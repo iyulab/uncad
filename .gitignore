@@ -1,0 +1,13 @@
+*.log
+.DS_Store
+
+# Rust workspace (crates/) build output
+target/
+*.obj
+*.pdb
+
+# User-provided local CAD samples for manual testing -- license/provenance
+# not verified, so never committed (nothing under samples/ is bundled with
+# the repo anymore). See samples/README.md.
+/samples/*
+!/samples/README.md

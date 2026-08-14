@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/libredwg-sys", "crates/uncad", "crates/uncad-cli"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/iyulab-rnd/uncad"
+homepage = "https://github.com/iyulab-rnd/uncad"
+readme = "README.md"
+
+[workspace.lints.rust]
+# This workspace is unsafe/FFI-heavy by necessity (see docs/ARCHITECTURE.md)
+# and already writes every unsafe operation inside its own `unsafe { }`
+# block with a SAFETY comment, even inside `unsafe fn` bodies where that
+# isn't required until the 2024 edition -- this lint just enforces that
+# existing convention stays enforced on this edition too, instead of
+# silently degrading if a future `unsafe fn` skips it.
+unsafe_op_in_unsafe_fn = "warn"

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang (bindgen)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Point bindgen at the preinstalled LLVM
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang (bindgen)
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Rustfmt check
+        run: cargo fmt --check
+
+      # libredwg-sys's bindgen-generated bindings.rs carries a few harmless
+      # lints of its own (useless_transmute, missing_safety_doc) --
+      # allow()'d at the crate level in crates/libredwg-sys/src/lib.rs
+      # rather than suppressed here, so `-D warnings` below still catches
+      # anything new in code this project actually controls.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

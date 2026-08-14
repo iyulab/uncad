@@ -1,0 +1,21 @@
+[package]
+name = "uncad-cli"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+description = "CLI for uncad (CAD file summary, SVG rendering, DWG/DXF conversion)."
+keywords = ["cad", "dwg", "dxf", "cli", "svg"]
+categories = ["command-line-utilities", "graphics"]
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "uncad"
+path = "src/main.rs"
+
+[dependencies]
+uncad = { path = "../uncad" }
