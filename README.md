@@ -1,5 +1,8 @@
 # uncad
 
+[![CI](https://github.com/iyulab/uncad/actions/workflows/ci.yml/badge.svg)](https://github.com/iyulab/uncad/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+
 CAD 파일(DWG/DXF)을 파싱, 렌더링(SVG), 저장(DWG/DXF)하기 위한 오픈소스 Rust 라이브러리.
 
 ## 빠른 시작
