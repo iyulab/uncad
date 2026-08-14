@@ -5,8 +5,8 @@ members = ["crates/libredwg-sys", "crates/uncad", "crates/uncad-cli"]
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/iyulab-rnd/uncad"
-homepage = "https://github.com/iyulab-rnd/uncad"
+repository = "https://github.com/iyulab/uncad"
+homepage = "https://github.com/iyulab/uncad"
 readme = "README.md"
 
 [workspace.lints.rust]
