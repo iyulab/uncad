@@ -18,17 +18,36 @@ crates/
   uncad-cli/             CLI 바이너리 (uncad 명령)
 ```
 
-## 빌드: autotools 대신 `cc` 크레이트
+## 빌드: autotools 대신 `cc` 크레이트, 그리고 submodule 대신 vendor/ 복사본
 
-`build.rs`가 `lib/libredwg/src/*.c`를 직접 컴파일한다(`configure`/`autoreconf`/`libtool` 불필요).
-`crates/libredwg-sys/vendor-config/config.h`가 autotools의 생성 산출물을 대신하는 손으로 쓴 파일이다.
+`build.rs`가 `crates/libredwg-sys/vendor/libredwg/src/*.c`를 직접 컴파일한다(`configure`/
+`autoreconf`/`libtool` 불필요). `crates/libredwg-sys/vendor-config/config.h`가 autotools의
+생성 산출물을 대신하는 손으로 쓴 파일이다.
 
-**드리프트 감지**: `build.rs`는 `lib/libredwg/src/*.c` 파일 개수를 하드코딩된 기대값과 비교해서
-다르면 빌드를 그대로 `panic!`시킨다. `lib/libredwg` submodule 포인터를 옮길 때(`git submodule
-update --remote` 등) 새로 추가/삭제된 `.c` 파일이 있으면 컴파일 목록이 조용히 stale해지는 걸
-막기 위함 -- panic 메시지가 나오면 새 파일 목록을 확인하고 `LIBREDWG_SOURCES`/
-`EXCLUDED_JSON_SOURCES`를 갱신한 뒤 진행해야 한다. bindgen이 생성하는 바인딩도 헤더가 바뀌었으면
-같이 재검증(`cargo build --workspace`가 컴파일 에러로 알려줌)할 것.
+**왜 `lib/libredwg` submodule을 직접 안 쓰고 크레이트 안에 vendor/ 복사본을 따로 두는가**:
+`cargo package`/`cargo publish`는 크레이트 디렉터리(`crates/libredwg-sys/`) 밖의 파일을 절대
+포함하지 않고, crates.io에서 이 크레이트를 받는 소비자는 `.git`도 submodule도 아예 없다 --
+`repo_root/lib/libredwg`를 참조하는 build.rs는 로컬 워크스페이스 안에서만 동작하고 발행된
+크레이트에서는 100% 빌드 실패한다(실제로 `cargo publish --dry-run`으로 확인했던 실패
+모드). `crates/libredwg-sys/vendor/libredwg/`는 이 크레이트가 실제 컴파일에 쓰는 파일만
+(`.c` 24개 + 그게 실제로 `#include`하는 헤더/`.spec`/`.inc`/codepage 테이블 전체, 총
+124개 파일 ~24MB/gzip 3MB) submodule에서 그대로 복사해 git으로 커밋해둔 것 -- 수정 없이
+원본 그대로(`docs/THIRD_PARTY_NOTICES.md` 참고), 다만 담긴 파일 집합이 submodule 전체가
+아니라 실제 사용 파일의 부분집합이라는 차이가 있다. `lib/libredwg` submodule 자체는 여전히
+남아있다 -- 업스트림 갱신 시 diff 대상, 그리고 `uncad` 크레이트의 실 파일 기반 회귀 테스트
+(`png.rs`, `lib/libredwg/test/test-data/2000/circle.dwg` 사용)가 여전히 참조한다.
+
+**submodule 갱신 절차**: `git submodule update --remote` 등으로 `lib/libredwg` 포인터를
+옮긴 뒤에는 `scripts/sync-libredwg-vendor.sh`를 실행해서 vendor/ 복사본을 다시 만들어야
+한다(실제 `#include` 그래프를 새로 추적해서 파일 목록을 재생성함). 그 다음
+`cargo build --workspace`로 컴파일이 여전히 되는지 확인 -- 새 `.c`/헤더 파일이 필요해졌으면
+컴파일 에러로 바로 드러난다. `build.rs`의 드리프트 감지 두 단계도 참고: (1)
+`vendor/libredwg/src/*.c` 파일 개수를 `LIBREDWG_SOURCES` 기대값과 비교(둘이 다르면 vendor
+복사본 자체가 손상/불일치 -- `panic!`), (2) `lib/libredwg` submodule이 체크아웃되어 있으면
+(로컬 개발/CI에서만, 발행된 크레이트 소비자에게는 없음) 그 `.c` 파일 개수를 vendor 복사본과
+교차 검증(다르면 재동기화가 필요하다는 `cargo:warning`만 내고 빌드는 계속 진행). bindgen이
+생성하는 바인딩도 헤더가 바뀌었으면 같이 재검증(`cargo build --workspace`가 컴파일 에러로
+알려줌)할 것.
 
 ## FFI 경계: opaque 타입 + dynapi 리플렉션
 

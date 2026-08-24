@@ -52,36 +52,69 @@ fn main() {
     );
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // repo_root = crates/libredwg-sys/../..
-    let repo_root = manifest_dir
-        .parent()
-        .and_then(|p| p.parent())
-        .expect("crates/libredwg-sys should be two levels under the repo root");
 
-    let libredwg_src = repo_root.join("lib/libredwg/src");
-    let libredwg_include = repo_root.join("lib/libredwg/include");
+    // Build from the vendored copy inside the crate (vendor/libredwg), not
+    // the workspace's lib/libredwg git submodule -- a `cargo package`/publish
+    // tarball only contains files under the crate root, and a downstream
+    // consumer building from crates.io has no submodule (no .git at all) to
+    // fall back to. vendor/libredwg is a plain, git-tracked copy of exactly
+    // the submodule files this crate's build actually reaches (traced via
+    // the real #include graph, not just the top-level LIBREDWG_SOURCES
+    // list) -- see scripts/sync-libredwg-vendor.sh and docs/ARCHITECTURE.md's
+    // "빌드" section for how to refresh it after a submodule update.
+    let libredwg_src = manifest_dir.join("vendor/libredwg/src");
+    let libredwg_include = manifest_dir.join("vendor/libredwg/include");
     let vendor_config = manifest_dir.join("vendor-config");
     let shim_dir = manifest_dir.join("shim");
 
-    // Drift detector: fail loudly if upstream lib/libredwg/src gains or
-    // loses .c files on a future submodule update, rather than silently
-    // compiling a stale file list. See docs/ARCHITECTURE.md's "빌드" section
-    // for the submodule-update procedure this is meant to catch early.
+    // Drift detector: fail loudly if vendor/libredwg/src's .c file count
+    // doesn't match what this file expects to compile, rather than silently
+    // compiling a stale/incomplete vendored copy. See docs/ARCHITECTURE.md's
+    // "빌드" section for the submodule-update / re-vendor procedure this is
+    // meant to catch early.
     let actual_c_files: Vec<String> = std::fs::read_dir(&libredwg_src)
-        .expect("lib/libredwg/src should exist (did you run `git submodule update --init`?)")
+        .expect("crates/libredwg-sys/vendor/libredwg/src should exist (checked into git -- see scripts/sync-libredwg-vendor.sh)")
         .filter_map(|e| e.ok())
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| n.ends_with(".c"))
         .collect();
-    const EXCLUDED_JSON_SOURCES: &[&str] = &["in_json.c", "out_json.c", "out_geojson.c"];
-    let expected_total = LIBREDWG_SOURCES.len() + EXCLUDED_JSON_SOURCES.len();
-    if actual_c_files.len() != expected_total {
+    if actual_c_files.len() != LIBREDWG_SOURCES.len() {
         panic!(
-            "lib/libredwg/src/*.c file count changed ({} found, {} expected: {} compiled + {} excluded JSON). \
-             Upstream LibreDWG source was likely updated -- re-check the LIBREDWG_SOURCES list in build.rs \
-             against the new file list before proceeding (see docs/ARCHITECTURE.md).",
-            actual_c_files.len(), expected_total, LIBREDWG_SOURCES.len(), EXCLUDED_JSON_SOURCES.len()
+            "vendor/libredwg/src/*.c file count changed ({} found, {} expected). The vendored \
+             copy was likely edited or re-synced with a different file set -- re-check the \
+             LIBREDWG_SOURCES list in build.rs against vendor/libredwg/src before proceeding \
+             (see docs/ARCHITECTURE.md).",
+            actual_c_files.len(),
+            LIBREDWG_SOURCES.len()
         );
+    }
+
+    // Dev-only cross-check: when the lib/libredwg submodule is also checked
+    // out (local dev / CI clone with submodules, not a published-crate
+    // build), warn if its .c file set has drifted from the vendored copy --
+    // i.e. someone ran `git submodule update --remote` without re-running
+    // scripts/sync-libredwg-vendor.sh.
+    if let Some(repo_root) = manifest_dir.parent().and_then(|p| p.parent()) {
+        let submodule_src = repo_root.join("lib/libredwg/src");
+        if let Ok(entries) = std::fs::read_dir(&submodule_src) {
+            const EXCLUDED_JSON_SOURCES: &[&str] = &["in_json.c", "out_json.c", "out_geojson.c"];
+            let submodule_c_count = entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().into_string().ok())
+                .filter(|n| n.ends_with(".c"))
+                .count();
+            let expected_submodule_total = LIBREDWG_SOURCES.len() + EXCLUDED_JSON_SOURCES.len();
+            if submodule_c_count != expected_submodule_total {
+                println!(
+                    "cargo:warning=lib/libredwg/src/*.c ({submodule_c_count} files) has drifted \
+                     from vendor/libredwg/src ({expected_submodule_total} expected: {} compiled + \
+                     {} excluded JSON). Upstream LibreDWG was likely updated -- re-run \
+                     scripts/sync-libredwg-vendor.sh and update LIBREDWG_SOURCES in build.rs.",
+                    LIBREDWG_SOURCES.len(),
+                    EXCLUDED_JSON_SOURCES.len()
+                );
+            }
+        }
     }
 
     let mut build = cc::Build::new();

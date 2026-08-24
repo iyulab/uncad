@@ -18,4 +18,4 @@ name = "uncad"
 path = "src/main.rs"
 
 [dependencies]
-uncad = { path = "../uncad" }
+uncad = { path = "../uncad", version = "0.1.0" }
