@@ -19,7 +19,13 @@
 //! are supported, and which of those are JS-baseline ports vs. new
 //! functionality beyond it).
 
-use crate::dynapi::{Point2D, Point3D};
+// Re-exported, not merely imported: these are the declared types of public
+// fields below (`LineEntity::start_point` and friends), but `dynapi` is a
+// private module, so without this a caller can read `line.start_point.x` and
+// still have no way to *name* the type it just read -- no signature can take
+// one, no struct can hold one, and rustdoc renders the field type as a dead
+// link. The exposure already exists; this only makes it usable.
+pub use crate::dynapi::{Point2D, Point3D};
 
 /// Fields common to every DWG entity, regardless of type.
 #[derive(Debug, Clone, PartialEq)]
