@@ -213,8 +213,15 @@ fn main() -> ExitCode {
             }
             unsupported = result.unsupported_entity_types;
         }
+        // Writes the database already parsed above, mirroring the "dwg" arm.
+        // `dwg_to_dxf()` would re-read `input` from disk -- a second parse of
+        // a file this process has already decoded, and one that rejects a DXF
+        // input outright (LibreDWG code 2048) even though `write_dxf()`
+        // handles it, so `uncad in.dxf -o out.dxf` used to fail while the
+        // library call behind it worked. For the DWG input the two produce
+        // byte-identical output.
         "dxf" => {
-            if let Err(e) = uncad::dwg_to_dxf(input, output) {
+            if let Err(e) = db.write_dxf(output) {
                 eprintln!("오류: {e}");
                 return ExitCode::FAILURE;
             }
