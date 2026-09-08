@@ -51,6 +51,12 @@
 // `unsafe fn` body being implicitly unsafe (2021 edition default) --
 // harmless and, again, not this crate's own code to restyle.
 #![allow(unsafe_op_in_unsafe_fn)]
+// bindgen 0.72 changed the bitfield accessors it emits to compute a byte
+// offset as `usize` and then cast it to `isize` for `.offset()`. clippy asks
+// for `.add()` instead, which is the right advice for hand-written code and
+// unactionable here: these bodies are regenerated from dwg.h on every build.
+// Same rationale as the three allows above.
+#![allow(clippy::ptr_offset_with_cast)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
