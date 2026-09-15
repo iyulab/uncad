@@ -2,9 +2,7 @@
 //!
 //! `png.rs` already runs `parse()` -> `to_svg()` -> `to_png()` against a real
 //! DWG from the LibreDWG submodule. Nothing did the same for DXF, and nothing
-//! at all exercised `write_dxf()` -- the encoder is a separate LibreDWG code
-//! path from the decoder, so a green suite said nothing about whether writing
-//! worked.
+//! exercised the JSON export against a real drawing.
 //!
 //! Fixtures come from the same place `png.rs` takes its DWG: the
 //! submodule-tracked LibreDWG corpus (a precondition of the tests only -- the
@@ -22,8 +20,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A DXF from the LibreDWG corpus. R2000, inside the version range
-/// `docs/CAVEATS.md` documents as reliable for writing.
+/// A DXF from the LibreDWG corpus (R2000, a version LibreDWG's DXF reader
+/// handles well -- see `docs/CAVEATS.md`, "DXF 읽기"); the same fixture the
+/// CLI tests use.
 const CORPUS_DXF: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../lib/libredwg/test/test-data/2000/entities-2d.dxf"
@@ -97,38 +96,45 @@ fn renders_a_parsed_dxf_to_svg() {
 }
 
 #[test]
-fn a_dxf_survives_being_written_back_out_and_reparsed() {
-    let mut db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
-    let before: Vec<String> = db
-        .entities
-        .iter()
-        .map(|e| e.type_name().to_string())
-        .collect();
+fn a_parsed_dxf_survives_a_json_round_trip() {
+    let db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
 
-    let out = TempFile::new("roundtrip.dxf");
-    db.write_dxf(out.path())
-        .expect("writing R2000 DXF should succeed");
-
-    let written = fs::metadata(out.path())
-        .expect("the encoder should have produced a file")
-        .len();
-    assert!(written > 0, "the encoder wrote an empty file");
-
-    let reparsed = uncad::parse(out.path()).expect("what this crate wrote, it should read back");
+    let json = db
+        .to_json(uncad::ToJsonOptions::default())
+        .expect("serializing the model should succeed");
+    assert!(
+        json.starts_with('{'),
+        "to_json should produce a JSON object: {json}"
+    );
 
     // The drawing is its own expectation -- no external reference needed, and
     // this holds for any input file, so it does not rot when the fixture
-    // changes. It spans decode -> render projection -> encode -> decode.
-    // The *type sequence*, not just the count: a write that dropped one
-    // entity and duplicated another would keep the count and still be wrong.
-    let after: Vec<String> = reparsed
-        .entities
-        .iter()
-        .map(|e| e.type_name().to_string())
-        .collect();
+    // changes. It spans decode -> model -> JSON -> model, and compares the
+    // whole model (`PartialEq`), not a count.
+    let back: uncad::CadDatabase =
+        serde_json::from_str(&json).expect("what this crate wrote, it should read back");
+    assert_eq!(back, db, "the model changed across a JSON round trip");
+}
+
+/// `CadDatabase` owns no C memory any more, so it should be an ordinary
+/// value -- and `parse()` should have no side effect that makes a second
+/// parse of the same file come out different. Both are stated in lib.rs;
+/// this pins them.
+#[test]
+fn parse_is_deterministic_and_the_database_is_a_plain_value() {
+    fn assert_plain<T: Send + Sync + Clone + PartialEq + std::fmt::Debug>() {}
+    assert_plain::<uncad::CadDatabase>();
+
+    let first = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
+    let second = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse again");
     assert_eq!(
-        after, before,
-        "entity type sequence changed across a write/reparse round trip"
+        first, second,
+        "two parses of one file should produce equal models"
+    );
+    assert_eq!(
+        first.to_json(uncad::ToJsonOptions::default()).unwrap(),
+        second.to_json(uncad::ToJsonOptions::default()).unwrap(),
+        "and byte-identical JSON (sorted tables, file-ordered entities)"
     );
 }
 

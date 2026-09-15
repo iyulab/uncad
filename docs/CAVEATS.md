@@ -153,6 +153,10 @@ AutoCAD의 실제 시각적 표현과 무관하다.
 읽기만큼 완전하지 않다(LWPOLYLINE이 포함된 실제 `.dxf` 파일에서 조용히 빠지는 걸 확인한 적
 있음 -- ARC/ELLIPSE는 정상 동작). 이 프로젝트가 손댈 수 있는 부분이 아니라 업스트림 한계다.
 
+실례(2026-09-15): `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`(엔티티 60개)를 LibreDWG 자신의
+DXF 라이터로 써낸 R2007 DXF를 `dxf_read_file`로 다시 읽으면 엔티티 1개만 돌아온다. 이 크레이트가
+손댈 수 있는 부분이 아니다.
+
 ## LWPOLYLINE/POLYLINE3D의 "closed" 판정
 
 `dwg.h`의 필드 주석은 flag의 512번 비트를 "closed"라고 적어두었지만, 실제 렌더링 로직은 1번
@@ -347,79 +351,28 @@ MLINE 지오메트리와 일치하는지)가 맞는지 확인한 게 아니다 -
 클린, 9개 fixture 전부 크래시 없이 렌더링되고 출력이 이전(MLINESTYLE 파싱 전)과 바이트 단위로
 동일함을 확인(정상 -- MLINE이 없는 파일들이니 동일해야 함).
 
-## DWG/DXF 쓰기 지원 (2026-08-07)
+## 3DSOLID SAB 변환은 복사본에서 (2026-09-15)
 
-`CadDatabase`가 이제 `write_dwg(path)`/`write_dxf(path)` 메서드로 자기 자신을 다시
-DWG/DXF로 저장할 수 있다 -- `parse()`가 채운 뒤 즉시 해제하던 LibreDWG의 실제 `Dwg_Data`를
-이제 `CadDatabase` 안에 살려서 들고 있다가, 그걸 그대로 LibreDWG 자신의 인코더(`dwg_write_file`)
-/새 shim(`uncad_write_dxf`)에 넘기는 방식이다. `entities`/`tables`(렌더링 전용, 손실 있는
-Rust 투영)에서 역변환하는 게 아니다 -- `docs/ARCHITECTURE.md`의 "두 계층 모델" 섹션 참고.
-`dwg_to_dxf(path, path)` 자유 함수는 그대로 남아있다 -- `CadDatabase`를 만들 필요 없는 순수
-파일→파일 변환 용도. 단 **DWG 입력 전용**이다: 뒤의 shim(`uncad_write_dxf_file`)이
-`dwg_read_file`을 고정 호출하므로 DXF를 넣으면 `WriteError::Critical(2048)`
-(`DWG_ERR_INVALIDDWG`)로 실패한다. DXF를 다시 쓰려면 `parse()` + `write_dxf()`.
-
-**DWG 쓰기는 R_2004 이하에서만 안정적** -- LibreDWG 자신의 `README`: "Write support only
-works for earlier versions until r2004. Rewriting most DWG's <= r2004 usually works fine."
-이 프로젝트가 손댈 수 있는 부분이 아니라 업스트림 인코더 자체의 경계다.
-
-**실측 (9개 fixture 전부 AC1018/R_2004, 그래서 실제로 검증 가능했던 몇 안 되는 케이스)**:
-`write_dwg`가 9개 중 **5개는 성공**(AutoCADSamples1/2/3/4/8, 재파싱한 엔티티 타입별 개수가
-원본과 정확히 일치 확인), **4개는 `DWG_ERR_INVALIDDWG`(코드 2048)로 실패**
-(AutoCADSamples5/6/7/9). 실패 원인이 HATCH 개수 같은 명백한 패턴은 아니다 -- 확인해보니
-AutoCADSamples9는 HATCH가 아예 0개인데도 실패하고, 실패한 파일들과 성공한 파일들의 HATCH
-개수 범위가 겹친다(성공한 AutoCADSamples2는 188개, 실패한 AutoCADSamples6은 95개). 네
-파일 다 `dwg_read_file`로는 문제없이 읽혔고(엔티티 변환/SVG 렌더링 전부 정상) `dwg_write_file`의
-`dwg_encode` 단계에서만 실패한다 -- 즉 우리 쪽 `Dwg_Data` 보관/전달 방식의 문제가 아니라,
-LibreDWG 자신의 인코더가 이 파일들에 있는 (아직 특정 못 한) 무언가를 다시 못 쓴다는 뜻이다.
-"usually works fine"이라는 업스트림 표현 그대로 -- 항상은 아니다. 실패해도 크래시하지 않고
-`WriteError::Critical(2048)`을 정상적으로 반환한다. **DXF 쓰기는 이 4개 포함 9개 전부
-성공** -- `write_dxf`가 실패하는 게 아니라 `dwg_encode`(DWG 전용 경로)만의 문제.
-
-**`dwg_write_file`은 기존 파일을 덮어쓰지 않는다** -- 대상 경로에 이미 파일이 있으면
-`stat()`으로 확인한 뒤 덮어쓰지 않고 `DWG_ERR_IOERROR`를 반환한다(`WriteError::Critical`로
-나타남). 이 크레이트는 이 동작을 그대로 노출한다 -- 자동으로 지우지 않음(업스트림의 안전장치
-존중). DXF 쓰기(`write_dxf`/`dwg_to_dxf`)는 이 제약이 없다 -- 그냥 `fopen(path, "wb")`라서
-기존 파일을 덮어쓴다.
-
-**`write_dwg`가 `&mut self`를 받는 이유**: `dwg_write_file`의 공개 시그니처는
-`const Dwg_Data*`지만, LibreDWG의 `dwg.c`를 직접 읽어보면 내부에서
-`dwg_encode((Dwg_Data*)dwg, &dat)`로 const를 캐스팅해서 버리고 실제로 내부 상태를 변경한다.
-공개 시그니처의 약속을 그대로 믿는 건 안전하지 않다고 판단해서 `&self`가 아니라 `&mut self`로
-받는다.
-
-**교차검증**: 같은 소스 파일에 대해 `db.write_dxf(path)` 결과와 기존
-`dwg_to_dxf(원본경로, path)` 결과가 9개 fixture 전부 바이트 단위로 완전히 동일함을 확인
-(각각 2.1MB~78MB 범위) -- 새 shim(`uncad_write_dxf`, 이미 열려있는 `Dwg_Data`를 씀)과 기존
-shim(`uncad_write_dxf_file`, 파일을 새로 읽음)이 서로 다른 경로로 같은 결과에 도달한다는
-뜻이라 유용한 회귀 가드다. `dxf_read_file`로 채운 `Dwg_Data`도 `write_dwg`가 정상 동작함을
-확인(DWG -> DXF -> DWG 왕복, 엔티티 개수 일치) -- DXF로 읽은 도면도 다시 DWG로 저장 가능.
-
-**(수정됨, 2026-09-15) SAB 3DSOLID/REGION이 있는 파일을 다시 쓰면 솔리드가 깨지던 버그**:
-`acis.rs`가 `parse()` 도중 와이어프레임 추출을 위해 LibreDWG의 `dwg_convert_SAB_to_SAT1`을
-살아있는 엔티티에 직접 호출하고 있었다. 이 함수는 제자리 변환이라 `version`을 2→1로 바꾸고
-`encr_sat_data`에 **평문** SAT를 채우는데, LibreDWG의 두 인코더는 `version == 1`이면 "이미
-난독화된 SAT1"로 간주해 변환·암호화 단계를 건너뛰고 블록을 그대로 쓴다. 그래서 같은 `Dwg_Data`를
-쓰는 `write_dxf`는 평문 SAT를, `write_dwg`는 원본 SAB 대신 평문을 써냈고, 리더는 그것을
-"복호화"해 쓰레기를 만들었다. 실측(`lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, SAB 솔리드
-58개): `db.write_dxf()` 결과가 `dwg_to_dxf()` 결과와 달랐고(평문 SAT 줄 3,869개 vs 0개),
-`parse → write_dwg → parse` 후 와이어프레임이 있는 솔리드가 26개에서 0개로 줄었다. 위 "교차검증"의
-9개 fixture에는 3DSOLID/REGION이 하나도 없어서 잡히지 않았다. 이제 `libredwg-sys`의
-`uncad_3dsolid_sab_to_sat_text` 심이 엔티티의 얕은 복사본에서 변환을 돌리고 텍스트만 돌려주므로
+`acis.rs`가 와이어프레임 추출을 위해 LibreDWG의 `dwg_convert_SAB_to_SAT1`을 살아있는 엔티티에
+직접 호출하고 있었다. 이 함수는 제자리 변환이라 `version`을 2→1로 바꾸고 `encr_sat_data`에 평문
+SAT를 채우며 `acis_data`는 SAB 바이너리 그대로 둔다. `parse()`는 같은 솔리드를 두 번 읽으므로
+(`convert_entities`, 그다음 `convert_tables`의 블록 레코드 순회) 두 번째 읽기는 `version != 2`
+분기에서 SAB 바이너리를 SAT 텍스트로 파싱해 와이어프레임을 잃었다 -- `entities`에는 있고
+`tables.block_records["*Model_Space"]`에는 없는 불일치. 당시 있던 쓰기 경로(`write_dxf`/
+`write_dwg`, 지금은 제거됨)에서는 같은 변이가 인코더까지 오염시켜 다시 읽으면 솔리드가 전부 깨졌다
+(실측 `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, SAB 솔리드 58개). 이제 `libredwg-sys`의
+`uncad_3dsolid_sab_to_sat_text` 심이 엔티티의 얕은 복사본에서 변환하고 텍스트만 돌려주므로
 `parse()`는 `Dwg_Data`를 전혀 건드리지 않는다. `crates/uncad/tests/acis_sab.rs`가 같은 파일로
-(1) `write_dxf` 결과가 `dwg_to_dxf` 결과와 바이트 동일한지, (2) `parse → write_dwg → parse` 뒤
-솔리드 개수가 같고 와이어프레임을 가진 솔리드가 줄지 않았는지를 회귀 가드한다.
+두 순회의 와이어프레임이 솔리드마다 일치하는지 회귀 가드한다.
 
-같은 실측에서 확인한, 이 프로젝트가 손대지 않는 업스트림 동작 두 가지: (a) `write_dxf`
-자체(LibreDWG의 `dwg_write_dxf`)는 SAB 솔리드를 **제자리에서** SAT1(난독화됨)로 바꾼다 -- 그래서
-`write_dxf` 뒤에 `write_dwg`를 부르면 원본 SAB가 아니라 SAT1 블록이 써진다. 유효한 표현이라
-읽기에는 문제없고(왕복 후 와이어프레임 26/26 확인), `write_dxf`가 `&mut self`인 이유이기도 하다.
-(b) `write_dwg`는 AC1021(R2007) 소스를 AC1024(R2010)로 써낸다(업스트림 인코더가 R2007을
-지원하지 않아 올려 쓰는 것으로 보임). LibreDWG의 SAB→SAT 변환은 헤더 버전에 따라 다른 SAT
-방언을 내놓으므로, 다시 읽었을 때 `acis.rs`의 최소 SAT 리더가 엣지를 뽑아내는 솔리드 수가
-원본보다 오히려 늘어난다(26 → 57). 그래서 테스트는 개수 일치가 아니라 "줄지 않음"을 단언한다.
-(c) 이 R2007 도면을 DXF로 써서 다시 읽으면 LibreDWG의 DXF 리더가 엔티티 60개 중 1개만 돌려준다
-(`dwg_to_dxf` 결과도 동일) -- 위 "DXF 읽기는 LibreDWG 자체의 한계" 절의 실례.
+## DWG/DXF 쓰기는 없다 (2026-09-15 제거)
+
+0.1.0의 `CadDatabase::write_dwg`/`write_dxf`, `uncad::dwg_to_dxf`, `WriteError`, CLI의 `-o x.dxf`/
+`-o x.dwg`는 제거됐다(`CHANGELOG.md`). 이 프로젝트의 범위는 "DWG/DXF -> 모델 -> JSON/SVG/PNG"다.
+제거 전 실측으로 알게 된 업스트림 인코더의 성질(R_2004 이하만 안정, 9개 fixture 중 4개가
+`dwg_encode`에서 실패, 기존 파일 덮어쓰기 거부, R2007 소스를 R2010으로 승격, `dwg_write_dxf`가 SAB
+솔리드를 제자리에서 SAT1로 변환)은 git 히스토리의 이 절 이전 버전에 남아 있다. C 빌드에는
+`USE_WRITE`와 인코더 소스가 여전히 들어간다 -- `docs/ARCHITECTURE.md`의 "모델" 절 참고.
 
 ## 스레드 세이프티
 
@@ -428,14 +381,15 @@ shim(`uncad_write_dxf_file`, 파일을 새로 읽음)이 서로 다른 경로로
 
 ## 파일 기반 회귀 테스트는 소수 (폭넓은 실 파일 커버리지는 여전히 없음)
 
-`cargo test --workspace`는 2026-09-15 기준 82개 테스트를 돈다. 그중 `uncad` 유닛테스트가 58개
-(2026-08-14 기준: `color.rs` 11개 -- ACI/BYLAYER
+`cargo test --workspace`는 2026-09-15 기준 86개 테스트를 돈다. 그중 `uncad` 유닛테스트가 64개 --
+`json.rs` 6개(아래 참고) + 2026-08-14 기준의 58개(`color.rs` 11개 -- ACI/BYLAYER
 색상 해석 + 그라디언트용 `tint_toward_white`, `acis.rs` 6개 -- SAT 레코드 파싱/포인터 해석/
 와이어프레임 추출, `convert.rs` 6개 -- HATCH 그라디언트 색상 해석/스탑 정렬/`gradient_name`
 분류, `svg.rs` 28개 -- outlier-trim 클러스터링, HATCH 엣지 근사, MTEXT 포맷팅 스트리핑,
 stroke-width 치환, transform 합성, HATCH 패턴 채우기, MLINE 오프셋 계산, TEXT/ATTRIB 회전
 transform, 비유한(non-finite) 좌표 방어, 블록 참조 재귀의 콤비네이토리얼 폭증 방지 등,
-`tables.rs` 3개 -- LAYER TRUECOLOR-256-sentinel 폴백). 대부분은 fixture 파일 없이 합성
+`tables.rs` 3개 -- LAYER TRUECOLOR-256-sentinel 폴백, `png.rs` 4개 -- SVG→PNG 크기/배율/오류 +
+circle.dwg 파이프라인). 대부분은 fixture 파일 없이 합성
 데이터로 검증 가능한 순수 함수 유닛테스트라 실제로 유용한 회귀 가드다 -- 예를 들어
 `dominant_cluster_box`가 합성 박스 집합에서 지배적 클러스터를 정확히 골라내는지,
 `parse_sat_records`가 `End-of-ACIS-data` 마커 이후를 제대로 자르는지 등은 실 DWG 파일 없이도
@@ -447,15 +401,18 @@ transform, 비유한(non-finite) 좌표 방어, 블록 참조 재귀의 콤비�
 `parse()` -> `to_svg()` -> `to_png()` 전체 파이프라인을 실행해 유효한 PNG가 나오는지 확인하는
 진짜 end-to-end 테스트다. 다만 이건 "크래시 없이 유효한 출력이 나온다"를 파일 하나로 확인하는
 스모크 테스트 수준이지, 엔티티 타입별 렌더링 정확성을 폭넓게 검증하는 게 아니다. 같은 corpus로
-`tests/dxf_pipeline.rs`(4개: DXF 파싱/렌더/`write_dxf` 왕복 시 엔티티 타입 순서 보존/쓰레기 입력
-에러 반환), `tests/write_dwg.rs`(2개: DWG→DWG 왕복, 기존 파일 덮어쓰기 거부),
-`tests/acis_sab.rs`(2개: SAB 솔리드 파일의 `write_dxf`가 `dwg_to_dxf`와 바이트 동일, 왕복 후
-와이어프레임 솔리드 개수 보존)와 `uncad-cli`의 `tests/documented_invocations.rs`(16개: README가
-문서화한 모든 호출을 실제 바이너리로 실행. `--scale`/`--space`/`--no-trim`은 옵션이 결과를
-실제로 바꾸는지 비교하고, `--no-trim`은 테스트가 직접 group code로 작성한 5줄짜리 DXF를
-쓴다)가 돈다. 모두 기대값을 고정하지 않는 성질 기반 단언이다.
+`tests/dxf_pipeline.rs`(5개: DXF 파싱/렌더/JSON 왕복(`to_json` -> `serde_json::from_str` ->
+`PartialEq`)/두 번 파싱한 결과와 JSON이 동일하고 `CadDatabase`가 Send+Sync+Clone인지/쓰레기 입력
+에러 반환), `tests/acis_sab.rs`(1개: SAB 솔리드 파일에서 `entities`와
+`tables.block_records`의 와이어프레임이 솔리드마다 일치)와 `uncad-cli`의
+`tests/documented_invocations.rs`(16개: README가 문서화한 모든 호출을 실제 바이너리로 실행.
+`--scale`/`--space`/`--no-trim`/`--pretty`는 옵션이 결과를 실제로 바꾸는지 비교하고, `--no-trim`은
+테스트가 직접 group code로 작성한 5줄짜리 DXF를 쓴다)가 돈다. 모두 기대값을 고정하지 않는 성질
+기반 단언이다. `json.rs`의 유닛테스트 6개는 `RenderEntity`의 모든 variant를 하나씩 만들어 JSON
+`type` 태그가 `type_name()`과 같은지, HATCH 경로/엣지 태그, 왕복, 비유한 실수가 `null`이 되어
+되돌아오지 않는 것, 잘못되거나 빠진 `type` 태그가 패닉이 아니라 에러인 것을 확인한다.
 
-**여전히 없는 것**: 실제 DWG/DXF 파일 기반 `parse()`/`to_svg()`/`dwg_to_dxf()`의 폭넓은
+**여전히 없는 것**: 실제 DWG/DXF 파일 기반 `parse()`/`to_svg()`/`to_json()`의 폭넓은
 end-to-end 검증(여러 파일에 걸친 엔티티 카운트 parity, 렌더링 바이트 단위 비교 등)은
 자동화되어 있지 않다 -- `samples/`가 완전히 gitignore 처리되어 있어서(라이선스 확인 없이
 아무 파일이나 넣고 쓰라는 의도적 선택), 커밋된 채로 CI가 참조할 수 있는 파일이 없다.

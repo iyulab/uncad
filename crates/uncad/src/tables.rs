@@ -4,10 +4,11 @@
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field};
 use crate::render_model::RenderEntity;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayerRecord {
     pub name: String,
     /// Same raw semantics as `EntityCommon::color_index`: <0 off, else the
@@ -20,7 +21,7 @@ pub struct LayerRecord {
     pub color_index: i16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BlockRecord {
     pub name: String,
     /// Every entity directly owned by this block (via
@@ -33,7 +34,10 @@ pub struct BlockRecord {
     pub entities: Vec<RenderEntity>,
 }
 
-#[derive(Debug, Clone, Default)]
+/// The three maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
+/// therefore `to_json()`'s key order -- is deterministic: the same input
+/// file serializes to the same bytes on every run and every machine.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Tables {
     /// Layer name -> record. Deliberately does *not* expose `Dwg_Color.rgb`
     /// for layers -- see docs/CAVEATS.md / the color module: that field is a
@@ -41,11 +45,11 @@ pub struct Tables {
     /// LibreDWG parses, regardless of the layer's real color, confirmed
     /// across 22 real-world files during the original JS implementation.
     /// Only `color_index` is trustworthy for BYLAYER resolution.
-    pub layers: HashMap<String, LayerRecord>,
+    pub layers: BTreeMap<String, LayerRecord>,
     /// Block name -> record, every `BLOCK_HEADER` in the file (including
     /// `*Model_Space`/`*Paper_Space*`, which also show up flattened into
     /// `CadDatabase::entities` -- see that field's doc comment).
-    pub block_records: HashMap<String, BlockRecord>,
+    pub block_records: BTreeMap<String, BlockRecord>,
     /// MLINESTYLE name -> each parallel line's `offset` (distance from the
     /// MLINE centerline), in the same order LibreDWG stores them in --
     /// `svg.rs`'s MLINE rendering pairs index `i` here with the same index
@@ -53,7 +57,7 @@ pub struct Tables {
     /// no separate "line identity" field, just consistent array order). See
     /// `convert::convert_mline`'s doc comment for why only `offset` is read
     /// (color/linetype per line aren't rendered).
-    pub mlinestyles: HashMap<String, Vec<f64>>,
+    pub mlinestyles: BTreeMap<String, Vec<f64>>,
 }
 
 /// # Safety
@@ -68,9 +72,9 @@ pub struct Tables {
 /// guarantee (and leak `libredwg_sys` types into the public surface).
 pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
-    let mut layers = HashMap::new();
-    let mut block_records = HashMap::new();
-    let mut mlinestyles = HashMap::new();
+    let mut layers = BTreeMap::new();
+    let mut block_records = BTreeMap::new();
+    let mut mlinestyles = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -124,7 +128,7 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
 /// something this crate filters out afterward). Confirmed against
 /// `example_r14.dwg`: 9 separate anonymous blocks all reported
 /// `BLOCK_HEADER.name == "*D"`, silently collapsing to one entry when used
-/// as a HashMap key -- matches `converter.ts`'s own `convertBlockRecord`,
+/// as a map key -- matches `converter.ts`'s own `convertBlockRecord`,
 /// which reads the BLOCK entity's name specifically for this reason ("we
 /// want '*D30' instead of '*D'"). Falls back to the abbreviated name if
 /// there's no BLOCK entity (shouldn't normally happen, but the fallback is

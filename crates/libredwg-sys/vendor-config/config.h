@@ -5,8 +5,9 @@
    why this project builds LibreDWG via a direct `cc`-crate compile instead
    of autotools/configure (Windows autotools friction).
 
-   Scope mirrors the existing WASM build's flags: write + DXF read/write
-   enabled (USE_WRITE defined, DISABLE_DXF left undefined), JSON/GeoJSON,
+   Scope mirrors the former WASM build's flags: USE_WRITE defined and
+   DISABLE_DXF left undefined (both needed for *reading* DXF, see the
+   USE_WRITE line below), JSON/GeoJSON,
    Python and language-binding code paths disabled (their .c files are
    simply excluded from the build, not compiled-and-ifdef'd-out; the
    DISABLE_JSON/DISABLE_BINDINGS macros below only matter for the few
@@ -33,7 +34,11 @@
                                 on !DISABLE_DXF && USE_WRITE */
 #define DISABLE_JSON 1
 #define DISABLE_BINDINGS 1
-#define USE_WRITE 1
+#define USE_WRITE 1         /* must stay defined even though this project
+                               only reads: dwg.c gates dxf_read_file() on
+                               it, and in_dxf.c uses encoder helpers from
+                               encode.c. No writer entry point is bound to
+                               Rust (see build.rs's allowlist). */
 #undef USE_TRACING
 #undef ENABLE_MIMALLOC
 #undef ENABLE_SHARED

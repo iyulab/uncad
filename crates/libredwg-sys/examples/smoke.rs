@@ -1,22 +1,19 @@
 //! Phase 0 exit-criterion smoke test: read a real fixture through the
-//! bindgen-generated FFI (not the C smoke test used to debug the build),
-//! print its object count, and round-trip it through the DXF-write shim.
+//! bindgen-generated FFI (not the C smoke test used to debug the build) and
+//! print its object count.
 //!
-//! Run: cargo run -p libredwg-sys --example smoke -- <path/to/file.dwg> <path/to/out.dxf>
+//! Run: cargo run -p libredwg-sys --example smoke -- <path/to/file.dwg>
 
 use std::ffi::CString;
 use std::mem::MaybeUninit;
 
 fn main() {
-    let mut args = std::env::args().skip(1);
-    let dwg_path = args.next().expect("usage: smoke <in.dwg> <out.dxf>");
-    let dxf_path = args.next().expect("usage: smoke <in.dwg> <out.dxf>");
-
+    let dwg_path = std::env::args().nth(1).expect("usage: smoke <in.dwg>");
     let c_dwg_path = CString::new(dwg_path.as_str()).unwrap();
 
     // SAFETY: Dwg_Data is a plain-old-data FFI struct; dwg_read_file expects
     // a zero-initialized instance (mirrors dwg_read_file_wrapper's `Dwg_Data
-    // dwg = {}` in the existing JS/embind binding -- an uninitialized stack
+    // dwg = {}` in the former JS/embind binding -- an uninitialized stack
     // struct was confirmed during Phase 0's C-level smoke test to produce a
     // STATUS_STACK_BUFFER_OVERRUN, traced to `dwg.opts` feeding garbage into
     // the runtime `loglevel` global).
@@ -36,23 +33,4 @@ fn main() {
     println!("num_objects={n}");
 
     unsafe { libredwg_sys::dwg_free(&mut dwg) };
-
-    let c_dxf_path = CString::new(dxf_path.as_str()).unwrap();
-    let write_err =
-        unsafe { libredwg_sys::uncad_write_dxf_file(c_dwg_path.as_ptr(), c_dxf_path.as_ptr()) };
-    println!("uncad_write_dxf_file -> error={write_err}");
-    assert!(write_err < critical, "critical write error: {write_err}");
-
-    let written = std::fs::read(&dxf_path).expect("dxf output should exist");
-    println!("wrote {} bytes to {dxf_path}", written.len());
-
-    // sanity: DXF text starts with the "999" comment-group-code convention
-    // and ends with EOF, matching test/core.test.mjs's dwgToDxf() assertion.
-    let text = String::from_utf8_lossy(&written);
-    assert!(
-        text.starts_with("999"),
-        "DXF should start with group code 999"
-    );
-    assert!(text.trim_end().ends_with("EOF"), "DXF should end with EOF");
-    println!("DXF header/footer sanity check passed");
 }

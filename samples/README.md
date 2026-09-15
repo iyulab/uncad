@@ -15,21 +15,22 @@ files without an independent reference to check against. See `git log` for the f
 (this project's docs describe current state, not a running history log).
 
 Practically, this means: there's no automated regression coverage for `parse()`/`to_svg()`/
-`dwg_to_dxf()` against *this* directory. It does not mean those calls are untested. What
+`to_json()` against *this* directory. It does not mean those calls are untested. What
 runs in `cargo test` is:
 
 - the self-contained unit tests that need no external file -- across `acis.rs`, `color.rs`,
-  `convert.rs`, `png.rs`, `svg.rs` and `tables.rs`, covering the pure-Rust side (colour
-  resolution, SVG emission, ACIS parsing, unit conversion, table lookup);
+  `convert.rs`, `json.rs`, `png.rs`, `svg.rs` and `tables.rs`, covering the pure-Rust side
+  (colour resolution, JSON tagging and round-trips, SVG emission, ACIS parsing, unit conversion,
+  table lookup);
 - `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png`, which runs the whole
   `parse()` -> `to_svg()` -> `to_png()` pipeline against a DWG from the LibreDWG submodule
   (`git submodule update --init` first -- the build compiles a vendored copy and does not
   need the submodule; the fixture-based tests do);
-- `crates/uncad/tests/dxf_pipeline.rs`, `tests/write_dwg.rs` and `tests/acis_sab.rs`, which
-  parse corpus files from that same submodule and assert *properties* rather than pinned
-  values: the SVG carries geometry, a `write_dxf()`/`write_dwg()` round trip re-parses to the
-  same entity type sequence, a parsed database writes out byte-identically to the file-to-file
-  converter, garbage input returns an error instead of panicking;
+- `crates/uncad/tests/dxf_pipeline.rs` and `tests/acis_sab.rs`, which parse corpus files from
+  that same submodule and assert *properties* rather than pinned values: the SVG carries
+  geometry, the model survives a `to_json()` -> `serde_json` round trip unchanged, SAB solids
+  get the same wireframe in `entities` and in their block record, garbage input returns an
+  error instead of panicking;
 - `crates/uncad-cli/tests/documented_invocations.rs`, which runs the real `uncad` binary for
   every invocation the README documents. Its `--no-trim` test authors a five-line DXF from group
   codes inside the test (four lines forming a square plus one far-away outlier) and checks that

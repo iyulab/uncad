@@ -1631,7 +1631,7 @@ mod tests {
     fn render_block_ref_budget_caps_combinatorial_blowup_from_self_referencing_blocks() {
         use crate::render_model::InsertEntity;
         use crate::tables::BlockRecord;
-        use std::collections::HashMap;
+        use std::collections::BTreeMap;
 
         // Block "R" contains 5 INSERTs of itself. `depth`'s own cap (>20)
         // bounds recursion *depth*, but nothing bounds *breadth* on its
@@ -1664,7 +1664,7 @@ mod tests {
                 })
             })
             .collect();
-        let mut block_records = HashMap::new();
+        let mut block_records = BTreeMap::new();
         block_records.insert(
             "R".to_string(),
             BlockRecord {

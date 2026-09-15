@@ -1,11 +1,16 @@
-//! Safe DWG/DXF parsing on top of `libredwg-sys`.
+//! Safe DWG/DXF parsing on top of `libredwg-sys`, plus JSON/SVG/PNG export
+//! of the parsed model.
 //!
-//! Rust port of `src/index.mjs`'s `parse()`/`toSVG()`/`dwgToDxf()`.
+//! Rust port of `src/index.mjs`'s `parse()`/`toSVG()`. Reading only: this
+//! crate does not write DWG or DXF (the 0.1.0 write API was removed -- see
+//! CHANGELOG.md). The shape is `DWG/DXF -> CadDatabase (entities + tables)
+//! -> to_json() | to_svg() | to_png()`.
 
 mod acis;
 pub mod color;
 mod convert;
 mod dynapi;
+pub mod json;
 pub mod png;
 pub mod render_model;
 pub mod svg;
@@ -16,6 +21,9 @@ use std::mem::MaybeUninit;
 use std::path::Path;
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
+
+pub use json::{JsonError, ToJsonOptions};
 pub use png::{PngError, ToPngOptions, ToPngResult};
 pub use render_model::RenderEntity;
 pub use svg::{Space, ToSvgOptions, ToSvgResult};
@@ -28,58 +36,48 @@ pub use tables::Tables;
 /// parallel test runner once the object walk did enough work per call for
 /// two threads' read/convert/free cycles to overlap (Phase 0 only verified
 /// *sequential* reuse across many calls was safe -- a different property
-/// from *concurrent* calls, and this is where that gap showed up). Every
-/// entry point that touches the FFI boundary takes this lock for its
-/// entire duration, so `uncad::parse()` is safe to call from multiple
-/// threads even though the underlying C library isn't -- callers don't
-/// need to know libredwg-sys exists, let alone serialize around it
-/// themselves.
+/// from *concurrent* calls, and this is where that gap showed up). The one
+/// entry point that touches the FFI boundary, [`parse`], takes this lock
+/// for its entire duration, so it is safe to call from multiple threads
+/// even though the underlying C library isn't -- callers don't need to
+/// know libredwg-sys exists, let alone serialize around it themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
-/// A parsed CAD drawing. Two layers live here, deliberately kept separate
-/// (see `docs/ARCHITECTURE.md`'s "two-layer model" section):
-/// - `entities`/`tables`: a lossy, rendering-oriented Rust projection (see
-///   [`crate::render_model`]) -- only the fields `to_svg()` needs, nothing
-///   else. This is what [`CadDatabase::to_svg`] reads.
-/// - `dwg` (private): the actual `Dwg_Data` LibreDWG populated from the
-///   source file, kept alive instead of freed immediately -- a genuinely
-///   complete, round-trip-faithful representation, since it's LibreDWG's
-///   own native structure. [`CadDatabase::write_dwg`]/[`write_dxf`] write
-///   *this*, not a re-derivation from `entities`/`tables` (which couldn't
-///   round-trip -- they're missing everything not needed for rendering).
+/// A parsed CAD drawing: the model, and nothing else.
+///
+/// `entities` holds what the drawing shows (everything owned by the
+/// `*Model_Space`/`*Paper_Space*` blocks, see [`crate::render_model`]) and
+/// `tables` the LAYER / BLOCK_RECORD / MLINESTYLE tables it resolves against.
+/// This is what [`to_json`](Self::to_json) serializes verbatim and what
+/// [`to_svg`](Self::to_svg)/[`to_png`](Self::to_png) render from.
+///
+/// It is a plain Rust value: LibreDWG's own `Dwg_Data` is freed inside
+/// [`parse`] as soon as these two fields have been built from it, so a
+/// `CadDatabase` owns no C memory, is `Clone`/`PartialEq`/`Send`/`Sync`
+/// without ceremony, and can be constructed directly or deserialized from
+/// the JSON `to_json` produced. It is deliberately *not* a round-trip
+/// representation of the file (no linetypes, lineweights, styles,
+/// dictionaries, header variables...) -- the model keeps the fields
+/// rendering needs, and this crate has no write path that would need more.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CadDatabase {
     pub entities: Vec<RenderEntity>,
     pub tables: Tables,
-    dwg: Box<libredwg_sys::Dwg_Data>,
-}
-
-impl std::fmt::Debug for CadDatabase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // `dwg` deliberately omitted -- it's an opaque 676-`u64` blob with
-        // no useful `Debug` output of its own.
-        f.debug_struct("CadDatabase")
-            .field("entities", &self.entities)
-            .field("tables", &self.tables)
-            .finish_non_exhaustive()
-    }
-}
-
-impl Drop for CadDatabase {
-    fn drop(&mut self) {
-        // See LIBREDWG_LOCK's doc comment.
-        let _guard = LIBREDWG_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        unsafe { libredwg_sys::dwg_free(self.dwg.as_mut()) };
-    }
 }
 
 impl CadDatabase {
+    /// Serializes this parsed drawing (`entities` + `tables`) to JSON text
+    /// -- see the [`json`] module doc for the exact shape. `&self`, like
+    /// the renderers: the same database can be exported and rendered any
+    /// number of times.
+    pub fn to_json(&self, options: ToJsonOptions) -> Result<String, JsonError> {
+        json::to_json(self, options)
+    }
+
     /// Renders this parsed drawing to SVG. A method rather than a free
-    /// function taking `&CadDatabase` -- this genuinely operates on `self`
-    /// (unlike [`dwg_to_dxf`], see its doc comment), so it belongs on the
-    /// type (`&self`, not consuming, since the same parsed database can be
-    /// rendered multiple times with different options -- e.g. once per
+    /// function taking `&CadDatabase` because it genuinely operates on
+    /// `self` (`&self`, not consuming, since the same parsed database can
+    /// be rendered multiple times with different options -- e.g. once per
     /// `Space`).
     pub fn to_svg(&self, options: ToSvgOptions) -> ToSvgResult {
         svg::to_svg(self, options)
@@ -92,79 +90,6 @@ impl CadDatabase {
     /// [`to_svg`]: Self::to_svg
     pub fn to_png(&self, options: ToPngOptions) -> Result<ToPngResult, PngError> {
         png::to_png(self, options)
-    }
-
-    /// Writes this drawing back out as a DWG file at `path`, using
-    /// LibreDWG's own encoder (`dwg_write_file`) on the live `Dwg_Data`
-    /// `self` has kept alive since `parse()` -- not a re-derivation from
-    /// `entities`/`tables`, which are a deliberately lossy rendering
-    /// projection (see [`CadDatabase`]'s own doc comment).
-    ///
-    /// **Reliable only for DWG version <= R_2004.** LibreDWG's own `README`:
-    /// "Write support only works for earlier versions until r2004...
-    /// Rewriting most DWG's <= r2004 usually works fine." Newer source
-    /// files may fail to encode correctly or at all -- this is an upstream
-    /// LibreDWG boundary, not something this project can widen. (Verified
-    /// against this project's own 9 real-file spot-check set: all 9 are
-    /// `AC1018`/R_2004, squarely inside the supported range -- see
-    /// `docs/CAVEATS.md`.)
-    ///
-    /// **Refuses to overwrite an existing file.** `dwg_write_file` itself
-    /// `stat()`s `path` first and returns a critical error
-    /// (`DWG_ERR_IOERROR`, surfaced as [`WriteError::Critical`]) if
-    /// anything is already there, rather than silently clobbering it --
-    /// this wrapper doesn't work around that; delete the target yourself
-    /// first if you want to replace it.
-    ///
-    /// Takes `&mut self`, not `&self`, even though `dwg_write_file`'s own C
-    /// signature claims `const Dwg_Data*` -- reading LibreDWG's `dwg.c`
-    /// shows its implementation casts that const away and mutates
-    /// internally (`dwg_encode((Dwg_Data*)dwg, &dat)`), so trusting the
-    /// public signature's claim here would be unsound.
-    pub fn write_dwg(&mut self, path: impl AsRef<Path>) -> Result<(), WriteError> {
-        let path_str = path.as_ref().to_str().ok_or(WriteError::InvalidPath)?;
-        let c_path = CString::new(path_str).map_err(|_| WriteError::InvalidPath)?;
-
-        // See LIBREDWG_LOCK's doc comment.
-        let _guard = LIBREDWG_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        let error = unsafe { libredwg_sys::dwg_write_file(c_path.as_ptr(), self.dwg.as_ref()) };
-        // See the cast comment on the same comparison in parse() below.
-        #[allow(clippy::unnecessary_cast)]
-        if error >= libredwg_sys::DWG_ERROR_DWG_ERR_CLASSESNOTFOUND as i32 {
-            return Err(WriteError::Critical(error));
-        }
-        Ok(())
-    }
-
-    /// Writes this drawing back out as DXF text at `path`, via
-    /// `libredwg-sys`'s `uncad_write_dxf` shim operating on the same live
-    /// `Dwg_Data` [`write_dwg`](Self::write_dwg) uses -- **not** the same
-    /// code path as the free function [`dwg_to_dxf`], which re-reads its
-    /// own source file from scratch and never touches a `CadDatabase` at
-    /// all. Prefer this method when you've already `parse()`d the file (no
-    /// point re-reading it from disk); prefer the free function when you
-    /// only want a pure file-to-file conversion and don't need a
-    /// `CadDatabase` for anything else (skips building `entities`/`tables`
-    /// entirely).
-    pub fn write_dxf(&mut self, path: impl AsRef<Path>) -> Result<(), WriteError> {
-        let path_str = path.as_ref().to_str().ok_or(WriteError::InvalidPath)?;
-        let c_path = CString::new(path_str).map_err(|_| WriteError::InvalidPath)?;
-
-        // See LIBREDWG_LOCK's doc comment.
-        let _guard = LIBREDWG_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-        let error = unsafe { libredwg_sys::uncad_write_dxf(self.dwg.as_mut(), c_path.as_ptr()) };
-        // See the cast comment on the same comparison in parse() below.
-        #[allow(clippy::unnecessary_cast)]
-        if error >= libredwg_sys::DWG_ERROR_DWG_ERR_CLASSESNOTFOUND as i32 {
-            return Err(WriteError::Critical(error));
-        }
-        Ok(())
     }
 }
 
@@ -223,12 +148,10 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // (see libredwg-sys build.rs); dwg_read_file/dxf_read_file expect a
     // zero-initialized instance -- an uninitialized one was confirmed
     // during Phase 0 to produce a STATUS_STACK_BUFFER_OVERRUN (garbage in
-    // dwg.opts feeding the runtime loglevel global). Boxed (rather than a
-    // stack local moved into the box afterward) so dwg_read_file/
-    // dxf_read_file fill it in place at its final, stable heap address --
-    // this is the same `Dwg_Data` CadDatabase keeps alive afterward for
-    // write_dwg/write_dxf, not freed here the way earlier versions of this
-    // function did.
+    // dwg.opts feeding the runtime loglevel global). Boxed so the C side
+    // fills it in place at a stable heap address; it lives only until the
+    // two conversion walks below have copied out everything this crate
+    // exposes, then dwg_free + the Box drop release it.
     let mut dwg: Box<libredwg_sys::Dwg_Data> =
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
 
@@ -254,80 +177,18 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         return Err(ParseError::Critical(error));
     }
 
+    // Two walks over the live C structure, neither of which mutates it
+    // (see acis.rs for the one place that used to). Everything the
+    // returned value exposes is an owned Rust copy by the end of them.
     let entities = unsafe { convert::convert_entities(dwg.as_mut()) };
     let tables = unsafe { tables::convert_tables(dwg.as_mut()) };
 
-    Ok(CadDatabase {
-        entities,
-        tables,
-        dwg,
-    })
-}
+    // Nothing needs LibreDWG's structure past this point: this crate has no
+    // write path, and the model above is what every export reads. Freed
+    // here, still under the lock, rather than kept alive in CadDatabase --
+    // which is what keeps CadDatabase a plain value (no Drop, no C memory,
+    // Send + Sync by construction).
+    unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
-/// Shared by [`dwg_to_dxf`] and [`CadDatabase::write_dwg`]/
-/// [`CadDatabase::write_dxf`] -- the shape (a critical LibreDWG error code,
-/// an unusable path, or a plain I/O error) is entirely format-agnostic, so
-/// one type covers writing DWG or DXF from either entry point.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum WriteError {
-    /// The underlying LibreDWG write call returned a critical error code
-    /// (`dwg_write_file`/`uncad_write_dxf`/`uncad_write_dxf_file`).
-    Critical(i32),
-    InvalidPath,
-    Io(std::io::Error),
-}
-
-impl std::fmt::Display for WriteError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WriteError::Critical(code) => {
-                write!(f, "LibreDWG critical write error (code {code})")
-            }
-            WriteError::InvalidPath => write!(f, "path is not valid UTF-8 / contains a NUL byte"),
-            WriteError::Io(e) => write!(f, "{e}"),
-        }
-    }
-}
-impl std::error::Error for WriteError {}
-
-/// Converts a DWG file at `dwg_path` to DXF text, written to `dxf_path`,
-/// re-reading `dwg_path` from scratch rather than going through an already-
-/// `parse()`d [`CadDatabase`] -- unlike [`CadDatabase::write_dxf`], this
-/// never builds `entities`/`tables` at all, so prefer this free function
-/// for a pure file-to-file conversion when you don't otherwise need a
-/// `CadDatabase`; prefer the method when you've already parsed the file.
-///
-/// **DWG input only.** The shim behind this calls `dwg_read_file`
-/// unconditionally (no extension dispatch, unlike [`parse`]), so handing
-/// it a DXF fails with [`WriteError::Critical`] carrying LibreDWG's
-/// `DWG_ERR_INVALIDDWG` (2048). To rewrite a DXF, `parse()` it and call
-/// [`CadDatabase::write_dxf`] -- which is exactly why the CLI's `.dxf`
-/// output arm uses the method rather than this function.
-///
-/// Uses `libredwg-sys`'s `uncad_write_dxf_file` shim (see its doc comment)
-/// rather than an in-memory buffer -- `dwg_write_dxf` itself is
-/// file-stream-based (it takes a `Bit_Chain` wrapping a `FILE*`), matching
-/// how the JS `dwgToDxf()` -> `dwg_write_dxf` WASM binding already worked.
-pub fn dwg_to_dxf(
-    dwg_path: impl AsRef<Path>,
-    dxf_path: impl AsRef<Path>,
-) -> Result<(), WriteError> {
-    let dwg_str = dwg_path.as_ref().to_str().ok_or(WriteError::InvalidPath)?;
-    let dxf_str = dxf_path.as_ref().to_str().ok_or(WriteError::InvalidPath)?;
-    let c_dwg = CString::new(dwg_str).map_err(|_| WriteError::InvalidPath)?;
-    let c_dxf = CString::new(dxf_str).map_err(|_| WriteError::InvalidPath)?;
-
-    // See LIBREDWG_LOCK's doc comment.
-    let _guard = LIBREDWG_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-
-    let error = unsafe { libredwg_sys::uncad_write_dxf_file(c_dwg.as_ptr(), c_dxf.as_ptr()) };
-    // See the cast comment on the same comparison in parse() above.
-    #[allow(clippy::unnecessary_cast)]
-    if error >= libredwg_sys::DWG_ERROR_DWG_ERR_CLASSESNOTFOUND as i32 {
-        return Err(WriteError::Critical(error));
-    }
-    Ok(())
+    Ok(CadDatabase { entities, tables })
 }

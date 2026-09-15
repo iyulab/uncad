@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "CLI for uncad (CAD file summary, SVG rendering, DWG/DXF conversion)."
+description = "CLI for uncad (CAD file summary, JSON export of the parsed model, SVG/PNG rendering)."
 keywords = ["cad", "dwg", "dxf", "cli", "svg"]
 categories = ["command-line-utilities", "graphics"]
 
@@ -19,3 +19,6 @@ path = "src/main.rs"
 
 [dependencies]
 uncad = { path = "../uncad", version = "0.1.0" }
+
+[dev-dependencies]
+serde_json = "1.0.151"

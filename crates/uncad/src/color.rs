@@ -142,10 +142,10 @@ pub fn tint_toward_white(hex: &str, tint: f64) -> String {
 mod tests {
     use super::*;
     use crate::tables::LayerRecord;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     fn tables_with(name: &str, color_index: i16) -> Tables {
-        let mut layers = HashMap::new();
+        let mut layers = BTreeMap::new();
         layers.insert(
             name.to_string(),
             LayerRecord {

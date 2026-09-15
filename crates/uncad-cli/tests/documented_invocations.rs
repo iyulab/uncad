@@ -145,47 +145,95 @@ fn scale_actually_scales_the_raster() {
 }
 
 #[test]
-fn converts_dwg_to_dxf() {
-    let dxf = TempFile::new("converted.dxf");
-    let out = run(&[CORPUS_DWG, "-o", dxf.arg()]);
+fn writes_json() {
+    let json = TempFile::new("out.json");
+    let out = run(&[CORPUS_DXF, "-o", json.arg()]);
     assert!(
         out.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // Readable by the same library that wrote it.
-    assert!(uncad::parse(dxf.path()).is_ok());
+    let value: serde_json::Value =
+        serde_json::from_slice(&json.bytes()).expect("the output should be valid JSON");
+    let entities = value["entities"]
+        .as_array()
+        .expect("`entities` should be an array");
+    assert!(
+        !entities.is_empty(),
+        "a drawing with contents should export at least one entity"
+    );
+    assert!(value["tables"].is_object(), "`tables` should be an object");
+    // The DXF type name is the tag a consumer dispatches on.
+    assert!(
+        entities.iter().all(|e| e["type"].is_string()),
+        "every entity should carry a string `type`: {value}"
+    );
+    assert!(
+        entities.iter().any(|e| e["type"] == "LINE"),
+        "entities-2d.dxf contains LINE entities: {value}"
+    );
 }
 
 #[test]
-fn converts_dxf_to_dwg() {
-    let dwg = TempFile::new("converted.dwg");
-    let out = run(&[CORPUS_DXF, "-o", dwg.arg()]);
+fn writes_json_from_a_dwg_too() {
+    let json = TempFile::new("from-dwg.json");
+    let out = run(&[CORPUS_DWG, "-o", json.arg()]);
     assert!(
         out.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 
-    assert!(uncad::parse(dwg.path()).is_ok());
+    let value: serde_json::Value =
+        serde_json::from_slice(&json.bytes()).expect("the output should be valid JSON");
+    assert!(
+        value["entities"]
+            .as_array()
+            .is_some_and(|entities| !entities.is_empty()),
+        "circle.dwg should export at least one entity: {value}"
+    );
+    // The tables come along, and model space is one of the block records.
+    let block_records = value["tables"]["block_records"]
+        .as_object()
+        .expect("`tables.block_records` should be an object");
+    let model_space = block_records
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("*MODEL_SPACE"))
+        .map(|(_, record)| record)
+        .expect("a model-space block record should be exported");
+    assert!(
+        model_space["entities"]
+            .as_array()
+            .is_some_and(|entities| !entities.is_empty()),
+        "model space should carry its entities: {model_space}"
+    );
 }
 
 #[test]
-fn writes_dxf_from_a_dxf_input_too() {
-    // Regression guard: the "dxf" arm used to re-read `input` through
-    // `dwg_to_dxf()`, which rejects a DXF input (LibreDWG code 2048) even
-    // though the `write_dxf()` behind it accepts one. The library could do
-    // this; the CLI could not.
-    let dxf = TempFile::new("rewritten.dxf");
-    let out = run(&[CORPUS_DXF, "-o", dxf.arg()]);
+fn pretty_changes_the_layout_but_not_the_content() {
+    let compact = TempFile::new("compact.json");
+    let pretty = TempFile::new("pretty.json");
+
+    assert!(run(&[CORPUS_DXF, "-o", compact.arg()]).status.success());
+    assert!(run(&[CORPUS_DXF, "-o", pretty.arg(), "--pretty"])
+        .status
+        .success());
+
+    let compact_bytes = compact.bytes();
+    let pretty_bytes = pretty.bytes();
     assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
+        !compact_bytes.contains(&b'\n'),
+        "the default should be a single line"
+    );
+    assert!(
+        pretty_bytes.contains(&b'\n'),
+        "--pretty should indent across lines"
     );
 
-    assert!(uncad::parse(dxf.path()).is_ok());
+    let a: serde_json::Value = serde_json::from_slice(&compact_bytes).expect("valid JSON");
+    let b: serde_json::Value = serde_json::from_slice(&pretty_bytes).expect("valid JSON");
+    assert_eq!(a, b, "--pretty should change only whitespace");
 }
 
 #[test]
@@ -222,10 +270,21 @@ fn rejects_a_scale_that_is_not_a_positive_number() {
 
 #[test]
 fn rejects_an_output_extension_it_cannot_write() {
-    let other = TempFile::new("out.pdf");
-    let out = run(&[CORPUS_DXF, "-o", other.arg()]);
-    assert!(!out.status.success());
-    assert!(!other.path().exists());
+    // `.dxf`/`.dwg` are the headline removal: the CLI used to write them.
+    for name in ["out.pdf", "out.dxf", "out.dwg"] {
+        let other = TempFile::new(name);
+        let out = run(&[CORPUS_DXF, "-o", other.arg()]);
+        assert!(!out.status.success(), "-o {name} should be refused");
+        assert!(
+            !other.path().exists(),
+            "a refused run should write nothing for {name}"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains(".json, .svg, .png"),
+            "the refusal should list what is supported: {stderr}"
+        );
+    }
 }
 
 #[test]
@@ -249,7 +308,7 @@ fn help_exits_successfully_and_lists_the_options() {
     assert!(out.status.success(), "--help should exit 0");
 
     let text = String::from_utf8_lossy(&out.stderr);
-    for flag in ["--space", "--scale", "--no-trim"] {
+    for flag in ["--space", "--scale", "--no-trim", "--pretty"] {
         assert!(text.contains(flag), "usage should document {flag}: {text}");
     }
 }
@@ -265,8 +324,11 @@ fn no_arguments_is_a_usage_error() {
 
 #[test]
 fn space_paper_renders_something_different_from_space_model() {
-    let model = TempFile::new("space-model.svg");
-    let paper = TempFile::new("space-paper.svg");
+    // Distinct names from `every_documented_space_is_accepted`'s
+    // `space-<name>.svg`: tests share one process (one pid), so two
+    // TempFiles with the same name would delete each other's output.
+    let model = TempFile::new("differential-model.svg");
+    let paper = TempFile::new("differential-paper.svg");
 
     assert!(run(&[CORPUS_DXF, "-o", model.arg(), "--space", "model"])
         .status

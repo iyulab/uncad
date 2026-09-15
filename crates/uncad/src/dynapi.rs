@@ -14,7 +14,7 @@ use std::mem::MaybeUninit;
 /// A DWG 3D point/vector field (BITCODE_3BD, BE, ...): plain C structs of
 /// 3 `double`s with no padding.
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Point3D {
     pub x: f64,
     pub y: f64,
@@ -25,7 +25,7 @@ pub struct Point3D {
 /// of 2 `double`s -- 2RD (raw) and 2BD (bitcode-compressed on disk) are
 /// identical once decoded into memory, so one Rust type covers both.
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Point2D {
     pub x: f64,
     pub y: f64,

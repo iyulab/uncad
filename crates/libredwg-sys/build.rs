@@ -1,10 +1,20 @@
 use std::path::PathBuf;
 
-// Core LibreDWG sources actually needed for DWG/DXF read + DXF write, mirroring
-// the existing WASM build's `emmake make -C src` scope (which itself excludes
+// Core LibreDWG sources actually needed for DWG/DXF *reading*, mirroring the
+// former WASM build's `emmake make -C src` scope (which itself excludes
 // examples/programs/test/). JSON/GeoJSON in/out modules are excluded outright
 // (not compiled-and-ifdef'd-out) since this project never enables them --
 // matches the WASM build's `--disable-json` flag.
+//
+// encode.c/encode2.c/out_dxf.c/out_dxfb.c are *writer* sources, and nothing
+// in this workspace writes DWG or DXF any more (the write API was removed --
+// see CHANGELOG.md). They stay compiled because reading depends on them:
+// dwg.c gates dxf_read_file() on USE_WRITE, in_dxf.c calls encode.c's
+// in_postprocess_handles()/in_postprocess_SEQEND() (and dwg.c's own
+// USE_WRITE-gated dwg_find_tablehandle_silent()), and out_dxf.c hosts
+// dwg_convert_SAB_to_SAT1(), which the 3DSOLID wireframe extraction
+// needs. Only the symbols in the bindgen allowlist below reach Rust, and no
+// writer entry point is among them.
 const LIBREDWG_SOURCES: &[&str] = &[
     "bits.c",
     "classes.c",
@@ -155,17 +165,11 @@ fn main() {
         .clang_arg(format!("-I{}", shim_dir.display()))
         .allowlist_function("dwg_read_file")
         .allowlist_function("dxf_read_file")
-        // Public, already-compiled (this crate's config.h defines USE_WRITE,
-        // required for dwg_write_file to even exist in dwg.c -- see
-        // docs/CAVEATS.md's DWG/DXF-writing section). Reliable for <= R_2004
-        // per LibreDWG's own README ("Write support only works for earlier
-        // versions until r2004"); despite the public `const Dwg_Data*`
-        // signature, dwg_write_file's own implementation casts away that
-        // const and mutates internally (`dwg_encode((Dwg_Data*)dwg, &dat)`,
-        // confirmed by reading dwg.c directly) -- CadDatabase::write_dwg
-        // takes `&mut self` to reflect that honestly rather than trust the
-        // C signature's claim.
-        .allowlist_function("dwg_write_file")
+        // Deliberately NOT allowlisted: dwg_write_file. It exists in the
+        // compiled library (config.h defines USE_WRITE, which dxf_read_file
+        // also needs -- see the LIBREDWG_SOURCES comment), but this
+        // workspace has no write path; keeping the binding out makes that a
+        // property of the crate rather than of its callers.
         .allowlist_function("dwg_get_num_objects")
         .allowlist_function("dwg_get_object")
         .allowlist_function("dwg_object_get_fixedtype")
@@ -199,8 +203,6 @@ fn main() {
         .allowlist_function("dwg_obj_.*")
         .allowlist_function("dwg_ref_.*")
         .allowlist_function("dwg_resolve_handleref")
-        .allowlist_function("uncad_write_dxf_file")
-        .allowlist_function("uncad_write_dxf")
         .allowlist_type("Dwg_Data")
         .allowlist_type("Dwg_Object")
         .allowlist_type("Dwg_Object_Type")
@@ -236,10 +238,13 @@ fn main() {
         // Same reasoning, needed because these are parameter/return types of
         // otherwise-allowlisted functions (dwg_dynapi_*, dwg_obj_*,
         // dwg_object_to_entity/_object) even with Dwg_Object itself opaque.
-        // Dwg_Entity__3DSOLID stays listed for the same reason even though
-        // nothing allowlisted references it any more -- the SAB conversion
-        // goes through the uncad_3dsolid_sab_to_sat_text shim, which takes
-        // a void*, so bindgen simply never emits the type now.
+        // Dwg_Entity__3DSOLID stays listed because bindgen still reaches the
+        // type transitively (the 3DSOLID wire/silhouette/material structs'
+        // `parent` pointers, the surface entities' `extra_acis_data`, the
+        // entity tio union) and emits it as an opaque blob, even though no
+        // allowlisted function names it directly any more -- the SAB
+        // conversion goes through the uncad_3dsolid_sab_to_sat_text shim,
+        // which takes a void*.
         .opaque_type("_dwg_object_entity")
         .opaque_type("Dwg_Object_Entity")
         .opaque_type("_dwg_object_object")

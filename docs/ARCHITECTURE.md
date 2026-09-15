@@ -9,14 +9,15 @@ lib/libredwg/            LibreDWG 업스트림(github.com/LibreDWG/libredwg)을 
 crates/
   libredwg-sys/          raw FFI: build.rs가 vendor/libredwg/src/*.c(아래 "빌드" 절)를 cc
                          크레이트로 직접 컴파일(autotools 없이) + bindgen으로 바인딩 생성.
-                         shim/uncad_shim.c는 공개 헤더에 없는 내부 함수(dwg_write_dxf 등)를
-                         감싸는 C 실드 + dynapi로 도달 못 하는 중첩 구조체(MULTILEADER 리더
-                         라인 등)를 순회해서 평평한 배열로 넘겨주는 전용 함수들 + 3DSOLID의
-                         SAB→SAT 변환을 원본을 건드리지 않고 복사본에서 수행하는 함수.
+                         shim/uncad_shim.c는 opaque 타입 너머의 엔티티 포인터를 꺼내는
+                         접근자 + dynapi로 도달 못 하는 중첩 구조체(MULTILEADER 리더 라인)를
+                         순회해서 평평한 배열로 넘겨주는 함수 + 3DSOLID의 SAB→SAT 변환을
+                         원본을 건드리지 않고 복사본에서 수행하는 함수.
   uncad/                 안전한 API. dynapi.rs(리플렉션 헬퍼) -> convert.rs(raw Dwg_Data* ->
                          render_model.rs의 RenderEntity) -> tables.rs(LAYER/BLOCK_RECORD) ->
-                         color.rs(ACI/BYLAYER 해석) -> svg.rs(to_svg()) -> acis.rs(3DSOLID
-                         실험적 와이어프레임) 순으로 레이어가 쌓인다.
+                         color.rs(ACI/BYLAYER 해석) -> svg.rs(to_svg())/png.rs(to_png())/
+                         json.rs(to_json()) -> acis.rs(3DSOLID 실험적 와이어프레임) 순으로
+                         레이어가 쌓인다. 읽기 전용 -- DWG/DXF 쓰기 경로는 없다.
   uncad-cli/             CLI 바이너리 (uncad 명령)
 ```
 
@@ -38,7 +39,7 @@ crates/
 원본 그대로(`docs/THIRD_PARTY_NOTICES.md` 참고), 다만 담긴 파일 집합이 submodule 전체가
 아니라 실제 사용 파일의 부분집합이라는 차이가 있다. `lib/libredwg` submodule 자체는 여전히
 남아있다 -- 업스트림 갱신 시 diff 대상, 그리고 실 파일 기반 회귀 테스트(`uncad`의 `png.rs`,
-`tests/dxf_pipeline.rs`, `tests/write_dwg.rs`, `tests/acis_sab.rs`와 `uncad-cli`의
+`tests/dxf_pipeline.rs`, `tests/acis_sab.rs`와 `uncad-cli`의
 `tests/documented_invocations.rs`)가 `lib/libredwg/test/test-data/`의 픽스처를 읽는다. 즉
 submodule은 `cargo build`가 아니라 `cargo test`의 전제조건이다.
 
@@ -100,26 +101,27 @@ LibreDWG C 라이브러리는 스레드 세이프하지 않다(`loglevel` 등 no
 안전한 공개 API를 제공한다. `libredwg-sys`를 직접 쓴다면 이 제약을 스스로 지켜야 한다 -- 동시
 호출 시 `STATUS_HEAP_CORRUPTION`으로 재현된 적 있음.
 
-## 두 계층 모델: `Dwg_Data`(진짜 허브) vs `RenderEntity`/`Tables`(렌더링 전용 투영)
+## 모델: `RenderEntity`/`Tables` 하나뿐 -- `Dwg_Data`는 `parse()` 안에서만 산다
 
-`CadDatabase`는 사실 두 개의 서로 다른 "모델"을 동시에 들고 있다:
+`CadDatabase`는 `entities`(모델/페이퍼 스페이스가 소유한 엔티티)와 `tables`(LAYER, 모든
+BLOCK_RECORD, MLINESTYLE)만 들고 있는 순수 Rust 값이다(`Debug`/`Clone`/`PartialEq`/
+`serde::Serialize`/`Deserialize`, 직접 생성 가능). LibreDWG가 `dwg_read_file`/`dxf_read_file`로
+채운 `Dwg_Data`는 `parse()` 안에서 두 번 순회(`convert_entities`, `convert_tables`)된 직후
+`dwg_free`로 해제되고 반환값에 남지 않는다. 즉 "DWG/DXF -> 공통 model -> 여러 출력"의 허브는 이
+Rust 모델이고, 출력은 `to_json()`(모델을 serde로 그대로 직렬화, `json.rs`), `to_svg()`,
+`to_png()`(SVG를 래스터화) 셋이다.
 
-- **`dwg: Box<Dwg_Data>`** (비공개 필드) -- LibreDWG 자신이 `dwg_read_file`/`dxf_read_file`로
-  채운, 완전하고 왕복 가능한(round-trip-faithful) 원본 그대로다. `parse()`는 예전(2026-08-07
-  이전)엔 변환 직후 이걸 바로 `dwg_free`했지만, 이제는 `CadDatabase`의 수명 동안 살려서
-  들고 있다가 `write_dwg`/`write_dxf`가 그대로 다시 써낸다(`Drop for CadDatabase`가 해제).
-  새 무손실 Rust 모델을 따로 만들 필요가 없었던 이유가 이거다 -- LibreDWG 자신의 구조체가
-  이미 그 역할을 한다.
-- **`entities`/`tables`** (공개 필드) -- `to_svg()` 렌더링에 필요한 필드만 남긴, 의도적으로
-  손실 있는 Rust 투영. 아래 "엔티티 모델과 블록 기반 순회" 절에서 설명하는 게 전부 이쪽이다.
-  `write_dwg`/`write_dxf`는 이 모델을 전혀 안 거친다 -- 여기서 역변환하면 애초에 렌더링에
-  안 쓰이는 필드(전체 테이블, 오브젝트 사전, 헤더 변수, 스타일 정의 등)가 다 빠진 반쪽짜리
-  DWG/DXF가 나올 것이다.
+이 모델은 의도적으로 손실이 있다 -- 렌더링에 필요한 필드만 남긴다(선종류·선굵기·레이어 on/off·
+텍스트 스타일·오브젝트 사전·헤더 변수 등은 없음). 그래서 DWG/DXF를 다시 써내는 용도로는 쓸 수
+없고, 이 프로젝트는 쓰기를 제공하지 않는다(0.1.0의 `write_dwg`/`write_dxf`/`dwg_to_dxf`는
+2026-09-15에 제거 -- `CHANGELOG.md`). 2026-08-07부터 제거 전까지는 쓰기를 위해 `Dwg_Data`를
+`CadDatabase` 수명 동안 살려 두는 "두 계층" 구조였다.
 
-즉 사용자가 원래 그렸던 "여러 입력 포맷 -> 공통 model -> 여러 출력 포맷" 허브 구조에서, 진짜
-허브는 `RenderEntity`가 아니라 `Dwg_Data`다. `RenderEntity`는 그 허브 위에 얹힌, SVG 전용 파생
-뷰(view)일 뿐이다. `docs/CAVEATS.md`의 "DWG/DXF 쓰기 지원" 섹션에 실측 결과(R_2004 제약,
-9개 fixture 중 5개만 `write_dwg` 성공 등)가 있다.
+`libredwg-sys`의 C 빌드에는 그래도 인코더(`encode.c` 등)가 포함되고 `config.h`의 `USE_WRITE`도
+켜져 있다: `dwg.c`가 `dxf_read_file()`을 `USE_WRITE`로 가드하고, `in_dxf.c`가 `encode.c`의
+핸들 후처리 헬퍼를 쓰며, `out_dxf.c`가 3DSOLID 와이어프레임에 필요한 `dwg_convert_SAB_to_SAT1`을
+담고 있기 때문이다. Rust로 바인딩되는 쓰기 진입점은 없다(`dwg_write_file`은 allowlist에서 뺐고
+DXF 쓰기 심은 삭제).
 
 ## 엔티티 모델과 블록 기반 순회
 
@@ -154,11 +156,13 @@ INSERT가 속한 블록 자신의 `entities` 목록에는 중복되지 않는다
 
 SAB(v2, 바이너리)로 저장된 솔리드는 SAT 텍스트로 먼저 변환해야 하는데, LibreDWG의
 `dwg_convert_SAB_to_SAT1`은 엔티티를 **제자리에서** 바꾼다(`version`을 1로, `encr_sat_data`에
-평문 SAT를 채움). `CadDatabase`가 같은 `Dwg_Data`를 `write_dwg`/`write_dxf`용으로 계속 들고
-있으므로 `parse()` 중에 그걸 살아있는 엔티티에 호출하면 나중 쓰기 결과가 깨진다(2026-09-15에
-실 파일로 확인, `docs/CAVEATS.md`의 "DWG/DXF 쓰기 지원" 절 참고). 그래서 `libredwg-sys`의
+평문 SAT를 채우고 `acis_data`는 SAB 바이트 그대로 둠). `parse()`는 같은 솔리드를 두 번
+읽으므로(`convert_entities`의 모델 스페이스 순회, 그다음 `convert_tables`의 블록 레코드 순회)
+살아있는 엔티티에 호출하면 두 번째 읽기가 `version == 1` 분기에서 SAB 바이너리를 SAT 텍스트로
+파싱해 와이어프레임을 잃는다(제거된 쓰기 경로에서는 같은 변이가 쓰기 결과까지 깨뜨렸다 --
+2026-09-15 실 파일로 확인, `docs/CAVEATS.md`의 "3DSOLID SAB 변환" 절). 그래서 `libredwg-sys`의
 `uncad_3dsolid_sab_to_sat_text` 심이 엔티티의 얕은 복사본에서 변환을 돌리고 텍스트만 돌려준다
--- `parse()`는 `Dwg_Data`를 LibreDWG가 읽은 그대로 남긴다.
+-- `parse()`는 `Dwg_Data`에 아무 부작용도 남기지 않는다.
 
 `extract_wireframe(entity_ptr, dxfname)`가 `dxfname`을 인자로 받는 이유: REGION은 `dwg.h`에서
 `Dwg_Entity__3DSOLID`의 typedef라 3DSOLID와 완전히 같은 구조체/dynapi 필드 테이블을 쓰지만,

@@ -137,9 +137,10 @@ fn extract_wireframe_segments(records: &[SatRecord]) -> Vec<[Point3D; 2]> {
 /// `libredwg-sys`'s `uncad_3dsolid_sab_to_sat_text` shim, never in place --
 /// if that's how this particular entity stored its ACIS data. Returns
 /// `None` if the solid is empty or its ACIS data can't be read/converted.
-/// Never modifies the entity: `CadDatabase` keeps this same `Dwg_Data`
-/// alive for `write_dwg`/`write_dxf`, so parse-time reads must leave it
-/// exactly as LibreDWG decoded it.
+/// Never modifies the entity: `parse()` reads every solid twice (once for
+/// `CadDatabase::entities`, once for its block record in `Tables`), so an
+/// in-place conversion on the first read would hand the second one a
+/// half-converted entity -- see the comment in the SAB branch below.
 ///
 /// `dxfname` must be the entity's own real dxfname (`"3DSOLID"`,
 /// `"REGION"`, ...) -- dynapi enforces this exactly (`dwg_dynapi_entity_value`
@@ -186,13 +187,14 @@ unsafe fn read_sat_text_from_entity(entity_ptr: *mut c_void, dxfname: &str) -> O
     // SAB (v2, binary). Converted to SAT text on a *copy* of the entity by
     // the uncad_3dsolid_sab_to_sat_text shim -- deliberately not by calling
     // LibreDWG's dwg_convert_SAB_to_SAT1 on the live entity, which is what
-    // this used to do. That function converts in place (rewriting
-    // version/num_blocks/block_size/encr_sat_data), and because CadDatabase
-    // keeps this same Dwg_Data alive for write_dwg/write_dxf, an in-place
-    // conversion here made every later write emit unencrypted SAT text that
-    // readers then garbled -- see the shim's doc comment in
+    // this used to do. That function converts in place (version 2 -> 1,
+    // plaintext SAT into encr_sat_data, acis_data left as SAB bytes), so
+    // the second read of the same solid -- convert_tables walks every block
+    // record's entities after convert_entities has walked model space --
+    // took the `version != 2` branch above, parsed binary SAB as SAT text,
+    // and produced no wireframe. See the shim's doc comment in
     // crates/libredwg-sys/shim/uncad_shim.h and docs/CAVEATS.md's
-    // "DWG/DXF 쓰기 지원" section. parse() must leave the Dwg_Data exactly
+    // "3DSOLID SAB 변환" section. parse() must leave the Dwg_Data exactly
     // as LibreDWG read it.
     let mut len: usize = 0;
     // SAFETY: entity_ptr is a valid Dwg_Entity__3DSOLID* per this function's

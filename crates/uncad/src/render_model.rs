@@ -1,11 +1,11 @@
-//! The rendering-only entity model, read from a parsed drawing and consumed
-//! by [`crate::svg::to_svg`]. **Not a general-purpose CAD IR** and not a
-//! round-trip representation -- it only keeps the fields `to_svg()` needs.
-//! `CadDatabase::write_dwg`/`write_dxf` never go through this model; they
-//! write the original `Dwg_Data` LibreDWG parsed, which is the crate's
-//! actual complete/round-trip-faithful representation (see
-//! `docs/ARCHITECTURE.md`'s "two-layer model" section for the full
-//! rationale).
+//! The entity model this crate exposes: read from a parsed drawing, consumed
+//! by `crate::svg::to_svg` and exported verbatim by `CadDatabase::to_json`.
+//! **Not a general-purpose CAD IR** and not a round-trip representation --
+//! it keeps the fields rendering needs (see `docs/ARCHITECTURE.md`'s "모델"
+//! section). Every type here derives `serde::Serialize`/`Deserialize`;
+//! `RenderEntity` is internally tagged with `"type"` using the same DXF
+//! names `type_name()` reports, so JSON consumers can dispatch on `type`
+//! without knowing the Rust enum (see `crate::json`).
 //!
 //! Mirrors the JS/WASM-era predecessor's
 //! `bindings/javascript/src/database/entities/*.ts` shape (see git history
@@ -27,8 +27,10 @@
 // link. The exposure already exists; this only makes it usable.
 pub use crate::dynapi::{Point2D, Point3D};
 
+use serde::{Deserialize, Serialize};
+
 /// Fields common to every DWG entity, regardless of type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityCommon {
     /// Hex handle string, matching the JS CadDatabase's `.handle` shape
     /// (e.g. `"2A"`), used for cross-referencing (3DSOLID wireframe
@@ -51,21 +53,21 @@ pub struct EntityCommon {
     pub true_color: Option<u32>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LineEntity {
     pub common: EntityCommon,
     pub start_point: Point3D,
     pub end_point: Point3D,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CircleEntity {
     pub common: EntityCommon,
     pub center: Point3D,
     pub radius: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextEntity {
     pub common: EntityCommon,
     pub start_point: Point2D,
@@ -77,7 +79,7 @@ pub struct TextEntity {
     pub rotation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LwPolylineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<Point2D>,
@@ -87,7 +89,7 @@ pub struct LwPolylineEntity {
     pub closed: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArcEntity {
     pub common: EntityCommon,
     pub center: Point3D,
@@ -98,7 +100,7 @@ pub struct ArcEntity {
     pub end_angle: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EllipseEntity {
     pub common: EntityCommon,
     pub center: Point3D,
@@ -110,13 +112,13 @@ pub struct EllipseEntity {
     pub end_angle: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointEntity {
     pub common: EntityCommon,
     pub position: Point3D,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolidEntity {
     pub common: EntityCommon,
     /// Raw DXF corner order (1-2-3-4) -- AutoCAD's classic 1-2-4-3
@@ -132,7 +134,7 @@ pub struct SolidEntity {
 /// (`Dwg_Entity_RAY`, `typedef`'d as `Dwg_Entity_XLINE`) for both; they only
 /// differ in the DXF/dynapi type name and in `toSVG()`'s eventual rendering
 /// (RAY extends one direction from `point`, XLINE extends both).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RayEntity {
     pub common: EntityCommon,
     pub point: Point3D,
@@ -142,7 +144,7 @@ pub struct RayEntity {
 /// ATTRIB shares TEXT's exact field shape (position/height/text value) --
 /// it's a block-attribute value attached to an INSERT, but geometrically
 /// it's just another piece of text.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttribEntity {
     pub common: EntityCommon,
     pub start_point: Point2D,
@@ -152,7 +154,7 @@ pub struct AttribEntity {
     pub rotation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InsertEntity {
     pub common: EntityCommon,
     /// Referenced block's name, resolved from the `block_header` handle
@@ -179,7 +181,7 @@ pub struct InsertEntity {
 /// formatting codes (e.g. `%%v`-style symbol escapes) unstripped, so this
 /// is a readable-but-unfaithful approximation, not real GD&T symbol
 /// rendering.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToleranceEntity {
     pub common: EntityCommon,
     pub insertion_point: Point3D,
@@ -197,7 +199,7 @@ pub struct ToleranceEntity {
 /// rendered through the same `render_block_ref` machinery, not table-cell
 /// content reconstructed from `num_cols`/`num_rows`/`col_widths`/etc
 /// (which this project doesn't even parse).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcadTableEntity {
     pub common: EntityCommon,
     pub block_name: String,
@@ -209,7 +211,7 @@ pub struct AcadTableEntity {
 
 /// Same field shape as ATTRIB -- the *template* stored in a block
 /// definition (vs. ATTRIB, the value instance attached to an INSERT).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttdefEntity {
     pub common: EntityCommon,
     pub start_point: Point2D,
@@ -222,7 +224,7 @@ pub struct AttdefEntity {
     pub rotation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ViewportEntity {
     pub common: EntityCommon,
     pub center: Point3D,
@@ -230,7 +232,7 @@ pub struct ViewportEntity {
     pub height: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Face3DEntity {
     pub common: EntityCommon,
     /// Already-sequential order (unlike SOLID, no 1-2-4-3 reorder needed).
@@ -240,7 +242,7 @@ pub struct Face3DEntity {
     pub corner4: Point3D,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SplineEntity {
     pub common: EntityCommon,
     /// Points that lie exactly on the curve -- preferred over
@@ -250,7 +252,7 @@ pub struct SplineEntity {
     pub control_points: Vec<Point3D>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MTextEntity {
     pub common: EntityCommon,
     pub insertion_point: Point3D,
@@ -267,7 +269,7 @@ pub struct MTextEntity {
     pub line_spacing_factor: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PolylineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<Point3D>,
@@ -278,8 +280,12 @@ pub struct PolylineEntity {
 /// `hatchEdgePoints`'s 4 cases in the JS baseline exactly (chord/segment
 /// approximation, not real curve evaluation, matching the same
 /// simplification used for SPLINE/curved 3DSOLID edges elsewhere).
-#[derive(Debug, Clone, PartialEq)]
+// JSON: internally tagged like `RenderEntity`, upper-case like its tags --
+// `{"type":"ARC","center":...}` -- but these are edge kinds, not DXF entity
+// names (see `crate::json`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[serde(tag = "type", rename_all = "UPPERCASE")]
 pub enum HatchEdge {
     Line {
         start: Point2D,
@@ -310,8 +316,12 @@ pub enum HatchEdge {
 /// bulge/arc segments are dropped, matching the JS baseline's own
 /// simplification -- `toSVG()` never reconstructs the arcs a bulge would
 /// imply) or a list of curved/straight edges.
-#[derive(Debug, Clone, PartialEq)]
+// JSON: adjacently tagged, because the payload is a sequence rather than a
+// struct -- `{"type":"POLYLINE","data":[pt,..]}` / `{"type":"EDGES","data":
+// [edge,..]}` -- keeping the `type` key every other tagged object uses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[serde(tag = "type", content = "data", rename_all = "UPPERCASE")]
 pub enum HatchBoundaryPath {
     Polyline(Vec<Point2D>),
     Edges(Vec<HatchEdge>),
@@ -331,7 +341,7 @@ pub enum HatchBoundaryPath {
 /// ~390 units, many times larger than the shape it was supposed to fill,
 /// rendering no visible lines at all) -- see `svg.rs`'s
 /// `render_hatch_pattern_line` doc comment for the full account.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HatchPatternLine {
     /// Radians.
     pub angle: f64,
@@ -368,7 +378,7 @@ pub struct HatchPatternLine {
 /// this is built from `dwg.h`'s field comments and general DXF-gradient
 /// knowledge, not confirmed against a real AutoCAD rendering the way most
 /// of this project's other logic is.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HatchGradient {
     pub is_radial: bool,
     /// Radians.
@@ -377,7 +387,7 @@ pub struct HatchGradient {
     pub color2: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HatchEntity {
     pub common: EntityCommon,
     pub boundary_paths: Vec<HatchBoundaryPath>,
@@ -406,7 +416,7 @@ pub struct HatchEntity {
 /// baseline never recognized (unlike MULTILEADER/MLINE this isn't new
 /// functionality though, just extending an already-ported mechanism to a
 /// 7th case using its own `block` field the same way).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionEntity {
     pub common: EntityCommon,
     pub block_name: String,
@@ -421,7 +431,7 @@ pub struct DimensionEntity {
 /// Empty when the wireframe couldn't be extracted (empty solid,
 /// unrecognized ACIS version, conversion failure) -- callers should treat
 /// that the same as an unsupported entity type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Solid3DEntity {
     pub common: EntityCommon,
     pub wireframe_edges: Vec<[Point3D; 2]>,
@@ -437,7 +447,7 @@ pub struct Solid3DEntity {
 /// straight-line polylines (spline leaders are chord-approximated, same
 /// simplification used for SPLINE/HATCH curved edges elsewhere). MLEADER
 /// text/block content itself (`ctx.content`) is not extracted or drawn.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MultiLeaderEntity {
     pub common: EntityCommon,
     pub lines: Vec<Vec<Point3D>>,
@@ -448,7 +458,7 @@ pub struct MultiLeaderEntity {
 /// `point + miter_direction * offset` is that vertex's position on the
 /// parallel line `offset` away from the centerline (see
 /// `convert::convert_mline`'s doc comment).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MLineVertex {
     pub point: Point3D,
     pub miter_direction: Point3D,
@@ -466,7 +476,7 @@ pub struct MLineVertex {
 /// handle LibreDWG couldn't resolve), it falls back to a single centerline
 /// through each vertex's `point`, same as this type's previous
 /// centerline-only behavior.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MLineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<MLineVertex>,
@@ -488,7 +498,7 @@ pub struct MLineEntity {
 /// so there's no reference implementation in this codebase to check
 /// against either) -- see `convert.rs`'s `wipeout_boundary` for the exact
 /// computation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WipeoutEntity {
     pub common: EntityCommon,
     pub boundary: Vec<Point2D>,
@@ -505,7 +515,7 @@ pub struct WipeoutEntity {
 /// VIEWPORT's frame-only rendering, not a claim that this is what LIGHT
 /// looks like in AutoCAD (it isn't -- lights aren't visible at all in a
 /// normal 2D plan view).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LightEntity {
     pub common: EntityCommon,
     pub position: Point3D,
@@ -518,39 +528,67 @@ pub struct LightEntity {
 /// baseline's `renderEntity` actually draws (styleName/isSpline/text box
 /// size/etc are parsed by the JS model but never reach the SVG, so they're
 /// left out here rather than ported unused).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LeaderEntity {
     pub common: EntityCommon,
     pub vertices: Vec<Point3D>,
     pub is_arrowhead_enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+// Internally tagged for JSON: `{"type":"LINE","common":{...},"start_point":...}`.
+// Each variant's tag is spelled exactly as `type_name()` reports it -- the
+// unit tests in json.rs check every variant for that agreement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[serde(tag = "type")]
 pub enum RenderEntity {
+    #[serde(rename = "LINE")]
     Line(LineEntity),
+    #[serde(rename = "CIRCLE")]
     Circle(CircleEntity),
+    #[serde(rename = "TEXT")]
     Text(TextEntity),
+    #[serde(rename = "LWPOLYLINE")]
     LwPolyline(LwPolylineEntity),
+    #[serde(rename = "ARC")]
     Arc(ArcEntity),
+    #[serde(rename = "ELLIPSE")]
     Ellipse(EllipseEntity),
+    #[serde(rename = "POINT")]
     Point(PointEntity),
+    #[serde(rename = "SOLID")]
     Solid(SolidEntity),
+    #[serde(rename = "RAY")]
     Ray(RayEntity),
+    #[serde(rename = "XLINE")]
     XLine(RayEntity),
+    #[serde(rename = "INSERT")]
     Insert(InsertEntity),
+    #[serde(rename = "ATTRIB")]
     Attrib(AttribEntity),
+    #[serde(rename = "ATTDEF")]
     Attdef(AttdefEntity),
+    #[serde(rename = "VIEWPORT")]
     Viewport(ViewportEntity),
+    #[serde(rename = "3DFACE")]
     Face3D(Face3DEntity),
+    #[serde(rename = "SPLINE")]
     Spline(SplineEntity),
+    #[serde(rename = "MTEXT")]
     MText(MTextEntity),
+    #[serde(rename = "POLYLINE3D")]
     Polyline3D(PolylineEntity),
+    #[serde(rename = "DIMENSION")]
     Dimension(DimensionEntity),
+    #[serde(rename = "HATCH")]
     Hatch(HatchEntity),
+    #[serde(rename = "3DSOLID")]
     Solid3D(Solid3DEntity),
+    #[serde(rename = "LEADER")]
     Leader(LeaderEntity),
+    #[serde(rename = "MULTILEADER")]
     MultiLeader(MultiLeaderEntity),
+    #[serde(rename = "MLINE")]
     MLine(MLineEntity),
     /// REGION -- **new functionality, not a JS-baseline port** (the JS
     /// baseline never handled REGION at all; see `docs/CAVEATS.md`).
@@ -561,6 +599,7 @@ pub enum RenderEntity {
     /// [`RayEntity`] and [`RenderEntity::Polyline2D`] reuses
     /// [`LwPolylineEntity`] -- kept separate so `type_name()` still
     /// reports the real "REGION" dxfname.
+    #[serde(rename = "REGION")]
     Region(Solid3DEntity),
     /// POLYLINE_PFACE ("polyface mesh") -- **new functionality, not a
     /// JS-baseline port** (the JS baseline never handled it; see
@@ -573,6 +612,7 @@ pub enum RenderEntity {
     /// [`Solid3DEntity`]'s shape and `svg.rs`'s isometric wireframe
     /// renderer, same as [`RenderEntity::Region`], since a polyface mesh is
     /// just as inherently 3D as an ACIS solid's wireframe.
+    #[serde(rename = "POLYLINE_PFACE")]
     PolylinePFace(Solid3DEntity),
     /// Same shape as [`RenderEntity::LwPolyline`] (2D vertices + closed flag,
     /// same flag-bit convention) -- reuses [`LwPolylineEntity`] rather than
@@ -582,15 +622,23 @@ pub enum RenderEntity {
     /// DXF type, matching the JS baseline's `entityConverter.ts` (which
     /// also keeps `POLYLINE2D` a separate `type:` from `LWPOLYLINE`, even
     /// though `toSVG()` renders both through one shared `case`).
+    #[serde(rename = "POLYLINE_2D")]
     Polyline2D(LwPolylineEntity),
+    #[serde(rename = "TOLERANCE")]
     Tolerance(ToleranceEntity),
+    #[serde(rename = "ACAD_TABLE")]
     AcadTable(AcadTableEntity),
+    #[serde(rename = "WIPEOUT")]
     Wipeout(WipeoutEntity),
+    #[serde(rename = "LIGHT")]
     Light(LightEntity),
     /// Any entity type not yet ported. Carries the real DXF type name (from
     /// `dwg_object_get_dxfname`) so callers can still count/report by type
     /// -- see convert.rs's module doc for how this differs from (and is a
-    /// superset of) the JS baseline's silent-drop behavior.
+    /// superset of) the JS baseline's silent-drop behavior. In JSON this is
+    /// the one variant whose `"type"` tag (`"UNKNOWN"`) is not the DXF
+    /// name; the real name is in `type_name`.
+    #[serde(rename = "UNKNOWN")]
     Unknown {
         common: EntityCommon,
         type_name: String,

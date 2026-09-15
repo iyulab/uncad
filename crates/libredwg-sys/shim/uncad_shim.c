@@ -4,59 +4,7 @@
 
 #include "dwg.h"
 #include "dwg_api.h"
-#include "bits.h"
-#include "out_dxf.h"
 #include "uncad_shim.h"
-
-int
-uncad_write_dxf_file (const char *dwg_path, const char *dxf_path)
-{
-  if (strcmp (dwg_path, dxf_path) == 0)
-    return DWG_ERR_IOERROR;
-
-  Dwg_Data dwg;
-  Bit_Chain dat;
-  memset (&dwg, 0, sizeof (dwg));
-  memset (&dat, 0, sizeof (dat));
-
-  int error = dwg_read_file (dwg_path, &dwg);
-  if (error >= DWG_ERR_CRITICAL)
-    {
-      dwg_free (&dwg);
-      return error;
-    }
-
-  dat.version = dwg.header.version;
-  dat.from_version = dwg.header.from_version;
-  dat.fh = fopen (dxf_path, "wb");
-  if (!dat.fh)
-    {
-      dwg_free (&dwg);
-      return DWG_ERR_IOERROR;
-    }
-
-  error = dwg_write_dxf (&dat, &dwg);
-  fclose (dat.fh);
-  dwg_free (&dwg);
-  return error;
-}
-
-int
-uncad_write_dxf (Dwg_Data *dwg, const char *dxf_path)
-{
-  Bit_Chain dat;
-  memset (&dat, 0, sizeof (dat));
-
-  dat.version = dwg->header.version;
-  dat.from_version = dwg->header.from_version;
-  dat.fh = fopen (dxf_path, "wb");
-  if (!dat.fh)
-    return DWG_ERR_IOERROR;
-
-  int error = dwg_write_dxf (&dat, dwg);
-  fclose (dat.fh);
-  return error;
-}
 
 void *
 uncad_object_entity_ptr (Dwg_Object *obj)

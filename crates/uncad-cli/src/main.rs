@@ -1,11 +1,14 @@
 //! Port of `src/cli.mjs`, DWF/DWFx branch dropped (scope decision: this
-//! Rust port is DWG/DXF only). Same argv surface, same summary/`-o`
-//! dispatch, same Korean-language usage/messages.
+//! Rust port is DWG/DXF only). Same `<input> [-o <output>]` shape, same
+//! summary/`-o` dispatch, same Korean-language usage/messages, but the output
+//! set is JSON/SVG/PNG rather than the JS CLI's. Reading only: the `-o`
+//! targets are the parsed model as JSON, or a rendering of it as SVG/PNG --
+//! there is no DWG/DXF output (see CHANGELOG.md).
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
-use uncad::{RenderEntity, Space, ToPngOptions, ToSvgOptions};
+use uncad::{RenderEntity, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
 
 struct Args {
     input: Option<String>,
@@ -13,6 +16,7 @@ struct Args {
     space: String,
     outlier_trim: bool,
     scale: String,
+    pretty: bool,
     help: bool,
 }
 
@@ -22,10 +26,12 @@ fn usage() {
 
 사용법:
   uncad <input.dwg>                 요약 정보 출력 (엔티티 타입 개수)
+  uncad <input> -o <output.json>    파싱한 모델(엔티티 + 테이블)을 JSON으로 추출
   uncad <input> -o <output.svg>     이미지(SVG)로 추출
   uncad <input> -o <output.png>     이미지(PNG)로 추출 (SVG를 거쳐 래스터화)
-  uncad <input> -o <output.dxf>     DXF로 저장
-  uncad <input> -o <output.dwg>     DWG로 저장 (R_2004 이하만 안정적 -- docs/CAVEATS.md 참고)
+
+옵션 (JSON 추출 전용):
+  --pretty                    들여쓰기된 여러 줄 JSON (기본: 한 줄로 압축)
 
 옵션 (SVG/PNG 추출 전용):
   --space <model|paper|all>   렌더링할 스페이스 (기본: model)
@@ -38,11 +44,10 @@ fn usage() {
 
 예:
   uncad drawing.dwg
+  uncad drawing.dwg -o drawing.json --pretty
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
-  uncad drawing.dwg -o drawing.png --scale 2
-  uncad drawing.dwg -o drawing.dxf
-  uncad drawing.dxf -o drawing.dwg"#
+  uncad drawing.dwg -o drawing.png --scale 2"#
     );
 }
 
@@ -53,6 +58,7 @@ fn parse_args(argv: &[String]) -> Args {
         space: "model".to_string(),
         outlier_trim: true,
         scale: "1".to_string(),
+        pretty: false,
         help: false,
     };
     let mut i = 0;
@@ -75,6 +81,7 @@ fn parse_args(argv: &[String]) -> Args {
                     args.scale = v.clone();
                 }
             }
+            "--pretty" => args.pretty = true,
             "-h" | "--help" => args.help = true,
             other if args.input.is_none() => args.input = Some(other.to_string()),
             _ => {}
@@ -133,7 +140,7 @@ fn main() -> ExitCode {
         Ok(_) => {}
     }
 
-    let mut db = match uncad::parse(input) {
+    let db = match uncad::parse(input) {
         Ok(db) => db,
         Err(e) => {
             eprintln!("오류: '{input}' 파싱 실패 ({e}) -- 유효한 DWG/DXF 파일인지 확인하세요");
@@ -156,6 +163,21 @@ fn main() -> ExitCode {
 
     let mut unsupported: Vec<String> = Vec::new();
     match out_ext.as_str() {
+        "json" => {
+            let json = match db.to_json(ToJsonOptions {
+                pretty: args.pretty,
+            }) {
+                Ok(json) => json,
+                Err(e) => {
+                    eprintln!("오류: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            if let Err(e) = std::fs::write(output, json) {
+                eprintln!("오류: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         "svg" => {
             let space = match parse_space(&args.space) {
                 Ok(space) => space,
@@ -213,27 +235,8 @@ fn main() -> ExitCode {
             }
             unsupported = result.unsupported_entity_types;
         }
-        // Writes the database already parsed above, mirroring the "dwg" arm.
-        // `dwg_to_dxf()` would re-read `input` from disk -- a second parse of
-        // a file this process has already decoded, and one that rejects a DXF
-        // input outright (LibreDWG code 2048) even though `write_dxf()`
-        // handles it, so `uncad in.dxf -o out.dxf` used to fail while the
-        // library call behind it worked. For the DWG input the two produce
-        // byte-identical output.
-        "dxf" => {
-            if let Err(e) = db.write_dxf(output) {
-                eprintln!("오류: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-        "dwg" => {
-            if let Err(e) = db.write_dwg(output) {
-                eprintln!("오류: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
         other => {
-            eprintln!("오류: 지원하지 않는 출력 확장자 '.{other}' (.svg, .png, .dxf, .dwg만 지원)");
+            eprintln!("오류: 지원하지 않는 출력 확장자 '.{other}' (.json, .svg, .png만 지원)");
             return ExitCode::FAILURE;
         }
     }
