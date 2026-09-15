@@ -3,12 +3,12 @@
 [![CI](https://github.com/iyulab/uncad/actions/workflows/ci.yml/badge.svg)](https://github.com/iyulab/uncad/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
-CAD 파일(DWG/DXF)을 파싱, 렌더링(SVG), 저장(DWG/DXF)하기 위한 오픈소스 Rust 라이브러리.
+CAD 파일(DWG/DXF)을 파싱, 렌더링(SVG/PNG), 저장(DWG/DXF)하기 위한 오픈소스 Rust 라이브러리.
 
 ## 빠른 시작
 
 ```bash
-git submodule update --init   # 처음 클론했다면
+git submodule update --init   # 테스트 픽스처용 -- 빌드에는 불필요 (아래 "플랫폼" 절 참고)
 cargo build --workspace
 cargo test --workspace
 ```
@@ -27,7 +27,8 @@ std::fs::write("drawing.png", png.png)?;
 db.write_dxf("drawing.dxf")?;
 db.write_dwg("drawing_copy.dwg")?;   // R_2004 이하에서만 안정적, docs/CAVEATS.md 참고
 
-// db 없이 파일→파일로 빠르게 변환만 하고 싶을 때(파싱 오버헤드 없음):
+// db 없이 파일→파일로 빠르게 변환만 하고 싶을 때(파싱 오버헤드 없음). DWG 입력 전용 --
+// DXF를 다시 쓰려면 위처럼 parse() + write_dxf()를 쓴다:
 uncad::dwg_to_dxf("drawing.dwg", "drawing2.dxf")?;
 ```
 
@@ -38,6 +39,7 @@ cargo run -p uncad-cli -- drawing.dwg                  # 요약 정보 (엔티�
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg    # 이미지(SVG)로 추출 (기본: 모델 스페이스만)
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png    # 이미지(PNG)로 추출 (SVG를 거쳐 래스터화)
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # 2배 해상도로 래스터화
+cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim  # 이상치 좌표를 뷰박스에서 자동 제외하지 않음
 cargo run -p uncad-cli -- drawing.dwg -o drawing.dxf    # DWG -> DXF 저장
 cargo run -p uncad-cli -- drawing.dxf -o drawing.dwg    # DXF -> DWG 저장 (R_2004 이하만 안정적)
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper   # 도곽/타이틀블록만
@@ -54,8 +56,12 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all       # 모든 스�
 순수 Rust + 네이티브 FFI. WebAssembly/브라우저는 목표가 아니다 — 실제 사용처가 라이브러리/바이너리(CLI, 서버, 데스크톱 앱)뿐이다.
 
 `bindgen`이 `libclang`을 필요로 하므로 시스템에 LLVM/Clang이 설치되어 있어야 한다
-(Windows: `winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). `lib/libredwg`는
-git submodule이므로 클론 시 `git clone --recurse-submodules` 사용하거나, 이미 클론했다면
+(Windows: `winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). LibreDWG C 소스는
+`crates/libredwg-sys/vendor/libredwg/`에 벤더링되어 있어 **빌드에는 `lib/libredwg` submodule이
+필요 없다**. 다만 `cargo test --workspace`의 실 파일 테스트(`uncad`의 `png.rs`,
+`tests/dxf_pipeline.rs`, `tests/write_dwg.rs`, `tests/acis_sab.rs`와 `uncad-cli`의
+`tests/documented_invocations.rs`)가 그 submodule의 `test/test-data/` 픽스처를 읽으므로,
+테스트를 돌리려면 `git clone --recurse-submodules`로 받거나 이미 클론했다면
 `git submodule update --init`으로 받아온다. Linux(`x86_64-unknown-linux-gnu`)에서도 빌드/테스트
 전부 통과 확인됨.
 
@@ -66,11 +72,14 @@ git submodule이므로 클론 시 `git clone --recurse-submodules` 사용하거�
 ## 저장소 구조
 
 ```
-lib/libredwg/            LibreDWG C 소스 -- git submodule, 수정 없이 그대로 씀
+lib/libredwg/            LibreDWG 업스트림 -- git submodule. 빌드에는 안 쓰이고, vendor/ 갱신의
+                         원본이자 실 파일 테스트 픽스처(test/test-data/)의 출처
 crates/
-  libredwg-sys/          raw FFI (cc + bindgen)
+  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/에 실제 컴파일되는 C 소스
+                         부분집합이 수정 없이 복사되어 있음 (crates.io 발행용)
   uncad/                 안전한 API: parse()/CadDatabase::{to_svg,to_png,write_dwg,write_dxf}()/dwg_to_dxf()
   uncad-cli/             CLI 바이너리 (uncad 명령)
+scripts/                 sync-libredwg-vendor.sh -- submodule 갱신 후 vendor/ 복사본 재생성
 samples/                 gitignored (README 제외) -- 라이선스 확인 없이 아무 DWG/DXF나 넣고
                          수동 테스트하는 용도. 자동화된 회귀 테스트는 없음
 docs/                    아키텍처, 알려진 제한, 서드파티 고지

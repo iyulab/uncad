@@ -58,8 +58,15 @@ pub struct Tables {
 
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
-/// `Dwg_Data`.
-pub unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
+/// `Dwg_Data`, and the caller must hold `LIBREDWG_LOCK` (see lib.rs) for
+/// the whole call -- this walks LibreDWG's non-reentrant C API directly.
+///
+/// `pub(crate)`, not `pub`: `parse()` is the only intended caller. This
+/// module has to be `pub` so `LayerRecord`/`BlockRecord` are nameable, but
+/// exporting a `*mut Dwg_Data` entry point that bypasses the lock would
+/// contradict the crate's "every FFI-touching entry point is serialized"
+/// guarantee (and leak `libredwg_sys` types into the public surface).
+pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut layers = HashMap::new();
     let mut block_records = HashMap::new();
@@ -160,7 +167,7 @@ fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
 
 /// Resolves a `BITCODE_H` handle to a `BLOCK_HEADER` (e.g. INSERT's
 /// `block_header` field, or a DIMENSION's `block` field) to that block's
-/// *disambiguated* name -- the same resolution [`convert_tables`] uses to
+/// *disambiguated* name -- the same resolution `convert_tables` uses to
 /// key `block_records`, so callers can reliably look up
 /// `Tables::block_records` afterward. **Not** the same as
 /// `crate::dynapi::resolve_handle_name` (which returns `BLOCK_HEADER.name`

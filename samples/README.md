@@ -23,12 +23,18 @@ runs in `cargo test` is:
   resolution, SVG emission, ACIS parsing, unit conversion, table lookup);
 - `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png`, which runs the whole
   `parse()` -> `to_svg()` -> `to_png()` pipeline against a DWG from the LibreDWG submodule
-  (always present, since the build already requires that submodule);
-- `tests/dxf_minimal.rs`, which writes its own DXF from group codes and asserts the geometry
-  back out of `parse()` and into `to_svg()`. Authoring the input is what makes exact expected
-  values possible at all -- the reason the old tests could not be kept is that nobody could
-  regenerate correct expectations for a file without an independent reference, and a fixture
-  the test wrote itself needs no such reference.
+  (`git submodule update --init` first -- the build compiles a vendored copy and does not
+  need the submodule; the fixture-based tests do);
+- `crates/uncad/tests/dxf_pipeline.rs`, `tests/write_dwg.rs` and `tests/acis_sab.rs`, which
+  parse corpus files from that same submodule and assert *properties* rather than pinned
+  values: the SVG carries geometry, a `write_dxf()`/`write_dwg()` round trip re-parses to the
+  same entity type sequence, a parsed database writes out byte-identically to the file-to-file
+  converter, garbage input returns an error instead of panicking;
+- `crates/uncad-cli/tests/documented_invocations.rs`, which runs the real `uncad` binary for
+  every invocation the README documents. Its `--no-trim` test authors a five-line DXF from group
+  codes inside the test (four lines forming a square plus one far-away outlier) and checks that
+  the flag changes the viewBox -- an authored fixture needs no external reference for its
+  expected values, which is exactly the property the removed `core.rs` tests lacked.
 
 What is still missing is breadth: entity-count parity across many real drawings, byte-level
 render comparison. Use files dropped here for manual spot-checks:

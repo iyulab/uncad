@@ -298,6 +298,13 @@ impl std::error::Error for WriteError {}
 /// for a pure file-to-file conversion when you don't otherwise need a
 /// `CadDatabase`; prefer the method when you've already parsed the file.
 ///
+/// **DWG input only.** The shim behind this calls `dwg_read_file`
+/// unconditionally (no extension dispatch, unlike [`parse`]), so handing
+/// it a DXF fails with [`WriteError::Critical`] carrying LibreDWG's
+/// `DWG_ERR_INVALIDDWG` (2048). To rewrite a DXF, `parse()` it and call
+/// [`CadDatabase::write_dxf`] -- which is exactly why the CLI's `.dxf`
+/// output arm uses the method rather than this function.
+///
 /// Uses `libredwg-sys`'s `uncad_write_dxf_file` shim (see its doc comment)
 /// rather than an in-memory buffer -- `dwg_write_dxf` itself is
 /// file-stream-based (it takes a `Bit_Chain` wrapping a `FILE*`), matching

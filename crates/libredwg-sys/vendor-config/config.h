@@ -1,8 +1,9 @@
 /* Hand-authored config.h for a native build of the vendored LibreDWG C
-   sources (lib/libredwg-web/src), used in place of the autotools-generated
-   src/config.h.in output. See PATCHES.md for why this project builds
-   LibreDWG via a direct `cc`-crate compile instead of autotools/configure
-   (Windows autotools friction documented there).
+   sources (crates/libredwg-sys/vendor/libredwg/, an unmodified subset of
+   the lib/libredwg submodule), used in place of the autotools-generated
+   src/config.h.in output. See docs/ARCHITECTURE.md's "빌드" section for
+   why this project builds LibreDWG via a direct `cc`-crate compile instead
+   of autotools/configure (Windows autotools friction).
 
    Scope mirrors the existing WASM build's flags: write + DXF read/write
    enabled (USE_WRITE defined, DISABLE_DXF left undefined), JSON/GeoJSON,
@@ -16,7 +17,8 @@
    defined(_WIN32) branch below is that exact original content, untouched.
    The #else (POSIX/glibc, e.g. Ubuntu CI) branch was added afterward and
    validated the same way, against real gcc compile errors in a Docker
-   `rust:latest` container (see PATCHES.md). It intentionally changes as
+   `rust:latest` container (see docs/CAVEATS.md's cross-platform section).
+   It intentionally changes as
    little as possible from the Windows branch -- most HAVE_* flags mirror
    LibreDWG's own general policy of preferring its portable internal
    fallbacks over platform-specific code paths, so this only diverges where
@@ -184,7 +186,7 @@
 #undef ICONV_CONST
 #undef STACK_DIRECTION
 #undef LT_OBJDIR
-#define LIBREDWG_SO_VERSION "0.13"
+#define LIBREDWG_SO_VERSION "0.14"
 #undef _UINT32_T
 #undef _UINT64_T
 #undef __XSI_VISIBLE
@@ -192,9 +194,9 @@
 /* --- package metadata (only used for --version-style strings) --------- */
 #define PACKAGE_NAME "LibreDWG"
 #define PACKAGE_TARNAME "libredwg"
-#define PACKAGE_VERSION "0.13.3"
-#define PACKAGE_STRING "LibreDWG 0.13.3"
-#define PACKAGE_BUGREPORT "https://github.com/iyulab-rnd/uncad/issues"
+#define PACKAGE_VERSION "0.14"
+#define PACKAGE_STRING "LibreDWG 0.14"
+#define PACKAGE_BUGREPORT "https://github.com/iyulab/uncad/issues"
 #define PACKAGE_URL "https://www.gnu.org/software/libredwg/"
 
 #ifndef __cplusplus

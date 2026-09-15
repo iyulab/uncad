@@ -1,13 +1,19 @@
 #ifndef UNCAD_SHIM_H
 #define UNCAD_SHIM_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Reads `dwg_path` (DWG or DXF, by extension) and writes it back out as DXF
- * text to `dxf_path`. Returns a LibreDWG error code (see DWG_ERR_* in
- * dwg.h); values >= DWG_ERR_CRITICAL mean the write did not happen.
+/* Reads the DWG file at `dwg_path` and writes it back out as DXF text to
+ * `dxf_path`. **DWG input only**: this calls dwg_read_file unconditionally
+ * (no extension dispatch), so a DXF input fails with DWG_ERR_INVALIDDWG --
+ * callers that already have a DXF go through dxf_read_file + uncad_write_dxf
+ * (uncad's parse() + CadDatabase::write_dxf) instead. Returns a LibreDWG
+ * error code (see DWG_ERR_* in dwg.h); values >= DWG_ERR_CRITICAL mean the
+ * write did not happen.
  *
  * This exists because dwg_write_dxf(Bit_Chain*, Dwg_Data*) is declared only
  * in the private src/out_dxf.h (not a public installed header) and needs a
@@ -18,8 +24,9 @@ extern "C" {
  * set as the rest of vendored LibreDWG, where reaching into those private
  * headers is normal/expected. Rust only ever sees this one function.
  *
- * Recipe ported verbatim from the existing JS/embind binding's
- * dwg_write_dxf_wrapper (lib/libredwg-web/bindings/javascript/embind/binding_func.cpp).
+ * Recipe ported verbatim from this project's former JS/embind binding
+ * (`dwg_write_dxf_wrapper` in its `binding_func.cpp`; that binding is no
+ * longer part of the repository).
  */
 int uncad_write_dxf_file(const char *dwg_path, const char *dxf_path);
 
@@ -94,6 +101,34 @@ unsigned int uncad_multileader_get_lines(void *entity,
 
 void uncad_multileader_free_lines(uncad_multileader_line_t *lines,
                                    unsigned int num_lines);
+
+/* Converts a 3DSOLID/REGION/BODY entity's ACIS payload from SAB ("ACIS
+ * BinaryFile", `version == 2`) to SAT v1 text and returns it as one
+ * malloc'd, NUL-terminated buffer (its byte length in *out_len), or NULL
+ * if `entity` is NULL, the payload is not SAB, or the conversion fails.
+ * Free with uncad_free_sat_text. `entity` is the type-specific struct
+ * pointer (Dwg_Entity_3DSOLID*, passed as const void* for the same reason
+ * uncad_object_entity_ptr returns void*).
+ *
+ * This exists because LibreDWG's own dwg_convert_SAB_to_SAT1 converts *in
+ * place*: it rewrites version/num_blocks/block_size/encr_sat_data (and
+ * sab_size/acis_empty/_dxf_sab_converted) on the entity it is handed, and
+ * both LibreDWG encoders then key off exactly those fields -- dxf_3dsolid
+ * skips its own convert-and-encrypt step for `version == 1` and emits the
+ * blocks as-is, and the DWG encoder does the same. Calling it on the live
+ * entity during parse() therefore turned a later write_dxf/write_dwg of the
+ * same Dwg_Data into one that emitted UNENCRYPTED SAT text where readers
+ * expect the obfuscated form, garbling every SAB solid on re-read. This
+ * shim runs the conversion on a shallow stack copy of the entity (with the
+ * three output pointers cleared so nothing aliases the original), copies
+ * the SAT text out, frees what the conversion allocated on the copy, and
+ * leaves the entity byte-for-byte untouched. The copy's `parent` still
+ * points at the real Dwg_Object_Entity, which is all the conversion reads
+ * through it (the drawing's header.version, for the target ACIS version).
+ */
+char *uncad_3dsolid_sab_to_sat_text(const void *entity, size_t *out_len);
+
+void uncad_free_sat_text(char *text);
 
 #ifdef __cplusplus
 }

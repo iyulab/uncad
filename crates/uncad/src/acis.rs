@@ -25,7 +25,7 @@ struct SatRecord {
     tokens: Vec<String>,
 }
 
-/// Splits raw ACIS SAT v1 text (as produced by `dwg_convert_SAB_to_SAT1`, or
+/// Splits raw ACIS SAT v1 text (as produced by LibreDWG's SAB-to-SAT conversion, or
 /// already-SAT `acis_data`) into records, indexed exactly as `$N` pointers
 /// within the file refer to them (0-based, in file order, header lines and
 /// the `End-of-ACIS-data` marker excluded).
@@ -133,9 +133,13 @@ fn extract_wireframe_segments(records: &[SatRecord]) -> Vec<[Point3D; 2]> {
 }
 
 /// Reads the SAT (v1, ASCII) text for a 3DSOLID/REGION/BODY entity,
-/// converting from SAB (v2, binary) first via `dwg_convert_SAB_to_SAT1` if
-/// that's how this particular entity stored its ACIS data. Returns `None`
-/// if the solid is empty or its ACIS data can't be read/converted.
+/// converting from SAB (v2, binary) first -- on a copy of the entity, via
+/// `libredwg-sys`'s `uncad_3dsolid_sab_to_sat_text` shim, never in place --
+/// if that's how this particular entity stored its ACIS data. Returns
+/// `None` if the solid is empty or its ACIS data can't be read/converted.
+/// Never modifies the entity: `CadDatabase` keeps this same `Dwg_Data`
+/// alive for `write_dwg`/`write_dxf`, so parse-time reads must leave it
+/// exactly as LibreDWG decoded it.
 ///
 /// `dxfname` must be the entity's own real dxfname (`"3DSOLID"`,
 /// `"REGION"`, ...) -- dynapi enforces this exactly (`dwg_dynapi_entity_value`
@@ -179,42 +183,35 @@ unsafe fn read_sat_text_from_entity(entity_ptr: *mut c_void, dxfname: &str) -> O
         return Some(String::from_utf8_lossy(&bytes).into_owned());
     }
 
+    // SAB (v2, binary). Converted to SAT text on a *copy* of the entity by
+    // the uncad_3dsolid_sab_to_sat_text shim -- deliberately not by calling
+    // LibreDWG's dwg_convert_SAB_to_SAT1 on the live entity, which is what
+    // this used to do. That function converts in place (rewriting
+    // version/num_blocks/block_size/encr_sat_data), and because CadDatabase
+    // keeps this same Dwg_Data alive for write_dwg/write_dxf, an in-place
+    // conversion here made every later write emit unencrypted SAT text that
+    // readers then garbled -- see the shim's doc comment in
+    // crates/libredwg-sys/shim/uncad_shim.h and docs/CAVEATS.md's
+    // "DWG/DXF 쓰기 지원" section. parse() must leave the Dwg_Data exactly
+    // as LibreDWG read it.
+    let mut len: usize = 0;
     // SAFETY: entity_ptr is a valid Dwg_Entity__3DSOLID* per this function's
-    // contract; dwg_convert_SAB_to_SAT1 mutates the entity in place to
-    // populate num_blocks/block_size/encr_sat_data from the raw SAB stream.
-    let ret = unsafe {
-        libredwg_sys::dwg_convert_SAB_to_SAT1(
-            entity_ptr.cast::<libredwg_sys::Dwg_Entity__3DSOLID>(),
-        )
-    };
-    if ret != 0 {
+    // contract; the shim only reads through it (and through its `parent`
+    // back-pointer, to reach the drawing's header version) and writes to
+    // its own stack copy.
+    let text_ptr = unsafe { libredwg_sys::uncad_3dsolid_sab_to_sat_text(entity_ptr, &mut len) };
+    if text_ptr.is_null() {
         return None;
     }
-    let num_blocks = get_field::<u32>(entity_ptr, dxfname, "num_blocks").unwrap_or(0);
-    if num_blocks == 0 {
+    // SAFETY: the shim returned a malloc'd buffer valid for `len` bytes (plus
+    // a trailing NUL), owned by this function until uncad_free_sat_text below.
+    let bytes = unsafe { std::slice::from_raw_parts(text_ptr.cast::<u8>(), len) };
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    // SAFETY: text_ptr came from uncad_3dsolid_sab_to_sat_text and is freed
+    // exactly once, here, after the last read of it above.
+    unsafe { libredwg_sys::uncad_free_sat_text(text_ptr) };
+    if text.is_empty() {
         return None;
-    }
-    let block_size_ptr = get_field::<*const u32>(entity_ptr, dxfname, "block_size")?;
-    let block_ptrs_ptr =
-        get_field::<*const *const std::os::raw::c_char>(entity_ptr, dxfname, "encr_sat_data")?;
-    if block_size_ptr.is_null() || block_ptrs_ptr.is_null() {
-        return None;
-    }
-
-    let mut text = String::new();
-    for i in 0..num_blocks as usize {
-        // SAFETY: block_size_ptr/block_ptrs_ptr are both num_blocks-long
-        // arrays per LibreDWG's own convention (populated together by the
-        // dwg_convert_SAB_to_SAT1 call above); valid until dwg_free.
-        let (block_size, str_ptr) = unsafe { (*block_size_ptr.add(i), *block_ptrs_ptr.add(i)) };
-        if str_ptr.is_null() || block_size == 0 {
-            continue;
-        }
-        // SAFETY: str_ptr is valid for block_size bytes, matching the same
-        // encr_sat_data/block_size convention.
-        let bytes =
-            unsafe { std::slice::from_raw_parts(str_ptr.cast::<u8>(), block_size as usize) };
-        text.push_str(&String::from_utf8_lossy(bytes));
     }
     Some(text)
 }

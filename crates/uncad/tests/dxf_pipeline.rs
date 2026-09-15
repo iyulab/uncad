@@ -7,9 +7,10 @@
 //! worked.
 //!
 //! Fixtures come from the same place `png.rs` takes its DWG: the
-//! submodule-tracked LibreDWG corpus, which `libredwg-sys` already requires to
-//! build. That is deliberate -- `samples/README.md` explains why real-file
-//! tests cannot hang off `samples/` (gitignored, so CI has nothing to read).
+//! submodule-tracked LibreDWG corpus (a precondition of the tests only -- the
+//! build compiles `libredwg-sys`'s vendored copy). That is deliberate --
+//! `samples/README.md` explains why real-file tests cannot hang off
+//! `samples/` (gitignored, so CI has nothing to read).
 //!
 //! The assertions avoid the trap that killed the previous file-based tests:
 //! they pinned expected values that nobody could regenerate for a different
@@ -98,7 +99,11 @@ fn renders_a_parsed_dxf_to_svg() {
 #[test]
 fn a_dxf_survives_being_written_back_out_and_reparsed() {
     let mut db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
-    let before = db.entities.len();
+    let before: Vec<String> = db
+        .entities
+        .iter()
+        .map(|e| e.type_name().to_string())
+        .collect();
 
     let out = TempFile::new("roundtrip.dxf");
     db.write_dxf(out.path())
@@ -114,10 +119,16 @@ fn a_dxf_survives_being_written_back_out_and_reparsed() {
     // The drawing is its own expectation -- no external reference needed, and
     // this holds for any input file, so it does not rot when the fixture
     // changes. It spans decode -> render projection -> encode -> decode.
+    // The *type sequence*, not just the count: a write that dropped one
+    // entity and duplicated another would keep the count and still be wrong.
+    let after: Vec<String> = reparsed
+        .entities
+        .iter()
+        .map(|e| e.type_name().to_string())
+        .collect();
     assert_eq!(
-        reparsed.entities.len(),
-        before,
-        "entity count changed across a write/reparse round trip"
+        after, before,
+        "entity type sequence changed across a write/reparse round trip"
     );
 }
 

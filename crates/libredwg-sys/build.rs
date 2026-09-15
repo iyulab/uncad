@@ -193,7 +193,8 @@ fn main() {
         .allowlist_function("dwg_free")
         .allowlist_function("dwg_free_object")
         .allowlist_function("dwg_abandon")
-        .allowlist_function("dwg_convert_SAB_to_SAT1")
+        .allowlist_function("uncad_3dsolid_sab_to_sat_text")
+        .allowlist_function("uncad_free_sat_text")
         .allowlist_function("dwg_dynapi_.*")
         .allowlist_function("dwg_obj_.*")
         .allowlist_function("dwg_ref_.*")
@@ -233,8 +234,12 @@ fn main() {
         .opaque_type("Dwg_Object")
         .opaque_type("dwg_object") // dwg_api.h's own separate `typedef struct _dwg_object dwg_object;`
         // Same reasoning, needed because these are parameter/return types of
-        // otherwise-allowlisted functions (dwg_convert_SAB_to_SAT1,
-        // dwg_dynapi_*, dwg_obj_*) even with Dwg_Object itself opaque.
+        // otherwise-allowlisted functions (dwg_dynapi_*, dwg_obj_*,
+        // dwg_object_to_entity/_object) even with Dwg_Object itself opaque.
+        // Dwg_Entity__3DSOLID stays listed for the same reason even though
+        // nothing allowlisted references it any more -- the SAB conversion
+        // goes through the uncad_3dsolid_sab_to_sat_text shim, which takes
+        // a void*, so bindgen simply never emits the type now.
         .opaque_type("_dwg_object_entity")
         .opaque_type("Dwg_Object_Entity")
         .opaque_type("_dwg_object_object")
@@ -348,4 +353,18 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", shim_dir.display());
     println!("cargo:rerun-if-changed={}", vendor_config.display());
+    // The vendored C sources are the actual compile input, and neither cc
+    // (for .file() sources) nor bindgen (without CargoCallbacks) registers
+    // them with Cargo. Once any rerun-if-changed is printed Cargo watches
+    // *only* the named paths, so without this line a refreshed vendor/ (from
+    // scripts/sync-libredwg-vendor.sh) silently reused stale objects and a
+    // stale bindings.rs until `cargo clean -p libredwg-sys`. A directory
+    // path makes Cargo scan the whole tree (112 files -- negligible).
+    println!(
+        "cargo:rerun-if-changed={}",
+        libredwg_src
+            .parent()
+            .expect("vendor/libredwg/src always has a parent directory")
+            .display()
+    );
 }

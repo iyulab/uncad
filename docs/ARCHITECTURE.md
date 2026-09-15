@@ -3,14 +3,16 @@
 ## 크레이트 구조
 
 ```
-lib/libredwg/            LibreDWG C 소스 -- 진짜 업스트림(github.com/LibreDWG/libredwg)을 가리키는
-                         git submodule. 수정 없이 그대로 씀.
+lib/libredwg/            LibreDWG 업스트림(github.com/LibreDWG/libredwg)을 가리키는 git submodule.
+                         빌드에는 쓰이지 않는다 -- vendor/ 복사본의 원본이자, 실 파일 테스트
+                         픽스처(test/test-data/)의 출처. 수정 없이 그대로 둠.
 crates/
-  libredwg-sys/          raw FFI: build.rs가 lib/libredwg/src/*.c를 cc 크레이트로 직접 컴파일
-                         (autotools 없이) + bindgen으로 바인딩 생성. shim/uncad_shim.c는 공개
-                         헤더에 없는 내부 함수(dwg_write_dxf 등)를 감싸는 C 실드 + dynapi로
-                         도달 못 하는 중첩 구조체(MULTILEADER 리더 라인 등)를 순회해서 평평한
-                         배열로 넘겨주는 전용 함수들.
+  libredwg-sys/          raw FFI: build.rs가 vendor/libredwg/src/*.c(아래 "빌드" 절)를 cc
+                         크레이트로 직접 컴파일(autotools 없이) + bindgen으로 바인딩 생성.
+                         shim/uncad_shim.c는 공개 헤더에 없는 내부 함수(dwg_write_dxf 등)를
+                         감싸는 C 실드 + dynapi로 도달 못 하는 중첩 구조체(MULTILEADER 리더
+                         라인 등)를 순회해서 평평한 배열로 넘겨주는 전용 함수들 + 3DSOLID의
+                         SAB→SAT 변환을 원본을 건드리지 않고 복사본에서 수행하는 함수.
   uncad/                 안전한 API. dynapi.rs(리플렉션 헬퍼) -> convert.rs(raw Dwg_Data* ->
                          render_model.rs의 RenderEntity) -> tables.rs(LAYER/BLOCK_RECORD) ->
                          color.rs(ACI/BYLAYER 해석) -> svg.rs(to_svg()) -> acis.rs(3DSOLID
@@ -31,17 +33,24 @@ crates/
 크레이트에서는 100% 빌드 실패한다(실제로 `cargo publish --dry-run`으로 확인했던 실패
 모드). `crates/libredwg-sys/vendor/libredwg/`는 이 크레이트가 실제 컴파일에 쓰는 파일만
 (`.c` 24개 + 그게 실제로 `#include`하는 헤더/`.spec`/`.inc`/codepage 테이블 전체, 총
-124개 파일 ~24MB/gzip 3MB) submodule에서 그대로 복사해 git으로 커밋해둔 것 -- 수정 없이
+112개 파일 ~24MB/gzip 3MB -- `git ls-files crates/libredwg-sys/vendor | wc -l`) submodule에서
+그대로 복사해 git으로 커밋해둔 것 -- 수정 없이
 원본 그대로(`docs/THIRD_PARTY_NOTICES.md` 참고), 다만 담긴 파일 집합이 submodule 전체가
 아니라 실제 사용 파일의 부분집합이라는 차이가 있다. `lib/libredwg` submodule 자체는 여전히
-남아있다 -- 업스트림 갱신 시 diff 대상, 그리고 `uncad` 크레이트의 실 파일 기반 회귀 테스트
-(`png.rs`, `lib/libredwg/test/test-data/2000/circle.dwg` 사용)가 여전히 참조한다.
+남아있다 -- 업스트림 갱신 시 diff 대상, 그리고 실 파일 기반 회귀 테스트(`uncad`의 `png.rs`,
+`tests/dxf_pipeline.rs`, `tests/write_dwg.rs`, `tests/acis_sab.rs`와 `uncad-cli`의
+`tests/documented_invocations.rs`)가 `lib/libredwg/test/test-data/`의 픽스처를 읽는다. 즉
+submodule은 `cargo build`가 아니라 `cargo test`의 전제조건이다.
 
 **submodule 갱신 절차**: `git submodule update --remote` 등으로 `lib/libredwg` 포인터를
 옮긴 뒤에는 `scripts/sync-libredwg-vendor.sh`를 실행해서 vendor/ 복사본을 다시 만들어야
 한다(실제 `#include` 그래프를 새로 추적해서 파일 목록을 재생성함). 그 다음
 `cargo build --workspace`로 컴파일이 여전히 되는지 확인 -- 새 `.c`/헤더 파일이 필요해졌으면
-컴파일 에러로 바로 드러난다. `build.rs`의 드리프트 감지 두 단계도 참고: (1)
+컴파일 에러로 바로 드러난다(`build.rs`가 `vendor/libredwg/` 디렉터리 전체를
+`cargo:rerun-if-changed`로 등록해두어서, 복사본이 바뀌면 증분 빌드에서도 C 재컴파일과 bindgen이
+다시 돈다 -- `cargo clean` 불필요. 2026-09-15 전에는 shim/과 vendor-config/만 등록되어 있어
+재벤더링 뒤 낡은 오브젝트를 그대로 쓰는 함정이 있었다). `build.rs`의 드리프트 감지 두 단계도
+참고: (1)
 `vendor/libredwg/src/*.c` 파일 개수를 `LIBREDWG_SOURCES` 기대값과 비교(둘이 다르면 vendor
 복사본 자체가 손상/불일치 -- `panic!`), (2) `lib/libredwg` submodule이 체크아웃되어 있으면
 (로컬 개발/CI에서만, 발행된 크레이트 소비자에게는 없음) 그 `.c` 파일 개수를 vendor 복사본과
@@ -142,6 +151,14 @@ INSERT가 속한 블록 자신의 `entities` 목록에는 중복되지 않는다
 레코드/필드 *의미*를 이해하는 참고 자료로만 썼을 뿐, 그 문서의 코드나 텍스트를 그대로
 재사용하지 않았다 -- 독자적으로 새로 작성한 구현이다. 곡선 엣지는 현(chord)으로 근사하고,
 면/서피스는 아예 해석하지 않는다(항상 와이어프레임만 나옴, 채워진 solid는 안 나옴).
+
+SAB(v2, 바이너리)로 저장된 솔리드는 SAT 텍스트로 먼저 변환해야 하는데, LibreDWG의
+`dwg_convert_SAB_to_SAT1`은 엔티티를 **제자리에서** 바꾼다(`version`을 1로, `encr_sat_data`에
+평문 SAT를 채움). `CadDatabase`가 같은 `Dwg_Data`를 `write_dwg`/`write_dxf`용으로 계속 들고
+있으므로 `parse()` 중에 그걸 살아있는 엔티티에 호출하면 나중 쓰기 결과가 깨진다(2026-09-15에
+실 파일로 확인, `docs/CAVEATS.md`의 "DWG/DXF 쓰기 지원" 절 참고). 그래서 `libredwg-sys`의
+`uncad_3dsolid_sab_to_sat_text` 심이 엔티티의 얕은 복사본에서 변환을 돌리고 텍스트만 돌려준다
+-- `parse()`는 `Dwg_Data`를 LibreDWG가 읽은 그대로 남긴다.
 
 `extract_wireframe(entity_ptr, dxfname)`가 `dxfname`을 인자로 받는 이유: REGION은 `dwg.h`에서
 `Dwg_Entity__3DSOLID`의 typedef라 3DSOLID와 완전히 같은 구조체/dynapi 필드 테이블을 쓰지만,

@@ -11,11 +11,15 @@
 #
 # This script re-derives the exact file set by tracing the real #include
 # graph from the .c files build.rs compiles (LIBREDWG_SOURCES in build.rs),
-# rather than copying all of lib/libredwg/src (which also has ~80 other
-# .c files and test/example content this crate never builds). If upstream
-# adds a new #include this list doesn't yet know about, the next `cargo
-# build` fails loudly with a file-not-found from the C compiler -- add the
-# missing file's search dir below and re-run.
+# rather than copying all of lib/libredwg/src (which also has the three
+# JSON/GeoJSON .c files this crate deliberately never builds -- see
+# EXCLUDED_JSON_SOURCES in build.rs -- plus test/example content). If
+# upstream adds a new #include this list doesn't yet know about, the next
+# `cargo build` fails loudly with a file-not-found from the C compiler --
+# add the missing file's search dir below and re-run. build.rs registers
+# the whole vendor/libredwg directory with cargo:rerun-if-changed, so that
+# next build really does recompile from the refreshed copy (no `cargo
+# clean` needed).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

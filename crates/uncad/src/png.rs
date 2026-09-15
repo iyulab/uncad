@@ -153,13 +153,14 @@ mod tests {
 
     /// Exercises the full `CadDatabase::to_png` -> `to_svg` -> `svg_to_png`
     /// pipeline against a real DWG, rather than only the SVG -> PNG half
-    /// tested above. Uses a file from the (git-submodule-tracked, always
-    /// present) LibreDWG test-data corpus rather than `samples/`, which is
-    /// gitignored and manual-spot-check-only by design -- see
-    /// `samples/README.md` for why real-file regression tests don't hang
-    /// off that directory. `libredwg-sys` itself already requires this
-    /// submodule to build, so depending on one of its files here adds no
-    /// new precondition.
+    /// tested above. Uses a file from the git-submodule-tracked LibreDWG
+    /// test-data corpus rather than `samples/`, which is gitignored and
+    /// manual-spot-check-only by design -- see `samples/README.md` for why
+    /// real-file regression tests don't hang off that directory. The build
+    /// itself no longer needs the submodule (`libredwg-sys` compiles its
+    /// own vendored copy), so `git submodule update --init` is a
+    /// precondition of `cargo test`, not of `cargo build` -- README.md
+    /// says so.
     #[test]
     fn to_png_renders_a_real_dwg_to_a_valid_png() {
         let path = concat!(

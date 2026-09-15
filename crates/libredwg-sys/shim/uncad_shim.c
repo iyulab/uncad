@@ -154,3 +154,68 @@ uncad_multileader_free_lines (uncad_multileader_line_t *lines, unsigned int num_
     free (lines[i].points);
   free (lines);
 }
+
+char *
+uncad_3dsolid_sab_to_sat_text (const void *entity, size_t *out_len)
+{
+  if (out_len)
+    *out_len = 0;
+  if (!entity)
+    return NULL;
+
+  /* Shallow copy. dwg_convert_SAB_to_SAT1 only *reads* acis_data/sab_size
+     (and header.version through ->parent) from the struct it is handed; it
+     *writes* version/num_blocks/block_size/encr_sat_data/sab_size/
+     acis_empty/_dxf_sab_converted -- all of which land on this copy and are
+     thrown away below. The three output pointers are cleared first so the
+     conversion callocs fresh arrays instead of realloc()ing (and thereby
+     possibly freeing) anything the original owns. */
+  Dwg_Entity_3DSOLID copy = *(const Dwg_Entity_3DSOLID *)entity;
+  copy.num_blocks = 0;
+  copy.block_size = NULL;
+  copy.encr_sat_data = NULL;
+
+  char *text = NULL;
+  int error = dwg_convert_SAB_to_SAT1 (&copy);
+  if (error == 0 && copy.num_blocks > 0 && copy.block_size && copy.encr_sat_data)
+    {
+      size_t total = 0;
+      for (BITCODE_BL i = 0; i < copy.num_blocks; i++)
+        if (copy.encr_sat_data[i])
+          total += copy.block_size[i];
+      text = malloc (total + 1);
+      if (text)
+        {
+          size_t off = 0;
+          for (BITCODE_BL i = 0; i < copy.num_blocks; i++)
+            {
+              if (!copy.encr_sat_data[i] || copy.block_size[i] == 0)
+                continue;
+              memcpy (text + off, copy.encr_sat_data[i], copy.block_size[i]);
+              off += copy.block_size[i];
+            }
+          text[off] = '\0';
+          if (out_len)
+            *out_len = off;
+        }
+    }
+
+  /* Release what the conversion allocated on the copy. On the error path
+     it may already have calloc'd block_size/encr_sat_data (before the
+     "ACIS BinaryFile" header check) with num_blocks reset to 0, so the
+     per-block loop is a no-op there and only the arrays themselves go. */
+  if (copy.encr_sat_data)
+    {
+      for (BITCODE_BL i = 0; i < copy.num_blocks; i++)
+        free (copy.encr_sat_data[i]);
+      free (copy.encr_sat_data);
+    }
+  free (copy.block_size);
+  return text;
+}
+
+void
+uncad_free_sat_text (char *text)
+{
+  free (text);
+}

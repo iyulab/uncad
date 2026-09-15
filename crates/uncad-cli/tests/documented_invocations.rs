@@ -6,7 +6,10 @@
 //! producing a file, with `cargo test` still green.
 //!
 //! Fixtures come from the submodule-tracked LibreDWG corpus, the same source
-//! `crates/uncad/src/png.rs` and `crates/uncad/tests/dxf_pipeline.rs` use.
+//! `crates/uncad/src/png.rs` and `crates/uncad/tests/dxf_pipeline.rs` use --
+//! plus, for `--no-trim`, a five-line DXF the test writes itself (see
+//! `dxf_with_an_outlier`), because neither corpus file has an outlier for the
+//! flag to act on.
 //!
 //! Assertions stay reference-free, as in `dxf_pipeline.rs`: that a file of the
 //! right format appears, that an exit status is what it claims to be, and --
@@ -257,5 +260,108 @@ fn no_arguments_is_a_usage_error() {
     assert!(
         !out.status.success(),
         "invoking with no input should fail, not exit 0"
+    );
+}
+
+#[test]
+fn space_paper_renders_something_different_from_space_model() {
+    let model = TempFile::new("space-model.svg");
+    let paper = TempFile::new("space-paper.svg");
+
+    assert!(run(&[CORPUS_DXF, "-o", model.arg(), "--space", "model"])
+        .status
+        .success());
+    assert!(run(&[CORPUS_DXF, "-o", paper.arg(), "--space", "paper"])
+        .status
+        .success());
+
+    let model_svg = String::from_utf8(model.bytes()).expect("SVG is text");
+    let paper_svg = String::from_utf8(paper.bytes()).expect("SVG is text");
+    assert!(
+        model_svg.contains("<line") || model_svg.contains("<path"),
+        "model space of entities-2d.dxf should carry geometry: {model_svg}"
+    );
+    // `every_documented_space_is_accepted` only proves each value exits 0.
+    // This is the property that fails when `--space` stops reaching
+    // `ToSvgOptions`: the two renders would then be the same document.
+    assert_ne!(
+        model_svg, paper_svg,
+        "--space paper should not render the same document as --space model"
+    );
+}
+
+/// A DXF written from group codes by the test itself: four LINEs forming a
+/// 10x10 square at the origin, plus one LINE a million units away. Authoring
+/// the fixture is what makes a *differential* `--no-trim` test possible --
+/// neither corpus file has an outlier, so on them the flag is (correctly) a
+/// no-op and a test could not tell a wired-up flag from an ignored one.
+fn dxf_with_an_outlier() -> String {
+    fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> String {
+        format!(
+            "  0\nLINE\n  8\n0\n 10\n{x1}\n 20\n{y1}\n 30\n0.0\n 11\n{x2}\n 21\n{y2}\n 31\n0.0\n"
+        )
+    }
+    let mut dxf = String::from("  0\nSECTION\n  2\nENTITIES\n");
+    dxf.push_str(&line(0.0, 0.0, 10.0, 0.0));
+    dxf.push_str(&line(10.0, 0.0, 10.0, 10.0));
+    dxf.push_str(&line(10.0, 10.0, 0.0, 10.0));
+    dxf.push_str(&line(0.0, 10.0, 0.0, 0.0));
+    dxf.push_str(&line(1_000_000.0, 1_000_000.0, 1_000_001.0, 1_000_001.0));
+    dxf.push_str("  0\nENDSEC\n  0\nEOF\n");
+    dxf
+}
+
+/// The `viewBox` attribute's value from an SVG document.
+fn view_box(svg: &[u8]) -> String {
+    let text = String::from_utf8_lossy(svg);
+    let start = text
+        .find("viewBox=\"")
+        .expect("the SVG root should carry a viewBox")
+        + "viewBox=\"".len();
+    let end = text[start..]
+        .find('"')
+        .expect("the viewBox attribute should be closed")
+        + start;
+    text[start..end].to_string()
+}
+
+#[test]
+fn no_trim_keeps_the_outlier_inside_the_viewbox() {
+    let input = TempFile::new("outlier.dxf");
+    fs::write(input.path(), dxf_with_an_outlier()).expect("temp dir should be writable");
+
+    let trimmed = TempFile::new("trimmed.svg");
+    let untrimmed = TempFile::new("untrimmed.svg");
+    let out = run(&[input.arg(), "-o", trimmed.arg()]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run(&[input.arg(), "-o", untrimmed.arg(), "--no-trim"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let width = |vb: &str| -> f64 {
+        vb.split_whitespace()
+            .nth(2)
+            .and_then(|w| w.parse().ok())
+            .expect("viewBox has four numbers")
+    };
+    let vb_trimmed = view_box(&trimmed.bytes());
+    let vb_untrimmed = view_box(&untrimmed.bytes());
+
+    // Default: the far-away line is trimmed, so the box is about the square.
+    // --no-trim: the box has to reach the outlier a million units out.
+    assert!(
+        width(&vb_trimmed) < 1_000.0,
+        "the default should trim the outlier: viewBox {vb_trimmed}"
+    );
+    assert!(
+        width(&vb_untrimmed) > 1_000_000.0,
+        "--no-trim should keep the outlier inside the viewBox: {vb_untrimmed}"
     );
 }

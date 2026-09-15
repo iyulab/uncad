@@ -71,9 +71,9 @@ pub struct TextEntity {
     pub start_point: Point2D,
     pub text_height: f64,
     pub text: String,
-    /// Radians (DXF 50) -- unlike MTEXT's `x_axis_dir`-derived rotation
-    /// (see [`MTextEntity::rotation`]), TEXT stores this as a plain,
-    /// unambiguous angle.
+    /// Radians (DXF 50) -- TEXT stores this as a plain, unambiguous angle,
+    /// unlike MTEXT, whose rotation is a direction vector in the DWG and is
+    /// currently not converted at all (see [`MTextEntity::rotation`]).
     pub rotation: f64,
 }
 
@@ -256,8 +256,13 @@ pub struct MTextEntity {
     pub insertion_point: Point3D,
     pub text: String,
     pub text_height: f64,
-    /// Radians, derived from `x_axis_dir` (DWG stores MTEXT's rotation as a
-    /// direction vector, not an angle).
+    /// Radians. **Currently always `0.0`**: DWG stores MTEXT's rotation as
+    /// a direction vector (`x_axis_dir`), and convert.rs deliberately does
+    /// not derive an angle from it, matching the JS baseline this renderer
+    /// was ported from (`docs/CAVEATS.md`, "MTEXT 회전은 항상 0"). If that
+    /// is ever implemented the value would be
+    /// `atan2(x_axis_dir.y, x_axis_dir.x)`; until then callers must not
+    /// expect a rotated MTEXT to be reported as rotated.
     pub rotation: f64,
     pub line_spacing_factor: f64,
 }
