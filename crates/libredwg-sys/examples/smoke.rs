@@ -1,6 +1,11 @@
-//! Phase 0 exit-criterion smoke test: read a real fixture through the
-//! bindgen-generated FFI (not the C smoke test used to debug the build) and
-//! print its object count.
+//! Manual smoke check for the raw FFI layer: reads a DWG through the
+//! bindgen-generated bindings and prints its object count.
+//!
+//! Like every `examples/` target in this workspace it asserts nothing --
+//! `cargo test` and `cargo clippy --workspace --all-targets` compile it, so a
+//! public FFI signature that stops matching shows up as a CI build error. See
+//! `docs/ARCHITECTURE.md`'s "테스트 구조" section for how the three test
+//! layers divide up.
 //!
 //! Run: cargo run -p libredwg-sys --example smoke -- <path/to/file.dwg>
 
@@ -11,12 +16,10 @@ fn main() {
     let dwg_path = std::env::args().nth(1).expect("usage: smoke <in.dwg>");
     let c_dwg_path = CString::new(dwg_path.as_str()).unwrap();
 
-    // SAFETY: Dwg_Data is a plain-old-data FFI struct; dwg_read_file expects
-    // a zero-initialized instance (mirrors dwg_read_file_wrapper's `Dwg_Data
-    // dwg = {}` in the former JS/embind binding -- an uninitialized stack
-    // struct was confirmed during Phase 0's C-level smoke test to produce a
-    // STATUS_STACK_BUFFER_OVERRUN, traced to `dwg.opts` feeding garbage into
-    // the runtime `loglevel` global).
+    // SAFETY: Dwg_Data is a plain-old-data FFI struct, and dwg_read_file
+    // requires a zero-initialized instance: an uninitialized stack struct
+    // aborts with STATUS_STACK_BUFFER_OVERRUN, because `dwg.opts` then feeds
+    // garbage into LibreDWG's runtime `loglevel` global.
     let mut dwg: libredwg_sys::Dwg_Data = unsafe { MaybeUninit::zeroed().assume_init() };
 
     let error = unsafe { libredwg_sys::dwg_read_file(c_dwg_path.as_ptr(), &mut dwg) };

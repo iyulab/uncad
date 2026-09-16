@@ -15,30 +15,17 @@ files without an independent reference to check against. See `git log` for the f
 (this project's docs describe current state, not a running history log).
 
 Practically, this means: there's no automated regression coverage for `parse()`/`to_svg()`/
-`to_json()` against *this* directory. It does not mean those calls are untested. What
-runs in `cargo test` is:
+`to_json()` against *this* directory. It does not mean those calls are untested -- `cargo test`
+covers them through self-contained unit tests on the pure-Rust side, plus fixture-based tests
+that read the LibreDWG submodule's own corpus (`git submodule update --init` first: the build
+compiles a vendored copy and does not need the submodule, but those tests do).
 
-- the self-contained unit tests that need no external file -- across `acis.rs`, `color.rs`,
-  `convert.rs`, `json.rs`, `png.rs`, `svg.rs` and `tables.rs`, covering the pure-Rust side
-  (colour resolution, JSON tagging and round-trips, SVG emission, ACIS parsing, unit conversion,
-  table lookup);
-- `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png`, which runs the whole
-  `parse()` -> `to_svg()` -> `to_png()` pipeline against a DWG from the LibreDWG submodule
-  (`git submodule update --init` first -- the build compiles a vendored copy and does not
-  need the submodule; the fixture-based tests do);
-- `crates/uncad/tests/dxf_pipeline.rs` and `tests/acis_sab.rs`, which parse corpus files from
-  that same submodule and assert *properties* rather than pinned values: the SVG carries
-  geometry, the model survives a `to_json()` -> `serde_json` round trip unchanged, SAB solids
-  get the same wireframe in `entities` and in their block record, garbage input returns an
-  error instead of panicking;
-- `crates/uncad-cli/tests/documented_invocations.rs`, which runs the real `uncad` binary for
-  every invocation the README documents. Its `--no-trim` test authors a five-line DXF from group
-  codes inside the test (four lines forming a square plus one far-away outlier) and checks that
-  the flag changes the viewBox -- an authored fixture needs no external reference for its
-  expected values, which is exactly the property the removed `core.rs` tests lacked.
+That inventory is not restated here, so it can't drift out of sync -- it lives in
+`docs/CAVEATS.md`'s "파일 기반 회귀 테스트는 소수" section, which lists what each test file
+currently covers and what breadth is still missing. For how unit, integration and example
+targets divide up, see `docs/ARCHITECTURE.md`'s "테스트 구조" section.
 
-What is still missing is breadth: entity-count parity across many real drawings, byte-level
-render comparison. Use files dropped here for manual spot-checks:
+Use files dropped here for manual spot-checks:
 
 ```bash
 cargo run -p uncad-cli -- samples/whatever.dwg

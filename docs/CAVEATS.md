@@ -381,6 +381,10 @@ SAT를 채우며 `acis_data`는 SAB 바이너리 그대로 둔다. `parse()`는 
 
 ## 파일 기반 회귀 테스트는 소수 (폭넓은 실 파일 커버리지는 여전히 없음)
 
+이 절이 "무엇이 실제로 검증되고 있는가"의 유일한 목록이다 -- `samples/README.md`는 그 디렉터리가
+왜 gitignore인지만 설명하고 이리로 링크한다. 유닛/통합/예제 세 계층을 어떤 기준으로 나누는지(새
+테스트를 어디에 놓아야 하는지)는 `docs/ARCHITECTURE.md`의 "테스트 구조" 절에 있다.
+
 `cargo test --workspace`는 2026-09-15 기준 86개 테스트를 돈다. 그중 `uncad` 유닛테스트가 64개 --
 `json.rs` 6개(아래 참고) + 2026-08-14 기준의 58개(`color.rs` 11개 -- ACI/BYLAYER
 색상 해석 + 그라디언트용 `tint_toward_white`, `acis.rs` 6개 -- SAT 레코드 파싱/포인터 해석/

@@ -72,9 +72,13 @@ lib/libredwg/            LibreDWG 업스트림 -- git submodule. 빌드에는 �
                          원본이자 실 파일 테스트 픽스처(test/test-data/)의 출처
 crates/
   libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/에 실제 컴파일되는 C 소스
-                         부분집합이 수정 없이 복사되어 있음 (crates.io 발행용)
+                         부분집합이 수정 없이 복사되어 있음 (crates.io 발행용). shim/은 opaque
+                         타입 접근자 C 코드, vendor-config/config.h는 autotools 대체
   uncad/                 안전한 API: parse() -> CadDatabase::{to_json,to_svg,to_png}()
   uncad-cli/             CLI 바이너리 (uncad 명령)
+crates/*/tests/          공개 API 통합 테스트. crates/*/examples/는 수동 확인용 예제,
+                         src/*.rs 안의 #[cfg(test)]는 유닛 테스트 -- 세 계층의 배치 규칙은
+                         docs/ARCHITECTURE.md의 "테스트 구조" 절
 scripts/                 sync-libredwg-vendor.sh -- submodule 갱신 후 vendor/ 복사본 재생성
 samples/                 gitignored (README 제외) -- 라이선스 확인 없이 아무 DWG/DXF나 넣고
                          수동 테스트하는 용도. 자동화된 회귀 테스트는 없음
@@ -83,5 +87,5 @@ docs/                    아키텍처, 알려진 제한, 서드파티 고지
 
 더 자세한 내용은:
 
-- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 크레이트 구조, 빌드 시스템, FFI/bindgen 경계, 스레드 세이프티, 엔티티 모델
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — 크레이트 구조, 빌드 시스템, 테스트 구조, FFI/bindgen 경계, 스레드 세이프티, 엔티티 모델
 - [`docs/CAVEATS.md`](./docs/CAVEATS.md) — 엔티티 타입 커버리지, 알려진 제한/버그, 크로스플랫폼 노트

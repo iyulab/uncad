@@ -11,10 +11,10 @@
 //! definition (i.e. a symbol referenced by INSERT elsewhere) are
 //! deliberately excluded from the top-level list; they stay reachable only
 //! via that block's own owned-entity chain. A naive global fixedtype scan
-//! (this module's Phase 1/2-early approach) silently over-collects: it
-//! picks up every entity inside every block definition too, which only
-//! went unnoticed on `sample_2000.dwg` because that fixture has no
-//! INSERT-referenced blocks with real content. Confirmed by diffing
+//! (the obvious alternative, and what this module originally did) silently
+//! over-collects: it picks up every entity inside every block definition
+//! too, which only went unnoticed on `sample_2000.dwg` because that fixture
+//! has no INSERT-referenced blocks with real content. Confirmed by diffing
 //! against the JS baseline on `example_r14.dwg` (10 INSERTs): a POINT
 //! (handle `1BC`) turned up in the naive walk with no corresponding entry
 //! in `db.entities` at all -- it belongs to a named block, not model/paper

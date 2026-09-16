@@ -34,13 +34,14 @@ pub use tables::Tables;
 /// likely more) -- calling into it concurrently from multiple threads
 /// reliably produced `STATUS_HEAP_CORRUPTION` under `cargo test`'s default
 /// parallel test runner once the object walk did enough work per call for
-/// two threads' read/convert/free cycles to overlap (Phase 0 only verified
-/// *sequential* reuse across many calls was safe -- a different property
-/// from *concurrent* calls, and this is where that gap showed up). The one
-/// entry point that touches the FFI boundary, [`parse`], takes this lock
-/// for its entire duration, so it is safe to call from multiple threads
-/// even though the underlying C library isn't -- callers don't need to
-/// know libredwg-sys exists, let alone serialize around it themselves.
+/// two threads' read/convert/free cycles to overlap. Sequential reuse
+/// across many calls is safe, but that is a different property and says
+/// nothing about *concurrent* calls -- this lock is what closes that gap.
+/// The one entry point that touches the FFI boundary, [`parse`], takes
+/// this lock for its entire duration, so it is safe to call from multiple
+/// threads even though the underlying C library isn't -- callers don't
+/// need to know libredwg-sys exists, let alone serialize around it
+/// themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
 /// A parsed CAD drawing: the model, and nothing else.
@@ -146,12 +147,12 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
 
     // SAFETY: Dwg_Data is bound as an opaque, correctly-sized byte blob
     // (see libredwg-sys build.rs); dwg_read_file/dxf_read_file expect a
-    // zero-initialized instance -- an uninitialized one was confirmed
-    // during Phase 0 to produce a STATUS_STACK_BUFFER_OVERRUN (garbage in
-    // dwg.opts feeding the runtime loglevel global). Boxed so the C side
-    // fills it in place at a stable heap address; it lives only until the
-    // two conversion walks below have copied out everything this crate
-    // exposes, then dwg_free + the Box drop release it.
+    // zero-initialized instance -- an uninitialized one aborts with
+    // STATUS_STACK_BUFFER_OVERRUN (garbage in dwg.opts feeding the runtime
+    // loglevel global). Boxed so the C side fills it in place at a stable
+    // heap address; it lives only until the two conversion walks below have
+    // copied out everything this crate exposes, then dwg_free + the Box
+    // drop release it.
     let mut dwg: Box<libredwg_sys::Dwg_Data> =
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
 

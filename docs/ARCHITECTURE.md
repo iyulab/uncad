@@ -9,16 +9,22 @@ lib/libredwg/            LibreDWG 업스트림(github.com/LibreDWG/libredwg)을 
 crates/
   libredwg-sys/          raw FFI: build.rs가 vendor/libredwg/src/*.c(아래 "빌드" 절)를 cc
                          크레이트로 직접 컴파일(autotools 없이) + bindgen으로 바인딩 생성.
-                         shim/uncad_shim.c는 opaque 타입 너머의 엔티티 포인터를 꺼내는
-                         접근자 + dynapi로 도달 못 하는 중첩 구조체(MULTILEADER 리더 라인)를
-                         순회해서 평평한 배열로 넘겨주는 함수 + 3DSOLID의 SAB→SAT 변환을
-                         원본을 건드리지 않고 복사본에서 수행하는 함수.
+    shim/                uncad_shim.c -- opaque 타입 너머의 엔티티 포인터를 꺼내는 접근자 +
+                         dynapi로 도달 못 하는 중첩 구조체(MULTILEADER 리더 라인)를 순회해서
+                         평평한 배열로 넘겨주는 함수 + 3DSOLID의 SAB→SAT 변환을 원본을
+                         건드리지 않고 복사본에서 수행하는 함수.
+    vendor/libredwg/     실제 컴파일되는 업스트림 C 소스 부분집합 (아래 "빌드" 절)
+    vendor-config/       config.h -- autotools 생성 산출물을 대신하는 손으로 쓴 파일
+    examples/            smoke.rs -- raw FFI 수동 확인용 (아래 "테스트 구조" 절)
   uncad/                 안전한 API. dynapi.rs(리플렉션 헬퍼) -> convert.rs(raw Dwg_Data* ->
                          render_model.rs의 RenderEntity) -> tables.rs(LAYER/BLOCK_RECORD) ->
                          color.rs(ACI/BYLAYER 해석) -> svg.rs(to_svg())/png.rs(to_png())/
                          json.rs(to_json()) -> acis.rs(3DSOLID 실험적 와이어프레임) 순으로
                          레이어가 쌓인다. 읽기 전용 -- DWG/DXF 쓰기 경로는 없다.
+    tests/               공개 API 통합 테스트 (dxf_pipeline.rs, acis_sab.rs)
+    examples/            dump.rs / blocks.rs -- 수동 확인용
   uncad-cli/             CLI 바이너리 (uncad 명령)
+    tests/               documented_invocations.rs -- README/--help가 광고하는 호출 전부
 ```
 
 ## 빌드: autotools 대신 `cc` 크레이트, 그리고 submodule 대신 vendor/ 복사본
@@ -58,6 +64,46 @@ submodule은 `cargo build`가 아니라 `cargo test`의 전제조건이다.
 교차 검증(다르면 재동기화가 필요하다는 `cargo:warning`만 내고 빌드는 계속 진행). bindgen이
 생성하는 바인딩도 헤더가 바뀌었으면 같이 재검증(`cargo build --workspace`가 컴파일 에러로
 알려줌)할 것.
+
+## 테스트 구조: 유닛 / 통합 / 예제 세 계층
+
+Rust 표준 배치를 그대로 따른다. 새 테스트를 어디에 놓을지는 **무엇에 접근해야 하는가**로 갈린다.
+
+| 위치 | 컴파일 단위 | 접근 범위 | 용도 |
+|---|---|---|---|
+| `src/*.rs`의 `#[cfg(test)] mod tests` | 크레이트 내부 | private 포함 전체 | 픽스처 파일 없이 합성 데이터로 검증되는 순수 로직 |
+| `tests/*.rs` | 파일마다 독립 크레이트 | 공개 API만 | 실 파일로 도는 end-to-end |
+| `examples/*.rs` | 독립 바이너리 | 공개 API만 | 수동 확인 도구 + 사용 예시 |
+
+**유닛(`#[cfg(test)]`)** -- private 헬퍼를 직접 부를 수 있다는 것이 이 자리의 존재 이유다. 외부 파일이
+필요 없는 순수 함수(색상 해석, SVG 생성, SAT 파싱, outlier-trim 클러스터링 등)는 전부 여기 있고,
+`cargo test`가 도는 테스트의 대부분을 차지한다. 예외가 하나 있다: `png.rs`의
+`to_png_renders_a_real_dwg_to_a_valid_png`는 실 DWG를 읽는 end-to-end인데도 private `png_dimensions`를
+써야 해서 유닛 자리에 있다.
+
+**통합(`tests/`)** -- 파일마다 별개 크레이트로 컴파일되어 공개 API만 보이므로, 검증 범위가 "발행된
+크레이트를 받은 사람이 할 수 있는 일"과 정확히 일치한다. 픽스처는 `lib/libredwg/test/test-data/`에서
+읽는다(위 "빌드" 절 -- submodule은 `cargo build`가 아니라 `cargo test`의 전제조건이다).
+`uncad-cli`의 `tests/`는 라이브러리가 아니라 빌드된 바이너리를 실제로 실행한다.
+
+**예제(`examples/`)** -- 어서션이 없다. 대신 `cargo test`와 `cargo clippy --workspace --all-targets`가
+이들을 컴파일하므로, 공개 API 시그니처가 깨지면 CI에서 빌드 에러로 드러난다. 즉 "실행되는 문서"이자
+컴파일 가드다. 셋 다 인자로 받은 파일 경로로 동작한다 -- `samples/`에 아무 DWG/DXF나 넣고 돌려보는
+용도다(`samples/README.md`).
+
+```bash
+cargo run -p uncad --example dump <file>            # 엔티티 덤프
+cargo run -p uncad --example blocks <file> [이름]   # 블록 레코드 목록/내용
+cargo run -p libredwg-sys --example smoke <file>    # raw FFI로 읽어 오브젝트 수만 출력
+```
+
+**단언 원칙**: 실 파일 테스트는 기대값을 고정하지 않는다. 라운드트립(도면 자신이 기댓값)이나 "옵션이
+결과를 실제로 바꾸는가" 같은, 파일이 바뀌어도 성립하는 성질만 단언한다. 이 프로젝트 자신의 출력에서
+베낀 숫자를 박아둔 예전 테스트(`crates/uncad/tests/core.rs`)가 다른 파일로는 기대값을 재생성할 방법이
+없어 픽스처와 함께 통째로 삭제된 전례가 있다 -- `samples/README.md` 참고.
+
+현재 무엇이 얼마나 돌고 있는지(테스트 개수, 파일별 커버리지 내역, 아직 자동화되지 않은 것)는
+`docs/CAVEATS.md`의 "파일 기반 회귀 테스트는 소수" 절에 있다. 여기서는 배치 규칙만 다룬다.
 
 ## FFI 경계: opaque 타입 + dynapi 리플렉션
 
