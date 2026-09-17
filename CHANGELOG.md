@@ -6,7 +6,10 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
-**The next release is 0.2.0** -- writing was removed from the public API (see Removed).
+## [0.2.0] - 2026-09-17
+
+A breaking release: writing left the public API, and a cleanup pass renamed several
+public items.
 
 ### Removed
 
