@@ -1,12 +1,11 @@
-//! Safe(r) access to LibreDWG's dynapi reflection API
-//! (`dwg_dynapi_entity_value`/`dwg_dynapi_entity_field`): read a named
-//! field off an entity struct by string name, the same pattern the
-//! existing JS converter already relies on for every entity type.
+//! Safer access to LibreDWG's dynapi reflection API
+//! (`dwg_dynapi_entity_value`/`dwg_dynapi_entity_field`): reading a field off
+//! an entity struct by its string name.
 //!
 //! `Dwg_Object`/`Dwg_Object_Entity`/`Dwg_Entity_*` are all bound as opaque
-//! blobs (see libredwg-sys's build.rs) precisely so that this module is the
-//! *only* place that ever touches a raw entity pointer -- callers get typed
-//! Rust values back, never a struct to poke at directly.
+//! blobs (see libredwg-sys's build.rs) precisely so this module is the *only*
+//! place that touches a raw entity pointer -- callers get typed Rust values
+//! back, never a struct to poke at directly.
 
 use std::ffi::{c_void, CStr, CString};
 use std::mem::MaybeUninit;
@@ -31,29 +30,20 @@ pub struct Point2D {
     pub y: f64,
 }
 
-/// `Dwg_SPLINE_control_point`'s exact layout: a leading `parent` pointer
-/// (back to the owning `Dwg_Entity_SPLINE`, per dwg.h -- `struct
-/// _dwg_SPLINE_control_point { struct _dwg_entity_SPLINE *parent; double
-/// x, y, z, w; }`) followed by 4 doubles (x, y, z, weight).
+/// `Dwg_SPLINE_control_point`'s exact layout: a leading `parent` pointer back
+/// to the owning `Dwg_Entity_SPLINE`, then 4 doubles (x, y, z, weight).
 ///
-/// The `parent` field isn't a `get_array_field`/dynapi size-check concern
-/// (that only validates the *pointer-to-the-array* field's own size, 8
-/// bytes either way, never the element stride) -- it matters because
-/// `get_array_field` computes each element's address as `base_ptr +
-/// i * size_of::<T>()`. Omitting `parent` here (an earlier version of this
-/// struct only had x/y/z/w, 32 bytes) understates the real 40-byte
-/// element stride, so every control point after the first was read at a
-/// progressively larger offset than its real location -- silently
-/// reinterpreting 8 bytes of the *next* real control point's `parent`
-/// pointer as this point's leading coordinate field, cascading further
-/// out of alignment with each subsequent element. Confirmed on a real
-/// file (`samples/AutoCADSamples1.dwg`, a SPLINE-heavy architectural
-/// drawing): rendered SPLINE entities with only control points (no fit
-/// points) produced wild, drawing-spanning zigzag lines, and separately
-/// explains a batch of subnormal-magnitude coordinates (a `parent`
-/// pointer value bit-reinterpreted as `f64` is often subnormal) that had
-/// been worked around at the *formatting* layer in svg.rs before this was
-/// traced back to its real cause here.
+/// `parent` is not there for dynapi's size check, which only validates the
+/// pointer-to-the-array field (8 bytes either way) and never the element
+/// stride. It matters because [`get_array_field`] computes each element's
+/// address as `base_ptr + i * size_of::<T>()`. An earlier version of this
+/// struct omitted it, understating the real 40-byte stride, so every control
+/// point after the first was read at a progressively wrong offset --
+/// reinterpreting the next point's `parent` pointer as a coordinate. The
+/// symptoms were drawing-spanning zigzags on SPLINE-heavy files and a batch of
+/// subnormal coordinates (a pointer bit-pattern read as `f64` is often
+/// subnormal), the latter of which had been papered over at the formatting
+/// layer before the real cause was found here.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SplineControlPoint {
@@ -76,10 +66,9 @@ impl Default for SplineControlPoint {
     }
 }
 
-// Pins the element stride get_array_field::<_, SplineControlPoint> uses to
-// the real Dwg_SPLINE_control_point size (pointer + 4 doubles, 64-bit) --
-// see the struct's doc comment for the silent-misalignment bug this
-// guards against recurring.
+// Pins the element stride get_array_field uses to the real
+// Dwg_SPLINE_control_point size, guarding against a recurrence of the
+// silent misalignment described above.
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of SplineControlPoint"][std::mem::size_of::<SplineControlPoint>() - 40];
@@ -95,13 +84,12 @@ impl From<SplineControlPoint> for Point3D {
     }
 }
 
-/// Returns whether `dwg_dynapi_*_value` writing into a `MaybeUninit<T>`
-/// would fit -- it `memcpy`s `f.is_malloc() != 0 ? sizeof(char*) : f.size`
-/// bytes (`dynapi.c`'s own rule, mirrored here), entirely independent of
-/// whatever Rust type the caller chose. Panics in debug builds (turning a
-/// wrong-`T` call site into an immediate test failure, same as before) and
-/// returns `false` in release builds so the caller can refuse the read
-/// instead of letting dynapi overrun a too-small buffer.
+/// Returns whether `dwg_dynapi_*_value` writing into a `MaybeUninit<T>` would
+/// fit: it `memcpy`s `f.is_malloc() != 0 ? sizeof(char*) : f.size` bytes
+/// (dynapi.c's own rule, mirrored here), entirely independent of whatever Rust
+/// type the caller chose. Panics in debug builds, turning a wrong-`T` call site
+/// into an immediate test failure, and returns `false` in release builds so the
+/// caller can refuse the read rather than let dynapi overrun a short buffer.
 fn field_write_size_matches<T>(
     f: &libredwg_sys::Dwg_DYNAPI_field,
     dxfname: &str,
@@ -138,17 +126,12 @@ fn field_write_size_matches<T>(
 /// (points, numbers, small structs like `Dwg_Color`); string/handle-array
 /// fields need dedicated accessors.
 ///
-/// The JS binding's equivalent (`dwg_dynapi_entity_data<T>(obj, field)`)
-/// does an unchecked `as T` cast with no runtime check that `T` actually
-/// matches the field's real C type. Rust has no safe analogue of that, so
-/// this first calls the read-only `dwg_dynapi_entity_field` lookup (name ->
-/// field descriptor, no write) to check the field's real size *before*
-/// calling `dwg_dynapi_entity_value`, which unconditionally `memcpy`s that
-/// many bytes into `out` regardless of `T` -- checking only *after* that
-/// call (an earlier version of this function used `debug_assert_eq!` post-
-/// call) still lets a release build's missing debug assertions overrun a
-/// too-small `MaybeUninit<T>`, since the C-side write already happened by
-/// the time Rust gets to check anything.
+/// The size check happens *before* the read: `dwg_dynapi_entity_value`
+/// unconditionally `memcpy`s the field's own byte count into `out` regardless
+/// of `T`, so the read-only `dwg_dynapi_entity_field` lookup is used first to
+/// confirm the sizes agree. Checking afterwards (as an earlier version did,
+/// with a post-call `debug_assert_eq!`) is too late -- in a release build the
+/// C-side write has already overrun a too-small `MaybeUninit<T>`.
 pub fn get_field<T: Copy>(entity: *mut c_void, dxfname: &str, field: &str) -> Option<T> {
     if entity.is_null() {
         return None;
@@ -337,10 +320,9 @@ pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option
 /// pointer into memory LibreDWG itself owns (freed by `dwg_free`, not by
 /// this call), so this copies every element out rather than borrowing.
 ///
-/// `C` is the count field's own C integer type -- `BITCODE_BL` (u32) for
-/// most `num_X` fields, but e.g. SPLINE's `num_fit_pts` is `BITCODE_BS`
-/// (u16, *not* i16 -- see `docs/CAVEATS.md`'s `BITCODE_BS` note), so this
-/// can't hardcode one count width for every caller.
+/// `C` is the count field's own C integer type -- `BITCODE_BL` (u32) for most
+/// `num_X` fields, but e.g. SPLINE's `num_fit_pts` is `BITCODE_BS` (u16, *not*
+/// i16), so one count width cannot be hardcoded for every caller.
 pub fn get_array_field<C: Copy + TryInto<usize>, T: Copy>(
     entity: *mut c_void,
     dxfname: &str,

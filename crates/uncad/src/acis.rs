@@ -1,21 +1,15 @@
-//! Minimal, independent ACIS SAT (v1, ASCII) reader scoped to wireframe
-//! extraction only -- NOT a general ACIS/B-rep parser. Written from scratch
-//! against publicly available format documentation (Spatial's own "SAT Save
-//! File Format" chapter, long-mirrored at e.g. paulbourke.net/dataformats/sat)
-//! used only as a reference for record/field *semantics*; no code or text
-//! from that document is reproduced here. See docs/ARCHITECTURE.md's
-//! "3DSOLID / ACIS 와이어프레임" section for the full rationale, scope, and
-//! legal considerations. Ported line-for-line from the project's own former
-//! JS implementation (`src/acisWireframe.mjs`, see git history) rather than
-//! redesigned.
+//! Minimal ACIS SAT (v1, ASCII) reader scoped to wireframe extraction only --
+//! NOT a general ACIS/B-rep parser. Written from scratch against publicly
+//! available format documentation (Spatial's own "SAT Save File Format"
+//! chapter), used only as a reference for record and field *semantics*; no code
+//! or text from that document is reproduced here. See `docs/ARCHITECTURE.md`,
+//! "3DSOLID / REGION ACIS wireframe", for the full rationale and scope.
 //!
-//! Scope: for each `edge` record reachable from a 3DSOLID's body, resolve
-//! its two endpoint vertices (via `point` records) and emit a straight line
-//! segment between them. Curved edges (arcs on ellipse-curve/intcurve-curve)
-//! are rendered as chords, not true arcs -- a deliberate simplification.
-//! Faces/surfaces (plane-surface, cone-surface, sphere-surface,
-//! spline-surface, ...) are not interpreted at all; this only produces a
-//! wireframe, never a filled/shaded shape.
+//! For each `edge` record reachable from a solid's body, the two endpoint
+//! vertices are resolved through `point` records and emitted as one straight
+//! segment. Curved edges become chords, not true arcs. Faces and surfaces are
+//! not interpreted at all: the result is always a wireframe, never a filled or
+//! shaded shape.
 
 use crate::dynapi::{get_field, Point3D};
 use std::ffi::{c_void, CStr};
@@ -25,27 +19,15 @@ struct SatRecord {
     tokens: Vec<String>,
 }
 
-/// Splits raw ACIS SAT v1 text (as produced by LibreDWG's SAB-to-SAT conversion, or
-/// already-SAT `acis_data`) into records, indexed exactly as `$N` pointers
-/// within the file refer to them (0-based, in file order, header lines and
-/// the `End-of-ACIS-data` marker excluded).
-// Unverified against every ACIS SAT header variant -- ported as-is from
-// the JS baseline's own equally-unverified assumption. On the
-// `example_r14.dwg` fixture used during development (an old R14-era
-// ACIS v106/SAT-v1 body, no longer bundled with the repo), this 3-line
-// skip did parse 131 records including 18 real
-// `edge` records, but every one failed vertex/point resolution and
-// `extract_wireframe_segments` returned empty -- matching the JS
-// baseline's own real (WASM-executed) output on that exact file, which
-// reported 3DSOLID as unsupported too. Not independently confirmed
-// whether that's this header-skip assumption being wrong for this
-// particular (old) ACIS version, or some other cause -- but since it
-// reproduced JS's own observed behavior byte-for-byte on the one real
-// file available to verify against at the time, "fixing" it without
-// independent ground truth (a real AutoCAD render) would risk diverging
-// from the verified reference on an unverified guess, the same discipline
-// applied elsewhere in this codebase (see convert.rs's LWPOLYLINE
-// closed-bit comment).
+/// Splits raw ACIS SAT v1 text (from LibreDWG's SAB-to-SAT conversion, or
+/// already-SAT `acis_data`) into records, indexed exactly as the file's own
+/// `$N` pointers refer to them: 0-based, in file order, with the header lines
+/// and the `End-of-ACIS-data` marker excluded.
+// The fixed 3-line header skip is not verified against every ACIS SAT variant.
+// On an old R14-era body it did parse every record including 18 real `edge`
+// ones, yet none of their vertices resolved -- whether that is this assumption
+// being wrong for that ACIS version or some other cause was never established.
+// See docs/CAVEATS.md.
 fn parse_sat_records(sat_text: &str) -> Vec<SatRecord> {
     // The first 3 lines are the ACIS header (version, product/version/date
     // string, tolerances); entity records start on line 3 (0-based).
@@ -132,25 +114,17 @@ fn extract_wireframe_segments(records: &[SatRecord]) -> Vec<[Point3D; 2]> {
     segments
 }
 
-/// Reads the SAT (v1, ASCII) text for a 3DSOLID/REGION/BODY entity,
-/// converting from SAB (v2, binary) first -- on a copy of the entity, via
-/// `libredwg-sys`'s `uncad_3dsolid_sab_to_sat_text` shim, never in place --
-/// if that's how this particular entity stored its ACIS data. Returns
-/// `None` if the solid is empty or its ACIS data can't be read/converted.
-/// Never modifies the entity: `parse()` reads every solid twice (once for
-/// `CadDatabase::entities`, once for its block record in `Tables`), so an
-/// in-place conversion on the first read would hand the second one a
-/// half-converted entity -- see the comment in the SAB branch below.
+/// Reads the SAT (v1, ASCII) text for a 3DSOLID/REGION/BODY entity, converting
+/// from SAB (v2, binary) first when that is how this entity stored its ACIS
+/// data -- always on a copy, through `libredwg-sys`'s
+/// `uncad_3dsolid_sab_to_sat_text` shim, never in place. `None` if the solid is
+/// empty or its data cannot be read or converted.
 ///
-/// `dxfname` must be the entity's own real dxfname (`"3DSOLID"`,
-/// `"REGION"`, ...) -- dynapi enforces this exactly (`dwg_dynapi_entity_value`
-/// checks the passed name against the object's actual `obj->name` and
-/// refuses to read any field at all on a mismatch), even though REGION and
-/// 3DSOLID share the identical underlying C struct
-/// (`typedef Dwg_Entity__3DSOLID Dwg_Entity_REGION` in dwg.h, and
-/// `dynapi.c`'s `"REGION"` entry literally points at `_dwg_3DSOLID_fields`,
-/// the same field table `"3DSOLID"` uses) -- hardcoding `"3DSOLID"` here
-/// would silently return `None` for every field on a real REGION entity.
+/// `dxfname` must be the entity's own real name (`"3DSOLID"`, `"REGION"`, ...).
+/// dynapi checks it against the object's actual `obj->name` and refuses to read
+/// any field on a mismatch, even though REGION and 3DSOLID share one C struct
+/// and one dynapi field table -- hardcoding `"3DSOLID"` would silently return
+/// `None` for every field of a real REGION.
 ///
 /// # Safety
 /// `entity_ptr` must be a valid, non-null `Dwg_Entity__3DSOLID*` (as
@@ -184,18 +158,14 @@ unsafe fn read_sat_text_from_entity(entity_ptr: *mut c_void, dxfname: &str) -> O
         return Some(String::from_utf8_lossy(&bytes).into_owned());
     }
 
-    // SAB (v2, binary). Converted to SAT text on a *copy* of the entity by
-    // the uncad_3dsolid_sab_to_sat_text shim -- deliberately not by calling
-    // LibreDWG's dwg_convert_SAB_to_SAT1 on the live entity, which is what
-    // this used to do. That function converts in place (version 2 -> 1,
-    // plaintext SAT into encr_sat_data, acis_data left as SAB bytes), so
-    // the second read of the same solid -- convert_tables walks every block
-    // record's entities after convert_entities has walked model space --
-    // took the `version != 2` branch above, parsed binary SAB as SAT text,
-    // and produced no wireframe. See the shim's doc comment in
-    // crates/libredwg-sys/shim/uncad_shim.h and docs/CAVEATS.md's
-    // "3DSOLID SAB 변환" section. parse() must leave the Dwg_Data exactly
-    // as LibreDWG read it.
+    // SAB (v2, binary), converted to SAT text on a *copy* of the entity.
+    // Calling LibreDWG's dwg_convert_SAB_to_SAT1 on the live entity, which is
+    // what this used to do, converts in place (version 2 -> 1, plaintext SAT
+    // into encr_sat_data, acis_data left as SAB bytes). parse() reads every
+    // solid twice -- convert_entities for model space, then convert_tables for
+    // the owning block record -- so the second read took the `version != 2`
+    // branch above, parsed binary SAB as text, and produced no wireframe. See
+    // shim/uncad_shim.h and docs/CAVEATS.md, "3DSOLID SAB conversion".
     let mut len: usize = 0;
     // SAFETY: entity_ptr is a valid Dwg_Entity__3DSOLID* per this function's
     // contract; the shim only reads through it (and through its `parent`
@@ -218,19 +188,14 @@ unsafe fn read_sat_text_from_entity(entity_ptr: *mut c_void, dxfname: &str) -> O
     Some(text)
 }
 
-/// Best-effort wireframe extraction for one 3DSOLID/REGION/BODY entity:
-/// reads its ACIS data, converting from SAB to SAT if needed, parses the
-/// SAT records, and returns one chord segment per ACIS `edge`. Returns an
-/// empty `Vec` if the solid is empty, its ACIS data can't be read, or it
-/// has no edges (in which case the caller should treat this entity as
-/// unsupported, matching the JS baseline's `wireframeEdges?.length > 0`
-/// check at render time -- for REGION this isn't actually a JS behavior to
-/// match, since the JS baseline never handled REGION at all; see
-/// docs/CAVEATS.md).
+/// Best-effort wireframe extraction for one 3DSOLID/REGION/BODY entity: reads
+/// its ACIS data, converting from SAB to SAT if needed, parses the records, and
+/// returns one chord segment per ACIS `edge`. Empty when the solid is empty,
+/// its data cannot be read, or it has no edges -- the caller then treats the
+/// entity as unsupported.
 ///
-/// `dxfname` is the entity's own real dxfname -- see
-/// `read_sat_text_from_entity`'s doc comment for why this can't be
-/// hardcoded even though REGION/3DSOLID/BODY are structurally identical.
+/// `dxfname` is the entity's own real name; see `read_sat_text_from_entity` for
+/// why it cannot be hardcoded.
 ///
 /// # Safety
 /// `entity_ptr` must be a valid, non-null `Dwg_Entity__3DSOLID*`.

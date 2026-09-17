@@ -1,47 +1,45 @@
 //! JSON export of the parsed model -- [`CadDatabase::to_json`].
 //!
-//! The output is a direct serde serialization of [`CadDatabase`]
-//! (`entities` + `tables`): exactly the Rust model `to_svg()` renders from,
-//! nothing more and nothing less, so a consumer sees the same drawing the
-//! SVG shows. It round-trips for any database whose `f64` fields are all
-//! finite (everything `parse()` has produced on the corpus):
-//! `serde_json::from_str::<CadDatabase>` on the text gives back a database
-//! equal (`PartialEq`) to the one serialized. It is also reproducible:
-//! `tables.*` are sorted maps and entity order follows the file, so the same
-//! input serializes to the same bytes on every run.
+//! The output is a direct serde serialization of [`CadDatabase`] (`entities` +
+//! `tables`): exactly the model `to_svg()` renders from, so a consumer sees the
+//! same drawing the SVG shows. It round-trips for any database whose `f64`
+//! fields are all finite (everything `parse()` has produced so far):
+//! `serde_json::from_str::<CadDatabase>` gives back a database equal
+//! (`PartialEq`) to the one serialized. It is also reproducible -- `tables.*`
+//! are sorted maps and entity order follows the file, so the same input
+//! serializes to the same bytes every run.
 //!
-//! `serde` 1.x and `serde_json` 1.x are public dependencies of this crate
-//! (the model derives their traits and `serde_json::Error` appears in
+//! `serde` 1.x and `serde_json` 1.x are public dependencies of this crate (the
+//! model derives their traits and `serde_json::Error` appears in
 //! [`JsonError`]); bumping either major would be a breaking change.
 //!
 //! Shape notes for consumers:
 //! - Every entity object carries a `"type"` tag holding the DXF name
-//!   [`RenderEntity::type_name`](crate::RenderEntity::type_name) reports
-//!   (`"LINE"`, `"LWPOLYLINE"`, `"3DSOLID"`, `"POLYLINE_PFACE"`, ...), so
-//!   dispatching on `type` needs no knowledge of the Rust enum. The one
-//!   exception is an entity type this crate does not convert: it is tagged
-//!   `"UNKNOWN"` and carries the real DXF name in its `type_name` field.
-//! - Points are objects (`{"x":..,"y":..}` / `{"x":..,"y":..,"z":..}`);
-//!   angles are radians, as in the model.
+//!   [`Entity::type_name`](crate::Entity::type_name) reports (`"LINE"`,
+//!   `"LWPOLYLINE"`, `"3DSOLID"`, `"POLYLINE_PFACE"`, ...), so dispatching on
+//!   `type` needs no knowledge of the Rust enum. The one exception is an entity
+//!   type this crate does not convert: it is tagged `"UNKNOWN"` and carries the
+//!   real DXF name in its `type_name` field.
+//! - Points are objects (`{"x":..,"y":..}` / `{"x":..,"y":..,"z":..}`); angles
+//!   are radians, as in the model.
 //! - HATCH: each item of `boundary_paths` is `{"type":"POLYLINE","data":
 //!   [pt,..]}` or `{"type":"EDGES","data":[edge,..]}`, and each edge is
-//!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own
-//!   fields beside the tag. Upper-case like the entity tags, but these are
-//!   path/edge kinds, not DXF entity names.
+//!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own fields
+//!   beside the tag. Upper-case like the entity tags, but these are path/edge
+//!   kinds, not DXF entity names.
 //! - `entities` holds what the drawing shows (model + paper space), while
 //!   `tables.block_records` holds *every* block including those two, so a
-//!   model-space entity appears twice -- that duplication is the model's own
-//!   (see `CadDatabase::entities` and `Tables::block_records`), not a JSON
-//!   artifact. Read `entities` for the drawing and `block_records` for what
-//!   an INSERT's `block_name` refers to.
-//! - Likewise every INSERT's `attribs` are also present as top-level
-//!   `ATTRIB` entities in `entities` (that is how `to_svg` draws them --
-//!   it ignores `attribs`); `block_records[..].entities` does not carry that
-//!   duplication, so the two lists are not equal even for `*Model_Space`.
+//!   model-space entity appears twice. That duplication is the model's own, not
+//!   a JSON artifact: read `entities` for the drawing and `block_records` for
+//!   what an INSERT's `block_name` refers to.
+//! - Likewise every INSERT's `attribs` are also present as top-level `ATTRIB`
+//!   entities in `entities` (that is how `to_svg` draws them -- it ignores
+//!   `attribs`); `block_records[..].entities` does not carry that duplication,
+//!   so the two lists differ even for `*Model_Space`.
 //! - `f64` values that are not finite serialize as `null` (serde_json's
-//!   default) and such a document does not deserialize back; the corpus
-//!   never produces any, but a consumer should not assume every numeric
-//!   field is a number.
+//!   default) and such a document does not deserialize back. Nothing observed
+//!   so far produces any, but a consumer should not assume every numeric field
+//!   is a number.
 
 use crate::CadDatabase;
 
@@ -64,7 +62,7 @@ pub enum JsonError {
 impl std::fmt::Display for JsonError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JsonError::Serialize(e) => write!(f, "JSON 직렬화 실패: {e}"),
+            JsonError::Serialize(e) => write!(f, "JSON serialization failed: {e}"),
         }
     }
 }
@@ -92,7 +90,7 @@ pub(crate) fn to_json(db: &CadDatabase, options: ToJsonOptions) -> Result<String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::render_model::*;
+    use crate::model::*;
     use crate::tables::{BlockRecord, LayerRecord, Tables};
     use std::collections::BTreeMap;
 
@@ -113,10 +111,10 @@ mod tests {
         Point2D { x, y }
     }
 
-    /// One instance of every `RenderEntity` variant. The `match` at the end
+    /// One instance of every `Entity` variant. The `match` at the end
     /// has no wildcard arm, so adding a variant without adding it here (and
     /// to the tag table in `tags_match_type_name`) fails to compile.
-    fn one_of_each() -> Vec<RenderEntity> {
+    fn one_of_each() -> Vec<Entity> {
         let c = common("1A");
         let attrib = AttribEntity {
             common: c.clone(),
@@ -140,32 +138,32 @@ mod tests {
             wireframe_edges: vec![[p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 1.0)]],
         };
         let all = vec![
-            RenderEntity::Line(LineEntity {
+            Entity::Line(LineEntity {
                 common: c.clone(),
                 start_point: p3(0.0, 0.0, 0.0),
                 end_point: p3(1.0, 1.0, 0.0),
             }),
-            RenderEntity::Circle(CircleEntity {
+            Entity::Circle(CircleEntity {
                 common: c.clone(),
                 center: p3(0.0, 0.0, 0.0),
                 radius: 1.0,
             }),
-            RenderEntity::Text(TextEntity {
+            Entity::Text(TextEntity {
                 common: c.clone(),
                 start_point: p2(0.0, 0.0),
                 text_height: 2.5,
                 text: "hi".to_string(),
                 rotation: 0.2,
             }),
-            RenderEntity::LwPolyline(lwpoly.clone()),
-            RenderEntity::Arc(ArcEntity {
+            Entity::LwPolyline(lwpoly.clone()),
+            Entity::Arc(ArcEntity {
                 common: c.clone(),
                 center: p3(0.0, 0.0, 0.0),
                 radius: 1.0,
                 start_angle: 0.0,
                 end_angle: 1.0,
             }),
-            RenderEntity::Ellipse(EllipseEntity {
+            Entity::Ellipse(EllipseEntity {
                 common: c.clone(),
                 center: p3(0.0, 0.0, 0.0),
                 major_axis_endpoint: p3(2.0, 0.0, 0.0),
@@ -173,20 +171,20 @@ mod tests {
                 start_angle: 0.1,
                 end_angle: 1.5,
             }),
-            RenderEntity::Point(PointEntity {
+            Entity::Point(PointEntity {
                 common: c.clone(),
                 position: p3(0.0, 0.0, 0.0),
             }),
-            RenderEntity::Solid(SolidEntity {
+            Entity::Solid(SolidEntity {
                 common: c.clone(),
                 corner1: p2(0.0, 0.0),
                 corner2: p2(1.0, 0.0),
                 corner3: p2(1.0, 1.0),
                 corner4: p2(0.0, 1.0),
             }),
-            RenderEntity::Ray(ray.clone()),
-            RenderEntity::XLine(ray),
-            RenderEntity::Insert(InsertEntity {
+            Entity::Ray(ray.clone()),
+            Entity::XLine(ray),
+            Entity::Insert(InsertEntity {
                 common: c.clone(),
                 block_name: "DOOR".to_string(),
                 insertion_point: p3(0.0, 0.0, 0.0),
@@ -194,33 +192,33 @@ mod tests {
                 rotation: 0.25,
                 attribs: vec![attrib.clone()],
             }),
-            RenderEntity::Attrib(attrib),
-            RenderEntity::Attdef(AttdefEntity {
+            Entity::Attrib(attrib),
+            Entity::Attdef(AttdefEntity {
                 common: c.clone(),
                 start_point: p2(0.0, 0.0),
                 text_height: 2.5,
                 default_value: "?".to_string(),
                 rotation: 0.4,
             }),
-            RenderEntity::Viewport(ViewportEntity {
+            Entity::Viewport(ViewportEntity {
                 common: c.clone(),
                 center: p3(0.0, 0.0, 0.0),
                 width: 10.0,
                 height: 5.0,
             }),
-            RenderEntity::Face3D(Face3DEntity {
+            Entity::Face3D(Face3DEntity {
                 common: c.clone(),
                 corner1: p3(0.0, 0.0, 0.0),
                 corner2: p3(1.0, 0.0, 0.0),
                 corner3: p3(1.0, 1.0, 0.0),
                 corner4: p3(0.0, 1.0, 0.0),
             }),
-            RenderEntity::Spline(SplineEntity {
+            Entity::Spline(SplineEntity {
                 common: c.clone(),
                 fit_points: vec![p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 0.0)],
                 control_points: vec![p3(0.5, 0.5, 0.0)],
             }),
-            RenderEntity::MText(MTextEntity {
+            Entity::MText(MTextEntity {
                 common: c.clone(),
                 insertion_point: p3(0.0, 0.0, 0.0),
                 text: "para".to_string(),
@@ -228,16 +226,16 @@ mod tests {
                 rotation: 0.3,
                 line_spacing_factor: 1.0,
             }),
-            RenderEntity::Polyline3D(PolylineEntity {
+            Entity::Polyline3D(PolylineEntity {
                 common: c.clone(),
                 vertices: vec![p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 1.0)],
                 closed: true,
             }),
-            RenderEntity::Dimension(DimensionEntity {
+            Entity::Dimension(DimensionEntity {
                 common: c.clone(),
                 block_name: "*D1".to_string(),
             }),
-            RenderEntity::Hatch(HatchEntity {
+            Entity::Hatch(HatchEntity {
                 common: c.clone(),
                 boundary_paths: vec![
                     HatchBoundaryPath::Polyline(vec![p2(0.0, 0.0), p2(1.0, 0.0), p2(0.0, 1.0)]),
@@ -279,17 +277,17 @@ mod tests {
                     dash_pattern: vec![1.0, -0.5],
                 }],
             }),
-            RenderEntity::Solid3D(solid3d.clone()),
-            RenderEntity::Leader(LeaderEntity {
+            Entity::Solid3D(solid3d.clone()),
+            Entity::Leader(LeaderEntity {
                 common: c.clone(),
                 vertices: vec![p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 0.0)],
-                is_arrowhead_enabled: true,
+                has_arrowhead: true,
             }),
-            RenderEntity::MultiLeader(MultiLeaderEntity {
+            Entity::MultiLeader(MultiLeaderEntity {
                 common: c.clone(),
                 lines: vec![vec![p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 0.0)]],
             }),
-            RenderEntity::MLine(MLineEntity {
+            Entity::MLine(MLineEntity {
                 common: c.clone(),
                 vertices: vec![MLineVertex {
                     point: p3(0.0, 0.0, 0.0),
@@ -298,33 +296,33 @@ mod tests {
                 closed: true,
                 mlinestyle_name: "STANDARD".to_string(),
             }),
-            RenderEntity::Region(solid3d.clone()),
-            RenderEntity::PolylinePFace(solid3d),
-            RenderEntity::Polyline2D(lwpoly),
-            RenderEntity::Tolerance(ToleranceEntity {
+            Entity::Region(solid3d.clone()),
+            Entity::PolylinePFace(solid3d),
+            Entity::Polyline2D(lwpoly),
+            Entity::Tolerance(ToleranceEntity {
                 common: c.clone(),
                 insertion_point: p3(0.0, 0.0, 0.0),
                 text_height: 2.5,
                 text_value: "%%v0.1".to_string(),
             }),
-            RenderEntity::AcadTable(AcadTableEntity {
+            Entity::AcadTable(AcadTableEntity {
                 common: c.clone(),
                 block_name: "*T1".to_string(),
                 insertion_point: p3(0.0, 0.0, 0.0),
                 scale: p3(1.0, 1.0, 1.0),
                 rotation: 0.1,
             }),
-            RenderEntity::Wipeout(WipeoutEntity {
+            Entity::Wipeout(WipeoutEntity {
                 common: c.clone(),
                 boundary: vec![p2(0.0, 0.0), p2(1.0, 0.0), p2(0.0, 1.0)],
             }),
-            RenderEntity::Light(LightEntity {
+            Entity::Light(LightEntity {
                 common: c.clone(),
                 position: p3(0.0, 0.0, 10.0),
                 target: p3(0.0, 0.0, 0.0),
-                target_is_meaningful: true,
+                has_target: true,
             }),
-            RenderEntity::Unknown {
+            Entity::Unknown {
                 common: c,
                 type_name: "ACAD_PROXY_ENTITY".to_string(),
             },
@@ -332,38 +330,38 @@ mod tests {
         for e in &all {
             // Exhaustiveness guard -- see the doc comment above.
             match e {
-                RenderEntity::Line(_)
-                | RenderEntity::Circle(_)
-                | RenderEntity::Text(_)
-                | RenderEntity::LwPolyline(_)
-                | RenderEntity::Arc(_)
-                | RenderEntity::Ellipse(_)
-                | RenderEntity::Point(_)
-                | RenderEntity::Solid(_)
-                | RenderEntity::Ray(_)
-                | RenderEntity::XLine(_)
-                | RenderEntity::Insert(_)
-                | RenderEntity::Attrib(_)
-                | RenderEntity::Attdef(_)
-                | RenderEntity::Viewport(_)
-                | RenderEntity::Face3D(_)
-                | RenderEntity::Spline(_)
-                | RenderEntity::MText(_)
-                | RenderEntity::Polyline3D(_)
-                | RenderEntity::Dimension(_)
-                | RenderEntity::Hatch(_)
-                | RenderEntity::Solid3D(_)
-                | RenderEntity::Leader(_)
-                | RenderEntity::MultiLeader(_)
-                | RenderEntity::MLine(_)
-                | RenderEntity::Region(_)
-                | RenderEntity::PolylinePFace(_)
-                | RenderEntity::Polyline2D(_)
-                | RenderEntity::Tolerance(_)
-                | RenderEntity::AcadTable(_)
-                | RenderEntity::Wipeout(_)
-                | RenderEntity::Light(_)
-                | RenderEntity::Unknown { .. } => {}
+                Entity::Line(_)
+                | Entity::Circle(_)
+                | Entity::Text(_)
+                | Entity::LwPolyline(_)
+                | Entity::Arc(_)
+                | Entity::Ellipse(_)
+                | Entity::Point(_)
+                | Entity::Solid(_)
+                | Entity::Ray(_)
+                | Entity::XLine(_)
+                | Entity::Insert(_)
+                | Entity::Attrib(_)
+                | Entity::Attdef(_)
+                | Entity::Viewport(_)
+                | Entity::Face3D(_)
+                | Entity::Spline(_)
+                | Entity::MText(_)
+                | Entity::Polyline3D(_)
+                | Entity::Dimension(_)
+                | Entity::Hatch(_)
+                | Entity::Solid3D(_)
+                | Entity::Leader(_)
+                | Entity::MultiLeader(_)
+                | Entity::MLine(_)
+                | Entity::Region(_)
+                | Entity::PolylinePFace(_)
+                | Entity::Polyline2D(_)
+                | Entity::Tolerance(_)
+                | Entity::AcadTable(_)
+                | Entity::Wipeout(_)
+                | Entity::Light(_)
+                | Entity::Unknown { .. } => {}
             }
         }
         all
@@ -374,14 +372,14 @@ mod tests {
         for e in one_of_each() {
             let value = serde_json::to_value(&e).expect("serializable");
             let expected = match &e {
-                RenderEntity::Unknown { .. } => "UNKNOWN",
+                Entity::Unknown { .. } => "UNKNOWN",
                 other => other.type_name(),
             };
             assert_eq!(
                 value["type"], expected,
                 "the JSON `type` tag must equal type_name() for {e:?}"
             );
-            if let RenderEntity::Unknown { type_name, .. } = &e {
+            if let Entity::Unknown { type_name, .. } = &e {
                 assert_eq!(value["type_name"], type_name.as_str());
             }
             // Internally tagged: the entity's own fields sit next to `type`,
@@ -397,7 +395,7 @@ mod tests {
     fn hatch_paths_and_edges_are_tagged_like_everything_else() {
         let hatch = one_of_each()
             .into_iter()
-            .find(|e| matches!(e, RenderEntity::Hatch(_)))
+            .find(|e| matches!(e, Entity::Hatch(_)))
             .expect("one_of_each has a HATCH");
         let value = serde_json::to_value(&hatch).expect("serializable");
         let paths = value["boundary_paths"]
@@ -421,7 +419,7 @@ mod tests {
 
     #[test]
     fn non_finite_floats_serialize_as_null_and_do_not_round_trip() {
-        let e = RenderEntity::Circle(CircleEntity {
+        let e = Entity::Circle(CircleEntity {
             common: common("2B"),
             center: p3(0.0, 0.0, 0.0),
             radius: f64::NAN,
@@ -430,7 +428,7 @@ mod tests {
             serde_json::to_string(&e).expect("serde_json writes null for NaN, it does not fail");
         assert!(text.contains("\"radius\":null"), "{text}");
         assert!(
-            serde_json::from_str::<RenderEntity>(&text).is_err(),
+            serde_json::from_str::<Entity>(&text).is_err(),
             "a null radius must be rejected on the way back, not silently defaulted"
         );
     }
@@ -438,17 +436,13 @@ mod tests {
     #[test]
     fn an_unknown_or_missing_type_tag_is_an_error_not_a_panic() {
         let common = r#""common":{"handle":"1","layer":"0","color_index":256,"true_color":null}"#;
+        assert!(serde_json::from_str::<Entity>(&format!(r#"{{"type":"NOPE",{common}}}"#)).is_err());
+        assert!(serde_json::from_str::<Entity>(&format!(r#"{{{common}}}"#)).is_err());
         assert!(
-            serde_json::from_str::<RenderEntity>(&format!(r#"{{"type":"NOPE",{common}}}"#))
-                .is_err()
-        );
-        assert!(serde_json::from_str::<RenderEntity>(&format!(r#"{{{common}}}"#)).is_err());
-        assert!(
-            serde_json::from_str::<RenderEntity>(&format!(r#"{{"type":"UNKNOWN",{common}}}"#))
-                .is_err(),
+            serde_json::from_str::<Entity>(&format!(r#"{{"type":"UNKNOWN",{common}}}"#)).is_err(),
             "UNKNOWN without its type_name field is incomplete"
         );
-        let ok: RenderEntity = serde_json::from_str(&format!(
+        let ok: Entity = serde_json::from_str(&format!(
             r#"{{"type":"UNKNOWN",{common},"type_name":"ACAD_PROXY_ENTITY"}}"#
         ))
         .expect("a complete UNKNOWN entity deserializes");
@@ -459,7 +453,7 @@ mod tests {
     fn every_variant_survives_a_round_trip() {
         for e in one_of_each() {
             let text = serde_json::to_string(&e).expect("serializable");
-            let back: RenderEntity = serde_json::from_str(&text).expect("deserializable");
+            let back: Entity = serde_json::from_str(&text).expect("deserializable");
             assert_eq!(back, e);
         }
     }

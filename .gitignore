@@ -11,3 +11,32 @@ target/
 # the repo anymore). See samples/README.md.
 /samples/*
 !/samples/README.md
+
+# AI coding assistants: local session state, caches and per-developer
+# instruction files. None of it is project configuration, and none of it
+# should reach a published crate.
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+.windsurf/
+.windsurfrules
+.clinerules
+.roo/
+.roomodes
+.continue/
+.aider*
+.codex/
+.gemini/
+GEMINI.md
+AGENTS.md
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.specstory/
+.ai/
+.agent/

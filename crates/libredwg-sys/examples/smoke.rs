@@ -4,7 +4,7 @@
 //! Like every `examples/` target in this workspace it asserts nothing --
 //! `cargo test` and `cargo clippy --workspace --all-targets` compile it, so a
 //! public FFI signature that stops matching shows up as a CI build error. See
-//! `docs/ARCHITECTURE.md`'s "테스트 구조" section for how the three test
+//! `docs/ARCHITECTURE.md`'s "Test layout" section for how the three test
 //! layers divide up.
 //!
 //! Run: cargo run -p libredwg-sys --example smoke -- <path/to/file.dwg>

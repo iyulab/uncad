@@ -37,7 +37,7 @@
 // of whether the source and target types happen to coincide (they do for
 // every current `BITCODE_B`/`_BS`-backed bitfield in dwg.h) -- harmless,
 // and not something editing generated code (re-generated fresh on every
-// build) could fix. See docs/CAVEATS.md's "cargo clippy 현재 상태" note.
+// build) could fix. See docs/CAVEATS.md's "Clippy" note.
 #![allow(clippy::useless_transmute)]
 // Same rationale, for bindgen's generated `BindgenUninitializedField` helper
 // (`as_slice`/`as_mut_slice`/`as_ref`/`as_mut`) -- its `unsafe fn`s have no
@@ -60,20 +60,14 @@
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-// --- Hand-defined HATCH sub-structs -----------------------------------
+// --- Hand-written struct mirrors ---------------------------------------
 //
-// bindgen can't generate real field access for these two (same struct-
-// codegen limitation as Dwg_Object -- see build.rs's blocklist_type calls
-// for the full explanation), but this project needs real field access
-// into them (HATCH boundary-path geometry isn't reachable through dynapi
-// at all -- dynapi only exposes top-level entity fields by name, not
-// nested struct internals). Hand-defined here to match dwg.h's field
-// order and types exactly; #[repr(C)] then reproduces C's own alignment/
-// padding rules automatically; the layout_test() functions below assert
-// the resulting sizes against clang's own authoritative sizeof() (56/200/
-// 32 bytes -- the same numbers bindgen's own layout_tests() asserted
-// against before these types were blocklisted) as a safety net against a
-// transcription mistake in this hand-written mirror.
+// bindgen cannot generate real field access for the types below, and this
+// crate needs it (see build.rs's blocklist_type calls for the failure mode).
+// Each one mirrors dwg.h's field order and types exactly; #[repr(C)] then
+// reproduces C's alignment and padding rules, and the compile-time size
+// assertions at the end of this section check the result against clang's own
+// sizeof() -- a safety net against a transcription mistake here.
 
 /// `_dwg_HATCH_ControlPoint` (dwg.h) -- a SPLINE-type boundary edge's
 /// control point.
@@ -85,11 +79,10 @@ pub struct Dwg_HATCH_ControlPoint {
     pub weight: BITCODE_BD,
 }
 
-/// `_dwg_HATCH_PathSeg` (dwg.h) -- one edge of a non-polyline HATCH
-/// boundary path. Not a real C union (despite the "could be a union"
-/// comment in dwg.h) -- every field is present regardless of
-/// `curve_type`; only the fields relevant to that specific curve type are
-/// meaningfully populated.
+/// `_dwg_HATCH_PathSeg` (dwg.h) -- one edge of a non-polyline HATCH boundary
+/// path. Not a real C union despite dwg.h's "could be a union" comment: every
+/// field is present regardless of `curve_type`, and only the ones relevant to
+/// that curve type are meaningfully populated.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Dwg_HATCH_PathSeg {
@@ -138,35 +131,20 @@ pub struct Dwg_HATCH_Path {
     pub boundary_handles: *mut *mut Dwg_Object_Ref,
 }
 
-// _dwg_HATCH_PolylinePath (still bindgen-generated -- not blocklisted)
-// references the raw tag name `_dwg_HATCH_Path` directly in its `parent`
-// field, so this alias needs to exist even though nothing in this crate
-// otherwise uses the tag name (only the `Dwg_HATCH_Path` typedef above).
+// _dwg_HATCH_PolylinePath is still bindgen-generated and refers to the raw tag
+// name in its `parent` field, so the alias has to exist even though nothing
+// else here uses it.
 pub type _dwg_HATCH_Path = Dwg_HATCH_Path;
 
-/// `_dwg_HATCH_DefLine` (dwg.h) -- one pattern-fill "definition line": a
-/// family of parallel lines (`angle`/`pt0`/`offset`, in the pattern's own
-/// unscaled/unrotated definition space) plus an optional dash pattern
-/// (`dashes`, positive = dash length, negative = gap length; empty means a
-/// continuous line) -- one of `Dwg_Entity_HATCH.deflines`. Unlike
-/// `Dwg_HATCH_Path`/`PathSeg`/`ControlPoint` above, this one *is* reachable
-/// through dynapi (`num_deflines`/`deflines` are plain top-level
-/// `Dwg_Entity_HATCH` fields, not nested inside a Path/PathSeg element) --
-/// but it still has to be hand-defined and blocklisted the same way,
-/// because allowlisting it directly forces bindgen to also generate a real
-/// (non-opaque) `_dwg_entity_HATCH` for its `parent` field to point at
-/// (nothing else in this crate ever allowlists `_dwg_entity_HATCH`; HATCH's
-/// own fields are all read through dynapi's untyped `void*`), and
-/// `_dwg_entity_HATCH` itself then hits the identical struct-codegen
-/// failure. `parent` is left as an untyped `*mut c_void` here specifically
-/// to avoid that cascade, matching the other three HATCH sub-structs' own
-/// `parent` fields. `pt0`/`offset` are declared `BITCODE_2BD` in dwg.h, but
-/// typed `BITCODE_2RD` here instead -- same interchangeable-once-decoded
-/// reasoning as `Point2D`'s own doc comment (both are just 2 `double`s with
-/// no padding); `BITCODE_2RD` is already a bound type elsewhere in this
-/// crate (`Dwg_HATCH_PathSeg`), while nothing else pulls in the separate
-/// `BITCODE_2BD` alias, so reusing it avoids introducing a type bindgen
-/// would otherwise never generate.
+/// `_dwg_HATCH_DefLine` (dwg.h) -- one pattern-fill "definition line": a family
+/// of parallel lines (`angle`/`pt0`/`offset`) plus an optional dash pattern
+/// (`dashes`: positive = dash length, negative = gap, empty = continuous). One
+/// of `Dwg_Entity_HATCH.deflines`.
+///
+/// `pt0`/`offset` are declared `BITCODE_2BD` in dwg.h but typed `BITCODE_2RD`
+/// here: both are two `double`s with no padding, and `BITCODE_2RD` is already
+/// bound elsewhere in this crate, so reusing it avoids pulling in a type
+/// bindgen would otherwise never generate.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Dwg_HATCH_DefLine {
@@ -180,18 +158,8 @@ pub struct Dwg_HATCH_DefLine {
 pub type _dwg_HATCH_DefLine = Dwg_HATCH_DefLine;
 
 /// `_dwg_HATCH_Color` (dwg.h) -- one gradient-fill color stop: `shift_value`
-/// (0.0-1.0, this stop's position along the gradient) plus `color` (a plain
-/// `Dwg_Color`, already a normally-bound type elsewhere in this crate --
-/// e.g. entity/layer color -- so no further hand-writing needed for it).
-/// One of `Dwg_Entity_HATCH.colors` (`num_colors`/`colors`). Same
-/// `parent: struct _dwg_entity_HATCH *` cascade as `Dwg_HATCH_DefLine`
-/// above (allowlisting it directly forces bindgen to also materialize a
-/// real, cascade-failing `_dwg_entity_HATCH`), same fix: blocklisted and
-/// hand-defined with `parent` left as an untyped `*mut c_void`. Verified
-/// against clang's own authoritative `sizeof()` (64 bytes: parent@0,
-/// shift_value@8, color@16) via the same allowlist-then-read-the-failing-
-/// layout_tests()-assert technique used for the other hand-written HATCH
-/// sub-structs.
+/// (0.0-1.0, its position along the gradient) plus a plain `Dwg_Color`. One of
+/// `Dwg_Entity_HATCH.colors`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Dwg_HATCH_Color {
@@ -201,20 +169,12 @@ pub struct Dwg_HATCH_Color {
 }
 pub type _dwg_HATCH_Color = Dwg_HATCH_Color;
 
-/// `_dwg_MLINE_vertex` (dwg.h) -- same bindgen struct-codegen failure as
-/// the HATCH types above, hand-defined the same way. Its `vertex`/
-/// `vertex_direction`/`miter_direction` fields are declared `BITCODE_3BD`
-/// in dwg.h, which bindgen never generates a binding for on its own (only
-/// pulled in transitively by whatever references it, and nothing
-/// currently allowlisted does) -- `dwg_point_3d` is used instead, since
-/// `BITCODE_3BD`/`Dwg_Bitcode_3BD` is just 3 `double`s with no padding,
-/// identically laid out. `lines` (the per-vertex parallel-line array,
-/// `Dwg_MLINE_line*`) is declared as an opaque `*mut c_void` here rather
-/// than a real pointer type -- nothing in this crate reads through it
-/// (`uncad`'s MLINE rendering only uses `vertex`, the centerline point;
-/// see docs/CAVEATS.md), and leaving it untyped avoids also needing to
-/// bind/hand-write `Dwg_MLINE_line` just for a field no caller
-/// dereferences.
+/// `_dwg_MLINE_vertex` (dwg.h). Its `vertex`/`vertex_direction`/
+/// `miter_direction` fields are declared `BITCODE_3BD`, which bindgen never
+/// generates on its own; `dwg_point_3d` stands in, being the same three
+/// `double`s with no padding. `lines` (the per-vertex parallel-line array) is
+/// left as an untyped `*mut c_void` because nothing dereferences it, which
+/// saves hand-writing `Dwg_MLINE_line` as well.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Dwg_MLINE_vertex {
@@ -227,21 +187,11 @@ pub struct Dwg_MLINE_vertex {
 }
 
 /// `_dwg_MLINESTYLE_line` (dwg.h) -- one parallel-line definition in an
-/// MLINESTYLE OBJECT: `offset` (distance from the MLINE centerline,
-/// combined with each MLINE vertex's own `miter_direction` to get that
-/// line's actual point -- see `uncad`'s `convert::convert_mline` doc
-/// comment) plus `color`/`lt_index`/`lt_ltype` (this project only reads
-/// `offset`; the rest aren't used for rendering). Same
-/// `parent: struct _dwg_object_MLINESTYLE *` cascade as the HATCH
-/// sub-structs above (confirmed: allowlisting it alone produces a
-/// `1usize - 112usize` layout_tests() assert on `_dwg_object_MLINESTYLE`).
-/// Blocklisted and hand-defined instead, same recipe -- verified against
-/// clang's real `sizeof()` (80 bytes: parent@0, offset@8, color@16,
-/// lt_index@64, lt_ltype@72) the same way. `lt_ltype` (`BITCODE_H`, since
-/// 2018) is a real `*mut Dwg_Object_Ref` here rather than an opaque
-/// `c_void` pointer -- `Dwg_Object_Ref` is already a plain bound type
-/// elsewhere in this crate, so there's no extra hand-writing needed to type
-/// it correctly, unlike `Dwg_MLINE_vertex.lines` above.
+/// MLINESTYLE object: `offset` (distance from the MLINE centerline, combined
+/// with each vertex's `miter_direction` to get that line's actual point) plus
+/// `color`/`lt_index`/`lt_ltype`, none of which this workspace renders.
+/// `lt_ltype` is typed properly rather than left opaque, `Dwg_Object_Ref`
+/// already being a bound type here.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Dwg_MLINESTYLE_line {

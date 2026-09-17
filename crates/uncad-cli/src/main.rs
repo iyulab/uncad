@@ -1,14 +1,44 @@
-//! Port of `src/cli.mjs`, DWF/DWFx branch dropped (scope decision: this
-//! Rust port is DWG/DXF only). Same `<input> [-o <output>]` shape, same
-//! summary/`-o` dispatch, same Korean-language usage/messages, but the output
-//! set is JSON/SVG/PNG rather than the JS CLI's. Reading only: the `-o`
-//! targets are the parsed model as JSON, or a rendering of it as SVG/PNG --
-//! there is no DWG/DXF output (see CHANGELOG.md).
+//! Command-line front end for `uncad`: `<input> [-o <output>]`.
+//!
+//! Reading only -- with no `-o` it prints a summary, and the `-o` targets are
+//! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
+//! DWG/DXF output.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
-use uncad::{RenderEntity, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
+use uncad::{CadDatabase, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
+
+const USAGE: &str = "\
+uncad - parse DWG/DXF drawings
+
+Usage:
+  uncad <input.dwg>                 print a summary (entity count per type)
+  uncad <input> -o <output.json>    export the parsed model (entities + tables)
+  uncad <input> -o <output.svg>     render to SVG
+  uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
+
+JSON options:
+  --pretty                    indented, multi-line JSON (default: one line)
+
+SVG/PNG options:
+  --space <model|paper|all>   which space to render (default: model)
+                                model = the drawing itself
+                                paper = sheet borders and title blocks
+                                all   = everything, in one document
+  --no-trim                   keep outlying coordinates in the viewBox instead
+                                of trimming to the drawing's main cluster
+
+PNG options:
+  --scale <factor>            multiplies the SVG viewBox size (default: 1.0,
+                                e.g. 2.0 for twice the resolution)
+
+Examples:
+  uncad drawing.dwg
+  uncad drawing.dwg -o drawing.json --pretty
+  uncad drawing.dwg -o drawing.svg
+  uncad drawing.dwg -o drawing.svg --space paper
+  uncad drawing.dwg -o drawing.png --scale 2";
 
 struct Args {
     input: Option<String>,
@@ -18,37 +48,6 @@ struct Args {
     scale: String,
     pretty: bool,
     help: bool,
-}
-
-fn usage() {
-    eprintln!(
-        r#"uncad - DWG/DXF 파일 파싱 CLI
-
-사용법:
-  uncad <input.dwg>                 요약 정보 출력 (엔티티 타입 개수)
-  uncad <input> -o <output.json>    파싱한 모델(엔티티 + 테이블)을 JSON으로 추출
-  uncad <input> -o <output.svg>     이미지(SVG)로 추출
-  uncad <input> -o <output.png>     이미지(PNG)로 추출 (SVG를 거쳐 래스터화)
-
-옵션 (JSON 추출 전용):
-  --pretty                    들여쓰기된 여러 줄 JSON (기본: 한 줄로 압축)
-
-옵션 (SVG/PNG 추출 전용):
-  --space <model|paper|all>   렌더링할 스페이스 (기본: model)
-                               model = 실제 도면, paper = 도곽/타이틀블록,
-                               all = 예전 동작(전부 하나로 합쳐서 렌더링)
-  --no-trim                   이상치 좌표를 뷰박스 계산에서 자동 제외하지 않음
-
-옵션 (PNG 추출 전용):
-  --scale <factor>             SVG의 viewBox 기준 배율 (기본: 1.0, 예: 2.0 = 2배 해상도)
-
-예:
-  uncad drawing.dwg
-  uncad drawing.dwg -o drawing.json --pretty
-  uncad drawing.dwg -o drawing.svg
-  uncad drawing.dwg -o drawing.svg --space paper
-  uncad drawing.dwg -o drawing.png --scale 2"#
-    );
 }
 
 fn parse_args(argv: &[String]) -> Args {
@@ -91,164 +90,113 @@ fn parse_args(argv: &[String]) -> Args {
     args
 }
 
-fn summarize(counts: &HashMap<&str, usize>) -> String {
-    let mut entries: Vec<_> = counts.iter().collect();
-    entries.sort_by(|a, b| b.1.cmp(a.1));
-    entries
-        .into_iter()
-        .map(|(t, c)| format!("  {t}: {c}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn count_by_type(entities: &[RenderEntity]) -> HashMap<&str, usize> {
-    let mut counts = HashMap::new();
-    for e in entities {
-        *counts.entry(e.type_name()).or_insert(0) += 1;
-    }
-    counts
-}
-
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(&argv);
 
     if args.help || args.input.is_none() {
-        usage();
+        eprintln!("{USAGE}");
         return if args.help {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE
         };
     }
-    let input = args.input.as_ref().unwrap();
 
-    // `uncad::parse()` hands back a bare LibreDWG error code (e.g. "code
-    // 4096") for a nonexistent path or a wrong-extension file -- accurate,
-    // but not something a user can act on without cross-referencing
-    // dwg.h. Check the obvious cases ourselves first for a message that
-    // says what's actually wrong.
-    match std::fs::metadata(input) {
-        Ok(meta) if meta.is_dir() => {
-            eprintln!("오류: 입력 경로가 파일이 아니라 디렉터리입니다: '{input}'");
-            return ExitCode::FAILURE;
+    match run(&args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
         }
-        Err(e) => {
-            eprintln!("오류: 입력 파일을 열 수 없습니다: '{input}' ({e})");
-            return ExitCode::FAILURE;
-        }
-        Ok(_) => {}
     }
+}
 
-    let db = match uncad::parse(input) {
-        Ok(db) => db,
-        Err(e) => {
-            eprintln!("오류: '{input}' 파싱 실패 ({e}) -- 유효한 DWG/DXF 파일인지 확인하세요");
-            return ExitCode::FAILURE;
-        }
+/// Every failure path funnels back here as a message `main` prints with one
+/// `error:` prefix.
+fn run(args: &Args) -> Result<(), String> {
+    let input = args.input.as_deref().expect("checked by the caller");
+    let db = parse_input(input)?;
+
+    let Some(output) = args.output.as_deref() else {
+        print_summary(input, &db);
+        return Ok(());
     };
 
-    let Some(output) = &args.output else {
-        println!("파일: {input}");
-        println!("엔티티 ({}개):", db.entities.len());
-        println!("{}", summarize(&count_by_type(&db.entities)));
-        return ExitCode::SUCCESS;
-    };
-
-    let out_ext = Path::new(output)
+    let extension = Path::new(output)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
 
-    let mut unsupported: Vec<String> = Vec::new();
-    match out_ext.as_str() {
+    let unsupported = match extension.as_str() {
         "json" => {
-            let json = match db.to_json(ToJsonOptions {
-                pretty: args.pretty,
-            }) {
-                Ok(json) => json,
-                Err(e) => {
-                    eprintln!("오류: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            if let Err(e) = std::fs::write(output, json) {
-                eprintln!("오류: {e}");
-                return ExitCode::FAILURE;
-            }
+            let json = db
+                .to_json(ToJsonOptions {
+                    pretty: args.pretty,
+                })
+                .map_err(|e| e.to_string())?;
+            write_output(output, json.as_bytes())?;
+            Vec::new()
         }
         "svg" => {
-            let space = match parse_space(&args.space) {
-                Ok(space) => space,
-                Err(e) => {
-                    eprintln!("오류: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let result = db.to_svg(ToSvgOptions {
-                space,
-                outlier_trim: args.outlier_trim,
-                ..Default::default()
-            });
-            if let Err(e) = std::fs::write(output, &result.svg) {
-                eprintln!("오류: {e}");
-                return ExitCode::FAILURE;
-            }
-            unsupported = result.unsupported_entity_types;
+            let result = db.to_svg(svg_options(args)?);
+            write_output(output, result.svg.as_bytes())?;
+            result.unsupported_types
         }
         "png" => {
-            let space = match parse_space(&args.space) {
-                Ok(space) => space,
-                Err(e) => {
-                    eprintln!("오류: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            let scale = match args.scale.parse::<f32>() {
-                Ok(v) if v > 0.0 && v.is_finite() => v,
-                _ => {
-                    eprintln!(
-                        "오류: --scale 값은 0보다 큰 유한한 숫자여야 합니다 (받은 값: '{}')",
-                        args.scale
-                    );
-                    return ExitCode::FAILURE;
-                }
-            };
-            let result = match db.to_png(ToPngOptions {
-                svg: ToSvgOptions {
-                    space,
-                    outlier_trim: args.outlier_trim,
-                    ..Default::default()
-                },
-                scale,
-            }) {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("오류: {e}");
-                    return ExitCode::FAILURE;
-                }
-            };
-            if let Err(e) = std::fs::write(output, &result.png) {
-                eprintln!("오류: {e}");
-                return ExitCode::FAILURE;
-            }
-            unsupported = result.unsupported_entity_types;
+            let result = db
+                .to_png(ToPngOptions {
+                    svg: svg_options(args)?,
+                    scale: parse_scale(&args.scale)?,
+                })
+                .map_err(|e| e.to_string())?;
+            write_output(output, &result.png)?;
+            result.unsupported_types
         }
         other => {
-            eprintln!("오류: 지원하지 않는 출력 확장자 '.{other}' (.json, .svg, .png만 지원)");
-            return ExitCode::FAILURE;
+            return Err(format!(
+                "unsupported output extension '.{other}' (only .json, .svg, .png)"
+            ))
         }
-    }
+    };
 
-    println!("저장됨: {output}");
+    println!("wrote: {output}");
     if !unsupported.is_empty() {
         eprintln!(
-            "경고: 지원하지 않는 엔티티 타입이라 이미지에서 빠짐: {}",
+            "warning: left out of the image, unsupported entity types: {}",
             unsupported.join(", ")
         );
     }
-    ExitCode::SUCCESS
+    Ok(())
+}
+
+/// `uncad::parse()` reports a nonexistent path or a wrong extension as a bare
+/// LibreDWG error code, which is accurate but not something a user can act on
+/// without cross-referencing dwg.h. The obvious cases are checked here first so
+/// the message says what is actually wrong.
+fn parse_input(input: &str) -> Result<CadDatabase, String> {
+    match std::fs::metadata(input) {
+        Ok(meta) if meta.is_dir() => {
+            return Err(format!("input path is a directory, not a file: '{input}'"))
+        }
+        Err(e) => return Err(format!("cannot open input file '{input}': {e}")),
+        Ok(_) => {}
+    }
+    uncad::parse(input)
+        .map_err(|e| format!("could not parse '{input}' ({e}) -- is it a valid DWG/DXF file?"))
+}
+
+fn write_output(path: &str, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|e| format!("cannot write '{path}': {e}"))
+}
+
+fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
+    Ok(ToSvgOptions {
+        space: parse_space(&args.space)?,
+        outlier_trim: args.outlier_trim,
+        ..Default::default()
+    })
 }
 
 fn parse_space(value: &str) -> Result<Space, String> {
@@ -257,7 +205,33 @@ fn parse_space(value: &str) -> Result<Space, String> {
         "paper" => Ok(Space::Paper),
         "all" => Ok(Space::All),
         other => Err(format!(
-            "지원하지 않는 --space 값 '{other}' (model, paper, all 중 하나)"
+            "unsupported --space value '{other}' (one of model, paper, all)"
         )),
+    }
+}
+
+fn parse_scale(value: &str) -> Result<f32, String> {
+    match value.parse::<f32>() {
+        Ok(scale) if scale > 0.0 && scale.is_finite() => Ok(scale),
+        _ => Err(format!(
+            "--scale must be a finite number greater than 0 (got '{value}')"
+        )),
+    }
+}
+
+fn print_summary(input: &str, db: &CadDatabase) {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for e in &db.entities {
+        *counts.entry(e.type_name()).or_insert(0) += 1;
+    }
+    // Most common first, then alphabetically, so the same drawing always
+    // prints the same order (the counts come out of a HashMap).
+    let mut entries: Vec<_> = counts.into_iter().collect();
+    entries.sort_by_key(|&(type_name, count)| (std::cmp::Reverse(count), type_name));
+
+    println!("file: {input}");
+    println!("entities: {}", db.entities.len());
+    for (type_name, count) in entries {
+        println!("  {type_name}: {count}");
     }
 }

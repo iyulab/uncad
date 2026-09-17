@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// A DXF from the LibreDWG corpus (R2000, a version LibreDWG's DXF reader
-/// handles well -- see `docs/CAVEATS.md`, "DXF 읽기"); the same fixture the
+/// handles well -- see `docs/CAVEATS.md`, "DXF reading"); the same fixture the
 /// CLI tests use.
 const CORPUS_DXF: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -48,7 +48,7 @@ impl TempFile {
 }
 
 #[test]
-fn parses_a_dxf_and_projects_it_into_the_render_model() {
+fn parses_a_dxf_and_projects_it_into_the_model() {
     let db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
 
     // A drawing file that produced no entities would mean the decode path
@@ -63,11 +63,10 @@ fn parses_a_dxf_and_projects_it_into_the_render_model() {
     // wants to keep a point has to be able to write it down. This stops
     // compiling if `Point3D` ever becomes unnameable from outside the crate
     // again.
-    let first_line: Option<uncad::render_model::Point3D> =
-        db.entities.iter().find_map(|e| match e {
-            uncad::RenderEntity::Line(l) => Some(l.start_point),
-            _ => None,
-        });
+    let first_line: Option<uncad::model::Point3D> = db.entities.iter().find_map(|e| match e {
+        uncad::Entity::Line(l) => Some(l.start_point),
+        _ => None,
+    });
     assert!(
         first_line.is_some(),
         "entities-2d.dxf contains LINE entities; got {:?}",

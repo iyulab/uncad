@@ -11,7 +11,7 @@
 //! `tables.block_records`. (While the write API existed, the same mutation
 //! also corrupted every later DXF/DWG write.) Fixed by converting on a copy
 //! (`uncad_3dsolid_sab_to_sat_text` in `libredwg-sys`'s shim); see
-//! `docs/CAVEATS.md`, "3DSOLID SAB 변환".
+//! `docs/CAVEATS.md`, "3DSOLID SAB conversion".
 //!
 //! Fixture: `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, the one file
 //! in the bundled corpus whose solids are stored as SAB (58 of them).
@@ -29,12 +29,12 @@ const SAB_DWG: &str = concat!(
 
 /// handle -> wireframe edges, for every 3DSOLID/REGION in `entities`.
 fn wireframes_by_handle(
-    entities: &[uncad::RenderEntity],
-) -> HashMap<&str, &[[uncad::render_model::Point3D; 2]]> {
+    entities: &[uncad::Entity],
+) -> HashMap<&str, &[[uncad::model::Point3D; 2]]> {
     entities
         .iter()
         .filter_map(|e| match e {
-            uncad::RenderEntity::Solid3D(s) | uncad::RenderEntity::Region(s) => {
+            uncad::Entity::Solid3D(s) | uncad::Entity::Region(s) => {
                 Some((s.common.handle.as_str(), s.wireframe_edges.as_slice()))
             }
             _ => None,

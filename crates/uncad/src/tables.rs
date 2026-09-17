@@ -1,9 +1,9 @@
-//! Non-entity OBJECT-supertype table conversion (LAYER, BLOCK_RECORD --
-//! mirrors `converter.ts`'s `convertLayer`/`convertBlockRecord`).
+//! Conversion of the non-entity OBJECT-supertype tables an entity resolves
+//! against: LAYER, BLOCK_RECORD and MLINESTYLE.
 
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field};
-use crate::render_model::RenderEntity;
+use crate::model::Entity;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -11,13 +11,12 @@ use std::ffi::c_void;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LayerRecord {
     pub name: String,
-    /// Same raw semantics as `EntityCommon::color_index`: <0 off, else the
-    /// layer's own ACI palette index -- should never be 0/256 in practice
-    /// (BYLAYER/BYBLOCK are entity-level concepts, not something a layer
-    /// resolves against itself), but LibreDWG's own `bit_read_CMC` can hand
-    /// back a raw `256` "no palette match" sentinel for certain real files;
-    /// see [`resolve_layer_color_index`]'s doc comment for the recovery
-    /// this module applies before a `256` ever reaches this field.
+    /// Same raw semantics as `EntityCommon::color_index`: negative means
+    /// "off", otherwise the layer's own ACI palette index. It should never be
+    /// 0 or 256 in practice (BYLAYER/BYBLOCK are entity-level concepts a layer
+    /// cannot resolve against itself), but LibreDWG's `bit_read_CMC` does hand
+    /// back a raw `256` "no palette match" sentinel for some real files -- see
+    /// [`resolve_layer_color_index`] for the recovery applied first.
     pub color_index: i16,
 }
 
@@ -31,7 +30,7 @@ pub struct BlockRecord {
     /// `CadDatabase::entities`, which only includes the former. This is
     /// what an INSERT's `block_name` resolves against to find what it
     /// actually draws.
-    pub entities: Vec<RenderEntity>,
+    pub entities: Vec<Entity>,
 }
 
 /// The three maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
@@ -39,24 +38,19 @@ pub struct BlockRecord {
 /// file serializes to the same bytes on every run and every machine.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Tables {
-    /// Layer name -> record. Deliberately does *not* expose `Dwg_Color.rgb`
-    /// for layers -- see docs/CAVEATS.md / the color module: that field is a
-    /// constant placeholder (always 0xFFFFFF) on every LAYER table entry
-    /// LibreDWG parses, regardless of the layer's real color, confirmed
-    /// across 22 real-world files during the original JS implementation.
-    /// Only `color_index` is trustworthy for BYLAYER resolution.
+    /// Layer name -> record. Deliberately does *not* expose a layer's
+    /// `Dwg_Color.rgb`: only `color_index` is trustworthy for BYLAYER
+    /// resolution (see `docs/CAVEATS.md` and [`crate::color`]).
     pub layers: BTreeMap<String, LayerRecord>,
     /// Block name -> record, every `BLOCK_HEADER` in the file (including
     /// `*Model_Space`/`*Paper_Space*`, which also show up flattened into
     /// `CadDatabase::entities` -- see that field's doc comment).
     pub block_records: BTreeMap<String, BlockRecord>,
     /// MLINESTYLE name -> each parallel line's `offset` (distance from the
-    /// MLINE centerline), in the same order LibreDWG stores them in --
-    /// `svg.rs`'s MLINE rendering pairs index `i` here with the same index
-    /// `i` in every MLINE vertex's per-vertex line list (implicit -- there's
-    /// no separate "line identity" field, just consistent array order). See
-    /// `convert::convert_mline`'s doc comment for why only `offset` is read
-    /// (color/linetype per line aren't rendered).
+    /// MLINE centerline), in LibreDWG's own storage order. There is no
+    /// separate line-identity field, so array order is the only correspondence
+    /// between a style's lines and an MLINE's vertices. Per-line color and
+    /// linetype are not read: nothing renders them.
     pub mlinestyles: BTreeMap<String, Vec<f64>>,
 }
 
@@ -65,11 +59,10 @@ pub struct Tables {
 /// `Dwg_Data`, and the caller must hold `LIBREDWG_LOCK` (see lib.rs) for
 /// the whole call -- this walks LibreDWG's non-reentrant C API directly.
 ///
-/// `pub(crate)`, not `pub`: `parse()` is the only intended caller. This
-/// module has to be `pub` so `LayerRecord`/`BlockRecord` are nameable, but
-/// exporting a `*mut Dwg_Data` entry point that bypasses the lock would
-/// contradict the crate's "every FFI-touching entry point is serialized"
-/// guarantee (and leak `libredwg_sys` types into the public surface).
+/// `pub(crate)`, not `pub`: `parse()` is the only intended caller. The module
+/// itself has to be public so `LayerRecord`/`BlockRecord` are nameable, but
+/// exporting a `*mut Dwg_Data` entry point would bypass the lock and leak
+/// `libredwg_sys` types into the public surface.
 pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut layers = BTreeMap::new();
@@ -118,21 +111,16 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
     }
 }
 
+/// Resolves a block's real name.
+///
 /// `BLOCK_HEADER.name` is only the *abbreviated* name for anonymous blocks
-/// (e.g. `"*D"` for every anonymous DIMENSION-geometry-cache block, `"*T"`
-/// for table-cache blocks) -- the real, disambiguating name (`"*D30"`) is
-/// only present on the block's own `BLOCK` entity, reached via
-/// `BLOCK_HEADER.block_entity` (a direct handle field -- *not* via
-/// `get_first_owned_entity`, which was confirmed to skip the BLOCK/ENDBLK
-/// sentinels entirely as part of its own iteration protocol, not just
-/// something this crate filters out afterward). Confirmed against
-/// `example_r14.dwg`: 9 separate anonymous blocks all reported
-/// `BLOCK_HEADER.name == "*D"`, silently collapsing to one entry when used
-/// as a map key -- matches `converter.ts`'s own `convertBlockRecord`,
-/// which reads the BLOCK entity's name specifically for this reason ("we
-/// want '*D30' instead of '*D'"). Falls back to the abbreviated name if
-/// there's no BLOCK entity (shouldn't normally happen, but the fallback is
-/// cheap insurance).
+/// (`"*D"` for every anonymous DIMENSION-geometry cache, `"*T"` for table
+/// caches) -- the disambiguating name (`"*D30"`) lives on the block's own
+/// `BLOCK` entity, reached through the `block_entity` handle field rather than
+/// `get_first_owned_entity`, whose iteration protocol skips the BLOCK/ENDBLK
+/// sentinels entirely. Without this, every anonymous block in a drawing
+/// collapses onto one `"*D"` map key. Falls back to the abbreviated name if
+/// there is no BLOCK entity.
 fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
     let abbreviated =
         crate::dynapi::get_utf8_field(block_header_object_ptr, "BLOCK_HEADER", "name");
@@ -149,12 +137,9 @@ fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
             let block_obj = unsafe { (*block_ref).obj };
             if !block_obj.is_null() {
                 // Dwg_Object_Ref.obj's declared type is a second,
-                // independently-generated (non-opaque) bindgen item for
-                // the same `_dwg_object` C tag that Dwg_Object/dwg_object
-                // are opaqued to elsewhere (see build.rs's opaque_type
-                // comments -- the same duplicate-representation quirk hit
-                // there for Dwg_Data/dwg_data). Identical layout, so a
-                // pointer cast is sound.
+                // independently-generated bindgen item for the same
+                // `_dwg_object` C tag that Dwg_Object is opaqued to elsewhere.
+                // Identical layout, so the pointer cast is sound.
                 let entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(block_obj.cast()) };
                 if let Some(full_name) = crate::dynapi::get_utf8_field(entity_ptr, "BLOCK", "name")
                 {
@@ -169,17 +154,15 @@ fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
     abbreviated
 }
 
-/// Resolves a `BITCODE_H` handle to a `BLOCK_HEADER` (e.g. INSERT's
-/// `block_header` field, or a DIMENSION's `block` field) to that block's
-/// *disambiguated* name -- the same resolution `convert_tables` uses to
-/// key `block_records`, so callers can reliably look up
-/// `Tables::block_records` afterward. **Not** the same as
-/// `crate::dynapi::resolve_handle_name` (which returns `BLOCK_HEADER.name`
-/// directly, i.e. the *abbreviated* name for anonymous blocks) -- using
-/// that one here was a real bug: a DIMENSION's `block_name` resolved to
-/// `"*D"` for every anonymous dimension-cache block, none of which could
-/// ever be found in `block_records` (keyed by the real `"*D30"`-style
-/// name), silently breaking every DIMENSION's rendering.
+/// Resolves a `BITCODE_H` handle to a `BLOCK_HEADER` (an INSERT's
+/// `block_header`, a DIMENSION's `block`) to that block's disambiguated name --
+/// the same resolution `convert_tables` uses to key `block_records`, so a
+/// caller can look the result up there.
+///
+/// **Not** interchangeable with [`crate::dynapi::resolve_handle_name`], which
+/// returns `BLOCK_HEADER.name` directly. Using that here was a real bug: every
+/// anonymous dimension cache resolved to `"*D"`, which is never a key in
+/// `block_records`, so no DIMENSION rendered at all.
 pub(crate) fn resolve_block_name(
     block_header_ref: *mut libredwg_sys::Dwg_Object_Ref,
 ) -> Option<String> {
@@ -198,16 +181,13 @@ pub(crate) fn resolve_block_name(
     block_record_name(object_ptr)
 }
 
-/// Reads an MLINESTYLE OBJECT's name and each of its parallel lines'
-/// `offset` (distance from the MLINE centerline), in array order -- see
-/// `Tables::mlinestyles`'s doc comment for why order (not any explicit
-/// identity) is what `svg.rs` pairs against each MLINE vertex's own line
-/// list.
+/// Reads an MLINESTYLE object's name and each of its parallel lines' `offset`,
+/// in array order -- see [`Tables::mlinestyles`].
 fn convert_mlinestyle(object_ptr: *mut c_void) -> Option<(String, Vec<f64>)> {
     let name = crate::dynapi::get_utf8_field(object_ptr, "MLINESTYLE", "name")?;
-    // num_lines is BITCODE_RC (a single unsigned byte), unlike num_paths'
-    // BITCODE_BL -- see get_array_field's doc comment on why the count
-    // field's width can't be hardcoded for every caller.
+    // num_lines is BITCODE_RC (one unsigned byte), unlike num_paths'
+    // BITCODE_BL -- see get_array_field on why the count width cannot be
+    // hardcoded for every caller.
     let lines: Vec<libredwg_sys::Dwg_MLINESTYLE_line> =
         get_array_field::<u8, _>(object_ptr, "MLINESTYLE", "num_lines", "lines");
     let offsets = lines.iter().map(|l| l.offset).collect();
@@ -222,32 +202,24 @@ fn convert_layer(object_ptr: *mut c_void) -> Option<LayerRecord> {
 }
 
 /// Recovers a usable ACI index from a LAYER's raw `Dwg_Color` when LibreDWG
-/// itself couldn't. `bit_read_CMC` (`lib/libredwg/src/bits.c`) sets `index`
-/// via `dwg_find_color_index(rgb)`, which returns `256` ("no exact palette
-/// match", *not* a real BYLAYER-on-a-layer sentinel -- a LAYER can't be
-/// BYLAYER against itself) whenever a TRUECOLOR-tagged layer's `rgb` isn't
-/// bit-identical to one of the 256 ACI palette entries' own packed RGB.
+/// could not.
 ///
-/// Every real file in `samples/` (9 independent AutoCAD Architecture
-/// drawings, spot-checked 2026-08-14 by rendering all of them and comparing
-/// against AutoCAD's own default/AIA layer-color conventions) hits exactly
-/// this case, and stores what's obviously the *intended* ACI index itself
-/// in `rgb`'s low byte rather than a genuine 24-bit color -- e.g. layer
-/// `"0"` is always `rgb=0x..000007` across every file, matching AutoCAD's
-/// real default of ACI 7 for that layer. `bit_downconvert_CMC`
-/// (`bits.c:4069-4071`) already has the identical `if index==256 { index =
-/// rgb & 0xff }` fallback for this exact situation on its own (differently
-/// gated) code path; this mirrors it for `bit_read_CMC`'s plain-read path,
-/// which lacks it.
+/// `bit_read_CMC` sets `index` via `dwg_find_color_index(rgb)`, which returns
+/// `256` ("no exact palette match" -- not a real BYLAYER sentinel, since a
+/// layer cannot be BYLAYER against itself) whenever a TRUECOLOR-tagged layer's
+/// `rgb` is not bit-identical to one of the 256 palette entries. Real drawings
+/// hit exactly that case while storing the *intended* ACI index in `rgb`'s low
+/// byte rather than a genuine 24-bit color: layer `"0"` reads as
+/// `rgb = 0x..000007`, matching AutoCAD's real default of ACI 7. LibreDWG's own
+/// `bit_downconvert_CMC` already carries the identical `if index == 256 { index
+/// = rgb & 0xff }` fallback on its (differently gated) path; this mirrors it
+/// for the plain-read path, which lacks it.
 ///
-/// **Known limitation** (inherited from `bit_downconvert_CMC`'s own
-/// version of this fallback, not introduced here): a layer with a genuine
-/// arbitrary truecolor RGB that simply doesn't exactly match any ACI
-/// palette entry would also report `index=256`, and this reinterprets its
-/// blue channel as an ACI index instead -- indistinguishable, from the
-/// data available here, from the degenerate case above. Not verified
-/// against real AutoCAD (no AutoCAD available); verified only by rendering
-/// and eyeballing plausibility across the 9 `samples/` files.
+/// **Known limitation**, inherited from that same fallback rather than
+/// introduced here: a layer with a genuine arbitrary truecolor that happens not
+/// to match any palette entry also reports `index = 256`, and its blue channel
+/// is reinterpreted as an ACI index. From the data available here the two cases
+/// are indistinguishable. See `docs/CAVEATS.md`.
 fn resolve_layer_color_index(index: i16, method: libredwg_sys::Dwg_Color_Method, rgb: u32) -> i16 {
     if index == 256 && method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR {
         (rgb & 0xff) as i16

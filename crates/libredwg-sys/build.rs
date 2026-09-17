@@ -71,7 +71,7 @@ fn main() {
     // the submodule files this crate's build actually reaches (traced via
     // the real #include graph, not just the top-level LIBREDWG_SOURCES
     // list) -- see scripts/sync-libredwg-vendor.sh and docs/ARCHITECTURE.md's
-    // "빌드" section for how to refresh it after a submodule update.
+    // "Build" section for how to refresh it after a submodule update.
     let libredwg_src = manifest_dir.join("vendor/libredwg/src");
     let libredwg_include = manifest_dir.join("vendor/libredwg/include");
     let vendor_config = manifest_dir.join("vendor-config");
@@ -80,7 +80,7 @@ fn main() {
     // Drift detector: fail loudly if vendor/libredwg/src's .c file count
     // doesn't match what this file expects to compile, rather than silently
     // compiling a stale/incomplete vendored copy. See docs/ARCHITECTURE.md's
-    // "빌드" section for the submodule-update / re-vendor procedure this is
+    // "Build" section for the submodule-update / re-vendor procedure this is
     // meant to catch early.
     let actual_c_files: Vec<String> = std::fs::read_dir(&libredwg_src)
         .expect("crates/libredwg-sys/vendor/libredwg/src should exist (checked into git -- see scripts/sync-libredwg-vendor.sh)")
@@ -173,12 +173,8 @@ fn main() {
         .allowlist_function("dwg_get_num_objects")
         .allowlist_function("dwg_get_object")
         .allowlist_function("dwg_object_get_fixedtype")
-        .allowlist_function("dwg_object_get_supertype")
         .allowlist_function("dwg_object_get_dxfname")
-        .allowlist_function("dwg_object_get_name")
         .allowlist_function("dwg_object_get_handle")
-        .allowlist_function("dwg_object_to_entity")
-        .allowlist_function("dwg_object_to_object")
         .allowlist_function("get_first_owned_entity")
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")
@@ -187,7 +183,9 @@ fn main() {
         .allowlist_function("dwg_object_polyline_2d_get_points")
         .allowlist_function("dwg_object_polyline_3d_get_numpoints")
         .allowlist_function("dwg_object_polyline_3d_get_points")
-        .allowlist_type("dwg_point_2d")
+        // Named explicitly because src/lib.rs's hand-written
+        // Dwg_MLINE_vertex refers to it, not only because the polyline
+        // accessors above return it.
         .allowlist_type("dwg_point_3d")
         .allowlist_function("uncad_object_entity_ptr")
         .allowlist_function("uncad_object_object_ptr")
@@ -195,56 +193,43 @@ fn main() {
         .allowlist_function("uncad_multileader_free_lines")
         .allowlist_type("uncad_multileader_line_t")
         .allowlist_function("dwg_free")
-        .allowlist_function("dwg_free_object")
-        .allowlist_function("dwg_abandon")
         .allowlist_function("uncad_3dsolid_sab_to_sat_text")
         .allowlist_function("uncad_free_sat_text")
         .allowlist_function("dwg_dynapi_.*")
-        .allowlist_function("dwg_obj_.*")
-        .allowlist_function("dwg_ref_.*")
-        .allowlist_function("dwg_resolve_handleref")
         .allowlist_type("Dwg_Data")
         .allowlist_type("Dwg_Object")
         .allowlist_type("Dwg_Object_Type")
-        // Dwg_Object's `tio` union alone pulls in ~90 Dwg_Entity_*/Dwg_Object_*
-        // struct types (one pointer variant per DWG entity/object type), one
-        // of which bindgen cannot lay out cleanly (root cause not isolated --
-        // candidates include the #pragma pack(1) bitfields + flexible-array-
-        // in-union EED record type reachable transitively). bindgen's failure
-        // mode for that is silent and self-contradictory: it emits a
-        // 1-byte placeholder struct body but keeps the *correct*
-        // clang-computed size in the layout_tests() assertion, so the
-        // assertion always fails even though clang itself parses everything
-        // fine (confirmed: a standalone clang.exe compile with identical
-        // flags reports the right sizeof() for every one of these types).
+        // Dwg_Object's `tio` union alone pulls in ~90 Dwg_Entity_*/
+        // Dwg_Object_* struct types (one pointer variant per DWG entity/object
+        // type), one of which bindgen cannot lay out cleanly. Its failure mode
+        // is silent and self-contradictory: it emits a 1-byte placeholder
+        // struct body but keeps the correct clang-computed size in the
+        // layout_tests() assertion, so that assertion always fails even though
+        // clang itself parses everything fine (a standalone clang compile with
+        // identical flags reports the right sizeof() for every one of these
+        // types).
         //
-        // This project's design never needed field-level Rust access into
-        // these types anyway -- entity data always goes through
-        // dwg_dynapi_entity_value()/dwg_dynapi_entity_field() (see the
-        // Dwg_Object.tio union-safety note in the plan), and Dwg_Object's own
-        // fields we need (fixedtype, handle.value) are read via the C
-        // accessor functions dwg_object_get_fixedtype()/dwg_obj_get_handle_value()
-        // rather than direct struct-field access, exactly like the existing
-        // JS binding already does. So: opaque the two root structs outright
-        // (bindgen then represents them as correctly-sized `[u8; N]` blobs,
-        // safe to stack-allocate/zero and pass by pointer to the C API,
-        // without ever trying to lay out the problematic union).
+        // No field-level Rust access into these types is needed: entity data
+        // always goes through dwg_dynapi_entity_value()/
+        // dwg_dynapi_entity_field(), and the Dwg_Object fields this workspace
+        // reads (fixedtype, handle.value) come from C accessor functions. So
+        // the root structs are opaqued outright -- bindgen then represents
+        // them as correctly-sized `[u8; N]` blobs, safe to zero, stack- or
+        // heap-allocate and pass by pointer, without ever laying out the
+        // problematic union.
         .opaque_type("_dwg_struct")
         .opaque_type("Dwg_Data")
         .opaque_type("dwg_data") // dwg_api.h's own separate `typedef struct _dwg_struct dwg_data;`
         .opaque_type("_dwg_object")
         .opaque_type("Dwg_Object")
         .opaque_type("dwg_object") // dwg_api.h's own separate `typedef struct _dwg_object dwg_object;`
-        // Same reasoning, needed because these are parameter/return types of
-        // otherwise-allowlisted functions (dwg_dynapi_*, dwg_obj_*,
-        // dwg_object_to_entity/_object) even with Dwg_Object itself opaque.
-        // Dwg_Entity__3DSOLID stays listed because bindgen still reaches the
-        // type transitively (the 3DSOLID wire/silhouette/material structs'
-        // `parent` pointers, the surface entities' `extra_acis_data`, the
-        // entity tio union) and emits it as an opaque blob, even though no
-        // allowlisted function names it directly any more -- the SAB
-        // conversion goes through the uncad_3dsolid_sab_to_sat_text shim,
-        // which takes a void*.
+        // Same reasoning: these are parameter or return types of
+        // otherwise-allowlisted functions even with Dwg_Object itself opaque.
+        // Dwg_Entity__3DSOLID stays listed because bindgen still reaches it
+        // transitively and emits it as an opaque blob, even though nothing
+        // allowlisted names it directly any more (the SAB conversion goes
+        // through the uncad_3dsolid_sab_to_sat_text shim, which takes a
+        // void*).
         .opaque_type("_dwg_object_entity")
         .opaque_type("Dwg_Object_Entity")
         .opaque_type("_dwg_object_object")
@@ -252,98 +237,53 @@ fn main() {
         .opaque_type("_dwg_entity_3DSOLID")
         .opaque_type("Dwg_Entity__3DSOLID")
         .allowlist_type("DWG_ERROR")
-        .allowlist_type("Dwg_Error")
         .allowlist_type("Dwg_DYNAPI_field")
-        .allowlist_type("dwg_field_name_type_offset")
+        // Referenced by src/lib.rs's hand-written Dwg_HATCH_Path.
         .allowlist_type("Dwg_HATCH_PolylinePath")
-        // Dwg_HATCH_Path/Dwg_HATCH_PathSeg hit the same bindgen struct-
-        // codegen limitation as Dwg_Object (see the big opaque_type block
-        // above) -- but unlike Dwg_Object, this project actually needs
-        // real field access into these two (HATCH boundary-path geometry
-        // isn't reachable through dynapi at all, since dynapi only exposes
-        // top-level entity fields by name, not nested struct internals).
-        // Opaquing them (tried first) doesn't help since that removes
-        // field access entirely, and neither does opaquing the types they
-        // reference (Dwg_HATCH_ControlPoint, Dwg_Entity_HATCH) -- the
-        // cascade's real trigger was never isolated. Blocklisted here and
-        // hand-defined instead, in src/lib.rs, matching dwg.h's field
-        // layout exactly (verified against clang's own authoritative
-        // sizeof(): 56 and 200 bytes respectively, both confirmed by the
-        // layout_tests() assertions bindgen itself generated before
-        // blocklisting -- i.e. clang parses these types fine, only
-        // bindgen's Rust codegen for them specifically fails).
+        // The HATCH and MLINE sub-structs below hit the same bindgen
+        // struct-codegen failure as Dwg_Object, but unlike Dwg_Object this
+        // crate needs real field access into them: HATCH boundary-path
+        // geometry is not reachable through dynapi at all, which only exposes
+        // top-level entity fields by name. Opaquing them removes field access
+        // entirely, and opaquing the types they reference does not help
+        // either. So they are blocklisted here and hand-written in src/lib.rs
+        // against dwg.h's field layout, each with a compile-time assertion on
+        // clang's own sizeof() (the value bindgen's own layout_tests()
+        // reported before blocklisting).
+        //
+        // Several of them cascade for one specific reason: a `parent` field
+        // typed `struct _dwg_entity_HATCH *` or `struct _dwg_object_MLINESTYLE
+        // *` forces bindgen to materialize that parent as a real, non-opaque
+        // type, and the parent is what fails. The hand-written versions leave
+        // `parent` as an untyped `*mut c_void` to break the chain.
         .blocklist_type("_dwg_HATCH_Path")
         .blocklist_type("Dwg_HATCH_Path")
         .blocklist_type("_dwg_HATCH_PathSeg")
         .blocklist_type("Dwg_HATCH_PathSeg")
         .blocklist_type("_dwg_HATCH_ControlPoint")
         .blocklist_type("Dwg_HATCH_ControlPoint")
-        // Dwg_HATCH_DefLine (the pattern-fill line-family definitions --
-        // angle/pt0/offset/dashes -- used to render actual hatch patterns
-        // instead of outline-only) is a top-level Dwg_Entity_HATCH field
-        // (num_deflines/deflines), reachable through dynapi unlike the
-        // Path/PathSeg/ControlPoint types above -- but allowlisting it
-        // directly was tried first and made things *worse*: its `parent`
-        // field is typed `struct _dwg_entity_HATCH *`, which forces bindgen
-        // to also generate a real (non-opaque) _dwg_entity_HATCH just to
-        // have a pointee type, and _dwg_entity_HATCH itself then hits the
-        // same struct-codegen failure (confirmed: allowlisting DefLine
-        // alone produced a `1usize - 200usize` layout_tests() assert on
-        // _dwg_entity_HATCH, which nothing else in this crate ever
-        // allowlists directly -- HATCH's own fields are all read through
-        // dynapi's untyped void*). Blocklisted and hand-defined instead,
-        // same as the three types above, with `parent` left as an untyped
-        // `*mut c_void` (matching Dwg_HATCH_ControlPoint/PathSeg/Path's own
-        // `parent` fields) specifically to avoid pulling _dwg_entity_HATCH
-        // in at all.
         .blocklist_type("_dwg_HATCH_DefLine")
         .blocklist_type("Dwg_HATCH_DefLine")
-        // Dwg_HATCH_Color (one gradient-fill color stop: shift_value +
-        // Dwg_Color) has the exact same `parent: struct _dwg_entity_HATCH *`
-        // cascade as Dwg_HATCH_DefLine right above -- allowlisting it forces
-        // bindgen to materialize a real _dwg_entity_HATCH, which fails the
-        // same way. Blocklisted and hand-defined instead, same recipe.
         .blocklist_type("_dwg_HATCH_Color")
         .blocklist_type("Dwg_HATCH_Color")
-        // Dwg_MLINE_vertex hits the exact same bindgen struct-codegen
-        // failure (confirmed: allowlisting it alone produces a
-        // layout_tests() assert computing `1usize - 96usize`, i.e. bindgen
-        // silently generated a 1-byte placeholder while clang's own
-        // sizeof() -- what the assert checks against -- is the correct 96).
-        // Blocklisted and hand-defined instead, same as the HATCH types
-        // above. Dwg_MLINE_line (referenced by Dwg_MLINE_vertex.lines, and
-        // by nothing this crate allowlists directly) also has to be
-        // blocklisted here -- confirmed via Docker Linux/gcc build that,
-        // unlike on the Windows/MSVC target, bindgen there still generates
-        // it (a dangling reference to the now-blocklisted
-        // _dwg_MLINE_vertex, a compile error) even though nothing
-        // allowlisted uses it; same class of platform-conditional bindgen
-        // divergence as docs/CAVEATS.md's other Windows/Linux notes.
         .blocklist_type("_dwg_MLINE_vertex")
         .blocklist_type("Dwg_MLINE_vertex")
+        // Dwg_MLINE_line is referenced by Dwg_MLINE_vertex.lines and by
+        // nothing this crate allowlists, yet a Linux/gcc build still
+        // generates it -- with a dangling reference to the blocklisted
+        // _dwg_MLINE_vertex, which does not compile. Windows/MSVC does not.
         .blocklist_type("_dwg_MLINE_line")
         .blocklist_type("Dwg_MLINE_line")
-        // Dwg_MLINESTYLE_line (one parallel-line definition in an
-        // MLINESTYLE OBJECT -- offset/color/linetype -- read to give MLINE
-        // its real per-line offsets instead of centerline-only rendering)
-        // has the same `parent: struct _dwg_object_MLINESTYLE *` cascade as
-        // the HATCH sub-structs above (confirmed: allowlisting it alone
-        // produces a `1usize - 112usize` layout_tests() assert on
-        // _dwg_object_MLINESTYLE). Blocklisted and hand-defined instead,
-        // same recipe -- verified against clang's real sizeof() (80 bytes)
-        // the same way.
         .blocklist_type("_dwg_MLINESTYLE_line")
         .blocklist_type("Dwg_MLINESTYLE_line")
         .allowlist_type("Dwg_Handle")
         .allowlist_type("_dwg_handle")
-        .allowlist_type("Dwg_Object_Supertype")
         .allowlist_type("Dwg_Object_Ref")
         .allowlist_type("_dwg_object_ref")
         .allowlist_type("Dwg_Color")
         .allowlist_type("_dwg_color")
         .allowlist_type("DWG_COLOR_METHOD")
         .allowlist_type("Dwg_Color_Method")
-        .allowlist_var("DWG_NOERR")
         .allowlist_var("DWG_ERR_.*")
         .derive_default(true)
         .generate_comments(true)

@@ -34,7 +34,7 @@ impl Default for ToPngOptions {
 
 pub struct ToPngResult {
     pub png: Vec<u8>,
-    pub unsupported_entity_types: Vec<String>,
+    pub unsupported_types: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -57,9 +57,9 @@ pub enum PngError {
 impl std::fmt::Display for PngError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PngError::InvalidSvg(e) => write!(f, "SVG 파싱 실패: {e}"),
-            PngError::EmptyCanvas => write!(f, "렌더링 크기가 0입니다 (scale 값을 확인하세요)"),
-            PngError::Encode(e) => write!(f, "PNG 인코딩 실패: {e}"),
+            PngError::InvalidSvg(e) => write!(f, "SVG parsing failed: {e}"),
+            PngError::EmptyCanvas => write!(f, "render size is zero (check the scale)"),
+            PngError::Encode(e) => write!(f, "PNG encoding failed: {e}"),
         }
     }
 }
@@ -79,7 +79,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
     let png = svg_to_png(&svg_result.svg, options.scale)?;
     Ok(ToPngResult {
         png,
-        unsupported_entity_types: svg_result.unsupported_entity_types,
+        unsupported_types: svg_result.unsupported_types,
     })
 }
 
@@ -152,15 +152,11 @@ mod tests {
     }
 
     /// Exercises the full `CadDatabase::to_png` -> `to_svg` -> `svg_to_png`
-    /// pipeline against a real DWG, rather than only the SVG -> PNG half
-    /// tested above. Uses a file from the git-submodule-tracked LibreDWG
-    /// test-data corpus rather than `samples/`, which is gitignored and
-    /// manual-spot-check-only by design -- see `samples/README.md` for why
-    /// real-file regression tests don't hang off that directory. The build
-    /// itself no longer needs the submodule (`libredwg-sys` compiles its
-    /// own vendored copy), so `git submodule update --init` is a
-    /// precondition of `cargo test`, not of `cargo build` -- README.md
-    /// says so.
+    /// pipeline against a real DWG, not just the SVG -> PNG half tested above.
+    /// The fixture comes from the submodule-tracked LibreDWG corpus rather than
+    /// `samples/`, which is gitignored by design (see `samples/README.md`). The
+    /// build itself does not need the submodule -- `libredwg-sys` compiles its
+    /// own vendored copy -- so it is a precondition of `cargo test` only.
     #[test]
     fn to_png_renders_a_real_dwg_to_a_valid_png() {
         let path = concat!(

@@ -1,7 +1,7 @@
 /* Hand-authored config.h for a native build of the vendored LibreDWG C
    sources (crates/libredwg-sys/vendor/libredwg/, an unmodified subset of
    the lib/libredwg submodule), used in place of the autotools-generated
-   src/config.h.in output. See docs/ARCHITECTURE.md's "빌드" section for
+   src/config.h.in output. See docs/ARCHITECTURE.md's "Build" section for
    why this project builds LibreDWG via a direct `cc`-crate compile instead
    of autotools/configure (Windows autotools friction).
 

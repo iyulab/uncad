@@ -7,7 +7,7 @@
 # directory, and a downstream consumer building from crates.io has no
 # lib/libredwg submodule (no .git checkout) to fall back to. So build.rs
 # compiles from this vendored copy, not the submodule directly -- see
-# docs/ARCHITECTURE.md's "빌드" section.
+# docs/ARCHITECTURE.md's "Build" section.
 #
 # This script re-derives the exact file set by tracing the real #include
 # graph from the .c files build.rs compiles (LIBREDWG_SOURCES in build.rs),

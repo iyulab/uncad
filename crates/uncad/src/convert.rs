@@ -1,85 +1,60 @@
-//! Walks a parsed `Dwg_Data`'s objects and converts entities into
-//! [`RenderEntity`] values. Mirrors `converter.ts`'s `switch (fixedtype)`
-//! dispatch and `entityConverter.ts`'s per-type functions for most types
-//! (see `docs/CAVEATS.md` for current entity-type coverage, and which
-//! types are JS-baseline ports vs. new functionality beyond it).
+//! Walks a parsed `Dwg_Data`'s objects and converts entities into [`Entity`]
+//! values. `docs/CAVEATS.md` tracks which entity types are covered and how
+//! faithful each one is.
 //!
-//! **Not** a flat global object scan. `db.entities` in the JS baseline is
-//! built by walking `BLOCK_HEADER` (BLOCK_RECORD) objects and only
-//! collecting entities owned by the `*Model_Space`/`*Paper_Space*` blocks
-//! (`converter.ts:133-160`) -- entities that live inside a *named* block
-//! definition (i.e. a symbol referenced by INSERT elsewhere) are
-//! deliberately excluded from the top-level list; they stay reachable only
-//! via that block's own owned-entity chain. A naive global fixedtype scan
-//! (the obvious alternative, and what this module originally did) silently
-//! over-collects: it picks up every entity inside every block definition
-//! too, which only went unnoticed on `sample_2000.dwg` because that fixture
-//! has no INSERT-referenced blocks with real content. Confirmed by diffing
-//! against the JS baseline on `example_r14.dwg` (10 INSERTs): a POINT
-//! (handle `1BC`) turned up in the naive walk with no corresponding entry
-//! in `db.entities` at all -- it belongs to a named block, not model/paper
-//! space.
+//! **Not** a flat global object scan. `CadDatabase::entities` is built by
+//! walking `BLOCK_HEADER` (BLOCK_RECORD) objects and collecting only what the
+//! `*Model_Space`/`*Paper_Space*` blocks own. Entities that live inside a
+//! *named* block definition (a symbol an INSERT references elsewhere) are
+//! deliberately excluded from the top-level list; they stay reachable through
+//! that block's own owned-entity chain in [`crate::tables::Tables`]. A global
+//! scan over every object silently over-collects those.
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_utf8_field, resolve_handle_name, Point2D,
     Point3D, SplineControlPoint,
 };
-use crate::render_model::{
+use crate::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, DimensionEntity,
-    EllipseEntity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
+    EllipseEntity, Entity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
     HatchGradient, HatchPatternLine, InsertEntity, LeaderEntity, LightEntity, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, PointEntity,
-    PolylineEntity, RayEntity, RenderEntity, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
+    PolylineEntity, RayEntity, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
     ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use std::ffi::CStr;
 
-/// LWPOLYLINE.flag bit checked for "closed". dwg.h's own field comment on
-/// Dwg_Entity_LWPOLYLINE documents bit 512 as "closed", but the JS
-/// baseline's toSVG() actually checks bit 1 (`e.flag & 1`, matching the
-/// *standard DXF group-70* closed-bit convention, not LibreDWG's comment).
-/// Confirmed by diffing rendered SVG output against the JS baseline on the
-/// sample_2000.dwg fixture used during development (no longer bundled with
-/// the repo -- see docs/CAVEATS.md): its one LWPOLYLINE had flag=512 (closed
-/// per dwg.h's comment) and JS rendered it as an *open* `<polyline>`, not a
-/// `<polygon>` -- matched here rather than "corrected" to 512, since there's
-/// no independently-verified ground truth (a real AutoCAD screenshot) to
-/// confirm which interpretation is actually right, and the whole point of
-/// porting against the JS baseline is byte-for-byte behavioral parity, not
-/// silently diverging on an unverified guess.
-const LWPOLYLINE_CLOSED_FLAG: u16 = 1;
+/// The polyline `flag` bit checked for "closed", shared by LWPOLYLINE,
+/// POLYLINE_2D and POLYLINE_3D. `dwg.h`'s own field comment documents bit 512
+/// instead, but bit 1 is the standard DXF group-70 convention and is what
+/// matches observed rendering; there is no independently verified ground truth
+/// to settle which reading is right, so this follows the DXF convention rather
+/// than "correcting" it. See `docs/CAVEATS.md`.
+const POLYLINE_CLOSED_FLAG: u16 = 1;
 
-/// `name.to_uppercase() == "*MODEL_SPACE"` -- exact match, matching
-/// `converter.ts`'s `utils.ts::isModelSpace`.
+/// `MLINE_FLAGS_CLOSED` (dwg.h).
+const MLINE_CLOSED_FLAG: u16 = 2;
+
 fn is_model_space(name: &str) -> bool {
     name.to_uppercase() == "*MODEL_SPACE"
 }
 
-/// `name.to_uppercase().starts_with("*PAPER_SPACE")` -- matches
-/// `*Paper_Space`, `*Paper_Space0`, `*Paper_Space1`, ..., mirroring
-/// `converter.ts`'s `utils.ts::isPaperSpace`.
+/// Matches `*Paper_Space`, `*Paper_Space0`, `*Paper_Space1`, ... -- every
+/// layout tab.
 fn is_paper_space(name: &str) -> bool {
     name.to_uppercase().starts_with("*PAPER_SPACE")
 }
 
-/// Walks every `BLOCK_HEADER` object, collects entities owned by the
-/// `*Model_Space`/`*Paper_Space*` ones (see this module's doc comment for
-/// why not every block qualifies), and converts each. Entities of an
-/// unhandled type become [`RenderEntity::Unknown`] (counted, not dropped) --
-/// a deliberate deviation from the JS baseline, which silently drops
-/// entities its `entityConverter.ts` has no case for (`convertEntities()`
-/// only pushes when `converter.convert(next)` returns truthy) rather than
-/// tracking them. `Unknown` is more useful during porting -- it makes
-/// coverage gaps visible instead of silently invisible -- and it's a
-/// superset of the JS behavior, not a mismatch: every type the JS baseline
-/// *does* implement still round-trips with an identical count (verified
-/// against both test fixtures), the only difference is what happens to the
-/// ones neither implementation really supports yet.
+/// Walks every `BLOCK_HEADER` object, collects the entities owned by the
+/// `*Model_Space`/`*Paper_Space*` ones (see this module's doc for why not
+/// every block qualifies), and converts each. An entity of an unhandled type
+/// becomes [`Entity::Unknown`], which keeps its real DXF name -- counted and
+/// reportable rather than silently dropped.
 ///
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
 /// `Dwg_Data`.
-pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<RenderEntity> {
+pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut entities = Vec::new();
 
@@ -88,20 +63,14 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<RenderEn
         if block_obj.is_null() {
             continue;
         }
-        // `dwg_object_get_fixedtype`'s real C declaration returns plain
-        // `int`, not `DWG_OBJECT_TYPE` -- a pre-existing signature/enum-type
-        // mismatch in dwg_api.h itself. bindgen infers DWG_OBJECT_TYPE's own
-        // Rust representation from clang's target-dependent choice of
-        // underlying integer type for the (otherwise unconstrained) C enum,
-        // which isn't guaranteed to match plain `int` on every platform --
-        // confirmed to differ in practice: `c_int` (i32) on the MSVC target,
-        // `c_uint` (u32) on x86_64-unknown-linux-gnu (found by an actual gcc
-        // compile of this crate in a Docker `rust:latest` container, see
-        // docs/ARCHITECTURE.md). Every `fixedtype`-typed value in this crate is cast
-        // to `DWG_OBJECT_TYPE` immediately at its one FFI call site (here,
-        // and again in `convert_one` below and in tables.rs) so downstream
-        // code always compares one canonical, self-consistent type
-        // regardless of what bindgen inferred on a given target.
+        // `dwg_object_get_fixedtype`'s real C declaration returns plain `int`
+        // rather than DWG_OBJECT_TYPE -- a signature/enum mismatch in
+        // dwg_api.h itself. bindgen infers DWG_OBJECT_TYPE's own Rust
+        // representation from clang's target-dependent choice of underlying
+        // integer type for that C enum, which differs in practice: `i32` on
+        // the MSVC target, `u32` on x86_64-unknown-linux-gnu. Every
+        // `fixedtype` value is therefore cast at its FFI call site, so the
+        // rest of the crate compares one canonical type on every target.
         let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(block_obj) }
             as libredwg_sys::DWG_OBJECT_TYPE;
         if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_BLOCK_HEADER {
@@ -118,19 +87,13 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<RenderEn
             continue;
         }
 
-        // Duplicate each INSERT's attribs as top-level RenderEntity::Attrib
-        // entries, matching the JS baseline's db.entities.push(attrib) for
-        // every attribute value on an INSERT (converter.ts:151-157) --
-        // deliberately *only* here, not inside owned_entities() itself:
-        // JS's own per-block entities array (btr.entities, what
-        // BLOCK_RECORD.entries[].entities mirrors) does NOT get this
-        // duplication, only the flattened top-level db.entities does.
-        // Confirmed by diffing block-record entity counts against the JS
-        // baseline on example_r14.dwg: *MODEL_SPACE read 68 instead of 61
-        // until the duplication was moved out of the shared helper.
+        // Each INSERT's attribs are duplicated as top-level Entity::Attrib
+        // entries because that is what rendering draws. Deliberately here and
+        // not inside owned_entities(): a block record's own entity list must
+        // not carry the duplication (see crate::tables::BlockRecord).
         for entity in unsafe { owned_entities(dwg, block_obj) } {
-            if let RenderEntity::Insert(insert) = &entity {
-                entities.extend(insert.attribs.iter().cloned().map(RenderEntity::Attrib));
+            if let Entity::Insert(insert) = &entity {
+                entities.extend(insert.attribs.iter().cloned().map(Entity::Attrib));
             }
             entities.push(entity);
         }
@@ -140,12 +103,10 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<RenderEn
 }
 
 /// Walks every entity directly owned by `block_obj` (a live `BLOCK_HEADER`
-/// `Dwg_Object`) and converts each -- no attrib duplication (see
-/// `convert_entities`'s call site for why that's applied separately, only
-/// for the top-level list). Used both for the model/paper-space entity
-/// list and for every block's own entry in
-/// [`crate::tables::Tables::block_records`] (all blocks, unfiltered) -- one
-/// shared implementation so both stay in sync as entity types get ported.
+/// `Dwg_Object`) and converts each -- no attrib duplication, see
+/// `convert_entities`'s call site. Shared by the model/paper-space entity list
+/// and by every block's own entry in [`crate::tables::Tables::block_records`],
+/// so the two stay in sync as entity types are added.
 ///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `block_obj` was obtained from;
@@ -153,11 +114,11 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<RenderEn
 pub(crate) unsafe fn owned_entities(
     dwg: *mut libredwg_sys::Dwg_Data,
     block_obj: *mut libredwg_sys::Dwg_Object,
-) -> Vec<RenderEntity> {
+) -> Vec<Entity> {
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
-        if let Some(entity) = unsafe { convert_one(dwg, owned) } {
+        if let Some(entity) = unsafe { convert_entity(dwg, owned) } {
             entities.push(entity);
         }
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
@@ -165,18 +126,47 @@ pub(crate) unsafe fn owned_entities(
     entities
 }
 
-/// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its
-/// owned `VERTEX_PFACE` (vertex positions, in order) and `VERTEX_PFACE_FACE`
-/// (up to 4 vertex indices per face, 1-based, negative meaning "invisible
-/// edge" -- sign carries no other meaning here so it's just abs'd away)
-/// subentities directly -- see [`RenderEntity::PolylinePFace`]'s doc comment
-/// for why (LibreDWG's own dedicated accessor for this is documented as
-/// not implemented). Face records can be interleaved with vertex records
-/// in the chain (DWG's own convention lists every vertex first, then every
-/// face, but this doesn't assume that) -- indices are only resolved after
-/// the whole chain has been walked and every position collected. Faces
-/// referencing an out-of-range or all-zero index list are skipped rather
-/// than panicking.
+/// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
+/// returns into an owned `Vec`, then frees its buffer.
+///
+/// Those dedicated C functions are used rather than a generic owned-subentity
+/// walk because their traversal is version-dependent (pre-R2004 files chain
+/// `first_vertex..last_vertex` through the raw object list). A generic walk was
+/// tried and over-collected a vertex on a real file.
+///
+/// # Safety
+/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object matching the
+/// accessors passed in, and `T` must have the same layout as the
+/// `dwg_point_2d`/`dwg_point_3d` they return.
+unsafe fn read_polyline_points<P, T: Copy>(
+    obj: *mut libredwg_sys::Dwg_Object,
+    get_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> *mut P,
+    get_num_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> u32,
+) -> Vec<T> {
+    let mut error = 0i32;
+    let points_ptr = unsafe { get_points(obj, &mut error) };
+    let num_points = unsafe { get_num_points(obj, &mut error) };
+    if points_ptr.is_null() || num_points == 0 {
+        return Vec::new();
+    }
+    // SAFETY: on success the accessor calloc's exactly num_points entries of
+    // the layout T mirrors; copied out here before the buffer is freed.
+    let points =
+        unsafe { std::slice::from_raw_parts(points_ptr.cast::<T>(), num_points as usize) }.to_vec();
+    unsafe { libc::free(points_ptr.cast()) };
+    points
+}
+
+/// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
+/// `VERTEX_PFACE` (vertex positions, in order) and `VERTEX_PFACE_FACE` (up to
+/// 4 vertex indices per face, 1-based, negative meaning "invisible edge" --
+/// the sign carries no other meaning, so it is just dropped) subentities
+/// directly; LibreDWG's own accessor for this type is documented as not
+/// implemented.
+///
+/// Face records may be interleaved with vertex records, so indices are only
+/// resolved once the whole chain has been walked. Faces referencing an
+/// out-of-range or all-zero index list are skipped.
 ///
 /// # Safety
 /// `obj` must be a valid, non-null `POLYLINE_PFACE` `Dwg_Object`.
@@ -227,23 +217,19 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     edges
 }
 
-/// Resolves a WIPEOUT's clip boundary to local (2D) points -- see
-/// [`crate::render_model::WipeoutEntity`]'s doc comment for the risk this carries
-/// (an unverified pixel-space-to-world transform).
+/// Resolves a WIPEOUT's clip boundary to local 2D points -- see
+/// [`crate::model::WipeoutEntity`] for the risk this carries.
 ///
-/// `clip_boundary_type` 1 ("rect") stores exactly 2 `clip_verts`, the two
-/// opposite corners of an axis-aligned (in pixel space) rectangle;
-/// anything else (2, "polygon", or unset) is used as an explicit vertex
-/// list directly. If there's no usable `clip_verts` at all, falls back to
-/// the full image rectangle implied by `image_size` (0,0 to width,height)
-/// -- clipping is optional in the format, but every WIPEOUT still has
-/// *some* boundary, namely its full image extent.
+/// `clip_boundary_type` 1 ("rect") stores exactly 2 `clip_verts`, two opposite
+/// corners of a pixel-space-axis-aligned rectangle; anything else (2,
+/// "polygon", or unset) is used as an explicit vertex list. With no usable
+/// `clip_verts` at all this falls back to the full image rectangle implied by
+/// `image_size`: clipping is optional in the format, but every WIPEOUT still
+/// has its full image extent.
 ///
-/// Each pixel-space `(u, v)` point maps to world space as
-/// `pt0 + u*uvec + v*vvec` -- `uvec`/`vvec` are already one-pixel-length
-/// vectors in the entity's own local space (not normalized directions),
-/// per the standard DXF image-entity convention (group 11/12 vs. group 13
-/// pixel `image_size`, group 14 clip vertices in that same pixel space).
+/// Each pixel-space `(u, v)` maps to `pt0 + u*uvec + v*vvec` -- `uvec`/`vvec`
+/// are already one-pixel-length vectors in the entity's local space, not
+/// normalized directions.
 fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     let Some(pt0) = get_field::<Point3D>(entity_ptr, "WIPEOUT", "pt0") else {
         return Vec::new();
@@ -260,10 +246,8 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     });
     let clip_verts: Vec<Point2D> =
         get_array_field::<u32, _>(entity_ptr, "WIPEOUT", "num_clip_verts", "clip_verts");
-    // BITCODE_BS ("1 rect, 2 polygon" per dwg.h's own comment on the
-    // field). Defaults to 0 (neither) if unreadable -- per this function's
-    // doc comment, an unset/unknown type is treated the same as "polygon"
-    // (explicit vertex list), not assumed to be "rect".
+    // BITCODE_BS ("1 rect, 2 polygon"). An unreadable or unset value is
+    // treated like "polygon", not assumed to be "rect".
     let clip_boundary_type =
         get_field::<u16>(entity_ptr, "WIPEOUT", "clip_boundary_type").unwrap_or(0);
 
@@ -301,42 +285,33 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
 }
 
 /// # Safety
-/// `dwg` must be the live `Dwg_Data` `obj` was obtained from; `obj` must be
-/// a valid pointer from `dwg_get_object` on that same `Dwg_Data`.
-unsafe fn convert_one(
+/// `dwg` must be the live `Dwg_Data` `obj` was obtained from; `obj` must be a
+/// valid pointer from `dwg_get_object` on that same `Dwg_Data`.
+unsafe fn convert_entity(
     dwg: *mut libredwg_sys::Dwg_Data,
     obj: *mut libredwg_sys::Dwg_Object,
-) -> Option<RenderEntity> {
-    // Cast needed for cross-platform bindgen enum-width consistency -- see
-    // the comment on the same call in convert_entities() above.
+) -> Option<Entity> {
+    // Cast for cross-platform bindgen enum-width consistency -- see the
+    // comment on the same call in convert_entities() above.
     let fixedtype =
         unsafe { libredwg_sys::dwg_object_get_fixedtype(obj) } as libredwg_sys::DWG_OBJECT_TYPE;
 
-    // Only entities have a meaningful geometry conversion here -- non-entity
-    // OBJECT-supertype objects (LAYER, BLOCK_RECORD, DICTIONARY, ...) return
-    // null from uncad_object_entity_ptr and are skipped rather than
-    // mis-reported as "unknown entities". LAYER/BLOCK_RECORD are still
-    // converted, just separately, by tables::convert_tables (its own
-    // top-level object walk, not through this function).
+    // Only entities have geometry to convert here. Non-entity OBJECT-supertype
+    // objects (LAYER, BLOCK_RECORD, DICTIONARY, ...) return null from
+    // uncad_object_entity_ptr and are skipped rather than mis-reported as
+    // unknown entities; the ones this crate needs are converted separately by
+    // tables::convert_tables.
     let entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(obj) };
     if entity_ptr.is_null() {
         return None;
     }
 
-    // BLOCK/ENDBLK are structural block-boundary sentinels, not user-visible
-    // drawing content -- every BLOCK_RECORD (including the implicit
-    // *Model_Space/*Paper_Space ones every file has) owns exactly one BLOCK
-    // + one ENDBLK. Confirmed during development against the sample_2000.dwg
-    // fixture (no longer bundled): the raw object walk
-    // found 3 BLOCK + 3 ENDBLK (one pair per block record) alongside the 6
-    // real entities the JS `parse()` baseline reported, so the JS converter
-    // must exclude these too -- excluded here to match.
+    // BLOCK/ENDBLK are structural block-boundary sentinels (every BLOCK_RECORD
+    // owns exactly one of each) and SEQEND closes an INSERT's attrib chain or
+    // an old-style POLYLINE's vertex chain. None of them is user-visible
+    // drawing content.
     if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_BLOCK
         || fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ENDBLK
-        // SEQEND closes an INSERT's attrib chain (or an old-style
-        // POLYLINE's vertex chain) -- structural, like BLOCK/ENDBLK, not
-        // user-visible content. Encountered via get_first_owned_subentity
-        // when walking an INSERT's attribs below.
         || fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND
     {
         return None;
@@ -359,7 +334,7 @@ unsafe fn convert_one(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LINE => {
             let start_point = get_field::<Point3D>(entity_ptr, "LINE", "start")?;
             let end_point = get_field::<Point3D>(entity_ptr, "LINE", "end")?;
-            RenderEntity::Line(LineEntity {
+            Entity::Line(LineEntity {
                 common,
                 start_point,
                 end_point,
@@ -368,7 +343,7 @@ unsafe fn convert_one(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_CIRCLE => {
             let center = get_field::<Point3D>(entity_ptr, "CIRCLE", "center")?;
             let radius = get_field::<f64>(entity_ptr, "CIRCLE", "radius")?;
-            RenderEntity::Circle(CircleEntity {
+            Entity::Circle(CircleEntity {
                 common,
                 center,
                 radius,
@@ -379,7 +354,7 @@ unsafe fn convert_one(
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
             let text = get_utf8_field(entity_ptr, "TEXT", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
-            RenderEntity::Text(TextEntity {
+            Entity::Text(TextEntity {
                 common,
                 start_point,
                 text_height,
@@ -391,10 +366,10 @@ unsafe fn convert_one(
             let vertices: Vec<Point2D> =
                 get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_points", "points");
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
-            RenderEntity::LwPolyline(LwPolylineEntity {
+            Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
-                closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
+                closed: flag & POLYLINE_CLOSED_FLAG != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -402,7 +377,7 @@ unsafe fn convert_one(
             let radius = get_field::<f64>(entity_ptr, "ARC", "radius")?;
             let start_angle = get_field::<f64>(entity_ptr, "ARC", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ARC", "end_angle")?;
-            RenderEntity::Arc(ArcEntity {
+            Entity::Arc(ArcEntity {
                 common,
                 center,
                 radius,
@@ -416,7 +391,7 @@ unsafe fn convert_one(
             let axis_ratio = get_field::<f64>(entity_ptr, "ELLIPSE", "axis_ratio")?;
             let start_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "end_angle")?;
-            RenderEntity::Ellipse(EllipseEntity {
+            Entity::Ellipse(EllipseEntity {
                 common,
                 center,
                 major_axis_endpoint,
@@ -431,7 +406,7 @@ unsafe fn convert_one(
             let x = get_field::<f64>(entity_ptr, "POINT", "x")?;
             let y = get_field::<f64>(entity_ptr, "POINT", "y")?;
             let z = get_field::<f64>(entity_ptr, "POINT", "z")?;
-            RenderEntity::Point(PointEntity {
+            Entity::Point(PointEntity {
                 common,
                 position: Point3D { x, y, z },
             })
@@ -441,7 +416,7 @@ unsafe fn convert_one(
             let corner2 = get_field::<Point2D>(entity_ptr, "SOLID", "corner2")?;
             let corner3 = get_field::<Point2D>(entity_ptr, "SOLID", "corner3")?;
             let corner4 = get_field::<Point2D>(entity_ptr, "SOLID", "corner4")?;
-            RenderEntity::Solid(SolidEntity {
+            Entity::Solid(SolidEntity {
                 common,
                 corner1,
                 corner2,
@@ -452,19 +427,19 @@ unsafe fn convert_one(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
             let point = get_field::<Point3D>(entity_ptr, "RAY", "point")?;
             let vector = get_field::<Point3D>(entity_ptr, "RAY", "vector")?;
-            RenderEntity::Ray(RayEntity {
+            Entity::Ray(RayEntity {
                 common,
                 point,
                 vector,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_XLINE => {
-            // Same underlying C struct as RAY (Dwg_Entity_XLINE is a
-            // typedef of Dwg_Entity_RAY), but dynapi is keyed by dxfname,
-            // so "XLINE" (not "RAY") is required here.
+            // Same underlying C struct as RAY (Dwg_Entity_XLINE is a typedef
+            // of Dwg_Entity_RAY), but dynapi is keyed by dxfname, so "XLINE"
+            // is required here.
             let point = get_field::<Point3D>(entity_ptr, "XLINE", "point")?;
             let vector = get_field::<Point3D>(entity_ptr, "XLINE", "vector")?;
-            RenderEntity::XLine(RayEntity {
+            Entity::XLine(RayEntity {
                 common,
                 point,
                 vector,
@@ -475,7 +450,7 @@ unsafe fn convert_one(
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
             let text = get_utf8_field(entity_ptr, "ATTRIB", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTRIB", "rotation").unwrap_or(0.0);
-            RenderEntity::Attrib(AttribEntity {
+            Entity::Attrib(AttribEntity {
                 common,
                 start_point,
                 text_height,
@@ -484,35 +459,35 @@ unsafe fn convert_one(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
-            let block_name =
-                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "INSERT", "block_header")
-                    .and_then(crate::tables::resolve_block_name)
-                    .unwrap_or_default();
+            let block_name = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                entity_ptr,
+                "INSERT",
+                "block_header",
+            )
+            .and_then(crate::tables::resolve_block_name)
+            .unwrap_or_default();
             let insertion_point = get_field::<Point3D>(entity_ptr, "INSERT", "ins_pt")?;
-            let scale =
-                get_field::<Point3D>(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                });
+            let scale = get_field::<Point3D>(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            });
             let rotation = get_field::<f64>(entity_ptr, "INSERT", "rotation").unwrap_or(0.0);
 
-            // ATTRIBs are owned by the INSERT itself (a separate ownership
-            // relationship from BLOCK_HEADER->entity), walked via
-            // get_first_owned_subentity on the INSERT's own Dwg_Object --
-            // not entity_ptr, which is the type-specific Dwg_Entity_INSERT
-            // struct dynapi needs, a different pointer than the owning
-            // Dwg_Object subentity iteration expects.
+            // ATTRIBs are owned by the INSERT itself -- a separate ownership
+            // relationship from BLOCK_HEADER -> entity, walked from the
+            // INSERT's own Dwg_Object rather than from entity_ptr (which is
+            // the type-specific struct dynapi needs, a different pointer).
             let mut attribs = Vec::new();
             let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
             while !sub.is_null() {
-                if let Some(RenderEntity::Attrib(attrib)) = unsafe { convert_one(dwg, sub) } {
+                if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
                     attribs.push(attrib);
                 }
                 sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
             }
 
-            RenderEntity::Insert(InsertEntity {
+            Entity::Insert(InsertEntity {
                 common,
                 block_name,
                 insertion_point,
@@ -527,7 +502,7 @@ unsafe fn convert_one(
             let default_value =
                 get_utf8_field(entity_ptr, "ATTDEF", "default_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
-            RenderEntity::Attdef(AttdefEntity {
+            Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
                 text_height,
@@ -539,7 +514,7 @@ unsafe fn convert_one(
             let center = get_field::<Point3D>(entity_ptr, "VIEWPORT", "center")?;
             let width = get_field::<f64>(entity_ptr, "VIEWPORT", "width")?;
             let height = get_field::<f64>(entity_ptr, "VIEWPORT", "height")?;
-            RenderEntity::Viewport(ViewportEntity {
+            Entity::Viewport(ViewportEntity {
                 common,
                 center,
                 width,
@@ -551,7 +526,7 @@ unsafe fn convert_one(
             let corner2 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner2")?;
             let corner3 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner3")?;
             let corner4 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner4")?;
-            RenderEntity::Face3D(Face3DEntity {
+            Entity::Face3D(Face3DEntity {
                 common,
                 corner1,
                 corner2,
@@ -560,24 +535,20 @@ unsafe fn convert_one(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SPLINE => {
-            // num_fit_pts is BITCODE_BS (u16, unsigned -- libredwg-sys binds
-            // BITCODE_BS as u16, not i16; confirmed against the generated
-            // bindings while working on HATCH's num_deflines, itself also a
-            // BITCODE_BS), unlike most other num_X fields (BITCODE_BL/u32)
-            // -- see get_array_field's doc comment.
+            // num_fit_pts is BITCODE_BS (u16), unlike most other num_X fields
+            // (BITCODE_BL/u32) -- see get_array_field's doc comment.
             let fit_points: Vec<Point3D> =
                 get_array_field::<u16, _>(entity_ptr, "SPLINE", "num_fit_pts", "fit_pts");
-            let control_points: Vec<Point3D> =
-                get_array_field::<u32, SplineControlPoint>(
-                    entity_ptr,
-                    "SPLINE",
-                    "num_ctrl_pts",
-                    "ctrl_pts",
-                )
-                .into_iter()
-                .map(Into::into)
-                .collect();
-            RenderEntity::Spline(SplineEntity {
+            let control_points: Vec<Point3D> = get_array_field::<u32, SplineControlPoint>(
+                entity_ptr,
+                "SPLINE",
+                "num_ctrl_pts",
+                "ctrl_pts",
+            )
+            .into_iter()
+            .map(Into::into)
+            .collect();
+            Entity::Spline(SplineEntity {
                 common,
                 fit_points,
                 control_points,
@@ -587,21 +558,14 @@ unsafe fn convert_one(
             let insertion_point = get_field::<Point3D>(entity_ptr, "MTEXT", "ins_pt")?;
             let text = get_utf8_field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
-            // dwg.h's own comment on x_axis_dir says "defines the rotation",
-            // and atan2(x_axis_dir.y, x_axis_dir.x) does look like the right
-            // derivation -- but the JS baseline's convertMText() never
-            // actually implements it (`rotation: 0, // TODO: Didn't find
-            // the corresponding field in libredwg`, entityConverter.ts).
-            // Confirmed by diffing rendered SVG on example_r14.dwg: an
-            // MTEXT with a real x_axis_dir renders `rotate(0 ...)` in the
-            // JS output but a nonzero angle here until matched. Same
-            // discipline as LWPOLYLINE's closed-bit: match the JS
-            // baseline's actual (if incomplete) behavior rather than
-            // "improve" on an unverified guess.
+            // dwg.h's comment on x_axis_dir says it "defines the rotation",
+            // and atan2(x_axis_dir.y, x_axis_dir.x) looks like the right
+            // derivation -- but with no verified reference to confirm it, this
+            // stays 0 rather than guessing. See docs/CAVEATS.md.
             let rotation = 0.0;
             let line_spacing_factor =
                 get_field::<f64>(entity_ptr, "MTEXT", "linespace_factor").unwrap_or(1.0);
-            RenderEntity::MText(MTextEntity {
+            Entity::MText(MTextEntity {
                 common,
                 insertion_point,
                 text,
@@ -611,47 +575,40 @@ unsafe fn convert_one(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
-            // NOT a generic get_first_owned_subentity walk (tried first --
-            // wrong: it over-collected one extra vertex on a real fixture,
-            // confirmed by diffing against the JS baseline's rendered SVG).
-            // The JS baseline itself calls the real, dedicated LibreDWG C
-            // function dwg_object_polyline_3d_get_points() (via its embind
-            // wrapper), which -- for pre-R2004 files -- walks
-            // first_vertex..last_vertex through the raw object list
-            // (dwg_next_object), a different traversal than the generic
-            // owned-subentity chain. Calling the exact same C function
-            // directly guarantees identical results rather than
-            // reimplementing (and risking subtly re-diverging from) its
-            // version-dependent logic.
-            let mut error = 0i32;
-            let points_ptr =
-                unsafe { libredwg_sys::dwg_object_polyline_3d_get_points(obj, &mut error) };
-            let num_points =
-                unsafe { libredwg_sys::dwg_object_polyline_3d_get_numpoints(obj, &mut error) };
-            let vertices: Vec<Point3D> = if points_ptr.is_null() || num_points == 0 {
-                Vec::new()
-            } else {
-                // SAFETY: dwg_object_polyline_3d_get_points calloc's exactly
-                // num_points dwg_point_3d entries (same layout as Point3D)
-                // on success; we copy out before freeing.
-                let slice = unsafe {
-                    std::slice::from_raw_parts(
-                        points_ptr.cast::<Point3D>(),
-                        num_points as usize,
-                    )
-                };
-                let v = slice.to_vec();
-                unsafe { libc::free(points_ptr.cast()) };
-                v
+            // SAFETY: obj is a POLYLINE_3D per fixedtype, and Point3D mirrors
+            // dwg_point_3d's layout.
+            let vertices: Vec<Point3D> = unsafe {
+                read_polyline_points(
+                    obj,
+                    libredwg_sys::dwg_object_polyline_3d_get_points,
+                    libredwg_sys::dwg_object_polyline_3d_get_numpoints,
+                )
             };
             // POLYLINE_3D.flag is BITCODE_RC (1 byte), unlike LWPOLYLINE's
-            // BITCODE_BS (2 bytes) -- same closed-bit convention (bit 1),
-            // different underlying C width.
+            // BITCODE_BS (2 bytes) -- same closed-bit convention, different
+            // underlying C width.
             let flag = get_field::<u8>(entity_ptr, "POLYLINE_3D", "flag").unwrap_or(0);
-            RenderEntity::Polyline3D(PolylineEntity {
+            Entity::Polyline3D(PolylineEntity {
                 common,
                 vertices,
-                closed: flag & (LWPOLYLINE_CLOSED_FLAG as u8) != 0,
+                closed: flag & (POLYLINE_CLOSED_FLAG as u8) != 0,
+            })
+        }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
+            // SAFETY: obj is a POLYLINE_2D per fixedtype, and Point2D mirrors
+            // dwg_point_2d's layout.
+            let vertices: Vec<Point2D> = unsafe {
+                read_polyline_points(
+                    obj,
+                    libredwg_sys::dwg_object_polyline_2d_get_points,
+                    libredwg_sys::dwg_object_polyline_2d_get_numpoints,
+                )
+            };
+            let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
+            Entity::Polyline2D(LwPolylineEntity {
+                common,
+                vertices,
+                closed: flag & POLYLINE_CLOSED_FLAG != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE
@@ -661,41 +618,24 @@ unsafe fn convert_one(
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER
-        // ARC_DIMENSION (dwg.h's 7th DIMENSION subtype) shares the same
-        // DIMENSION_COMMON layout -- including the same `block` handle to
-        // its cached-geometry anonymous block -- as the other 6, so it
-        // needs no new rendering path, just recognizing it here. The JS
-        // baseline never recognized it (unlike the other 6 -- see
-        // MultiLeaderEntity/MLineEntity for genuinely new functionality;
-        // this one only extends an existing DIMENSION path to a type JS
-        // happened not to switch on, using the exact mechanism JS itself
-        // established for its 6 siblings).
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => {
             let dxfname = dimension_dxfname(fixedtype);
-            let block_name = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
-                entity_ptr,
-                dxfname,
-                "block",
-            )
-            .and_then(crate::tables::resolve_block_name)
-            .unwrap_or_default();
-            RenderEntity::Dimension(DimensionEntity { common, block_name })
+            let block_name =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block")
+                    .and_then(crate::tables::resolve_block_name)
+                    .unwrap_or_default();
+            Entity::Dimension(DimensionEntity { common, block_name })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
-            // ACAD_TABLE: new functionality, not a JS-baseline port -- see
-            // AcadTableEntity's doc comment. dynapi's field-table key for
-            // this type is "TABLE" (dwg.h/dynapi.c's internal name), not
-            // "ACAD_TABLE" (the real DXF/type_name() name, only returned
-            // by dwg_object_get_dxfname) -- passing "ACAD_TABLE" here
-            // would fail dwg_dynapi_entity_value's strict obj->name check,
-            // same class of pitfall as REGION/3DSOLID (see acis.rs).
-            let block_name = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
-                entity_ptr,
-                "TABLE",
-                "block_header",
-            )
-            .and_then(crate::tables::resolve_block_name)
-            .unwrap_or_default();
+            // dynapi's field-table key for this type is "TABLE" (dwg.h's
+            // internal name), not "ACAD_TABLE" (the DXF name
+            // dwg_object_get_dxfname reports) -- passing the latter would fail
+            // dwg_dynapi_entity_value's strict obj->name check, the same
+            // pitfall as REGION/3DSOLID (see acis.rs).
+            let block_name =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header")
+                    .and_then(crate::tables::resolve_block_name)
+                    .unwrap_or_default();
             let insertion_point = get_field::<Point3D>(entity_ptr, "TABLE", "ins_pt")?;
             let scale = get_field::<Point3D>(entity_ptr, "TABLE", "scale").unwrap_or(Point3D {
                 x: 1.0,
@@ -703,7 +643,7 @@ unsafe fn convert_one(
                 z: 1.0,
             });
             let rotation = get_field::<f64>(entity_ptr, "TABLE", "rotation").unwrap_or(0.0);
-            RenderEntity::AcadTable(AcadTableEntity {
+            Entity::AcadTable(AcadTableEntity {
                 common,
                 block_name,
                 insertion_point,
@@ -712,12 +652,12 @@ unsafe fn convert_one(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_HATCH => {
-            let solid_fill = get_field::<u8>(entity_ptr, "HATCH", "is_solid_fill").unwrap_or(0) != 0;
+            let solid_fill =
+                get_field::<u8>(entity_ptr, "HATCH", "is_solid_fill").unwrap_or(0) != 0;
             let paths: Vec<libredwg_sys::Dwg_HATCH_Path> =
                 get_array_field::<u32, _>(entity_ptr, "HATCH", "num_paths", "paths");
             let boundary_paths = paths.iter().map(convert_hatch_path).collect();
-            // num_deflines is BITCODE_BS (u16), unlike num_paths' BITCODE_BL
-            // (u32) -- see get_array_field's doc comment.
+            // num_deflines is BITCODE_BS (u16), unlike num_paths' BITCODE_BL.
             let deflines: Vec<libredwg_sys::Dwg_HATCH_DefLine> =
                 get_array_field::<u16, _>(entity_ptr, "HATCH", "num_deflines", "deflines");
             let pattern_lines = deflines.iter().map(convert_hatch_defline).collect();
@@ -725,27 +665,29 @@ unsafe fn convert_one(
             // unlike is_solid_fill (BITCODE_B, u8) above.
             let is_gradient_fill =
                 get_field::<u32>(entity_ptr, "HATCH", "is_gradient_fill").unwrap_or(0) != 0;
-            let gradient = is_gradient_fill.then(|| {
-                let gradient_angle =
-                    get_field::<f64>(entity_ptr, "HATCH", "gradient_angle").unwrap_or(0.0);
-                let single_color_gradient =
-                    get_field::<u32>(entity_ptr, "HATCH", "single_color_gradient").unwrap_or(0) != 0;
-                let gradient_tint =
-                    get_field::<f64>(entity_ptr, "HATCH", "gradient_tint").unwrap_or(0.0);
-                let gradient_name =
-                    get_utf8_field(entity_ptr, "HATCH", "gradient_name").unwrap_or_default();
-                // num_colors is BITCODE_BL (u32), like num_paths.
-                let colors: Vec<libredwg_sys::Dwg_HATCH_Color> =
-                    get_array_field::<u32, _>(entity_ptr, "HATCH", "num_colors", "colors");
-                convert_hatch_gradient(
-                    gradient_angle,
-                    single_color_gradient,
-                    gradient_tint,
-                    &gradient_name,
-                    &colors,
-                )
-            }).flatten();
-            RenderEntity::Hatch(HatchEntity {
+            let gradient = is_gradient_fill
+                .then(|| {
+                    let gradient_angle =
+                        get_field::<f64>(entity_ptr, "HATCH", "gradient_angle").unwrap_or(0.0);
+                    let single_color_gradient =
+                        get_field::<u32>(entity_ptr, "HATCH", "single_color_gradient").unwrap_or(0)
+                            != 0;
+                    let gradient_tint =
+                        get_field::<f64>(entity_ptr, "HATCH", "gradient_tint").unwrap_or(0.0);
+                    let gradient_name =
+                        get_utf8_field(entity_ptr, "HATCH", "gradient_name").unwrap_or_default();
+                    let colors: Vec<libredwg_sys::Dwg_HATCH_Color> =
+                        get_array_field::<u32, _>(entity_ptr, "HATCH", "num_colors", "colors");
+                    convert_hatch_gradient(
+                        gradient_angle,
+                        single_color_gradient,
+                        gradient_tint,
+                        &gradient_name,
+                        &colors,
+                    )
+                })
+                .flatten();
+            Entity::Hatch(HatchEntity {
                 common,
                 boundary_paths,
                 solid_fill,
@@ -757,41 +699,39 @@ unsafe fn convert_one(
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity__3DSOLID*
             // (checked above), matching fixedtype.
             let wireframe_edges = unsafe { crate::acis::extract_wireframe(entity_ptr, "3DSOLID") };
-            RenderEntity::Solid3D(Solid3DEntity { common, wireframe_edges })
+            Entity::Solid3D(Solid3DEntity {
+                common,
+                wireframe_edges,
+            })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_REGION => {
-            // REGION reuses Dwg_Entity__3DSOLID's exact struct layout
-            // (dwg.h: `typedef Dwg_Entity__3DSOLID Dwg_Entity_REGION`) and
-            // ACIS wireframe extraction, but needs its own real dxfname
-            // passed through -- see extract_wireframe's doc comment for
-            // why "3DSOLID" can't be hardcoded here. New functionality
-            // beyond the JS baseline, which never handled REGION at all;
-            // see docs/CAVEATS.md.
-            //
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_REGION*
-            // (checked above, matching fixedtype), which is
-            // layout-identical to Dwg_Entity__3DSOLID* per the typedef
-            // above -- the cast extract_wireframe does internally is sound.
+            // (checked above, matching fixedtype), which dwg.h typedefs from
+            // Dwg_Entity__3DSOLID -- layout-identical, so the cast
+            // extract_wireframe does internally is sound. Its real dxfname has
+            // to be passed through: dynapi refuses a name mismatch (acis.rs).
             let wireframe_edges = unsafe { crate::acis::extract_wireframe(entity_ptr, "REGION") };
-            RenderEntity::Region(Solid3DEntity { common, wireframe_edges })
+            Entity::Region(Solid3DEntity {
+                common,
+                wireframe_edges,
+            })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_PFACE => {
-            // SAFETY: obj is a valid, non-null Dwg_Object* for a
-            // POLYLINE_PFACE (matching fixedtype); polyline_pface_wireframe
-            // only walks its owned-subentity chain (get_first_owned_subentity/
-            // get_next_owned_subentity), the same mechanism already used for
-            // INSERT's attribs above.
+            // SAFETY: obj is a valid, non-null POLYLINE_PFACE Dwg_Object*
+            // (matching fixedtype); the helper only walks its owned-subentity
+            // chain.
             let wireframe_edges = unsafe { polyline_pface_wireframe(obj) };
-            RenderEntity::PolylinePFace(Solid3DEntity { common, wireframe_edges })
+            Entity::PolylinePFace(Solid3DEntity {
+                common,
+                wireframe_edges,
+            })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
-            // New functionality, not a JS-baseline port -- see
-            // ToleranceEntity's doc comment.
             let insertion_point = get_field::<Point3D>(entity_ptr, "TOLERANCE", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
             let text_value =
                 get_utf8_field(entity_ptr, "TOLERANCE", "text_value").unwrap_or_default();
-            RenderEntity::Tolerance(ToleranceEntity {
+            Entity::Tolerance(ToleranceEntity {
                 common,
                 insertion_point,
                 text_height,
@@ -799,129 +739,99 @@ unsafe fn convert_one(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_WIPEOUT => {
-            // New functionality, not a JS-baseline port -- see
-            // WipeoutEntity's doc comment for the risk this one carries
-            // beyond "unverified against a real file".
             let boundary = wipeout_boundary(entity_ptr);
-            RenderEntity::Wipeout(WipeoutEntity { common, boundary })
+            Entity::Wipeout(WipeoutEntity { common, boundary })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LIGHT => {
-            // New functionality, not a JS-baseline port -- see
-            // LightEntity's doc comment.
             let position = get_field::<Point3D>(entity_ptr, "LIGHT", "position")?;
             let target = get_field::<Point3D>(entity_ptr, "LIGHT", "target").unwrap_or(position);
             // type: distant=1, point=2, spot=3 (dwg.h, BITCODE_BL) -- only
             // distant/spot actually aim at `target`.
             let light_type = get_field::<u32>(entity_ptr, "LIGHT", "type").unwrap_or(2);
-            let target_is_meaningful = light_type != 2 && target != position;
-            RenderEntity::Light(LightEntity {
+            Entity::Light(LightEntity {
                 common,
                 position,
                 target,
-                target_is_meaningful,
-            })
-        }
-        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // Same dedicated-C-function discipline as POLYLINE_3D just
-            // above: the JS baseline calls libredwg's own
-            // dwg_object_polyline_2d_get_points() (not a generic
-            // owned-subentity walk), so this does too rather than risking
-            // re-diverging from its version-dependent vertex traversal.
-            let mut error = 0i32;
-            let points_ptr =
-                unsafe { libredwg_sys::dwg_object_polyline_2d_get_points(obj, &mut error) };
-            let num_points =
-                unsafe { libredwg_sys::dwg_object_polyline_2d_get_numpoints(obj, &mut error) };
-            let vertices: Vec<Point2D> = if points_ptr.is_null() || num_points == 0 {
-                Vec::new()
-            } else {
-                // SAFETY: dwg_object_polyline_2d_get_points calloc's exactly
-                // num_points dwg_point_2d entries (same layout as Point2D)
-                // on success; we copy out before freeing.
-                let slice = unsafe {
-                    std::slice::from_raw_parts(
-                        points_ptr.cast::<Point2D>(),
-                        num_points as usize,
-                    )
-                };
-                let v = slice.to_vec();
-                unsafe { libc::free(points_ptr.cast()) };
-                v
-            };
-            // POLYLINE_2D.flag is BITCODE_BS, same width and closed-bit
-            // convention (bit 1) as LWPOLYLINE's.
-            let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
-            RenderEntity::Polyline2D(LwPolylineEntity {
-                common,
-                vertices,
-                closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
+                has_target: light_type != 2 && target != position,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINE => {
-            RenderEntity::MLine(convert_mline(dwg, entity_ptr, common))
+            Entity::MLine(convert_mline(dwg, entity_ptr, common))
         }
-        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MULTILEADER => {
-            let mut lines_ptr: *mut libredwg_sys::uncad_multileader_line_t = std::ptr::null_mut();
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MULTILEADER => Entity::MultiLeader({
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_MULTILEADER*
-            // (checked above), matching fixedtype; uncad_multileader_get_lines
-            // mallocs *lines_ptr (num_lines entries, each owning its own
-            // points buffer) on success, freed below via
-            // uncad_multileader_free_lines before returning.
-            let num_lines =
-                unsafe { libredwg_sys::uncad_multileader_get_lines(entity_ptr, &mut lines_ptr) };
-            let mut lines = Vec::with_capacity(num_lines as usize);
-            if !lines_ptr.is_null() {
-                let raw_lines =
-                    unsafe { std::slice::from_raw_parts(lines_ptr, num_lines as usize) };
-                for l in raw_lines {
-                    if l.points.is_null() || l.num_points == 0 {
-                        continue;
-                    }
-                    // SAFETY: points is a flat (x,y,z) triple array of
-                    // num_points*3 doubles, per uncad_multileader_get_lines'
-                    // contract.
-                    let flat = unsafe {
-                        std::slice::from_raw_parts(l.points, l.num_points as usize * 3)
-                    };
-                    let pts = flat
-                        .chunks_exact(3)
-                        .map(|c| Point3D { x: c[0], y: c[1], z: c[2] })
-                        .collect();
-                    lines.push(pts);
-                }
-                unsafe { libredwg_sys::uncad_multileader_free_lines(lines_ptr, num_lines) };
-            }
-            RenderEntity::MultiLeader(MultiLeaderEntity { common, lines })
-        }
+            // (checked above), matching fixedtype.
+            let lines = unsafe { multileader_lines(entity_ptr) };
+            MultiLeaderEntity { common, lines }
+        }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
             let vertices: Vec<Point3D> =
                 get_array_field::<u32, _>(entity_ptr, "LEADER", "num_points", "points");
-            // arrowhead_type is BITCODE_BS (u16, unsigned; not a bit flag)
-            // -- JS baseline treats any nonzero value as "enabled",
-            // matching its own `isArrowheadEnabled > 0` check.
-            let is_arrowhead_enabled =
+            // arrowhead_type is BITCODE_BS (u16, not a bit flag): any nonzero
+            // value means an arrowhead is drawn.
+            let has_arrowhead =
                 get_field::<u16>(entity_ptr, "LEADER", "arrowhead_type").unwrap_or(0) > 0;
-            RenderEntity::Leader(LeaderEntity {
+            Entity::Leader(LeaderEntity {
                 common,
                 vertices,
-                is_arrowhead_enabled,
+                has_arrowhead,
             })
         }
         // SAFETY: obj is valid per this function's own `# Safety` doc contract.
-        _ => RenderEntity::Unknown {
+        _ => Entity::Unknown {
             common,
             type_name: unsafe { dxfname(obj) },
         },
     })
 }
 
-/// Reads a raw `(ptr, count)` pair from a *nested* struct field (not
-/// reachable through dynapi, which only exposes top-level entity fields by
-/// name) as an owned `Vec<T>`.
+/// Reads a MULTILEADER's leader lines through the `uncad_multileader_get_lines`
+/// shim, which flattens the three struct levels dynapi cannot reach
+/// (`ctx.leaders[].lines[].points[]`) into plain `(x, y, z)` arrays.
 ///
 /// # Safety
-/// `ptr` must be valid for reads of `count` consecutive `T`s (or null,
-/// treated as empty), matching LibreDWG's own num_X/X array convention.
+/// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*`.
+unsafe fn multileader_lines(entity_ptr: *mut std::ffi::c_void) -> Vec<Vec<Point3D>> {
+    let mut lines_ptr: *mut libredwg_sys::uncad_multileader_line_t = std::ptr::null_mut();
+    // SAFETY: entity_ptr is valid per this function's contract; on success the
+    // shim mallocs *lines_ptr (num_lines entries, each owning its own points
+    // buffer), freed below before returning.
+    let num_lines =
+        unsafe { libredwg_sys::uncad_multileader_get_lines(entity_ptr, &mut lines_ptr) };
+    if lines_ptr.is_null() {
+        return Vec::new();
+    }
+
+    let raw_lines = unsafe { std::slice::from_raw_parts(lines_ptr, num_lines as usize) };
+    let mut lines = Vec::with_capacity(num_lines as usize);
+    for line in raw_lines {
+        if line.points.is_null() || line.num_points == 0 {
+            continue;
+        }
+        // SAFETY: points is a flat (x,y,z) triple array of num_points*3
+        // doubles, per uncad_multileader_get_lines' contract.
+        let flat = unsafe { std::slice::from_raw_parts(line.points, line.num_points as usize * 3) };
+        lines.push(
+            flat.chunks_exact(3)
+                .map(|c| Point3D {
+                    x: c[0],
+                    y: c[1],
+                    z: c[2],
+                })
+                .collect(),
+        );
+    }
+    unsafe { libredwg_sys::uncad_multileader_free_lines(lines_ptr, num_lines) };
+    lines
+}
+
+/// Reads a raw `(ptr, count)` pair from a *nested* struct field (not reachable
+/// through dynapi, which only exposes top-level entity fields by name) as an
+/// owned `Vec<T>`.
+///
+/// # Safety
+/// `ptr` must be valid for reads of `count` consecutive `T`s (or null, treated
+/// as empty), matching LibreDWG's own num_X/X array convention.
 unsafe fn read_raw_array<T: Copy>(ptr: *const T, count: u32) -> Vec<T> {
     if ptr.is_null() || count == 0 {
         return Vec::new();
@@ -929,16 +839,21 @@ unsafe fn read_raw_array<T: Copy>(ptr: *const T, count: u32) -> Vec<T> {
     unsafe { std::slice::from_raw_parts(ptr, count as usize) }.to_vec()
 }
 
-/// HATCH.paths[i].flag bit for "this path is a polyline" (vs. a list of
-/// curved/straight edges) -- see dwg.h's field comment on
-/// Dwg_HATCH_Path::flag.
+/// `HATCH.paths[i].flag` bit for "this path is a polyline" (vs. a list of
+/// curved/straight edges).
 const HATCH_PATH_IS_POLYLINE_FLAG: u32 = 0x02;
+
+/// HATCH boundary edge curve types (`Dwg_HATCH_PathSeg::curve_type`).
+const HATCH_EDGE_LINE: u8 = 1;
+const HATCH_EDGE_ARC: u8 = 2;
+const HATCH_EDGE_ELLIPSE: u8 = 3;
+const HATCH_EDGE_SPLINE: u8 = 4;
 
 fn convert_hatch_path(path: &libredwg_sys::Dwg_HATCH_Path) -> HatchBoundaryPath {
     if path.flag & HATCH_PATH_IS_POLYLINE_FLAG != 0 {
-        // SAFETY: polyline_paths/num_segs_or_paths are LibreDWG's own
-        // matched array-length convention (see Dwg_HATCH_Path in dwg.h);
-        // valid until dwg_free, which outlives this whole conversion pass.
+        // SAFETY: polyline_paths/num_segs_or_paths are LibreDWG's own matched
+        // array-length convention (see Dwg_HATCH_Path in dwg.h); valid until
+        // dwg_free, which outlives this whole conversion pass.
         let vertices: Vec<Point2D> =
             unsafe { read_raw_array(path.polyline_paths, path.num_segs_or_paths) }
                 .into_iter()
@@ -955,12 +870,6 @@ fn convert_hatch_path(path: &libredwg_sys::Dwg_HATCH_Path) -> HatchBoundaryPath 
         HatchBoundaryPath::Edges(edges)
     }
 }
-
-/// HATCH boundary edge curve types (Dwg_HATCH_PathSeg::curve_type in dwg.h).
-const HATCH_EDGE_LINE: u8 = 1;
-const HATCH_EDGE_ARC: u8 = 2;
-const HATCH_EDGE_ELLIPSE: u8 = 3;
-const HATCH_EDGE_SPLINE: u8 = 4;
 
 fn convert_hatch_edge(seg: &libredwg_sys::Dwg_HATCH_PathSeg) -> Option<HatchEdge> {
     let p2 = |p: libredwg_sys::BITCODE_2RD| Point2D { x: p.x, y: p.y };
@@ -984,9 +893,8 @@ fn convert_hatch_edge(seg: &libredwg_sys::Dwg_HATCH_PathSeg) -> Option<HatchEdge
             is_ccw: seg.is_ccw != 0,
         },
         HATCH_EDGE_SPLINE => {
-            // SAFETY: num_control_points/control_points is the same
-            // matched array-length convention as everywhere else in
-            // dwg.h; valid until dwg_free.
+            // SAFETY: num_control_points/control_points is the same matched
+            // array-length convention as everywhere else in dwg.h.
             let control_points =
                 unsafe { read_raw_array(seg.control_points, seg.num_control_points) }
                     .into_iter()
@@ -998,60 +906,10 @@ fn convert_hatch_edge(seg: &libredwg_sys::Dwg_HATCH_PathSeg) -> Option<HatchEdge
     })
 }
 
-/// `point + miter_direction * offset` gives a vertex's position on the
-/// parallel line `offset` away from an MLINE's centerline -- `miter_direction`
-/// (per LibreDWG's own field, not derived here) already accounts for the
-/// miter angle at that vertex, so this is a plain scalar-multiply-and-add,
-/// no trigonometry needed. `mlinestyle_name` is resolved here (at convert
-/// time, like `EntityCommon::layer`) but not looked up against
-/// `Tables::mlinestyles` until render time in `svg.rs` -- `Tables` isn't
-/// built yet when entities are converted (see `lib.rs::parse`'s ordering),
-/// the same reason BYLAYER color resolution is deferred.
-fn convert_mline(
-    dwg: *mut libredwg_sys::Dwg_Data,
-    entity_ptr: *mut std::ffi::c_void,
-    common: EntityCommon,
-) -> MLineEntity {
-    // num_verts is BITCODE_BS (u16, unsigned) -- see the SPLINE
-    // num_fit_pts comment above for how this class of mistake was
-    // found (libredwg-sys binds BITCODE_BS as u16, not i16).
-    let verts: Vec<libredwg_sys::Dwg_MLINE_vertex> =
-        get_array_field::<u16, _>(entity_ptr, "MLINE", "num_verts", "verts");
-    let vertices: Vec<MLineVertex> = verts
-        .iter()
-        .map(|v| MLineVertex {
-            point: Point3D {
-                x: v.vertex.x,
-                y: v.vertex.y,
-                z: v.vertex.z,
-            },
-            miter_direction: Point3D {
-                x: v.miter_direction.x,
-                y: v.miter_direction.y,
-                z: v.miter_direction.z,
-            },
-        })
-        .collect();
-    // MLINE_FLAGS_CLOSED (dwg.h) = 2.
-    let flags = get_field::<u16>(entity_ptr, "MLINE", "flags").unwrap_or(0);
-    let mlinestyle_name =
-        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle")
-            .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
-            .unwrap_or_default();
-    MLineEntity {
-        common,
-        vertices,
-        closed: flags & 2 != 0,
-        mlinestyle_name,
-    }
-}
-
 fn convert_hatch_defline(defline: &libredwg_sys::Dwg_HATCH_DefLine) -> HatchPatternLine {
-    // SAFETY: num_dashes/dashes is the same matched array-length convention
-    // as everywhere else in dwg.h; valid until dwg_free. num_dashes is
-    // BITCODE_BS, which libredwg-sys binds as u16 (unsigned) -- a plain
-    // widening cast is enough, no negative-count wraparound to guard
-    // against.
+    // SAFETY: num_dashes/dashes is the same matched array-length convention as
+    // everywhere else in dwg.h. num_dashes is BITCODE_BS (unsigned), so the
+    // widening cast has no negative-count wraparound to guard against.
     let dash_pattern = unsafe { read_raw_array(defline.dashes, defline.num_dashes as u32) };
     HatchPatternLine {
         angle: defline.angle,
@@ -1067,12 +925,9 @@ fn convert_hatch_defline(defline: &libredwg_sys::Dwg_HATCH_DefLine) -> HatchPatt
     }
 }
 
-/// Resolves one `Dwg_HATCH_Color` gradient stop's `Dwg_Color` to a hex
-/// string, using the same truecolor-overrides-ACI precedence as
-/// [`entity_color`]/[`crate::color::resolve_color`] -- but unlike an
-/// entity's own color, a gradient stop is never BYLAYER/BYBLOCK (256/0
-/// don't apply here), so this skips straight to `aci_to_hex` for the
-/// non-truecolor case instead of needing layer/inherited-color context.
+/// Resolves one gradient stop's `Dwg_Color` to a hex string. Same
+/// truecolor-overrides-ACI precedence as [`entity_color`], but a gradient stop
+/// is never BYLAYER/BYBLOCK, so it needs no layer or inherited-color context.
 fn hatch_stop_color(c: &libredwg_sys::Dwg_HATCH_Color) -> String {
     let true_color = (c.color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
         .then_some(c.color.rgb & 0xff_ffff);
@@ -1081,11 +936,9 @@ fn hatch_stop_color(c: &libredwg_sys::Dwg_HATCH_Color) -> String {
         .unwrap_or_else(|| crate::color::DEFAULT_COLOR.to_string())
 }
 
-/// Builds a [`HatchGradient`] from the raw `Dwg_Entity_HATCH` gradient
-/// fields. Returns `None` when there's no usable color data (falls back to
-/// `pattern_lines`/outline-only rendering at the call site) -- see
-/// [`HatchGradient`]'s doc comment for the unverified `gradient_name`
-/// radial/linear split and the `single_color_gradient` tint approximation.
+/// Builds a [`HatchGradient`] from the raw `Dwg_Entity_HATCH` gradient fields.
+/// `None` when there is no usable color data, in which case the caller falls
+/// back to pattern or outline-only rendering.
 fn convert_hatch_gradient(
     angle: f64,
     single_color_gradient: bool,
@@ -1098,7 +951,7 @@ fn convert_hatch_gradient(
         let color2 = crate::color::tint_toward_white(&color1, gradient_tint);
         (color1, color2)
     } else if colors.len() >= 2 {
-        // shift_value (0.0-1.0) orders the stops; colors isn't guaranteed
+        // shift_value (0.0-1.0) orders the stops; `colors` is not guaranteed
         // to already be sorted by it.
         let mut sorted: Vec<&libredwg_sys::Dwg_HATCH_Color> = colors.iter().collect();
         sorted.sort_by(|a, b| {
@@ -1126,9 +979,50 @@ fn convert_hatch_gradient(
     })
 }
 
+/// Reads an MLINE's vertices and its MLINESTYLE reference. `mlinestyle_name` is
+/// resolved here but only looked up against
+/// [`crate::tables::Tables::mlinestyles`] at render time -- `Tables` is not
+/// built yet while entities are converted, the same reason BYLAYER color
+/// resolution is deferred.
+fn convert_mline(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+    common: EntityCommon,
+) -> MLineEntity {
+    // num_verts is BITCODE_BS (u16), not BITCODE_BL.
+    let verts: Vec<libredwg_sys::Dwg_MLINE_vertex> =
+        get_array_field::<u16, _>(entity_ptr, "MLINE", "num_verts", "verts");
+    let vertices: Vec<MLineVertex> = verts
+        .iter()
+        .map(|v| MLineVertex {
+            point: Point3D {
+                x: v.vertex.x,
+                y: v.vertex.y,
+                z: v.vertex.z,
+            },
+            miter_direction: Point3D {
+                x: v.miter_direction.x,
+                y: v.miter_direction.y,
+                z: v.miter_direction.z,
+            },
+        })
+        .collect();
+    let flags = get_field::<u16>(entity_ptr, "MLINE", "flags").unwrap_or(0);
+    let mlinestyle_name =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle")
+            .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+            .unwrap_or_default();
+    MLineEntity {
+        common,
+        vertices,
+        closed: flags & MLINE_CLOSED_FLAG != 0,
+        mlinestyle_name,
+    }
+}
+
 /// The 7 DIMENSION subtypes share `DIMENSION_COMMON`'s fields (including
-/// `block`, the cached-geometry handle), but dynapi is keyed by each
-/// subtype's own dxfname -- there's no generic `"DIMENSION"` to pass.
+/// `block`, the cached-geometry handle), but dynapi is keyed by each subtype's
+/// own dxfname -- there is no generic `"DIMENSION"` to pass.
 fn dimension_dxfname(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> &'static str {
     match fixedtype {
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => "DIMENSION_ORDINATE",
@@ -1144,10 +1038,10 @@ fn dimension_dxfname(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> &'static str {
 }
 
 /// Reads the common `color` (`Dwg_Color`) field and splits it into
-/// `(color_index, true_color)` per [`EntityCommon`]'s doc comment.
+/// `(color_index, true_color)` per [`EntityCommon`].
 fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
     let Some(color) = get_common_field::<libredwg_sys::Dwg_Color>(entity_ptr, "color") else {
-        return (256, None); // no color field at all -- BYLAYER default, matches toSVG's `?? 256`.
+        return (256, None); // no color field at all -- BYLAYER default
     };
     let true_color = (color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
         .then_some(color.rgb & 0xff_ffff);
@@ -1216,7 +1110,7 @@ mod tests {
 
     #[test]
     fn gradient_two_color_orders_stops_by_shift_value_not_array_order() {
-        // colors[0] is the *second* stop (shift_value 1.0); the array isn't
+        // colors[0] is the *second* stop (shift_value 1.0); the array is not
         // guaranteed to already be sorted.
         let colors = [aci_stop(1.0, 5), aci_stop(0.0, 1)];
         let g = convert_hatch_gradient(0.0, false, 0.0, "LINEAR", &colors).unwrap();
@@ -1227,7 +1121,7 @@ mod tests {
 
     #[test]
     fn gradient_single_color_tints_toward_white_for_second_stop() {
-        let colors = [aci_stop(0.0, 7)]; // ACI 7 -> normalized to black (#000000)
+        let colors = [aci_stop(0.0, 7)]; // ACI 7 -> normalized to black
         let g = convert_hatch_gradient(0.0, true, 0.5, "LINEAR", &colors).unwrap();
         assert_eq!(g.color1, "#000000");
         assert_eq!(g.color2, "#808080");

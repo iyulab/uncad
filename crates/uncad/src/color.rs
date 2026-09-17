@@ -1,25 +1,17 @@
-//! AutoCAD color resolution, ported from `src/index.mjs`'s `resolveColor`/
-//! `layerColorHex`/`aciToHex`/`trueColorToHex`/`normalizeHexForWhiteBg`.
-//! Kept as pure functions here, separate from `svg.rs`'s string-building
-//! code, matching how the JS source already separates this logic too.
+//! AutoCAD color resolution: the ACI palette, BYLAYER/BYBLOCK precedence, and
+//! the white-background normalization. Pure functions, kept separate from the
+//! renderer's string building.
 //!
-//! Every quirk below is preserved verbatim from the JS version, not
-//! rediscovered -- see docs/CAVEATS.md for the two real bugs (LAYER.color
-//! always reporting white, white-on-white invisibility) that were only
-//! caught by comparing rendered output against real AutoCAD screenshots.
+//! Two of the quirks here (a layer's color reporting as white, and
+//! white-on-white invisibility) were real bugs caught only by comparing
+//! rendered output against AutoCAD itself -- see `docs/CAVEATS.md`.
 
 use crate::tables::Tables;
 
 pub const DEFAULT_COLOR: &str = "#000000";
 
-// Standard AutoCAD Color Index (ACI) palette -- packed 24-bit RGB integers,
-// index 0-256. Ported verbatim from this project's own JS/WASM-era
-// predecessor (`src/index.mjs`, itself ported from the mlightcad/
-// libredwg-web fork's `bindings/javascript/src/svg/color.ts`, GPLv3+ --
-// both retired since; see git history), rather than re-transcribed a second
-// time -- these are Autodesk's own historical palette choices, not
-// derivable from a formula, so every re-transcription is a chance to
-// introduce a typo.
+/// The standard AutoCAD Color Index palette: packed 24-bit RGB, index 0-256.
+/// Autodesk's own historical color choices, not derivable from a formula.
 #[rustfmt::skip]
 pub const ACI_PALETTE: [u32; 257] = [
     0, 16711680, 16776960, 65280, 65535, 255, 16711935, 16777215, 8421504,
@@ -82,16 +74,12 @@ pub fn true_color_to_hex(color: Option<u32>) -> Option<String> {
     color.map(hex)
 }
 
-/// Deliberately ignores the layer's own truecolor field -- see
-/// [`crate::tables::Tables`]'s doc comment: on an older `lib/libredwg` it
-/// was a constant 0xFFFFFF placeholder on every real-world LAYER table
-/// entry, independent of the layer's actual color; trusting it made every
-/// BYLAYER entity in every real professional DWG render black -- caught by
-/// comparing against real AutoCAD screenshots, not synthetic test files. A
-/// newer `lib/libredwg` reports something different (see
-/// [`crate::tables::resolve_layer_color_index`]), but the conclusion is
-/// the same either way: `color_index` is the only trustworthy field, now
-/// corrected before it reaches `LayerRecord` rather than read here.
+/// Deliberately ignores a layer's own truecolor field. On an older LibreDWG it
+/// was a constant 0xFFFFFF placeholder on every real LAYER entry, so trusting
+/// it rendered every BYLAYER entity black; a newer LibreDWG reports something
+/// different (see [`crate::tables::resolve_layer_color_index`]), but the
+/// conclusion holds either way -- `color_index` is the only trustworthy field,
+/// and it is corrected before it ever reaches [`crate::tables::LayerRecord`].
 pub fn layer_color_hex(tables: &Tables, layer_name: &str) -> Option<String> {
     let layer = tables.layers.get(layer_name)?;
     aci_to_hex(layer.color_index.unsigned_abs())
@@ -122,12 +110,9 @@ pub fn resolve_color(
     }
 }
 
-/// Blends a hex color toward white by `tint` (0.0 = unchanged, 1.0 = pure
-/// white), clamped to `[0, 1]`. Approximates a single-color HATCH
-/// gradient's second stop from `gradient_tint` -- see `render_model::HatchGradient`'s
-/// doc comment for why this is an unverified approximation (no real file in
-/// this project's `samples/` exercises a gradient-fill HATCH at all), not a
-/// value read directly from any file the way most colors here are.
+/// Blends a hex color toward white by `tint` (0.0 = unchanged, 1.0 = white),
+/// clamped to `[0, 1]`. Approximates a single-color HATCH gradient's second
+/// stop -- unverified, like the rest of [`crate::model::HatchGradient`].
 pub fn tint_toward_white(hex: &str, tint: f64) -> String {
     let t = tint.clamp(0.0, 1.0);
     let packed = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
@@ -178,11 +163,10 @@ mod tests {
 
     #[test]
     fn bylayer_resolves_through_layer_colorindex_not_layer_rgb() {
-        // Regression test for the exact bug documented in docs/CAVEATS.md: a layer with
-        // colorIndex 2 (yellow) must resolve to yellow via layer_color_hex,
-        // never black, regardless of whatever Dwg_Color.rgb the LAYER
-        // table entry itself reports (which Tables/LayerRecord doesn't
-        // even carry, by design -- see Tables's doc comment).
+        // Regression test for the bug in docs/CAVEATS.md: a layer with color
+        // index 2 (yellow) must resolve to yellow, never black, whatever
+        // Dwg_Color.rgb the LAYER entry reports (LayerRecord does not even
+        // carry it, by design).
         let tables = tables_with("Tavolo 1", 2);
         let resolved = resolve_color(256, None, "Tavolo 1", &tables, DEFAULT_COLOR);
         assert_eq!(resolved, "#ffff00");

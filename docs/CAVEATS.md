@@ -1,470 +1,430 @@
-# 알려진 제한 / 주의사항
+# Known limitations and caveats
 
-## 엔티티 타입 커버리지
+## Entity type coverage
 
-`parse()`/`to_svg()`가 지원하는 타입: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT,
-SOLID, RAY, XLINE, INSERT(재귀적 블록 참조 렌더링 포함), ATTRIB, ATTDEF, VIEWPORT, 3DFACE,
-SPLINE, MTEXT, POLYLINE3D, DIMENSION(7개 하위타입 전부 하나의 타입으로 통합 -- ALIGNED/
-ANG2LN/ANG3PT/DIAMETER/LINEAR/ORDINATE 6개는 JS baseline도 인식하던 것, ARC_DIMENSION은
-JS baseline이 인식하지 않던 7번째지만 나머지 6개와 완전히 같은 `DIMENSION_COMMON` 레이아웃
-(같은 `block` 핸들 필드)을 공유해서 새 렌더링 로직 없이 기존 메커니즘만 한 케이스 더 인식
-하도록 확장 -- MULTILEADER/MLINE 같은 "새 기능"이 아니라 낮은 리스크의 기계적 확장), HATCH(경계
-패스가 polyline이든 line/arc/ellipse/spline 엣지 리스트든 전부 지원. 패턴 채우기도 실제로
-재현함 -- `Dwg_HATCH_DefLine`을 읽어 SVG `<pattern>` 타일로 렌더링, 자세한 내용과 발견된 버그는
-아래 "HATCH 패턴 채우기" 섹션 참고. 솔리드 채우기는 반투명 색으로 채움. 그라디언트 채우기도
-SVG `linearGradient`/`radialGradient`로 근사 렌더링함 -- 실 파일로 검증 안 됨, 아래 "HATCH
-그라디언트 채우기" 섹션 참고), 3DSOLID(실험적 --
-`docs/ARCHITECTURE.md`의 ACIS 와이어프레임
-섹션 참고. B-rep 자체를 해석하지 않는 근사치이며, ACIS 데이터를 읽거나 변환하지 못하는 솔리드는
-그냥 미지원으로 리포트됨), LEADER(단순 LEADER만.
-정점을 잇는 폴리라인 + 옵션인 첫 정점 화살표만 그림, 스플라인 경로/텍스트 박스 크기 등 렌더링에
-안 쓰이는 필드는 JS baseline과 마찬가지로 모델에 없음), POLYLINE_2D(LWPOLYLINE과 같은
-`LwPolylineEntity` 셰이프를 재사용 -- `RenderEntity::XLine`이 `RayEntity`를 재사용하는 것과 같은
-패턴. `to_svg()` 렌더링도 LWPOLYLINE과 완전히 같은 코드 경로 공유, JS baseline도 동일),
-MULTILEADER/MLINE/REGION/POLYLINE_PFACE/TOLERANCE/ACAD_TABLE/WIPEOUT/LIGHT(**전부 실험적,
-JS baseline에 없던 새 기능** -- 아래 별도 문단 참고).
+`parse()`/`to_svg()` support: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT, SOLID,
+RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
+VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
+LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
+LIGHT. Details worth knowing:
 
-아직 안 됨: ACAD_PROXY_ENTITY 하나뿐. 다른 프로그램이 만든, 이 라이브러리가 모르는
-커스텀 엔티티의 프록시 표현이라 애초에 렌더링 가능한 고정된 지오메트리가 없다 --
-`proxy_id`/`class_id`/직렬화된 엔티티 바이트 데이터만 있지, 좌표나 형태가 없다. `Unknown`
-으로 남겨두는 것 자체가 정확한 표현이고, 여기에 "지원"을 추가해도 실질적으로 달라지는 게
-없다(`Unknown`도 실제 dxfname을 보존하므로 CLI summary 카운트에는 이미 정확한 이름 "ACAD_
-PROXY_ENTITY"로 잡힌다). `parse()` 단계에서 미지원 타입은 `RenderEntity::Unknown`(실제
-dxfname 보존, 조용히 버리지 않음)으로, `to_svg()`에서는 `unsupported_entity_types`로
-리포트된다.
+- **DIMENSION** folds all 7 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
+  ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including the
+  `block` handle to the cached-geometry block that is what actually gets drawn.
+- **HATCH** handles boundary paths that are polylines as well as lists of
+  line/arc/ellipse/spline edges. Pattern fills are really reproduced, by reading
+  `Dwg_HATCH_DefLine` and tiling an SVG `<pattern>` (see "HATCH pattern fill" below);
+  solid fills are painted as a translucent color; gradient fills are approximated with
+  SVG's `linearGradient`/`radialGradient` (unverified, see "HATCH gradient fill").
+- **LEADER** draws only the polyline through its vertices plus an optional arrowhead at
+  the first one. Spline paths and text-box size are not in the model, because nothing
+  renders them.
+- **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
+  as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
+- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
+  an approximation, not a reading of the B-rep. A solid whose ACIS data cannot be read or
+  converted is reported as unsupported.
+- **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
+  are all **experimental** -- see the next section.
 
-**엔티티 커버리지 상황 요약**: `to_svg()`는 이제 JS baseline의 `toSVG()`가 실제로 `case`를
-갖고 있던 모든 타입(LEADER/POLYLINE_2D 포팅 완료 시점, 2026-08-05)을 커버한 데 더해,
-JS baseline이 아예 다루지 않았던 8개 타입(MULTILEADER, MLINE, REGION, POLYLINE_PFACE,
-TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT)까지 새 기능으로 추가했다. 유일하게 안 되는 건
-지오메트리 자체가 없는 ACAD_PROXY_ENTITY, 그리고 JS baseline도 파싱 안 하던
-REGION/LIGHT/POLYLINE_PFACE/ARC_DIMENSION 4개 중 REGION/LIGHT/POLYLINE_PFACE는
-새 기능으로 이미 추가했고 ARC_DIMENSION은 기존 DIMENSION 메커니즘의 저위험 확장으로
-추가했다(둘 다 위 커버리지 목록 참고) -- 결과적으로 파싱 가능한 모든 엔티티 타입 중
-지오메트리가 있는 타입은 전부 다뤄진 상태다.
+**Not supported: ACAD_PROXY_ENTITY, and nothing else.** It is the proxy representation of
+a custom entity from another program, so it has no fixed geometry to render at all: just
+`proxy_id`, `class_id` and serialized entity bytes, with no coordinates or shape. Leaving
+it as `Unknown` *is* the accurate representation, and "supporting" it would change nothing
+in practice -- `Unknown` preserves the real DXF name, so a CLI summary already counts it
+correctly as `ACAD_PROXY_ENTITY`. At the `parse()` stage an unsupported type becomes
+`Entity::Unknown` (never dropped silently); at `to_svg()` it is reported through
+`unsupported_types`.
 
-### 8개 타입은 예외적으로 JS baseline에 없던 새 기능이다
+Net: every parseable entity type that has geometry at all is handled.
+
+### Eight types are experimental
 
 (MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT)
 
-`entityConverter.ts`도 `toSVG()`도 MULTILEADER를 다루지 않았다 -- 포팅할 JS 동작 자체가
-없었다. 사용자 요청으로 새로 구현했고, 스코프를 의도적으로 좁게 잡았다: `ctx.leaders[].
-lines[].points`(리더 라인/스플라인 기하 정보만, 스플라인은 SPLINE/HATCH 곡선 엣지와 같은
-직선 근사)만 그리고, `ctx.content`(MTEXT/블록 콘텐츠)는 추출도 렌더링도 하지 않는다 --
-3DSOLID의 와이어프레임 전용 렌더링, VIEWPORT의 프레임 전용 렌더링과 같은 "최선을 다한
-근사치" 선례를 따른 것. 화살표는 각 리더 라인 끝에 항상 그린다 -- 실제
-`LEADER_Line.flags`의 "화살표 표시" 비트는 이 기능이 쓰는 지오메트리 전용 C 셔틀
-(`uncad_multileader_get_lines`, `libredwg-sys/shim/uncad_shim.c`)에서 추출하지 않기
-때문.
+None of these has been exercised by a real drawing. The spot-check set used during
+development -- 9 independent AutoCAD drawings -- contains no instance of any of them, so
+each was verified only by a clean `cargo build`/`cargo test`/`cargo clippy` on both MSVC
+and Linux (Docker) plus a direct reading of the real `dwg.h`/`dynapi.c` layouts. Scope and
+risk per type:
 
-**실제 파일로 검증 안 됨**: 스팟 체크에 쓴 실 AutoCAD 도면 9개 중 MULTILEADER를 포함한
-파일이 하나도 없어서, `cargo build`/`cargo clippy` 클린과 코드 리뷰(`dwg.h`/`dynapi.c`의
-`Dwg_MLEADER_AnnotContext`/`Dwg_LEADER_Node`/`Dwg_LEADER_Line` 실제 필드 레이아웃과
-셔틀 코드를 직접 대조)로만 확인했다 -- 실 파일에서의 동작은 아직 미확인.
+**MULTILEADER** renders only the leader-line geometry (`ctx.leaders[].lines[].points`),
+with spline leaders chord-approximated the way SPLINE and HATCH curves are. The text or
+block content (`ctx.content`) is neither extracted nor drawn -- the same best-effort
+precedent as 3DSOLID's wireframe-only and VIEWPORT's frame-only rendering. An arrowhead is
+drawn at the end of every leader line unconditionally, because the real "show arrowhead"
+bit in `LEADER_Line.flags` is not extracted by the geometry-only C shim
+(`uncad_multileader_get_lines` in `libredwg-sys/shim/uncad_shim.c`).
 
-MULTILEADER의 중첩 구조(`entity.ctx.leaders[].lines[].points[]`)는 dynapi의 평평한
-`dwg_dynapi_entity_value`로 도달할 수 없고(최상위 entity 필드만 이름으로 노출), 이 구조체들
-(`Dwg_MLEADER_AnnotContext` 등)을 Rust에서 직접 bindgen하는 것도 HATCH_Path/PathSeg가 이미
-겪은 것과 같은 bindgen 구조체 코드생성 실패 위험이 있어(`crates/libredwg-sys/build.rs`의
-블록리스트 주석 참고) 피했다. 대신 `uncad_shim.c`에 전용 C 함수를 추가해 실제 `dwg.h` 구조체
-레이아웃이 그대로 보이는 vendored C 소스 안에서 순회하고, 평평한 `(x,y,z)` 배열만 Rust로
-넘긴다.
+That shim exists because MULTILEADER's nested structure
+(`entity.ctx.leaders[].lines[].points[]`) is unreachable through dynapi's flat
+`dwg_dynapi_entity_value`, which only exposes top-level entity fields by name, and binding
+`Dwg_MLEADER_AnnotContext` and friends with bindgen runs into the same struct-codegen
+failure HATCH_Path already hit (see `crates/libredwg-sys/build.rs`). Walking the structs
+inside the vendored C source, where dwg.h's real layouts are visible, and handing Rust a
+flat `(x, y, z)` array sidesteps both problems.
 
-MLINE도 `entityConverter.ts`/`toSVG()` 둘 다 다룬 적 없는 새 기능이다. MLINE은 실제로는
-`num_lines`개의 평행선(벽 스타일 다중선)이고, 이제(2026-08-07) 각 선의 실제 오프셋 거리를
-MLINE이 참조하는 MLINESTYLE 오브젝트에서 읽어와 진짜 오프셋 폴리라인으로 그린다 -- 이전에는
-MLINESTYLE을 파싱하지 않아서 각 정점의 `vertex`(중심선)만 잇는 단일 폴리라인으로 근사했었다.
-`Dwg_MLINE_vertex`(정점 배열의 원소 타입)도 MULTILEADER의 서브타입들과 같은 bindgen
-구조체 코드생성 실패를 겪어서 `crates/libredwg-sys/src/lib.rs`에 `dwg.h`와 정확히 같은
-레이아웃으로 직접 손으로 정의했다 -- clang의 진짜 `sizeof()`(96바이트)와 대조하는
-컴파일타임 어서션 포함. (Linux/gcc Docker 빌드로 발견한 것: `Dwg_MLINE_vertex`를
-블록리스트하는 것만으로는 부족했다 -- Windows/MSVC와 달리 Linux 타겟에서는 bindgen이
-`Dwg_MLINE_line`도 함께 생성하면서 블록리스트된 `_dwg_MLINE_vertex`를 참조하는 컴파일
-에러가 났다. `Dwg_MLINE_line`도 같이 블록리스트해서 해결 -- 아래 "Windows/Linux
-크로스플랫폼" 섹션의 다른 bindgen 차이와 같은 종류.)
+**MLINE** is really a set of parallel lines (wall-style multi-line). Each line's offset is
+read from the MLINESTYLE object the MLINE references, and drawn as a true offset polyline;
+before MLINESTYLE was parsed this was approximated with a single centerline through each
+vertex's `vertex` point, which is still the fallback when the style cannot be resolved.
+`Dwg_MLINE_vertex` had to be hand-written in `crates/libredwg-sys/src/lib.rs` for the
+bindgen reason above, with a compile-time assertion against clang's real `sizeof()` (96
+bytes). A Linux/gcc Docker build turned up an extra wrinkle: blocklisting
+`Dwg_MLINE_vertex` alone was not enough there, because bindgen still generated
+`Dwg_MLINE_line` referring to the now-blocklisted type, which does not compile.
+Blocklisting both fixes it -- the same class of platform-conditional divergence as the
+other entries under "Windows/Linux".
 
-**MULTILEADER와 마찬가지로 실제 파일로 검증 안 됨**: 스팟 체크에 쓴 9개 파일 중 MLINE을
-포함한 파일이 여전히 하나도 없다(2026-08-07 재확인) -- 아래 "MLINESTYLE 파싱" 섹션 참고.
+**REGION** is `typedef Dwg_Entity__3DSOLID Dwg_Entity_REGION` in `dwg.h`, and `dynapi.c`'s
+`"REGION"` entry points at the very same `_dwg_3DSOLID_fields` table -- byte-for-byte the
+same struct. So `acis.rs`'s existing 3DSOLID wireframe extraction was reused directly,
+with one change: `dwg_dynapi_entity_value` strictly compares the type name passed in
+against the object's actual dxfname and silently fails on a mismatch, so `"3DSOLID"`
+cannot be hardcoded and `extract_wireframe()` takes the name as an argument. Rendering
+shares the isometric wireframe path.
 
-REGION은 `dwg.h`에서 `typedef Dwg_Entity__3DSOLID Dwg_Entity_REGION`으로, `dynapi.c`의
-`"REGION"` 엔트리도 `"3DSOLID"`와 완전히 같은 필드 테이블(`_dwg_3DSOLID_fields`)을 가리키는
--- 말 그대로 바이트 단위로 동일한 구조체다. 그래서 `acis.rs`의 기존 3DSOLID ACIS
-와이어프레임 추출 로직을 그대로 재사용할 수 있었다 -- 단, dynapi가 호출 시 전달한 타입
-이름과 오브젝트의 실제 dxfname을 엄격히 대조하기 때문에(`dwg_dynapi_entity_value`가
-`obj->name`과 인자로 받은 이름이 다르면 조용히 실패), `"3DSOLID"`를 하드코딩할 수 없어
-`extract_wireframe()`이 dxfname을 인자로 받도록 바꿨다. 렌더링도 3DSOLID와 완전히 같은
-등각 와이어프레임 경로 공유(`render_wireframe` 헬퍼로 통합).
+**POLYLINE_PFACE** ("polyface mesh") could not reuse a dedicated C function the way
+POLYLINE_3D does: LibreDWG's own `dwg_ent_polyline_pface_get_points` is marked
+`/* not implemented. use the dynapi instead */` in `dwg_api.h`. Instead the
+`VERTEX_PFACE` (vertex positions) and `VERTEX_PFACE_FACE` (up to 4 vertex indices per
+face) subentity chain is walked with `get_first_owned_subentity`, and each face's indices
+become wireframe edges -- rendered through the same isometric path as REGION, a polyface
+mesh being just as inherently 3D as an ACIS solid's wireframe.
 
-POLYLINE_PFACE("polyface mesh")는 LibreDWG 자신의 전용 접근자
-(`dwg_ent_polyline_pface_get_points`)가 `dwg_api.h`에 `/* not implemented. use the dynapi
-instead */`라고 명시되어 있어, POLYLINE_3D 때처럼 전용 C 함수를 그대로 호출할 수 없었다.
-대신 `VERTEX_PFACE`(정점 위치)/`VERTEX_PFACE_FACE`(최대 4개 정점 인덱스로 이루어진 면
-레코드) 서브엔티티 체인을 `get_first_owned_subentity`로 직접 순회해서, 각 면의 정점
-인덱스를 잇는 와이어프레임 엣지로 변환한다 -- REGION과 마찬가지로 3DSOLID의 등각 렌더링
-경로를 그대로 재사용(폴리페이스 메시도 본질적으로 3D 형상이라는 점에서 동일 취급).
+**TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
+`text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
+this project does not parse or strip (there is no dedicated stripper the way MTEXT has
+`strip_mtext_formatting`). Readable, but not real GD&T symbols.
 
-**REGION/POLYLINE_PFACE도 실제 파일로 검증 안 됨**: 스팟 체크에 쓴 9개 파일 중 어느 쪽도
-포함한 파일이 없었다 -- `cargo build`/`cargo test`/`cargo clippy`가 MSVC/Linux(Docker)
-양쪽에서 클린하다는 것과 `dwg.h`/`dynapi.c` 실제 레이아웃 대조로만 확인했다.
+**ACAD_TABLE** has nearly INSERT's field shape in `dwg.h` (`ins_pt`/`scale`/`rotation`/
+`block_header`), and its own `flag_for_table_value` comment states that 0x06 ("has a
+block") is normally always set. So rather than computing a cell grid from
+`num_cols`/`num_rows`/`col_widths`/`row_heights`, the cached block that `block_header`
+points at is drawn through the same path as INSERT/DIMENSION -- reusing geometry AutoCAD
+already computed instead of reconstructing cell content. Structurally that makes it about
+as trustworthy as REGION. Note that dynapi's field-table key is `"TABLE"`, not the real
+DXF name `"ACAD_TABLE"` (the same class of name mismatch as REGION/3DSOLID -- see the
+`DWG_TYPE_TABLE` case in `convert.rs`).
 
-TOLERANCE는 ATTRIB/TEXT와 완전히 같은 셰이프(위치 + 텍스트)로 그린다 -- 다만 `text_value`는
-GD&T feature-control-frame 전용 포맷 코드(`%%v` 류)를 그대로 담고 있고, 이 프로젝트는 그걸
-파싱/스트리핑하지 않는다(MTEXT의 `strip_mtext_formatting`과 달리 전용 스트리퍼가 없음) --
-읽을 수는 있지만 진짜 GD&T 기호로 렌더링되지는 않는, "정직하지만 불완전한" 근사치.
+**WIPEOUT** is the one type here carrying risk *beyond* "not verified against a real
+file": its `pt0 + u*uvec + v*vvec` pixel-space-to-world transform comes from general
+knowledge of the standard DXF image-entity convention (insertion point + U/V pixel vectors
++ clip vertices in that pixel space), not from LibreDWG's own source. LibreDWG does not
+render images, only read and write the fields, so there is no reference implementation in
+this codebase to check against, and neither `dwg.h`'s field comments nor anything else
+here confirms the formula. See `wipeout_boundary` in `crates/uncad/src/convert.rs`.
+Rendering is outline-only, deliberately: a filled shape risks becoming an opaque box
+hiding other geometry.
 
-ACAD_TABLE은 `dwg.h`에서 INSERT와 거의 같은 필드 셰이프(`ins_pt`/`scale`/`rotation`/
-`block_header`)를 갖고 있고, 자기 자신의 `flag_for_table_value` 필드 주석이 "0x06(블록 있음)
-은 보통 항상 세팅된다"고 명시하고 있어서, `num_cols`/`num_rows`/`col_widths`/`row_heights`
-등에서 셀 그리드를 직접 계산하는 대신 INSERT/DIMENSION과 똑같이 `block_header`가 가리키는
-캐시된 블록을 `render_block_ref`로 그린다 -- 셀 내용을 재구성하는 게 아니라 AutoCAD 자신이
-이미 계산해 둔 지오메트리를 그대로 재사용하는 것이므로, 이 8개 중에서는 REGION만큼이나
-구조적으로 신뢰도가 높다. dynapi 필드 테이블 조회 이름은 `"TABLE"`이지 실제 DXF 이름인
-`"ACAD_TABLE"`이 아니다(REGION/3DSOLID와 같은 종류의 이름 불일치 -- `convert.rs`의
-`DWG_TYPE_TABLE` 케이스 주석 참고).
+**LIGHT** has no drawable geometry at all -- a light is correctly invisible in a 2D plan
+view. It renders as an arbitrary placeholder: a small circular marker at `position`, plus a
+dashed line to `target` for distant and spot lights. Same spirit as VIEWPORT's frame, but
+weaker: a viewport frame at least means something, whereas a LIGHT marker conveys nothing
+beyond "a light exists here".
 
-WIPEOUT은 이 8개 중 유일하게 **"실 파일로 검증 안 됨"을 넘어서는 추가 리스크**가 있다:
-`pt0 + u*uvec + v*vvec` 픽셀-공간-투월드 변환이 표준 DXF 이미지 엔티티 관례(삽입점 + U/V
-픽셀 벡터 + 그 픽셀 공간 안의 클립 정점)에 대한 일반 지식에 기반한 것이지, LibreDWG 자신의
-소스 코드로 확인된 게 아니다(LibreDWG는 이미지를 렌더링하지 않고 필드만 읽고 쓰므로, 대조할
-참조 구현이 이 코드베이스 안에 아예 없음). `docs/ARCHITECTURE.md`나 `dwg.h`의 필드 주석
-어디에도 이 변환식 자체를 확인해 줄 근거가 없다 -- `crates/uncad/src/convert.rs`의
-`wipeout_boundary` 함수와 `WipeoutEntity`의 doc 주석 참고. 렌더링은 채우지 않고 외곽선만
-그린다(다른 지오메트리를 가리는 불투명한 흰 박스가 되는 리스크를 피하기 위함).
+## DXF reading inherits LibreDWG's own limits
 
-LIGHT는 이 8개 중 유일하게 JS baseline이 파싱조차 안 하던 타입이다(TOLERANCE/ACAD_TABLE/
-WIPEOUT은 최소한 파싱은 됐었음). 광원은 애초에 "그려지는" 지오메트리가 없어서(2D 평면도에서
-안 보이는 게 정상), `position`에 작은 원 마커 + (거리/스팟 조명일 때만) `target`까지 점선을
-그리는 임의의 placeholder다 -- VIEWPORT의 프레임 전용 렌더링과 같은 정신이지만, VIEWPORT는
-적어도 실제 뷰포트 경계라는 의미가 있는 반면 LIGHT 마커는 "여기 광원이 있다"는 사실 말고는
-AutoCAD의 실제 시각적 표현과 무관하다.
+`dxf_read_file()` is documented by LibreDWG itself as working "for most objects", so it is
+not as complete as DWG reading. An LWPOLYLINE has been observed dropping silently out of a
+real `.dxf` whose `ENTITIES` section clearly contained it, while ARC and ELLIPSE from the
+same file parsed fine. This is an upstream limit, not something this project can patch
+around.
 
-**TOLERANCE/ACAD_TABLE/WIPEOUT/LIGHT도 실제 파일로 검증 안 됨**: 스팟 체크에 쓴 9개 파일
-중 넷 다 포함한 파일이 없었다 -- MSVC/Linux(Docker) 양쪽 `cargo build`/`cargo test`/
-`cargo clippy` 클린과 `dwg.h`/`dynapi.c` 레이아웃 대조로만 확인했다.
+A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
+entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
+back with `dxf_read_file` returns exactly 1 entity.
 
-(2026-08-05, 실제 AutoCAD 도면 9개로 스팟 체크: LEADER(8/9 파일)와 POLYLINE_2D(2/9 파일)가
-발견된 미지원 타입 중 가장 흔했고, 둘 다 이후 포팅 완료. ACAD_PROXY_ENTITY는 1개 파일에서만
-등장 -- 왜 계속 미지원인지는 위 "아직 안 됨" 문단 참고. 나머지 지원 타입은 전부 정상
-파싱/렌더링됨.)
+## The polyline "closed" flag
 
-## DXF 읽기는 LibreDWG 자체의 한계를 그대로 물려받음
+`dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic
+checks bit 1 (`flag & 1`), the standard DXF group-70 convention -- see the
+`POLYLINE_CLOSED_FLAG` constant in `crates/uncad/src/convert.rs`. With no AutoCAD
+reference available to settle which reading is correct, the DXF convention was kept rather
+than "corrected" on a guess.
 
-`dxf_read_file()`은 LibreDWG 자체 문서가 "대부분의 오브젝트에서 동작"이라고 밝히고 있어 DWG
-읽기만큼 완전하지 않다(LWPOLYLINE이 포함된 실제 `.dxf` 파일에서 조용히 빠지는 걸 확인한 적
-있음 -- ARC/ELLIPSE는 정상 동작). 이 프로젝트가 손댈 수 있는 부분이 아니라 업스트림 한계다.
+## MTEXT rotation is always 0
 
-실례(2026-09-15): `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`(엔티티 60개)를 LibreDWG 자신의
-DXF 라이터로 써낸 R2007 DXF를 `dxf_read_file`로 다시 읽으면 엔티티 1개만 돌아온다. 이 크레이트가
-손댈 수 있는 부분이 아니다.
+`dwg.h` says the `x_axis_dir` field "defines the rotation", and deriving an angle from it
+(`atan2(x_axis_dir.y, x_axis_dir.x)`) looks technically more accurate. Without a verified
+reference to confirm it, the value stays fixed at `0` rather than diverging on an
+unverified guess.
 
-## LWPOLYLINE/POLYLINE3D의 "closed" 판정
+## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
-`dwg.h`의 필드 주석은 flag의 512번 비트를 "closed"라고 적어두었지만, 실제 렌더링 로직은 1번
-비트(`flag & 1`, 표준 DXF group-70 관례)를 확인한다 -- `crates/uncad/src/convert.rs`의
-`LWPOLYLINE_CLOSED_FLAG` 상수 주석 참고. 어느 쪽이 실제로 맞는지 검증할 실제 AutoCAD 참조가
-없어서, 이 프로젝트의 오래된 JS/WASM predecessor가 이미 검증 없이 그렇게 구현했던 걸 그대로
-포팅했다 -- 임의로 "고치지" 않았다.
+`Tables` does not expose a layer's `Dwg_Color.rgb`. On an older LibreDWG that field was
+measured as a constant `0xFFFFFF` placeholder, unrelated to the layer's real color, across
+22 real files. The principle still holds: BYLAYER resolution goes through `color_index`
+only, and `rgb` is never trusted. The
+`bylayer_resolves_through_layer_colorindex_not_layer_rgb` regression test in
+`crates/uncad/src/color.rs` guards that.
 
-## MTEXT 회전은 항상 0
+Since the submodule moved to a newer upstream, `rgb` is no longer always `0xFFFFFF` --
+and rendering 9 real files to PNG showed every one of them coming out entirely black
+(already at the SVG stage, so not a rasterization problem). Traced to `bit_read_CMC` in
+`lib/libredwg/src/bits.c`:
 
-`dwg.h`는 `x_axis_dir` 필드가 "회전을 정의한다"고 적어두었지만, `x_axis_dir`에서 각도를
-계산하는 게 기술적으로는 더 정확해 보여도, 검증된 근거(실제 AutoCAD 참조) 없이 predecessor와
-다르게 구현하지 않고 `0`으로 고정했다.
+All 9 files are AC1018 (R2004) native, with layer colors stored as `method=0xc3`
+(TRUECOLOR) but abnormally small `rgb` values (`0x000001`-`0x000008`). After reading,
+`bit_read_CMC` tries a reverse palette lookup with
+`color->index = dwg_find_color_index(color->rgb)`, and such a small `rgb` matches no
+palette entry exactly, so the no-match sentinel `256` comes back. `ACI_PALETTE` holds `0`
+(black) at index 256, so calling `aci_to_hex(256)` flattens every layer to black.
 
-## LAYER 색상: `Dwg_Color.rgb`는 못 믿고, `color_index`도 그대로는 못 믿음
+Those low bytes are not random: they are deterministic across layer names and files. The
+`"0"` layer is `rgb=..07` in all 9, matching AutoCAD's real default of ACI 7 for it;
+`"...TITL"` is always `5`, `"...BOLD"` always `6`, `"...FINE"` always `8`. That is the ACI
+index sitting directly in the `rgb` field. LibreDWG's own `bit_downconvert_CMC` already
+carries the identical `if (index == 256) index = rgb & 0xff;` fallback on the opposite
+conversion path; only the pure read path (`bit_read_CMC`) lacks it.
 
-`Tables`는 레이어별로 `Dwg_Color.rgb`를 노출하지 않는다. 구버전 `lib/libredwg` 기준으로는
-이 필드가 실제 레이어 색상과 무관하게 항상 `0xFFFFFF`(상수 placeholder)로 나오는 걸 실측
-확인했었다(22개 실제 파일 대조, 원래 JS/WASM predecessor 시절). BYLAYER 색상 해석은
-`color_index`를 통해서만 하고 `rgb`는 절대 신뢰하지 않는다는 원칙은 지금도 유효하다 --
-`crates/uncad/src/color.rs`의 `bylayer_resolves_through_layer_colorindex_not_layer_rgb`
-회귀 테스트가 이 버그를 잡는다.
+`resolve_layer_color_index` in `crates/uncad/src/tables.rs` mirrors that fallback for the
+read path. All 9 files were rendered and visually checked against AutoCAD's default and
+AIA layer-color conventions (roofs yellow, doors and windows green, outlines blue, piping
+cyan), but **never compared against an actual AutoCAD screen** -- unlike this project's
+other color bugs, this one was verified by plausibility rather than by reference. It also
+inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
+happens not to match the palette is misread as a small ACI index.
 
-2026-08-13 서브모듈을 최신 upstream으로 올린 뒤(`e405fcff` -> `a8ce2489`)로는 `rgb`가 더는
-항상 `0xFFFFFF`가 아니다. 2026-08-14, `samples/`의 9개 실 파일을 PNG로 변환해서 눈으로 보니
-전부 검정 하나로만 나오는 걸 발견(SVG 단계부터 이미 그랬음, PNG 변환 자체의 문제는 아니었음)
--- 원인을 `lib/libredwg/src/bits.c`의 `bit_read_CMC`까지 추적:
+## Fixed: SPLINE control points read at the wrong stride
 
-이 9개 파일은 전부 AC1018(R2004) 네이티브 포맷이고, LAYER 색상이 `method=0xc3`(TRUECOLOR)로
-저장돼 있는데 `rgb` 값이 `0x000001`~`0x000008`처럼 비정상적으로 작다. `bit_read_CMC`는 읽은
-뒤 `color->index = dwg_find_color_index(color->rgb)`로 ACI 팔레트 역매칭을 시도하는데, 이런
-작은 `rgb`는 어떤 팔레트 엔트리와도 정확히 일치하지 않아 매칭 실패 시의 sentinel `256`을
-반환한다. `ACI_PALETTE`는 인덱스 256 자리에 `0`(검정)을 담고 있어서, `layer_color_hex()`가
-`aci_to_hex(256)`을 그대로 호출하면 모든 레이어가 검정으로 뭉개진다.
+Rendering 9 real files to SVG and reviewing the screenshots turned up nonsensical
+diagonals crossing two SPLINE-heavy drawings end to end. The cause was
+`SplineControlPoint` in `crates/uncad/src/dynapi.rs` being defined without the leading
+`parent` pointer that `dwg.h`'s `Dwg_SPLINE_control_point` has (pointer + `x,y,z,w`, 40
+bytes), so it measured 32. `get_array_field` walks `ctrl_pts` at `size_of::<T>()` intervals,
+so from the second control point on it read at a progressively wrong offset, mixing the
+tail of one element with the head of the next element's `parent` pointer. SPLINEs with fit
+points were unaffected, since rendering prefers those -- only control-point-only SPLINEs
+showed it, which is why it went unnoticed for a while.
 
-`rgb`의 하위 바이트는 무작위가 아니라 레이어 이름/파일에 걸쳐 결정론적이다 (`"0"` 레이어는
-9개 파일 전부에서 항상 `rgb=..07`, AutoCAD 기본 레이어의 실제 ACI 7 관례와 일치; `"...TITL"`은
-항상 `5`, `"...BOLD"`는 항상 `6`, `"...FINE"`은 항상 `8`) -- ACI 인덱스 값이 그대로 `rgb`
-필드에 들어간 패턴이다. `lib/libredwg` 자체의 `bit_downconvert_CMC`(`bits.c:4069-4071`)에도
-정반대 변환 경로에서 동일한 `if (index==256) index = rgb & 0xff;` 폴백이 이미 존재한다 --
-이 프로젝트가 쓰는 순수 읽기 경로(`bit_read_CMC`)에만 빠져있던 것.
+The same bug explains a second, seemingly unrelated symptom: coordinates serializing as
+absurdly long strings of leading zeros (a pointer bit-pattern read as `f64` often lands in
+the subnormal range, and Rust's `f64` `Display` never switches to scientific notation).
+The `clean()` helper in `svg.rs` still guards that at the formatting level, but the real
+cause was the layout here.
 
-`crates/uncad/src/tables.rs`의 `resolve_layer_color_index`가 그 폴백을 읽기 경로에
-미러링한다. 9개 파일 전부 렌더링해서 AutoCAD 기본/AIA 레이어 색상 관례(지붕=노랑, 문/창=초록,
-외곽선=파랑, 배관=하늘색 등)와 부합하는 것으로 눈으로 확인했지만, **실제 AutoCAD로 연 화면과
-직접 대조하지는 못했다**(환경에 AutoCAD 없음) -- 이 프로젝트의 다른 색상 버그들과 달리
-"AutoCAD 스크린샷 대조"가 아니라 "렌더링 결과의 그럴듯함"으로만 검증됐다는 차이가 있다.
-`bit_downconvert_CMC`와 동일한 한계도 그대로 물려받는다: 팔레트에 우연히 안 맞는 진짜 임의의
-트루컬러도 작은 ACI 인덱스로 오인할 수 있다.
+`get_array_field`'s debug assertion cannot catch this class of bug: it compares the size
+of the *pointer-to-array* field (8 bytes, always matching), never the element stride. A
+compile-time assertion against clang's real `sizeof()` (40 bytes) was added instead, the
+same pattern the hand-written HATCH structs use. **When adding another struct read as a
+stride-based raw array, never omit a `parent` back-pointer from the C field list.**
 
-## (수정됨) SPLINE 컨트롤 포인트가 잘못된 stride로 읽히던 버그
+## HATCH pattern fill
 
-2026-08-05, 사용자 요청으로 `samples/`의 9개 실 파일을 SVG로 변환해서 렌더링 결과를 직접
-스크린샷으로 검토하다가 발견: SPLINE 위주 도면 2개(`AutoCADSamples1.dwg`,
-`AutoCADSamples5.dwg`)에서 도면 전체를 가로지르는 말도 안 되는 대각선들이 렌더링되고
-있었다. 원인은 `crates/uncad/src/dynapi.rs`의 `SplineControlPoint`가 실제 `dwg.h`의
-`Dwg_SPLINE_control_point`(`parent` 포인터 + `x,y,z,w` 4개 double, 40바이트)와 달리 앞의
-`parent` 포인터 필드 없이 `x,y,z,w`만(32바이트)으로 정의돼 있던 것 -- `get_array_field`가
-`ctrl_pts` 배열을 순회할 때 실제 40바이트가 아니라 32바이트 간격으로 원소를 읽어서, 두
-번째 컨트롤 포인트부터는 이전 원소의 끝부분 + 다음 원소의 `parent` 포인터 앞부분이
-뒤섞인 값을 읽고 있었다(포인터 비트 패턴을 `f64`로 잘못 해석한 값이 정상 좌표 사이에
-끼어들며 갈수록 어긋남). fit points(`num_fit_pts`/`fit_pts`)가 있는 SPLINE은 렌더링이
-그쪽을 우선하므로 영향이 없었고, fit points 없이 컨트롤 포인트만 있는 SPLINE에서만
-증상이 나타나 발견이 늦어졌다.
+The same bindgen struct-codegen failure as `Dwg_HATCH_Path`/`PathSeg`/`ControlPoint`
+recurred for `Dwg_HATCH_DefLine` (the pattern definition line: `angle`/`pt0`/`offset`/
+`dashes`), for a slightly different reason: allowlisting `DefLine` directly generates fine
+on its own, but its `parent` field is declared `struct _dwg_entity_HATCH *`, which forces
+bindgen to materialize a real (non-opaque) `_dwg_entity_HATCH`, and *that* is what fails.
+Nothing else allowlists `_dwg_entity_HATCH` -- HATCH's fields are all read through
+dynapi's `void*`. The fix is the same as before: blocklist and hand-write the struct,
+leaving `parent` as `*mut c_void` so `_dwg_entity_HATCH` is never pulled in, with a
+compile-time assertion against clang's real `sizeof()` (64 bytes).
 
-이 버그는 별개로 보였던 두 증상을 동시에 설명한다 -- (1) 도면 전체를 가로지르는 와일드한
-대각선(포인터 비트 패턴이 큰 값으로 해석된 경우), (2) 좌표가 수백 자리 0으로 시작하는
-비정상적으로 긴 문자열로 직렬화되던 문제(포인터 비트 패턴이 subnormal 범위로 해석된 경우
--- Rust의 `f64` `Display`는 JS의 `Number.prototype.toString`과 달리 과학적 표기법으로
-전환하지 않기 때문). (2)는 `svg.rs`의 `clean()` 헬퍼로 별도 방어 처리도 해뒀지만(포맷팅
-레벨의 안전망으로 유지), 근본 원인은 여기 `SplineControlPoint`의 레이아웃이었다.
+**Rendering**: one SVG `<pattern>` element per defline, accumulated into `<defs>` and
+emitted once by `to_svg`, with the HATCH boundary path filled via `fill="url(#...)"`.
+Clipping is delegated to SVG's own fill mechanism rather than hand-rolled polygon
+clipping, so a boundary with several loops or islands keeps working through the existing
+`fill-rule="evenodd"` path. Two deliberate simplifications (see
+`render_pattern_line` in `crates/uncad/src/svg/hatch.rs`): the component of `offset`
+parallel to the line direction, used for brick-style staggering, is ignored and only the
+perpendicular spacing is honored; and the line is drawn at the center of its tile rather
+than exactly on `base_point`, so `<pattern>`'s default tile-edge clipping cannot cut it in
+half. Being half a tile out of phase is immaterial for an infinitely repeating pattern.
 
-`get_array_field`의 기존 debug assert(dynapi가 보고하는 필드 크기와 요청 타입 크기를
-비교)는 이 버그를 못 잡는다 -- 그 assert는 "배열을 가리키는 포인터 필드" 자체의 크기(8바이트,
-항상 일치)만 검사하지, 배열 **원소**의 stride는 전혀 검증하지 않기 때문이다. 재발 방지로
-`SplineControlPoint`의 크기를 clang의 실제 `sizeof()`(40바이트)와 대조하는 컴파일타임
-어서션을 추가했다(HATCH_Path 등 손으로 쓴 다른 구조체들과 같은 패턴, `libredwg-sys/src/lib.rs`
-참고). `SplineControlPoint`처럼 raw 포인터 배열을 stride 기반으로 읽는 다른 구조체를 새로
-추가할 때는(예: 향후 확장 시) 이 클래스의 버그를 반드시 염두에 둘 것 -- **C 구조체 필드
-목록에 `parent` 백포인터가 있으면 절대 생략하지 말 것.**
+**A real bug found and fixed here**: the first implementation followed standard DXF
+pattern-fill documentation, which describes group 52 (`angle`) and 41 (`scale_spacing`) as
+applying on top of the group 78 definition-line data, and multiplied `pattern_angle`/
+`pattern_scale` back into each `HatchPatternLine`. Rendering a real file showed no pattern
+at all -- hatches inside small door and furniture symbols came out empty. Investigation:
+a HATCH whose `pattern_angle` was exactly 90 degrees had a defline whose own `angle` was
+also exactly 90, which is only possible if LibreDWG's parsed defline data already has
+52/41 applied (a 0-degree source pattern plus 90 would have given 180). The numbers agreed:
+multiplying a `pattern_scale` of 60 into a defline's ~6.5-unit spacing gives ~390 units,
+while the shape being filled was only ~90 units across, so not a single line fell inside
+one tile. Removing the reapplication entirely, and using the defline's
+`angle`/`base_point`/`offset`/`dash_pattern` as final values, made dense crosshatch and
+tile patterns appear correctly on the same file. The now-unused `pattern_angle`/
+`pattern_scale` fields were dropped from `HatchEntity`. The lesson generalizes: **do not
+take the DXF spec document at face value -- check what LibreDWG actually parses, against a
+real file.**
 
-## HATCH 패턴 채우기 (2026-08-06)
+**Still unverified** beyond the two deliberate simplifications above: whether
+`pattern_type` (0 = user-defined, 1 = predefined, 2 = custom) actually changes how defline
+data should be read. Measured: all ~2500 HATCHes across the 9 spot-check files are
+`pattern_type=1`, with 0 and 2 never appearing, so there has simply been no case that
+would distinguish them.
 
-`Dwg_HATCH_Path/PathSeg/ControlPoint`와 같은 클래스의 bindgen 구조체 코드생성 실패가
-`Dwg_HATCH_DefLine`(패턴 정의 라인: `angle`/`pt0`/`offset`/`dashes`)에도 재발했다 -- 이번엔
-원인이 조금 다르다: `DefLine`을 직접 allowlist하면 그 자체는 문제없이 생성되지만, `DefLine.parent`
-필드가 `struct _dwg_entity_HATCH *`로 선언돼 있어서 bindgen이 `_dwg_entity_HATCH` 자체도
-실제(비-opaque) 타입으로 생성해야 하고, `_dwg_entity_HATCH`가 바로 그 실패를 겪는다(이 크레이트
-어디도 `_dwg_entity_HATCH`를 직접 allowlist한 적이 없었다 -- HATCH 필드는 전부 dynapi의 `void*`로
-읽는다). `Dwg_HATCH_Path/PathSeg/ControlPoint` 때와 동일하게 블록리스트 + 손으로 구조체 재작성으로
-해결했고(`parent`를 `*mut c_void`로 남겨서 `_dwg_entity_HATCH`를 끌어들이지 않음), clang의 실제
-`sizeof()`(64바이트)와 대조하는 컴파일타임 어서션도 추가했다(`libredwg-sys/src/lib.rs`).
+## HATCH gradient fill (unverified)
 
-**렌더링 알고리즘**: SVG `<pattern>` 엘리먼트를 defline 하나당 하나씩(`<defs>`에 축적, `to_svg`가
-최종적으로 한 번에 방출) 생성해서, HATCH 경계 path를 `fill="url(#...)"`로 채운다 -- 직접 폴리곤
-클리핑을 구현하는 대신 SVG 자체의 fill 메커니즘에 위임(경계가 여러 개의 loop/island를 가져도
-기존 `fill-rule="evenodd"` path가 그대로 처리). 의도적으로 단순화한 부분 두 가지(`svg.rs`의
-`render_hatch_pattern_line` 문서 주석 참고): (1) `offset`의 라인-방향 평행 성분(벽돌쌓기 스타일
-스태거링에 쓰임)은 무시하고 수직 성분(간격)만 반영, (2) 타일 안의 선을 `base_point`가 정확히
-얹히는 타일 경계가 아니라 타일 중앙에 그려서 `<pattern>`의 기본 타일-경계 클리핑이 선을 반토막
-내는 걸 피함(무한 반복 패턴의 시각적 외관상 위치가 반 타일 어긋나는 건 무의미).
+`is_gradient_fill` was `0` for all ~2500 HATCHes across the 9 spot-check files: not one
+contains a gradient fill. The implementation below therefore rests on `dwg.h`'s field
+comments and general DXF knowledge rather than comparison with an actual AutoCAD
+rendering -- the same risk level as the other experimental types.
 
-**실제로 발견/수정한 버그**: 처음엔 표준 DXF 패턴 채우기 문서(그룹 52 `angle`/41 `scale_spacing`이
-그룹 78 서브레코드의 definition-line 데이터 위에 추가로 적용된다는 서술)를 따라
-`HatchEntity.pattern_angle`/`pattern_scale`을 각 `HatchPatternLine`에 다시 곱해서 적용했는데,
-`samples/AutoCADSamples7.dwg`로 렌더링해보니 패턴이 전혀 안 보였다(작은 문/가구 심볼 안의 헤치가
-텅 비어 보임). 원인 조사 결과: `pattern_angle`이 정확히 90도인 HATCH의 defline 자신의 `angle`도
-독립적으로 정확히 90도였다 -- LibreDWG가 파싱하는 defline 데이터에는 이미 52/41이 반영돼 있다는
-뜻이다(0도짜리 원본 패턴에 90도를 또 더했다면 180도가 됐어야 함). 수치로도 확인: `pattern_scale`
-60을 defline의 ~6.5유닛 간격에 다시 곱하면 ~390유닛이 되는데, 그 헤치가 채워야 할 도형 자체가
-~90유닛밖에 안 돼서 타일 하나 안에 선이 한 개도 안 들어가는 상황이었다(그래서 렌더링 결과가
-비어 보였음). `pattern_angle`/`pattern_scale` 재적용을 완전히 제거하고 defline의 `angle`/
-`base_point`/`offset`/`dash_pattern`을 이미 최종(절대) 값으로 그대로 쓰도록 고치니 동일 파일에서
-실제로 조밀한 크로스해치/타일 패턴이 정상적으로 나타났다(스크린샷으로 확인). 이 발견에 따라
-`HatchEntity`에서 `pattern_angle`/`pattern_scale` 필드 자체를 제거했다(안 쓰는 필드를 남겨두지
-않음). **표준 DXF 스펙 문서를 그대로 믿지 말고, 실제 LibreDWG가 무엇을 파싱해서 주는지 실 파일로
-검증할 것** -- 이 프로젝트 전반의 "실 파일 대조 없이는 검증된 게 아니다" 원칙이 새로 구현하는
-기능에도 동일하게 적용된 사례.
+**bindgen**: `Dwg_HATCH_Color` (one color stop: `shift_value` + `Dwg_Color`) hits exactly
+the same `parent: struct _dwg_entity_HATCH *` cascade as `Dwg_HATCH_DefLine`, and is
+handled the same way (blocklist, hand-write, assert clang's `sizeof()` of 64 bytes).
 
-**검증**: `cargo test --workspace` 35개 테스트(순수 알고리즘 유닛테스트 대거 추가 -- `acis.rs`
-SAT 파서 6개, `svg.rs` 클러스터링/HATCH 엣지 근사/stroke-width 치환/변환 합성 등 23개) 전부
-통과. `samples/`의 9개 실 파일 전부 크래시 없이 렌더링 확인, `AutoCADSamples7.dwg`(HATCH 432개)
-와 `AutoCADSamples5.dwg`(입면도 렌더링 -- 나무/지붕/그림자 텍스처가 전부 HATCH 기반)를 헤드리스
-브라우저 스크린샷으로 시각 확인.
+**Rendering**: `gradient_name` (`SPHERICAL`/`HEMISPHERICAL`/`CURVED`/`LINEAR`/`CYLINDER`)
+collapses to a binary choice -- the two spherical names become an SVG `radialGradient`
+(close to AutoCAD's center-out look), everything else including unrecognized names becomes
+a `linearGradient`. `CURVED` and `CYLINDER` are directional but not radial in AutoCAD too,
+so a linear approximation misses the curvature but is still closer than a radial one. For
+the two stops: with `single_color_gradient` off, `colors[]` is sorted by `shift_value` and
+the ends are used; with it on (only one color is stored), the second stop is that color
+blended toward white by `gradient_tint` (`color::tint_toward_white`, a plain per-channel
+linear blend -- whether AutoCAD uses the same formula is unverified). `gradient_shift`
+(DXF 461, the "Centered" option) is not applied, the same kind of deliberate
+simplification as ignoring `HatchPatternLine.offset`'s parallel component.
 
-**아직 검증 안 된 부분**: 위에서 이미 언급한 두 가지 의도적 단순화(브릭 스태거링 미반영, 타일
-위상 근사) 외에, `pattern_type`(0=user-defined/1=predefined/2=custom)에 따라 defline 데이터의
-의미가 실제로 달라지는지는 확인하지 못했다 -- 스팟 체크한 파일들에서는 구분 없이 동일한 해석이
-잘 맞았지만, 세 종류를 명시적으로 다르게 처리해야 하는 파일을 만나면 재검토가 필요할 수 있다.
-**실측**: `samples/`의 9개 파일에 있는 ~2500개 HATCH 전부 `pattern_type=1`(predefined)이었다
-(0/2는 한 번도 등장하지 않음, 2026-08-07 재확인) -- 세 값을 구분해야 하는 실제 사례가 아직
-한 번도 없었다는 뜻이라, 이 캐비어트는 "틀렸을 수도 있다"보다는 "테스트할 기회가 아직 없었다"에
-가깝다.
+## MLINESTYLE parsing (unverified)
 
-## HATCH 그라디언트 채우기 (2026-08-07, 실 파일로 검증 안 됨)
+MLINE used to be approximated with a single centerline because MLINESTYLE was not parsed.
+Now the MLINE's `mlinestyle` handle is resolved, looked up in `Tables::mlinestyles`
+(MLINESTYLE name -> list of per-line offsets), and each vertex's
+`point + miter_direction * offset` gives a true offset polyline. `miter_direction` is a
+vector LibreDWG has already computed with the miter angle applied, so this is one scalar
+multiply, no trigonometry. When the style cannot be found (empty handle, failed
+resolution) it is treated as a single `offset = 0.0`, which reproduces the old
+centerline rendering exactly through the same `mline_offset_points` function, with no
+separate branch.
 
-`is_gradient_fill` 자체가 위 재확인에서 9개 파일의 ~2500개 HATCH 전부 `0`으로 나왔다 --
-gradient-fill HATCH를 포함한 파일이 이 프로젝트의 스팟 체크 셋에 하나도 없다는 뜻이다. 그래서
-아래 구현은 `dwg.h`의 필드 주석과 일반적인 DXF 그라디언트 지식에 기반한 것이지, 이 프로젝트
-다른 대부분의 로직처럼 실제 AutoCAD 렌더링과 대조해서 확정된 게 아니다 -- MULTILEADER/MLINE 등
-JS baseline에 없던 다른 "새 기능"들과 같은 리스크 등급.
+**bindgen**: `Dwg_MLINESTYLE_line` (`offset`/`color`/`lt_index`/`lt_ltype`) hits the same
+cascade through `parent: struct _dwg_object_MLINESTYLE *`, handled the same way (hand
+written, clang `sizeof()` of 80 bytes asserted).
 
-**bindgen**: `Dwg_HATCH_Color`(그라디언트 색상 스탑 하나 -- `shift_value` + `Dwg_Color`)가
-`Dwg_HATCH_DefLine`과 완전히 같은 `parent: struct _dwg_entity_HATCH *` 캐스케이드를 겪어서
-같은 방식(블록리스트 + 손으로 구조체 재작성, clang 실제 `sizeof()` 64바이트와 대조하는
-컴파일타임 어서션)으로 해결했다.
+**Measured**: none of the 9 spot-check files contains an MLINE, so like MULTILEADER this
+has never been compared with a real AutoCAD file or rendering. The offset arithmetic
+itself is covered by two unit tests (a zero offset equals the centerline, a nonzero one
+displaces exactly along `miter_direction`), but that only confirms the arithmetic, not
+that using LibreDWG's `miter_direction` this way matches AutoCAD's real MLINE geometry. It
+is a reasonable reading of `dwg.h`'s field names and semantics, not a confirmed fact.
 
-**렌더링**: `gradient_name`(`SPHERICAL`/`HEMISPHERICAL`/`CURVED`/`LINEAR`/`CYLINDER`)을
-이진 선택으로 단순화했다 -- `SPHERICAL`/`HEMISPHERICAL`은 SVG `radialGradient`로(중심에서
-바깥으로 퍼지는 AutoCAD의 실제 느낌과 유사), 나머지(`CURVED`/`CYLINDER` 포함, 인식 못하는
-이름도)는 `linearGradient`로 근사한다 -- `CURVED`/`CYLINDER`도 AutoCAD에서 방향성은 있지만
-방사형은 아니라서, 곡률은 놓치더라도 선형 근사가 방사형 근사보다 낫다고 판단했다. 색상 두
-스탑은 `single_color_gradient`가 꺼져 있으면 `colors[]`를 `shift_value`로 정렬해서 양 끝을
-쓰고, 켜져 있으면(색상 하나만 저장됨) `gradient_tint`로 흰색 쪽으로 블렌드한 값을 두 번째
-스탑으로 만든다(`color::tint_toward_white`, 단순 RGB 채널별 선형 블렌드 -- AutoCAD가 실제로
-같은 공식을 쓰는지는 검증 못함, "그럴듯한 근사"임을 명시). `gradient_shift`(DXF 461, "Centered"
-옵션)는 `HatchPatternLine.offset`의 평행 성분 무시와 같은 종류의 의도적 단순화로 적용하지
-않았다.
+## 3DSOLID SAB conversion runs on a copy
 
-**검증**: `cargo test --workspace` 45개(그라디언트 색상 해석/정렬/틴트 관련 신규 유닛테스트
-포함) 전부 통과, `cargo clippy --workspace --all-targets` 클린(새 경고 없음), 9개 fixture
-전부 크래시 없이 렌더링되고 `is_gradient_fill=0`이 실측대로 gradient def를 하나도 생성하지
-않는 것까지 확인(정상 -- 그라디언트가 없는 파일이니 없는 게 맞음). **렌더링 결과 자체가 실제
-그라디언트 채우기와 시각적으로 일치하는지는 그라디언트 포함 파일을 구하기 전까지는 확인할
-방법이 없다.**
+`acis.rs` used to call LibreDWG's `dwg_convert_SAB_to_SAT1` directly on the live entity to
+get SAT text for the wireframe. That function converts in place: `version` 2 -> 1,
+plaintext SAT into `encr_sat_data`, `acis_data` left as SAB bytes. Since `parse()` reads
+every solid twice (`convert_entities`, then `convert_tables`'s walk over block records),
+the second read took the `version != 2` branch, parsed binary SAB as SAT text, and lost
+the wireframe -- present in `entities`, missing from
+`tables.block_records["*Model_Space"]`. With the write path that existed at the time, the
+same mutation reached the encoder and corrupted every solid on the way back out (measured
+on `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, 58 SAB solids). The
+`uncad_3dsolid_sab_to_sat_text` shim in `libredwg-sys` now converts on a shallow copy and
+returns only the text, so `parse()` never touches the `Dwg_Data` at all.
+`crates/uncad/tests/acis_sab.rs` guards this with the same file, checking that both walks
+extract the same wireframe for every solid.
 
-## MLINESTYLE 파싱 -- MLINE이 이제 진짜 오프셋 라인을 그림 (2026-08-07, 실 파일로 검증 안 됨)
+## No DWG/DXF writing
 
-MLINE은 이전엔 MLINESTYLE을 파싱하지 않아서(위 "MULTILEADER/MLINE/..." 문단 참고) 중심선
-하나만 그리는 정직하지만 불완전한 근사였다. 이제 MLINE의 `mlinestyle` 핸들을 해석해서
-`Tables::mlinestyles`(MLINESTYLE 이름 -> 각 평행선의 `offset` 목록)에서 찾고, 각 정점의
-`point + miter_direction * offset`으로 실제 오프셋 폴리라인을 그린다 -- `miter_direction`은
-LibreDWG가 이미 미터 각도까지 반영해서 계산해 둔 벡터라, 삼각함수 없이 스칼라 곱셈 하나로
-끝난다. 스타일을 못 찾으면(핸들이 비어있거나 해석 실패) `offset=0.0` 하나만 있는 걸로 취급해서
-예전과 정확히 같은 중심선 렌더링으로 자연스럽게 폴백한다(별도 분기 없이 같은 함수
-`mline_offset_points`를 재사용).
+0.1.0's `CadDatabase::write_dwg`/`write_dxf`, `uncad::dwg_to_dxf`, `WriteError` and the
+CLI's `-o x.dxf`/`-o x.dwg` were all removed. This project's scope is
+"DWG/DXF -> model -> JSON/SVG/PNG". What was measured about the upstream encoder before
+removal (stable only up to R_2004, 4 of 9 fixtures failing in `dwg_encode`, refusing to
+overwrite an existing file, promoting an R2007 source to R2010, `dwg_write_dxf` converting
+SAB solids to SAT1 in place) lives in this section's earlier versions in git history. The
+C build still includes `USE_WRITE` and the encoder sources -- see `docs/ARCHITECTURE.md`,
+"Model".
 
-**bindgen**: `Dwg_MLINESTYLE_line`(평행선 정의 -- `offset`/`color`/`lt_index`/`lt_ltype`)이
-HATCH의 두 손수-정의 타입과 완전히 같은 `parent: struct _dwg_object_MLINESTYLE *` 캐스케이드를
-겪어서 같은 방식(블록리스트 + 손으로 구조체 재작성, clang 실제 `sizeof()` 80바이트와 대조하는
-컴파일타임 어서션)으로 해결했다.
+## Thread safety
 
-**실측**: 9개 fixture 전부 여전히 MLINE을 포함하지 않는다(재확인) -- MULTILEADER와 같은
-처지로, 이 기능도 실제 AutoCAD 파일/렌더링과 대조된 적이 없다. `offset`/`miter_direction`을
-곱하는 계산 자체는 `svg.rs`의 `mline_offset_points_*` 유닛테스트 2개로 검증했지만(0 오프셋이
-중심선과 같음, 0이 아닌 오프셋이 `miter_direction` 방향으로 정확히 변위됨), 이건 산수가 맞는지
-확인한 것이지 이 계산식 자체(LibreDWG의 `miter_direction`을 이런 식으로 쓰는 게 AutoCAD의 실제
-MLINE 지오메트리와 일치하는지)가 맞는지 확인한 게 아니다 -- `dwg.h`의 필드 이름/의미론에 대한
-합리적 해석이지, 실제 렌더링으로 확정된 사실은 아니다.
+See `docs/ARCHITECTURE.md`. The `uncad` crate is safe to call from multiple threads; using
+`libredwg-sys` directly means serializing the calls yourself.
 
-**검증**: `cargo test --workspace` 47개 전부 통과, `cargo clippy --workspace --all-targets`
-클린, 9개 fixture 전부 크래시 없이 렌더링되고 출력이 이전(MLINESTYLE 파싱 전)과 바이트 단위로
-동일함을 확인(정상 -- MLINE이 없는 파일들이니 동일해야 함).
+## File-based regression tests are few (broad real-file coverage is still missing)
 
-## 3DSOLID SAB 변환은 복사본에서 (2026-09-15)
+This section is the single list of what is actually verified. `samples/README.md` only
+explains why that directory is gitignored and links here. `docs/ARCHITECTURE.md`'s "Test
+layout" covers where a new test belongs.
 
-`acis.rs`가 와이어프레임 추출을 위해 LibreDWG의 `dwg_convert_SAB_to_SAT1`을 살아있는 엔티티에
-직접 호출하고 있었다. 이 함수는 제자리 변환이라 `version`을 2→1로 바꾸고 `encr_sat_data`에 평문
-SAT를 채우며 `acis_data`는 SAB 바이너리 그대로 둔다. `parse()`는 같은 솔리드를 두 번 읽으므로
-(`convert_entities`, 그다음 `convert_tables`의 블록 레코드 순회) 두 번째 읽기는 `version != 2`
-분기에서 SAB 바이너리를 SAT 텍스트로 파싱해 와이어프레임을 잃었다 -- `entities`에는 있고
-`tables.block_records["*Model_Space"]`에는 없는 불일치. 당시 있던 쓰기 경로(`write_dxf`/
-`write_dwg`, 지금은 제거됨)에서는 같은 변이가 인코더까지 오염시켜 다시 읽으면 솔리드가 전부 깨졌다
-(실측 `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, SAB 솔리드 58개). 이제 `libredwg-sys`의
-`uncad_3dsolid_sab_to_sat_text` 심이 엔티티의 얕은 복사본에서 변환하고 텍스트만 돌려주므로
-`parse()`는 `Dwg_Data`를 전혀 건드리지 않는다. `crates/uncad/tests/acis_sab.rs`가 같은 파일로
-두 순회의 와이어프레임이 솔리드마다 일치하는지 회귀 가드한다.
+`cargo test --workspace` runs 86 tests. 64 of them are `uncad` unit tests: `color.rs` 11
+(ACI/BYLAYER resolution and the gradient helper `tint_toward_white`), `acis.rs` 6 (SAT
+record parsing, pointer resolution, wireframe extraction), `convert.rs` 6 (HATCH gradient
+color resolution, stop ordering, `gradient_name` classification), `json.rs` 6, `svg*.rs`
+28 (outlier-trim clustering, HATCH edge approximation, MTEXT formatting stripping,
+stroke-width substitution, transform composition, HATCH pattern fill, MLINE offsets,
+TEXT/ATTRIB rotation transforms, non-finite coordinate defense, block-reference recursion
+blowup), `tables.rs` 3 (the LAYER TRUECOLOR 256-sentinel fallback), and `png.rs` 4 (SVG ->
+PNG size, scaling, errors, plus the `circle.dwg` pipeline). Most are pure-function tests
+verifiable with synthetic data, which makes them genuinely useful regression guards:
+whether `dominant_cluster_box` picks the right cluster out of a synthetic set of boxes, or
+whether `parse_sat_records` really stops at the `End-of-ACIS-data` marker, is decidable
+without a DWG file at all.
 
-## DWG/DXF 쓰기는 없다 (2026-09-15 제거)
+**Real-file tests**: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
+`parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
+(`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
+unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
+precondition) and checks that a valid PNG comes out. That is a smoke test on one file, not
+broad per-entity-type rendering accuracy. From the same corpus:
+`tests/dxf_pipeline.rs` (5: DXF parse/render, a JSON round trip through
+`serde_json::from_str` and `PartialEq`, two parses agreeing and producing identical JSON
+with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic on
+garbage input), `tests/acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
+`entities` and in `tables.block_records`), and `uncad-cli`'s
+`tests/documented_invocations.rs` (16: every call the README documents, run against the
+real binary; `--scale`/`--space`/`--no-trim`/`--pretty` are each checked for actually
+changing the result, with `--no-trim` using a five-line DXF the test writes from group
+codes itself). All of them assert properties rather than pinned expected values. The 6
+`json.rs` unit tests build one instance of every `Entity` variant and check that the JSON
+`type` tag matches `type_name()`, that HATCH path and edge tags are right, that a round
+trip holds, that non-finite floats become `null` and do not come back, and that a wrong or
+missing `type` tag is an error rather than a panic.
 
-0.1.0의 `CadDatabase::write_dwg`/`write_dxf`, `uncad::dwg_to_dxf`, `WriteError`, CLI의 `-o x.dxf`/
-`-o x.dwg`는 제거됐다(`CHANGELOG.md`). 이 프로젝트의 범위는 "DWG/DXF -> 모델 -> JSON/SVG/PNG"다.
-제거 전 실측으로 알게 된 업스트림 인코더의 성질(R_2004 이하만 안정, 9개 fixture 중 4개가
-`dwg_encode`에서 실패, 기존 파일 덮어쓰기 거부, R2007 소스를 R2010으로 승격, `dwg_write_dxf`가 SAB
-솔리드를 제자리에서 SAT1로 변환)은 git 히스토리의 이 절 이전 버전에 남아 있다. C 빌드에는
-`USE_WRITE`와 인코더 소스가 여전히 들어간다 -- `docs/ARCHITECTURE.md`의 "모델" 절 참고.
+**Still missing**: broad end-to-end verification of `parse()`/`to_svg()`/`to_json()`
+against real DWG/DXF files -- entity-count parity across many files, byte-level rendering
+comparison and so on -- is not automated. `samples/` is entirely gitignored (a deliberate
+choice, so anyone can drop any file in without license clearance), so CI has nothing
+committed to read. See `samples/README.md`. Restoring that coverage means committing files
+with a clear license and verifying expected values against an independent reference rather
+than against this project's own output.
 
-## 스레드 세이프티
+## Clippy
 
-`docs/ARCHITECTURE.md` 참고 -- `uncad` 크레이트는 안전하지만 `libredwg-sys`를 직접 쓰면 직접
-직렬화해야 한다.
+A separate `lint` job in `.github/workflows/ci.yml` runs `cargo fmt --check` and
+`cargo clippy --workspace --all-targets -- -D warnings` on every push and pull request, so
+whether the tree is clean is tracked automatically. A separate `security-audit` job runs
+`cargo audit` against `Cargo.lock` for dependency vulnerabilities (without submodules --
+the vendored C sources are not part of the Rust dependency graph). The
+bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
+than written by hand, and the handful of harmless lints it raises (`useless_transmute`,
+`missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`) are allowed at
+crate level in `crates/libredwg-sys/src/lib.rs` so `-D warnings` does not fail on
+generated code. New warnings in hand-written code still fail CI.
 
-## 파일 기반 회귀 테스트는 소수 (폭넓은 실 파일 커버리지는 여전히 없음)
+## Windows/Linux
 
-이 절이 "무엇이 실제로 검증되고 있는가"의 유일한 목록이다 -- `samples/README.md`는 그 디렉터리가
-왜 gitignore인지만 설명하고 이리로 링크한다. 유닛/통합/예제 세 계층을 어떤 기준으로 나누는지(새
-테스트를 어디에 놓아야 하는지)는 `docs/ARCHITECTURE.md`의 "테스트 구조" 절에 있다.
+Builds and tests pass on Linux (`x86_64-unknown-linux-gnu`), verified locally in a Docker
+`rust:latest` image with `libclang-dev` and re-verified on every push by the
+`ubuntu-latest` job in `.github/workflows/ci.yml`. A `windows-latest` job covers the MSVC
+platform this project is actually developed on. Three real bugs were found and fixed while
+getting Linux working:
 
-`cargo test --workspace`는 2026-09-15 기준 86개 테스트를 돈다. 그중 `uncad` 유닛테스트가 64개 --
-`json.rs` 6개(아래 참고) + 2026-08-14 기준의 58개(`color.rs` 11개 -- ACI/BYLAYER
-색상 해석 + 그라디언트용 `tint_toward_white`, `acis.rs` 6개 -- SAT 레코드 파싱/포인터 해석/
-와이어프레임 추출, `convert.rs` 6개 -- HATCH 그라디언트 색상 해석/스탑 정렬/`gradient_name`
-분류, `svg.rs` 28개 -- outlier-trim 클러스터링, HATCH 엣지 근사, MTEXT 포맷팅 스트리핑,
-stroke-width 치환, transform 합성, HATCH 패턴 채우기, MLINE 오프셋 계산, TEXT/ATTRIB 회전
-transform, 비유한(non-finite) 좌표 방어, 블록 참조 재귀의 콤비네이토리얼 폭증 방지 등,
-`tables.rs` 3개 -- LAYER TRUECOLOR-256-sentinel 폴백, `png.rs` 4개 -- SVG→PNG 크기/배율/오류 +
-circle.dwg 파이프라인). 대부분은 fixture 파일 없이 합성
-데이터로 검증 가능한 순수 함수 유닛테스트라 실제로 유용한 회귀 가드다 -- 예를 들어
-`dominant_cluster_box`가 합성 박스 집합에서 지배적 클러스터를 정확히 골라내는지,
-`parse_sat_records`가 `End-of-ACIS-data` 마커 이후를 제대로 자르는지 등은 실 DWG 파일 없이도
-확정적으로 검증 가능하고 실제로 그렇게 하고 있다.
+- `config.h` hardcoded `SIZEOF_WCHAR_T` to the Windows value (2), so `BITCODE_TU` resolved
+  to the wrong pointer type on Linux.
+- Several LibreDWG functions' real C return type (`int`) diverged from the bindgen-inferred
+  type of the related enum, differently per platform -- see `docs/ARCHITECTURE.md`,
+  "Cross-platform enum width".
+- Blocklisting `Dwg_MLINE_vertex` was not enough on Linux, where bindgen additionally
+  generated `Dwg_MLINE_line` referring to the blocklisted type (a compile error). Not
+  reproducible on Windows/MSVC.
 
-**실 파일 테스트**: `png.rs`의 `to_png_renders_a_real_dwg_to_a_valid_png`는 실제 DWG 파일
-(`lib/libredwg/test/test-data/2000/circle.dwg` -- git submodule 소속이라 `samples/`와 달리
-커밋된 채로 존재. 빌드는 벤더 복사본을 쓰므로 submodule은 테스트 전용 전제조건이다) 하나로
-`parse()` -> `to_svg()` -> `to_png()` 전체 파이프라인을 실행해 유효한 PNG가 나오는지 확인하는
-진짜 end-to-end 테스트다. 다만 이건 "크래시 없이 유효한 출력이 나온다"를 파일 하나로 확인하는
-스모크 테스트 수준이지, 엔티티 타입별 렌더링 정확성을 폭넓게 검증하는 게 아니다. 같은 corpus로
-`tests/dxf_pipeline.rs`(5개: DXF 파싱/렌더/JSON 왕복(`to_json` -> `serde_json::from_str` ->
-`PartialEq`)/두 번 파싱한 결과와 JSON이 동일하고 `CadDatabase`가 Send+Sync+Clone인지/쓰레기 입력
-에러 반환), `tests/acis_sab.rs`(1개: SAB 솔리드 파일에서 `entities`와
-`tables.block_records`의 와이어프레임이 솔리드마다 일치)와 `uncad-cli`의
-`tests/documented_invocations.rs`(16개: README가 문서화한 모든 호출을 실제 바이너리로 실행.
-`--scale`/`--space`/`--no-trim`/`--pretty`는 옵션이 결과를 실제로 바꾸는지 비교하고, `--no-trim`은
-테스트가 직접 group code로 작성한 5줄짜리 DXF를 쓴다)가 돈다. 모두 기대값을 고정하지 않는 성질
-기반 단언이다. `json.rs`의 유닛테스트 6개는 `RenderEntity`의 모든 variant를 하나씩 만들어 JSON
-`type` 태그가 `type_name()`과 같은지, HATCH 경로/엣지 태그, 왕복, 비유한 실수가 `null`이 되어
-되돌아오지 않는 것, 잘못되거나 빠진 `type` 태그가 패닉이 아니라 에러인 것을 확인한다.
+All three were latent portability problems in the upstream C headers or in bindgen itself,
+which MSVC simply happened not to expose.
 
-**여전히 없는 것**: 실제 DWG/DXF 파일 기반 `parse()`/`to_svg()`/`to_json()`의 폭넓은
-end-to-end 검증(여러 파일에 걸친 엔티티 카운트 parity, 렌더링 바이트 단위 비교 등)은
-자동화되어 있지 않다 -- `samples/`가 완전히 gitignore 처리되어 있어서(라이선스 확인 없이
-아무 파일이나 넣고 쓰라는 의도적 선택), 커밋된 채로 CI가 참조할 수 있는 파일이 없다.
-`samples/README.md` 참고. 이 커버리지를 되살리려면 라이선스가 명확한 파일을 다시 커밋하고,
-이 프로젝트 코드 자신의 출력이 아닌 독립적인 참조로 기대값을 검증해야 한다.
-
-**`cargo clippy` 현재 상태**: 2026-08-14부터 `.github/workflows/ci.yml`의 별도 `lint` 잡이
-모든 push/PR에서 `cargo fmt --check`와 `cargo clippy --workspace --all-targets -- -D
-warnings`를 돌려 클린 여부를 자동으로 추적한다(그 전까지는 `cargo build`/`cargo test`만
-실행되고 있었다). 2026-09-07부터는 별도 `security-audit` 잡이 `cargo audit`로 `Cargo.lock`의
-의존성 취약점도 검사한다(submodule 없이 -- 벤더링된 C 소스는 Rust 의존성 그래프에 없다). `libredwg-sys`의 bindgen 생성 `bindings.rs`(이 프로젝트가 손으로 쓴 코드가
-아니라 빌드마다 새로 생성됨)가 내는 무해한 경고 두 종류(`useless_transmute`,
-`missing_safety_doc`)는 `-D warnings`가 생성 코드까지 실패시키지 않도록
-`crates/libredwg-sys/src/lib.rs`에서 크레이트 레벨로 `#![allow(...)]` 처리했다 -- 이 프로젝트가
-직접 손으로 쓴 코드에서 나는 새 경고는 여전히 CI를 실패시킨다. 아래 여러 "검증" 항목에 남아있는
-"clippy 클린" 서술은 그 기능을 구현했던 시점의 기록이다.
-
-## Windows/Linux 크로스플랫폼
-
-Linux(`x86_64-unknown-linux-gnu`)에서도 빌드/테스트 전부 통과 확인됨(로컬 Docker `rust:latest`
-+ `libclang-dev`로 검증, 그리고 이제 `.github/workflows/ci.yml`의 `ubuntu-latest` 잡으로
-모든 push/PR에서 자동 재검증됨). 2026-08-14부터 `ci.yml`에 `windows-latest` 잡도 추가되어
-이 프로젝트가 실제로 개발되는 플랫폼(MSVC)의 빌드도 CI에서 검증되기 시작했다 -- 그 전까지는
-로컬 수동 빌드로만 확인되고 있었다. 아래 3건은 그 Linux 이식성 검증 과정에서 발견/수정한
-실제 버그다:
-
-- `config.h`가 `SIZEOF_WCHAR_T`를 Windows 값(2)으로 하드코딩해서 Linux에서 `BITCODE_TU`가
-  잘못된 포인터 타입으로 해석되던 것.
-- `dwg_object_get_fixedtype`/`dwg_read_file` 등 몇몇 LibreDWG 함수의 실제 C 반환 타입(`int`)과
-  관련 enum의 bindgen 추론 타입이 플랫폼에 따라 다르게 갈리던 것(`docs/ARCHITECTURE.md`의
-  "크로스플랫폼 enum 폭 문제" 참고).
-- `Dwg_MLINE_vertex`를 블록리스트해도 Linux 타겟에서는 bindgen이 `Dwg_MLINE_line`을 추가로
-  생성해서 블록리스트된 타입을 참조하는 컴파일 에러를 내던 것 -- Windows/MSVC에서는 나타나지
-  않았음(위 "MULTILEADER/MLINE/REGION/POLYLINE_PFACE" 문단 참고).
-
-**32비트 타겟은 아예 지원 대상이 아니고, 이제 빌드 시점에 그렇게 실패한다**: `config.h`가
-`SIZEOF_SIZE_T`를 8(64비트)로 고정해두었는데, 이웃 필드 `SIZEOF_WCHAR_T`와 달리 플랫폼 분기가
-없다. 이 값은 LibreDWG의 `MAX_MEM_ALLOC` 할당 크기 안전장치(`bits.h`)와 `bits.c`의 여러
-워드-정렬 고속 경로 읽기에 쓰이는데, 32비트 타겟(`i686-*`, `wasm32-*`, `arm-*` 등)에서는 이
-가정이 깨져서 정렬되지 않은 읽기와, 공격자가 통제하는 DWG 크기 필드에 대해 지나치게 관대한
-할당 크기 게이트로 이어질 수 있다 -- 컴파일은 되지만 조용히 잘못된 동작을 하는, 진단하기 가장
-어려운 종류의 버그다. 지금까지는 이 프로젝트가 x86_64 전용으로만 빌드/검증되어 왔을 뿐 이를
-강제하는 장치가 없었다. `crates/libredwg-sys/build.rs`가 이제 빌드 시작 시
-`CARGO_CFG_TARGET_POINTER_WIDTH`를 확인해서 64비트가 아니면 명확한 메시지와 함께 즉시
-`panic!`한다 -- 32비트 타겟에서 잘못된 값으로 조용히 컴파일되는 것보다 빌드 실패가 낫다는
-판단. 32비트를 실제로 지원하려면 `config.h`에 `SIZEOF_WCHAR_T`처럼 플랫폼 분기를 추가하고
-그 타겟에서 실제로 빌드/테스트해서 검증해야 한다 -- 아직 안 한 일이다.
-
-셋 다 업스트림 C 헤더/bindgen 자체에 이미 있던 잠재적 이식성 문제였고, MSVC에서는 우연히
-드러나지 않았을 뿐이다. Docker로 로컬 Linux 빌드를 매번 확인하는 습관이 이 3건 전부를
-커밋 전에 잡아낸 이유이기도 하다.
+**32-bit targets are not supported, and now fail at build time.** `config.h` fixes
+`SIZEOF_SIZE_T` at 8 (64-bit) with no platform branch, unlike its neighbor
+`SIZEOF_WCHAR_T`. That value feeds LibreDWG's `MAX_MEM_ALLOC` allocation-size guard
+(`bits.h`) and several word-aligned fast-path reads in `bits.c`, so on a 32-bit target
+(`i686-*`, `wasm32-*`, `arm-*`) the assumption breaks, leading to misaligned reads and a
+far too permissive allocation-size gate against attacker-controlled DWG size fields -- the
+hardest kind of bug to diagnose, since it compiles and then quietly misbehaves. This
+project has only ever been built and verified for x86_64, with nothing enforcing it.
+`crates/libredwg-sys/build.rs` now checks `CARGO_CFG_TARGET_POINTER_WIDTH` at the start of
+the build and `panic!`s with a clear message if it is not 64: a build failure beats
+compiling silently with wrong values. Real 32-bit support would mean adding a platform
+branch to `config.h` the way `SIZEOF_WCHAR_T` has, and actually building and testing on
+such a target.
