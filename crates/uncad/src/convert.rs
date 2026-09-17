@@ -812,12 +812,10 @@ unsafe fn multileader_lines(entity_ptr: *mut std::ffi::c_void) -> Vec<Vec<Point3
         // doubles, per uncad_multileader_get_lines' contract.
         let flat = unsafe { std::slice::from_raw_parts(line.points, line.num_points as usize * 3) };
         lines.push(
-            flat.chunks_exact(3)
-                .map(|c| Point3D {
-                    x: c[0],
-                    y: c[1],
-                    z: c[2],
-                })
+            flat.as_chunks::<3>()
+                .0
+                .iter()
+                .map(|&[x, y, z]| Point3D { x, y, z })
                 .collect(),
         );
     }
