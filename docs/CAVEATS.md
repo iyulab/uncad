@@ -183,6 +183,28 @@ than "corrected" on a guess.
 reference to confirm it, the value stays fixed at `0` rather than diverging on an
 unverified guess.
 
+## There is no single ACI colour table
+
+`ACI_PALETTE` in `crates/uncad/src/color.rs` maps colour index 1-255 to RGB, and which RGB
+values are "right" has no one answer. AutoCAD's *displayed* colours depend on the
+drawing-area background, so a table captured from a dark model space and one captured from
+a white sheet disagree with each other; a third-party reader may carry a table that matches
+neither. Comparing this crate's table against the one LibreDWG keeps for its own JSON export
+(`rgb_palette` in `src/dwg.c`), 222 of 256 entries differ -- the two agree only on the
+primaries and a handful of others, starting to diverge at index 8. That is not evidence
+either is wrong; LibreDWG does not render, so its table answers a different question.
+
+What this crate uses is the table that has been published unchanged for decades and is the
+one mirrored by the widely used ACI charts. The
+`aci_palette_matches_the_published_table` test pins fifteen entries to it -- the first
+primary, the two greys at index 8 and 9 where implementations tend to split, the head of
+the red ramp, and the grey ladder at 250-255 -- so a re-import from some other project's
+table cannot land silently.
+
+Two entries are not colours: index 0 is a placeholder and index 256 is the BYLAYER slot.
+Both are `0`, which is what lets `aci_to_hex` stay total over `0..=256` without a branch --
+and what makes the unresolved-layer case below come out black rather than panicking.
+
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
 `Tables` does not expose a layer's `Dwg_Color.rgb`. On an older LibreDWG that field was

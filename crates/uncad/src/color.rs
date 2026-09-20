@@ -218,4 +218,59 @@ mod tests {
         assert_eq!(tint_toward_white("#123456", -1.0), "#123456");
         assert_eq!(tint_toward_white("#123456", 2.0), "#ffffff");
     }
+
+    /// Pins the palette to the long-published ACI table rather than to itself.
+    ///
+    /// There is no single canonical ACI-to-RGB mapping. AutoCAD's *displayed*
+    /// colours depend on the drawing-area background, so a table captured from
+    /// a dark model space and one captured from a white sheet disagree -- and
+    /// both disagree with the table LibreDWG carries for its own JSON output.
+    /// What this crate uses is the table that has been published unchanged for
+    /// decades, which is also the one a reader can check against any of the
+    /// widely mirrored ACI charts.
+    ///
+    /// The samples below are the entries those charts agree on and that are
+    /// easiest to verify by eye: the first primary, the two greys that sit
+    /// right where implementations tend to diverge (8 and 9), the head of the
+    /// red ramp, and the grey ladder at the end. A silent edit to
+    /// `ACI_PALETTE` -- a re-import from some other project's table, say --
+    /// changes at least one of these.
+    #[test]
+    fn aci_palette_matches_the_published_table() {
+        for (index, expected) in [
+            (1_usize, 0xFF_0000_u32),
+            (8, 0x80_8080),
+            (9, 0xC0_C0C0),
+            (11, 0xFF_7F7F),
+            (12, 0xCC_0000),
+            (13, 0xCC_6666),
+            (14, 0x99_0000),
+            (15, 0x99_4C4C),
+            (16, 0x7F_0000),
+            (250, 0x33_3333),
+            (251, 0x5B_5B5B),
+            (252, 0x84_8484),
+            (253, 0xAD_ADAD),
+            (254, 0xD6_D6D6),
+            (255, 0xFF_FFFF),
+        ] {
+            assert_eq!(
+                ACI_PALETTE[index], expected,
+                "ACI {index} is #{:06x}, expected #{expected:06x}",
+                ACI_PALETTE[index]
+            );
+        }
+    }
+
+    /// Index 0 is a placeholder and 256 is the BYLAYER slot; neither is a
+    /// colour anyone should read out of the table, and both being zero is what
+    /// keeps `aci_to_hex` total over `0..=256` without a branch.
+    #[test]
+    fn aci_palette_covers_zero_through_byblock_and_bylayer() {
+        assert_eq!(ACI_PALETTE.len(), 257);
+        assert_eq!(ACI_PALETTE[0], 0);
+        assert_eq!(ACI_PALETTE[256], 0);
+        assert!(aci_to_hex(256).is_some());
+        assert!(aci_to_hex(257).is_none());
+    }
 }
