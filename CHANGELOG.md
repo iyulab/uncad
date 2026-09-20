@@ -21,6 +21,9 @@ Notable changes to this project are recorded here. The format follows
   warning built from them) listed the same types in a different order from run to run.
   They are now sorted by name. A new `tests/determinism.rs` regenerates the JSON, the SVG
   and this list repeatedly and requires byte-identical results.
+- A polyface mesh with an unused face-index slot made `parse()` panic in debug builds
+  (index underflow; release builds were unaffected because the wrapped value was
+  discarded). The corpus example DXFs are now all parsed in a test.
 - The viewBox outlier trim grouped entity boxes into clusters whose order came out of a
   hash map, so a tie between equally scored clusters could be broken differently from
   run to run. Clusters now come out in input order.

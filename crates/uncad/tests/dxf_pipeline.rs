@@ -175,3 +175,28 @@ fn a_trace_written_by_a_cad_program_fills_as_a_simple_quadrilateral() {
         "corners walked 1-2-4-3 should turn the same way at every corner: {turns:?}"
     );
 }
+
+#[test]
+fn no_corpus_example_makes_the_parser_panic() {
+    // Whether each of these parses is LibreDWG's business (see
+    // `docs/CAVEATS.md`, "DXF reading"); that none of them brings the process
+    // down is this crate's. A polyface mesh with an unused face slot used to
+    // underflow an index here, in debug builds only.
+    let dir = Path::new(CORPUS_DXF)
+        .parent()
+        .and_then(Path::parent)
+        .expect("the corpus fixture sits two levels below test-data");
+    let mut seen = 0;
+    for entry in fs::read_dir(dir).expect("the corpus checkout should be readable") {
+        let path = entry.expect("a readable directory entry").path();
+        let is_example = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("example_") && n.ends_with(".dxf"));
+        if is_example {
+            let _ = uncad::parse(&path);
+            seen += 1;
+        }
+    }
+    assert!(seen >= 5, "expected the corpus example DXFs, found {seen}");
+}

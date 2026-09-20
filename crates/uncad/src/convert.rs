@@ -199,10 +199,10 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     for face in &faces {
         let idxs: Vec<usize> = face
             .iter()
-            .filter_map(|&i| {
-                let a = i.unsigned_abs() as usize;
-                (a != 0).then_some(a - 1)
-            })
+            // 1-based; 0 marks an unused slot. `checked_sub` rather than
+            // `(a != 0).then_some(a - 1)`: `then_some` evaluates its argument
+            // even when the condition is false, so the unused slot underflowed.
+            .filter_map(|&i| usize::from(i.unsigned_abs()).checked_sub(1))
             .collect();
         if idxs.len() < 2 {
             continue;
