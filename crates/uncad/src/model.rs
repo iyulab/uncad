@@ -463,6 +463,7 @@ pub struct LeaderEntity {
 ///
 /// A few variants share a payload type where the underlying DWG types are
 /// structurally identical ([`Entity::XLine`] reuses [`RayEntity`],
+/// [`Entity::Trace`] reuses [`SolidEntity`],
 /// [`Entity::Region`]/[`Entity::PolylinePFace`] reuse [`Solid3DEntity`],
 /// [`Entity::Polyline2D`] reuses [`LwPolylineEntity`]). They stay distinct
 /// variants so [`type_name`](Self::type_name) still reports the real DXF
@@ -490,6 +491,9 @@ pub enum Entity {
     Point(PointEntity),
     #[serde(rename = "SOLID")]
     Solid(SolidEntity),
+    /// Same four corners as SOLID, in the same order.
+    #[serde(rename = "TRACE")]
+    Trace(SolidEntity),
     #[serde(rename = "RAY")]
     Ray(RayEntity),
     #[serde(rename = "XLINE")]
@@ -565,7 +569,7 @@ impl Entity {
             Entity::Arc(e) => &e.common,
             Entity::Ellipse(e) => &e.common,
             Entity::Point(e) => &e.common,
-            Entity::Solid(e) => &e.common,
+            Entity::Solid(e) | Entity::Trace(e) => &e.common,
             Entity::Ray(e) => &e.common,
             Entity::XLine(e) => &e.common,
             Entity::Insert(e) => &e.common,
@@ -604,6 +608,7 @@ impl Entity {
             Entity::Ellipse(_) => "ELLIPSE",
             Entity::Point(_) => "POINT",
             Entity::Solid(_) => "SOLID",
+            Entity::Trace(_) => "TRACE",
             Entity::Ray(_) => "RAY",
             Entity::XLine(_) => "XLINE",
             Entity::Insert(_) => "INSERT",

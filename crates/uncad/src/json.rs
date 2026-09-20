@@ -182,6 +182,13 @@ mod tests {
                 corner3: p2(1.0, 1.0),
                 corner4: p2(0.0, 1.0),
             }),
+            Entity::Trace(SolidEntity {
+                common: c.clone(),
+                corner1: p2(0.0, 0.0),
+                corner2: p2(1.0, 0.0),
+                corner3: p2(0.0, 0.2),
+                corner4: p2(1.0, 0.2),
+            }),
             Entity::Ray(ray.clone()),
             Entity::XLine(ray),
             Entity::Insert(InsertEntity {
@@ -338,6 +345,7 @@ mod tests {
                 | Entity::Ellipse(_)
                 | Entity::Point(_)
                 | Entity::Solid(_)
+                | Entity::Trace(_)
                 | Entity::Ray(_)
                 | Entity::XLine(_)
                 | Entity::Insert(_)

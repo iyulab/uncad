@@ -6,6 +6,12 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- TRACE is read and drawn: `Entity::Trace`, which reuses `SolidEntity` the way `XLine`
+  reuses `RayEntity`. It used to arrive as `Entity::Unknown`. `Entity` is
+  `#[non_exhaustive]`, so this is not a breaking change.
+
 ### Fixed
 
 - `ToSvgResult::unsupported_types` / `ToPngResult::unsupported_types` (and the CLI
@@ -21,8 +27,8 @@ Notable changes to this project are recorded here. The format follows
   directories `cc` located. Bindings are also generated *before* the C compile, so a
   libclang problem fails in seconds rather than after the whole LibreDWG compile.
 - `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
-  TRACE, for one, still arrives as `Unknown`. The section now states the supported list
-  as the contract.
+  several types that have a shape still arrive as `Unknown`. The section now states the
+  supported list as the contract.
 
 ### Changed
 

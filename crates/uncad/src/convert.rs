@@ -424,6 +424,21 @@ unsafe fn convert_entity(
                 corner4,
             })
         }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TRACE => {
+            // Dwg_Entity_TRACE has exactly SOLID's fields (dwg.h), and DXF
+            // gives both the same group codes.
+            let corner1 = get_field::<Point2D>(entity_ptr, "TRACE", "corner1")?;
+            let corner2 = get_field::<Point2D>(entity_ptr, "TRACE", "corner2")?;
+            let corner3 = get_field::<Point2D>(entity_ptr, "TRACE", "corner3")?;
+            let corner4 = get_field::<Point2D>(entity_ptr, "TRACE", "corner4")?;
+            Entity::Trace(SolidEntity {
+                common,
+                corner1,
+                corner2,
+                corner3,
+                corner4,
+            })
+        }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
             let point = get_field::<Point3D>(entity_ptr, "RAY", "point")?;
             let vector = get_field::<Point3D>(entity_ptr, "RAY", "vector")?;

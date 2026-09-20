@@ -633,8 +633,8 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 neg(p.position.y)
             ))
         }
-        Entity::Solid(s) => {
-            // Classic AutoCAD SOLID vertex order is 1-2-4-3, not 1-2-3-4.
+        Entity::Solid(s) | Entity::Trace(s) => {
+            // Classic AutoCAD SOLID/TRACE vertex order is 1-2-4-3, not 1-2-3-4.
             let pts = [s.corner1, s.corner2, s.corner4, s.corner3];
             ctx.consider_all(&pts);
             Some(format!(

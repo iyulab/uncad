@@ -3,7 +3,7 @@
 ## Entity type coverage
 
 `parse()`/`to_svg()` support: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT, SOLID,
-RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
+TRACE, RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
 VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
 LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
 LIGHT. Details worth knowing:
@@ -19,6 +19,8 @@ LIGHT. Details worth knowing:
 - **LEADER** draws only the polyline through its vertices plus an optional arrowhead at
   the first one. Spline paths and text-box size are not in the model, because nothing
   renders them.
+- **TRACE** reuses `SolidEntity` (the two have the same four corners, in the same order) and
+  is filled the same way.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
   as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
 - **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
@@ -34,9 +36,9 @@ it through `unsupported_types` (sorted by name, so the report is the same on eve
 A listed type can end up there too when a particular entity gives the renderer nothing to
 draw, e.g. a DIMENSION without its cached-geometry block.
 
-Being off the list says nothing about whether the type has geometry. TRACE, for one, is
-four corner points exactly like SOLID and is still not covered; it is simply work that has
-not been done. Do not read the list as "everything with a shape".
+Being off the list says nothing about whether the type has geometry. POLYLINE_MESH, IMAGE
+and HELIX, for instance, all have a shape and none of them is covered; that is simply work
+that has not been done. Do not read the list as "everything with a shape".
 
 **ACAD_PROXY_ENTITY is the one type that will stay unsupported.** It is the proxy
 representation of a custom entity from another program, so it has no fixed geometry to
