@@ -34,6 +34,34 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  # A declared rust-version nobody checks goes stale with the next dependency
+  # bump. This job builds with exactly the declared toolchain, so the
+  # declaration and the truth cannot drift apart silently.
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      # No submodules: `cargo check` runs no tests, and the build compiles the
+      # vendored LibreDWG copy.
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install libclang (bindgen)
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Read the declared rust-version
+        run: |
+          msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          test -n "$msrv" || { echo "no rust-version in Cargo.toml"; exit 1; }
+          echo "MSRV=$msrv" >> "$GITHUB_ENV"
+
+      - name: Install that toolchain
+        run: rustup toolchain install "$MSRV" --profile minimal
+
+      - name: Check the workspace with it
+        run: cargo +"$MSRV" check --workspace --all-features --all-targets --locked
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest

@@ -11,6 +11,9 @@ Notable changes to this project are recorded here. The format follows
 - TRACE is read and drawn: `Entity::Trace`, which reuses `SolidEntity` the way `XLine`
   reuses `RayEntity`. It used to arrive as `Entity::Unknown`. `Entity` is
   `#[non_exhaustive]`, so this is not a breaking change.
+- All three crates declare `rust-version = "1.88"`. Until now the minimum was whatever
+  happened to build. The value is measured (1.87 fails, 1.88 passes) and CI has an `msrv`
+  job that checks the workspace with exactly the declared toolchain.
 
 ### Fixed
 
