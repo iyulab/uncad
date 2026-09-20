@@ -20,7 +20,7 @@
 //! drawing's entity list, its copy inside the model-space block record must
 //! get the very same one.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 const SAB_DWG: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -30,7 +30,7 @@ const SAB_DWG: &str = concat!(
 /// handle -> wireframe edges, for every 3DSOLID/REGION in `entities`.
 fn wireframes_by_handle(
     entities: &[uncad::Entity],
-) -> HashMap<&str, &[[uncad::model::Point3D; 2]]> {
+) -> BTreeMap<&str, &[[uncad::model::Point3D; 2]]> {
     entities
         .iter()
         .filter_map(|e| match e {

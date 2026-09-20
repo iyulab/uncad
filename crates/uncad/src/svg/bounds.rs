@@ -6,6 +6,8 @@
 //! approach reads the empty interior as a disconnected outlier and trims away
 //! real geometry. These boxes are clustered by corner proximity instead.
 
+use std::collections::BTreeMap;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Box2D {
     pub(super) min_x: f64,
@@ -103,8 +105,7 @@ fn cluster_entity_boxes(boxes: &[Box2D]) -> Vec<Vec<Box2D>> {
     // Bucket corners into eps-sized cells so each one only has to be compared
     // against the 9 cells around it, not against every other box.
     let cell = eps;
-    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> =
-        std::collections::HashMap::new();
+    let mut grid: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
     let key = |x: f64, y: f64| ((x / cell).floor() as i64, (y / cell).floor() as i64);
     for (i, c) in corners.iter().enumerate() {
         for &(x, y) in c {
@@ -136,12 +137,19 @@ fn cluster_entity_boxes(boxes: &[Box2D]) -> Vec<Vec<Box2D>> {
         }
     }
 
-    let mut groups: std::collections::HashMap<usize, Vec<Box2D>> = std::collections::HashMap::new();
+    // Clusters come out in the order their first box appears in `boxes`: the
+    // caller breaks score ties by position, so the order is part of the result.
+    let mut groups: Vec<Vec<Box2D>> = Vec::new();
+    let mut group_of_root: BTreeMap<usize, usize> = BTreeMap::new();
     for (i, &b) in boxes.iter().enumerate() {
         let r = find(&mut parent, i);
-        groups.entry(r).or_default().push(b);
+        let g = *group_of_root.entry(r).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[g].push(b);
     }
-    groups.into_values().collect()
+    groups
 }
 
 /// The bounding box of the drawing's dominant cluster, or `None` when
@@ -261,6 +269,26 @@ mod tests {
         let mut sizes: Vec<usize> = clusters.iter().map(|c| c.len()).collect();
         sizes.sort_unstable();
         assert_eq!(sizes, vec![1, 3]);
+    }
+
+    #[test]
+    fn cluster_entity_boxes_returns_clusters_in_input_order_on_every_run() {
+        // Twelve boxes far apart from each other: twelve single-box clusters.
+        // Their order reaches the rendered viewBox (it breaks score ties when
+        // the dominant cluster is picked), so it has to follow the input, not
+        // a hash map's per-instance iteration order.
+        let boxes: Vec<Box2D> = (0..12)
+            .map(|i| {
+                let o = f64::from(i) * 1000.0;
+                bx(o, o, o + 1.0, o + 1.0)
+            })
+            .collect();
+        for run in 0..16 {
+            let clusters = cluster_entity_boxes(&boxes);
+            let firsts: Vec<f64> = clusters.iter().map(|c| c[0].min_x).collect();
+            let expected: Vec<f64> = boxes.iter().map(|b| b.min_x).collect();
+            assert_eq!(firsts, expected, "run {run}: cluster order changed");
+        }
     }
 
     #[test]

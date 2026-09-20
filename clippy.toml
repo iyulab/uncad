@@ -1,0 +1,12 @@
+# Same input, same bytes. `std`'s hash collections iterate in an order that is
+# randomized per instance, and that order has leaked into results here more
+# than once -- through `into_iter().collect()` and `into_values()`, which the
+# `iter_over_hash_type` lint (it only looks at `for` loops) does not see.
+# Nothing in this workspace is large enough for the lookup cost to matter, so
+# the ordered collections are used throughout. If a hot path ever needs a hash
+# map, `#[expect(clippy::disallowed_types, reason = "...")]` it on the spot and
+# say why its order cannot reach any output.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is randomized per instance; use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "iteration order is randomized per instance; use BTreeSet" },
+]

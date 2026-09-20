@@ -12,6 +12,9 @@ Notable changes to this project are recorded here. The format follows
   warning built from them) listed the same types in a different order from run to run.
   They are now sorted by name. A new `tests/determinism.rs` regenerates the JSON, the SVG
   and this list repeatedly and requires byte-identical results.
+- The viewBox outlier trim grouped entity boxes into clusters whose order came out of a
+  hash map, so a tie between equally scored clusters could be broken differently from
+  run to run. Clusters now come out in input order.
 - Building on Windows no longer needs a Visual Studio developer prompt. The C compile
   always located MSVC by itself, but bindgen's libclang only found the C standard headers
   when `INCLUDE` was already set; `libredwg-sys`'s build script now forwards the header
@@ -22,6 +25,10 @@ Notable changes to this project are recorded here. The format follows
   as the contract.
 
 ### Changed
+
+- No `std` hash collections anywhere in the workspace: `clippy.toml` disallows `HashMap`
+  and `HashSet`, and the `iter_over_hash_type` lint is on. Both earlier ordering bugs went
+  through `into_iter()`/`into_values()`, which no lint on `for` loops would have seen.
 
 - `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
   requires prettyplease 0.3 -- see the commit for why the pair has to move

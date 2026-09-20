@@ -4,7 +4,7 @@
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use uncad::{CadDatabase, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
@@ -220,12 +220,11 @@ fn parse_scale(value: &str) -> Result<f32, String> {
 }
 
 fn print_summary(input: &str, db: &CadDatabase) {
-    let mut counts: HashMap<&str, usize> = HashMap::new();
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
     for e in &db.entities {
         *counts.entry(e.type_name()).or_insert(0) += 1;
     }
-    // Most common first, then alphabetically, so the same drawing always
-    // prints the same order (the counts come out of a HashMap).
+    // Most common first, then alphabetically.
     let mut entries: Vec<_> = counts.into_iter().collect();
     entries.sort_by_key(|&(type_name, count)| (std::cmp::Reverse(count), type_name));
 

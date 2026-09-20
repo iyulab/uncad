@@ -28,7 +28,7 @@ use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
 use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 /// Which of a drawing's spaces to render.
@@ -145,8 +145,7 @@ struct Ctx<'a> {
     ent_max_x: f64,
     ent_min_y: f64,
     ent_max_y: f64,
-    // Ordered, not hashed: this set is copied straight into the public
-    // result, and a hash set's iteration order differs from run to run.
+    // Copied straight into the public result, in this set's (sorted) order.
     unsupported: BTreeSet<String>,
     tables: &'a Tables,
     depth: u32,
@@ -879,7 +878,7 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
     if space == Space::All {
         return db.entities.iter().collect();
     }
-    let mut handles: HashSet<&str> = HashSet::new();
+    let mut handles: BTreeSet<&str> = BTreeSet::new();
     for (name, record) in &db.tables.block_records {
         let upper = name.to_uppercase();
         let matches = match space {

@@ -17,3 +17,11 @@ readme = "README.md"
 # existing convention stays enforced on this edition too, instead of
 # silently degrading if a future `unsafe fn` skips it.
 unsafe_op_in_unsafe_fn = "warn"
+
+[workspace.lints.clippy]
+# Same input, same bytes: nothing this workspace outputs may depend on a hash
+# collection's iteration order, which `std` randomizes per instance. The main
+# guard is clippy.toml's `disallowed-types` (std's HashMap/HashSet are not used
+# here at all); this restriction lint additionally covers `for` loops over any
+# other hash-based type, e.g. one handed over by a dependency.
+iter_over_hash_type = "warn"
