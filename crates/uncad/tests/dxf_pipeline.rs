@@ -146,3 +146,32 @@ fn reports_an_error_instead_of_panicking_on_a_file_that_is_not_a_drawing() {
     // process down rather than return. This asserts it returns.
     assert!(uncad::parse(garbage.path()).is_err());
 }
+
+#[test]
+fn a_trace_written_by_a_cad_program_fills_as_a_simple_quadrilateral() {
+    // TRACE lists its corners like SOLID does: 1-2 across the start, 3-4
+    // across the end. Walking them 1-2-4-3 gives the outline; 1-2-3-4 would
+    // cross itself. The renderer relies on that, so check it against a TRACE
+    // a CAD program wrote rather than one written by hand for a test.
+    let db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
+    let trace = db
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            uncad::Entity::Trace(t) => Some(t),
+            _ => None,
+        })
+        .expect("the corpus drawing contains a TRACE");
+
+    let outline = [trace.corner1, trace.corner2, trace.corner4, trace.corner3];
+    let turns: Vec<f64> = (0..4)
+        .map(|i| {
+            let (a, b, c) = (outline[i], outline[(i + 1) % 4], outline[(i + 2) % 4]);
+            (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)
+        })
+        .collect();
+    assert!(
+        turns.iter().all(|t| *t > 0.0) || turns.iter().all(|t| *t < 0.0),
+        "corners walked 1-2-4-3 should turn the same way at every corner: {turns:?}"
+    );
+}
