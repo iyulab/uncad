@@ -47,6 +47,9 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
 1. **DWG** — read through [LibreDWG](https://www.gnu.org/software/libredwg/)
    (GPLv3+), bound directly via Rust FFI (`bindgen`). All versions.
 2. **DXF** — read through the same LibreDWG engine, chosen by file extension.
+   **DXF saved as R2007 or later currently comes back with no entities and no
+   error** — see `docs/CAVEATS.md`, "DXF reading". R2000/R2004 DXF and every DWG
+   version are unaffected.
    LibreDWG's own DXF importer is documented as working "for most objects", so
    it is less complete than its DWG reading ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
 3. **Output** — the parsed model as JSON (`to_json`), SVG (`to_svg`) or PNG

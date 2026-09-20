@@ -142,6 +142,23 @@ A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
 
+### DXF saved as R2007 or later currently reads as an empty drawing
+
+`parse()` returns `Ok` with **zero entities** for every R2007, R2010, R2013 and R2018 DXF
+in the LibreDWG corpus (`test/test-data/example_20{07,10,13,18}.dxf`); the R2000 and R2004
+files from the same set read fine (68 and 72 entities), and so do the DWG versions of all
+of them. LibreDWG reports no error for these files, so nothing here can tell "empty
+drawing" from "not read" yet.
+
+What happens: LibreDWG's DXF importer stores strings as UTF-16 for R2007+ input, but its
+own text accessor treats imported data as 8-bit. Every name therefore comes back cut off
+after its first character -- `*Model_Space` arrives as `*` -- and this crate finds the
+entities by looking up the model- and paper-space block records by name. The entities are
+in memory (the block record that arrives as `*` has them); they are just never matched.
+
+Until this is fixed, treat an entity count of 0 from a `.dxf` as "possibly not read", and
+prefer the DWG when both exist. These are current DXF versions, not exotic ones.
+
 ## The polyline "closed" flag
 
 `dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic

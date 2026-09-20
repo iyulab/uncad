@@ -32,6 +32,9 @@ Notable changes to this project are recorded here. The format follows
   when `INCLUDE` was already set; `libredwg-sys`'s build script now forwards the header
   directories `cc` located. Bindings are also generated *before* the C compile, so a
   libclang problem fails in seconds rather than after the whole LibreDWG compile.
+- Documented, not fixed: a DXF saved as R2007 or later reads as an empty drawing without
+  any error. `docs/CAVEATS.md` explains the cause (string width in LibreDWG's DXF
+  importer) and what to do meanwhile.
 - `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
   several types that have a shape still arrive as `Unknown`. The section now states the
   supported list as the contract.
