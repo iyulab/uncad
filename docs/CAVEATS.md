@@ -156,6 +156,15 @@ after its first character -- `*Model_Space` arrives as `*` -- and this crate fin
 entities by looking up the model- and paper-space block records by name. The entities are
 in memory (the block record that arrives as `*` has them); they are just never matched.
 
+Correcting the width on this side is not enough. The importer resolves layer and block
+names through that same accessor while it builds the drawing, so those lookups have already
+failed by the time the data gets here: with the width corrected, the corpus files do yield
+their 72 entities, but 65 of them without a layer, every INSERT and DIMENSION without its
+block, and MTEXT content garbled (the importer stores that one field 8-bit). A drawing
+that looks read and is quietly missing that much is worse than an obviously empty one, so
+this crate does not do it. The fix belongs in LibreDWG's accessor, or in reading DXF
+without LibreDWG.
+
 Until this is fixed, treat an entity count of 0 from a `.dxf` as "possibly not read", and
 prefer the DWG when both exist. These are current DXF versions, not exotic ones.
 
