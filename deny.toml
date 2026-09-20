@@ -1,0 +1,58 @@
+# cargo-deny -- license gate for the Rust dependency graph.
+#
+# What this guards: this workspace links a GPL-3.0-or-later C library, so its
+# own crates are GPL. That is deliberate and declared. What must NOT happen is
+# a *second* copyleft component arriving unnoticed through a Rust dependency,
+# because the whole point of keeping the copyleft boundary at one repository is
+# that it stays knowable. Until this file existed, "the only copyleft here is
+# the vendored C library" was true but checked by hand.
+#
+# Scope note: like the cargo-audit job beside it, this reads Cargo.lock, so the
+# vendored C sources are not in view -- they are not part of the Rust
+# dependency graph. The drift detector in crates/libredwg-sys/build.rs is what
+# watches that side.
+#
+# Run locally: cargo deny check licenses
+
+[licenses]
+# Permissive only. Every entry below was observed in the current graph; this is
+# not a speculative allowlist.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unlicense",
+    "0BSD",
+    "Unicode-3.0",
+]
+# Deliberately absent: MPL-2.0, EPL, CDDL and the LGPLs. They are weak
+# copyleft, not permissive, and admitting one here would quietly undo the
+# boundary this file exists to hold. Adding one is a decision to be argued,
+# not a line to be appended when a build fails.
+
+# The GPL lives here and only here: the three crates this workspace publishes.
+# A fourth name appearing in this list means the copyleft boundary moved, which
+# is a decision, not a dependency bump.
+exceptions = [
+    { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
+    { crate = "uncad", allow = ["GPL-3.0-or-later"] },
+    { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
+]
+
+[bans]
+# A second copy of a crate is a build-size and correctness smell, but not a
+# license question -- warn, do not fail the gate this file exists for.
+multiple-versions = "warn"
+
+[advisories]
+# cargo-audit already runs as its own job; this section stays at defaults so
+# the two do not disagree about the same database.
+
+[sources]
+# crates.io only. A git or alternate-registry dependency would bypass the
+# license review above, since its license field is whatever the source says.
+unknown-registry = "deny"
+unknown-git = "deny"

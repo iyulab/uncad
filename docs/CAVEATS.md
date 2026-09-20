@@ -421,7 +421,14 @@ A separate `lint` job in `.github/workflows/ci.yml` runs `cargo fmt --check` and
 `cargo clippy --workspace --all-targets -- -D warnings` on every push and pull request, so
 whether the tree is clean is tracked automatically. A separate `security-audit` job runs
 `cargo audit` against `Cargo.lock` for dependency vulnerabilities (without submodules --
-the vendored C sources are not part of the Rust dependency graph). The
+the vendored C sources are not part of the Rust dependency graph). A `licenses` job runs
+`cargo deny check licenses sources` against the same file: this crate is GPL because it
+links a GPL library, and the gate is there so a *second* copyleft component cannot arrive
+through a dependency bump unnoticed. `deny.toml` allows only the permissive licenses the
+graph actually uses and names the three crates of this workspace as the sole GPL
+exceptions; it reads `Cargo.lock` too, so the same submodule caveat applies -- what
+watches the vendored C side is the source-file drift detector in
+`crates/libredwg-sys/build.rs`. The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
 than written by hand, and the handful of harmless lints it raises (`useless_transmute`,
 `missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`, `manual_div_ceil`) are allowed at

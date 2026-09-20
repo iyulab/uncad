@@ -79,6 +79,27 @@ jobs:
       - name: Audit dependencies
         run: cargo audit
 
+  licenses:
+    name: License Gate
+    runs-on: ubuntu-latest
+    steps:
+      # No submodules, for the same reason as the audit job above: this reads
+      # Cargo.lock, and the vendored C library is not a Rust dependency. See
+      # deny.toml for what that leaves uncovered.
+      - uses: actions/checkout@v4
+
+      # Prebuilt binary -- avoids compiling cargo-deny on every run.
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # This crate is GPL because it links a GPL library, and that is declared.
+      # The gate exists so a *second* copyleft component cannot arrive through
+      # a dependency bump without anyone noticing.
+      - name: Check dependency licenses
+        run: cargo deny check licenses sources
+
   lint:
     runs-on: ubuntu-latest
     steps:
