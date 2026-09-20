@@ -27,16 +27,21 @@ LIGHT. Details worth knowing:
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
-**Not supported: ACAD_PROXY_ENTITY, and nothing else.** It is the proxy representation of
-a custom entity from another program, so it has no fixed geometry to render at all: just
-`proxy_id`, `class_id` and serialized entity bytes, with no coordinates or shape. Leaving
-it as `Unknown` *is* the accurate representation, and "supporting" it would change nothing
-in practice -- `Unknown` preserves the real DXF name, so a CLI summary already counts it
-correctly as `ACAD_PROXY_ENTITY`. At the `parse()` stage an unsupported type becomes
-`Entity::Unknown` (never dropped silently); at `to_svg()` it is reported through
-`unsupported_types`.
+**The list above is the whole contract.** A type that is not on it becomes
+`Entity::Unknown` at the `parse()` stage -- never dropped silently, and `Unknown` keeps the
+real DXF name, so a CLI summary still counts it under that name -- and `to_svg()` reports
+it through `unsupported_types` (sorted by name, so the report is the same on every run).
+A listed type can end up there too when a particular entity gives the renderer nothing to
+draw, e.g. a DIMENSION without its cached-geometry block.
 
-Net: every parseable entity type that has geometry at all is handled.
+Being off the list says nothing about whether the type has geometry. TRACE, for one, is
+four corner points exactly like SOLID and is still not covered; it is simply work that has
+not been done. Do not read the list as "everything with a shape".
+
+**ACAD_PROXY_ENTITY is the one type that will stay unsupported.** It is the proxy
+representation of a custom entity from another program, so it has no fixed geometry to
+render at all: just `proxy_id`, `class_id` and serialized entity bytes, with no
+coordinates or shape. Leaving it as `Unknown` *is* the accurate representation.
 
 ### Eight types are experimental
 

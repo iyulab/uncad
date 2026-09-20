@@ -142,14 +142,11 @@ fn main() {
         build.flag("/utf-8").flag("/std:c11");
     }
 
-    for src in LIBREDWG_SOURCES {
-        build.file(libredwg_src.join(src));
-    }
-    build.file(shim_dir.join("uncad_shim.c"));
-
-    build.compile("libredwg");
-
     // --- bindgen -----------------------------------------------------------
+    // Runs before the C compile on purpose: a missing libclang or an
+    // unusable header search path then fails within seconds instead of after
+    // the several-minute LibreDWG compile.
+    //
     // Explicit --target so libclang follows the same ABI cl.exe used to
     // actually compile the library (matters for anyone building on a
     // different host/target combination than this was validated on).
@@ -158,6 +155,7 @@ fn main() {
         .header(shim_dir.join("wrapper.h").to_string_lossy())
         .clang_arg(format!("--target={target}"))
         .clang_arg("-xc")
+        .clang_args(msvc_system_include_args(&build))
         .clang_arg("-std=c11")
         .clang_arg(format!("-I{}", vendor_config.display()))
         .clang_arg(format!("-I{}", libredwg_src.display()))
@@ -296,6 +294,14 @@ fn main() {
         .write_to_file(out_dir.join("bindings.rs"))
         .expect("failed to write bindings.rs");
 
+    // --- C compile ---------------------------------------------------------
+    for src in LIBREDWG_SOURCES {
+        build.file(libredwg_src.join(src));
+    }
+    build.file(shim_dir.join("uncad_shim.c"));
+
+    build.compile("libredwg");
+
     println!("cargo:rerun-if-changed={}", shim_dir.display());
     println!("cargo:rerun-if-changed={}", vendor_config.display());
     // The vendored C sources are the actual compile input, and neither cc
@@ -312,4 +318,29 @@ fn main() {
             .expect("vendor/libredwg/src always has a parent directory")
             .display()
     );
+}
+
+/// `-isystem` arguments for the MSVC and Windows SDK header directories the
+/// `cc` crate located, so libclang can resolve the C standard headers the
+/// same way `cl.exe` does.
+///
+/// `cc` finds an installed MSVC toolchain on its own (registry / vswhere),
+/// so the C compile works from any shell. libclang has no such discovery: it
+/// only sees those directories when the `INCLUDE` environment variable is
+/// already set, i.e. inside a Visual Studio developer prompt. Forwarding what
+/// `cc` found makes both halves of this build script agree. Empty on
+/// non-MSVC targets, and harmless inside a developer prompt (same paths).
+fn msvc_system_include_args(build: &cc::Build) -> Vec<String> {
+    let compiler = build.get_compiler();
+    if !compiler.is_like_msvc() {
+        return Vec::new();
+    }
+    compiler
+        .env()
+        .iter()
+        .filter(|(key, _)| key.eq_ignore_ascii_case("INCLUDE"))
+        .flat_map(|(_, value)| std::env::split_paths(value).collect::<Vec<_>>())
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| format!("-isystem{}", dir.display()))
+        .collect()
 }

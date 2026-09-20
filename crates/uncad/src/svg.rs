@@ -1,10 +1,11 @@
 //! SVG rendering of a parsed [`CadDatabase`].
 //!
-//! Entity coverage matches [`crate::model::Entity`]'s variants. The one type
-//! left permanently unsupported is `ACAD_PROXY_ENTITY`: an opaque per-app
-//! serialized blob with no geometry to draw at all. Anything this renderer
-//! cannot draw is reported through [`ToSvgResult::unsupported_types`] rather
-//! than dropped silently.
+//! Entity coverage matches [`crate::model::Entity`]'s variants; every other
+//! type arrives as `Entity::Unknown`, whether or not it has geometry. Anything
+//! this renderer cannot draw is reported through
+//! [`ToSvgResult::unsupported_types`] rather than dropped silently. The one
+//! type that will stay there for good is `ACAD_PROXY_ENTITY`: an opaque
+//! per-app serialized blob with no geometry to draw at all.
 //!
 //! Several types render as deliberate approximations -- curves as chords, 3D
 //! solids as isometric wireframes, VIEWPORT and WIPEOUT as outlines only. See
@@ -27,7 +28,7 @@ use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
 use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt::Write as _;
 
 /// Which of a drawing's spaces to render.
@@ -64,7 +65,8 @@ impl Default for ToSvgOptions {
 
 pub struct ToSvgResult {
     pub svg: String,
-    /// DXF names of entity types this renderer had nothing to draw for.
+    /// DXF names of entity types this renderer had nothing to draw for,
+    /// sorted by name so the same input always reports them in the same order.
     pub unsupported_types: Vec<String>,
 }
 
@@ -143,7 +145,9 @@ struct Ctx<'a> {
     ent_max_x: f64,
     ent_min_y: f64,
     ent_max_y: f64,
-    unsupported: HashSet<String>,
+    // Ordered, not hashed: this set is copied straight into the public
+    // result, and a hash set's iteration order differs from run to run.
+    unsupported: BTreeSet<String>,
     tables: &'a Tables,
     depth: u32,
     scale: f64,
@@ -171,7 +175,7 @@ impl<'a> Ctx<'a> {
             ent_max_x: f64::NEG_INFINITY,
             ent_min_y: f64::INFINITY,
             ent_max_y: f64::NEG_INFINITY,
-            unsupported: HashSet::new(),
+            unsupported: BTreeSet::new(),
             tables,
             depth: 0,
             scale: 1.0,

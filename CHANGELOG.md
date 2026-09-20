@@ -6,6 +6,21 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `ToSvgResult::unsupported_types` / `ToPngResult::unsupported_types` (and the CLI
+  warning built from them) listed the same types in a different order from run to run.
+  They are now sorted by name. A new `tests/determinism.rs` regenerates the JSON, the SVG
+  and this list repeatedly and requires byte-identical results.
+- Building on Windows no longer needs a Visual Studio developer prompt. The C compile
+  always located MSVC by itself, but bindgen's libclang only found the C standard headers
+  when `INCLUDE` was already set; `libredwg-sys`'s build script now forwards the header
+  directories `cc` located. Bindings are also generated *before* the C compile, so a
+  libclang problem fails in seconds rather than after the whole LibreDWG compile.
+- `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
+  TRACE, for one, still arrives as `Unknown`. The section now states the supported list
+  as the contract.
+
 ### Changed
 
 - `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
