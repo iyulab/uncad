@@ -391,7 +391,7 @@ whether the tree is clean is tracked automatically. A separate `security-audit` 
 the vendored C sources are not part of the Rust dependency graph). The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
 than written by hand, and the handful of harmless lints it raises (`useless_transmute`,
-`missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`) are allowed at
+`missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`, `manual_div_ceil`) are allowed at
 crate level in `crates/libredwg-sys/src/lib.rs` so `-D warnings` does not fail on
 generated code. New warnings in hand-written code still fail CI.
 

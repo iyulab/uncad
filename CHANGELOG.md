@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
+  requires prettyplease 0.3 -- see the commit for why the pair has to move
+  together. The generated bitfield accessors raise one more harmless clippy lint
+  (`manual_div_ceil`), allowed at crate level with the existing ones (see
+  `docs/CAVEATS.md`, "Clippy").
+
 ## [0.2.0] - 2026-09-17
 
 A breaking release: writing left the public API, and a cleanup pass renamed several

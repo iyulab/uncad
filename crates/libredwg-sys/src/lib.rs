@@ -57,6 +57,11 @@
 // unactionable here: these bodies are regenerated from dwg.h on every build.
 // Same rationale as the three allows above.
 #![allow(clippy::ptr_offset_with_cast)]
+// bindgen 0.73 emits `(bits + 7) / 8` in the same bitfield accessors, which
+// clippy asks to write as `.div_ceil(8)`. Right for hand-written code, and
+// unactionable here for the same reason as the allows above: this file is
+// regenerated from dwg.h on every build.
+#![allow(clippy::manual_div_ceil)]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
