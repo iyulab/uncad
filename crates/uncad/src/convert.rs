@@ -19,7 +19,7 @@ use crate::model::{
     EllipseEntity, Entity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
     HatchGradient, HatchPatternLine, InsertEntity, LeaderEntity, LightEntity, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, PointEntity,
-    PolylineEntity, RayEntity, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
+    PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
     ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use std::ffi::CStr;
@@ -319,9 +319,10 @@ unsafe fn convert_entity(
 
     // SAFETY: obj is valid per this function's own `# Safety` doc contract.
     let handle = unsafe { entity_handle(obj) };
-    let layer = get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "layer")
-        .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
-        .unwrap_or_default();
+    let layer = reference(
+        get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "layer"),
+        |handle_ptr| resolve_handle_name(dwg, handle_ptr),
+    );
     let (color_index, true_color) = entity_color(entity_ptr);
     let common = EntityCommon {
         handle,
@@ -474,13 +475,14 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
-            let block_name = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
-                entity_ptr,
-                "INSERT",
-                "block_header",
-            )
-            .and_then(crate::tables::resolve_block_name)
-            .unwrap_or_default();
+            let block_name = reference(
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                    entity_ptr,
+                    "INSERT",
+                    "block_header",
+                ),
+                crate::tables::resolve_block_name,
+            );
             let insertion_point = get_field::<Point3D>(entity_ptr, "INSERT", "ins_pt")?;
             let scale = get_field::<Point3D>(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
                 x: 1.0,
@@ -635,10 +637,10 @@ unsafe fn convert_entity(
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => {
             let dxfname = dimension_dxfname(fixedtype);
-            let block_name =
-                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block")
-                    .and_then(crate::tables::resolve_block_name)
-                    .unwrap_or_default();
+            let block_name = reference(
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block"),
+                crate::tables::resolve_block_name,
+            );
             Entity::Dimension(DimensionEntity { common, block_name })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
@@ -647,10 +649,10 @@ unsafe fn convert_entity(
             // dwg_object_get_dxfname reports) -- passing the latter would fail
             // dwg_dynapi_entity_value's strict obj->name check, the same
             // pitfall as REGION/3DSOLID (see acis.rs).
-            let block_name =
-                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header")
-                    .and_then(crate::tables::resolve_block_name)
-                    .unwrap_or_default();
+            let block_name = reference(
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header"),
+                crate::tables::resolve_block_name,
+            );
             let insertion_point = get_field::<Point3D>(entity_ptr, "TABLE", "ins_pt")?;
             let scale = get_field::<Point3D>(entity_ptr, "TABLE", "scale").unwrap_or(Point3D {
                 x: 1.0,
@@ -1027,10 +1029,10 @@ fn convert_mline(
         })
         .collect();
     let flags = get_field::<u16>(entity_ptr, "MLINE", "flags").unwrap_or(0);
-    let mlinestyle_name =
-        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle")
-            .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
-            .unwrap_or_default();
+    let mlinestyle_name = reference(
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle"),
+        |handle_ptr| resolve_handle_name(dwg, handle_ptr),
+    );
     MLineEntity {
         common,
         vertices,
@@ -1077,6 +1079,31 @@ unsafe fn entity_handle(obj: *mut libredwg_sys::Dwg_Object) -> String {
     }
     let value = unsafe { (*handle_ptr).value };
     format!("{value:X}")
+}
+
+/// Turns a handle field into the model's three-state reference: no field or
+/// a null handle is [`Ref::Absent`]; a handle the resolver turns into a name
+/// is [`Ref::Resolved`]; a handle it cannot is [`Ref::Unresolved`] carrying
+/// the handle itself (`absolute_ref`, hex, the same form as
+/// [`EntityCommon::handle`]). This is the one place the empty-string fill
+/// used to happen, for every reference field the model has.
+fn reference(
+    handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
+    resolve: impl FnOnce(*mut libredwg_sys::Dwg_Object_Ref) -> Option<String>,
+) -> Ref<String> {
+    let Some(handle_ptr) = handle_ptr else {
+        return Ref::Absent;
+    };
+    if handle_ptr.is_null() {
+        return Ref::Absent;
+    }
+    match resolve(handle_ptr) {
+        Some(name) => Ref::Resolved(name),
+        // SAFETY: handle_ptr is a non-null Dwg_Object_Ref owned by the live
+        // Dwg_Data this conversion pass walks (same contract as the resolvers
+        // that just read it).
+        None => Ref::Unresolved(format!("{:X}", unsafe { (*handle_ptr).absolute_ref })),
+    }
 }
 
 /// # Safety

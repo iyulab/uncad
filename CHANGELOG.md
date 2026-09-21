@@ -54,6 +54,18 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Reference fields are three-state values, not strings.** `EntityCommon::layer`,
+  `InsertEntity::block_name`, `DimensionEntity::block_name`, `AcadTableEntity::block_name`
+  and `MLineEntity::mlinestyle_name` are now `Ref<String>`: `Resolved(name)`, `Absent` (the
+  file carries no handle for the field) or `Unresolved(handle)` (the handle points at
+  nothing -- the handle is kept, since it is what tells one missing table row from
+  references broken wholesale). Until now all three came back as `""`, so a consumer could
+  not tell a layer called nothing from a layer that could not be read. In JSON the field
+  is adjacently tagged like hatch boundary paths: `{"type":"RESOLVED","data":"0"}`,
+  `{"type":"ABSENT"}`, `{"type":"UNRESOLVED","data":"2A"}`. **This changes the JSON
+  shape** of every entity (`common.layer`) and is the reason the next release is a 0.x
+  minor. `Ref::name()` gives the resolved name or `""` for consumers that only need a
+  lookup key.
 - A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is now refused with
   `ParseError::UnsupportedDxfVersion` instead of being returned as a drawing with no
   entities and no error. The decision is made from the file's HEADER section before

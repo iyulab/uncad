@@ -401,7 +401,10 @@ fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
     resolve_color(
         common.color_index,
         common.true_color,
-        &common.layer,
+        // An absent or unresolved layer has no layer color to look up; the
+        // fallback below is the renderer's own, and the model still says
+        // which of the two it was.
+        common.layer.name(),
         ctx.tables,
         &ctx.inherited_color,
     )
@@ -685,7 +688,7 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Insert(i) => Some(render_block_ref(
-            &i.block_name,
+            i.block_name.name(),
             Point2D {
                 x: i.insertion_point.x,
                 y: i.insertion_point.y,
@@ -697,7 +700,7 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx,
         )),
         Entity::AcadTable(a) => Some(render_block_ref(
-            &a.block_name,
+            a.block_name.name(),
             Point2D {
                 x: a.insertion_point.x,
                 y: a.insertion_point.y,
@@ -712,7 +715,7 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             // The cached geometry block is already in final world coordinates,
             // so it is drawn with an identity transform.
             let svg = render_block_ref(
-                &d.block_name,
+                d.block_name.name(),
                 Point2D { x: 0.0, y: 0.0 },
                 1.0,
                 1.0,
@@ -831,7 +834,11 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             }
             // A single 0.0 offset is exactly the centerline-only fallback:
             // point + miter_direction * 0.0 is just point.
-            let offsets = match ctx.tables.mlinestyles.get(&l.mlinestyle_name) {
+            let offsets = match l
+                .mlinestyle_name
+                .resolved()
+                .and_then(|n| ctx.tables.mlinestyles.get(n))
+            {
                 Some(offsets) if !offsets.is_empty() => offsets.clone(),
                 _ => vec![0.0],
             };
@@ -1009,7 +1016,7 @@ mod tests {
 
     #[test]
     fn render_block_ref_budget_caps_combinatorial_blowup_from_self_referencing_blocks() {
-        use crate::model::InsertEntity;
+        use crate::model::{InsertEntity, Ref};
         use crate::tables::BlockRecord;
         use std::collections::BTreeMap;
 
@@ -1018,7 +1025,7 @@ mod tests {
         // (~9.5e13) block instantiations, which would never finish.
         let common = EntityCommon {
             handle: String::new(),
-            layer: String::new(),
+            layer: Ref::Absent,
             color_index: 0,
             true_color: None,
         };
@@ -1026,7 +1033,7 @@ mod tests {
             .map(|i| {
                 Entity::Insert(InsertEntity {
                     common: common.clone(),
-                    block_name: "R".to_string(),
+                    block_name: Ref::Resolved("R".to_string()),
                     insertion_point: Point3D {
                         x: i as f64,
                         y: 0.0,

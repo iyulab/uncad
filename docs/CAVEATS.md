@@ -196,6 +196,22 @@ out), and `Solid3DEntity::skipped_edges` counts the ACIS edges that could not be
 wireframe segments. Neither is an error; both are the difference between "empty" and "not
 read".
 
+## A reference that resolves to nothing is not an empty name
+
+Every field the model reaches through a file handle -- an entity's layer, an INSERT's,
+DIMENSION's or TABLE's block, an MLINE's style -- is a `Ref<String>` with three states:
+resolved, absent (no handle in the file), unresolved (a handle nothing answers to; the handle
+is kept). They used to collapse into `""`. What LibreDWG's DXF importer actually produces was
+measured with hand-written files: an INSERT naming a block the BLOCKS section does not define
+reads as *absent* (the importer stores no handle), a defined one resolves, and a LINE on a
+layer no LAYER table declares is not readable at all (`IOERROR`) -- so an unresolved *layer*
+comes from DWG files with broken handles, not from anything one can write into a DXF by hand.
+The R2007+ DXF case that this crate now refuses was the large-scale version of "unresolved":
+65 of 72 entities with a layer handle that no longer matched its table row.
+
+Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
+the model still says which it was.
+
 ## The polyline "closed" flag
 
 `dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic

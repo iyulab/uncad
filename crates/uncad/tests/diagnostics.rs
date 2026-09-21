@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use uncad::model::{EntityCommon, InsertEntity, LineEntity, Point3D};
+use uncad::model::{EntityCommon, InsertEntity, LineEntity, Point3D, Ref};
 use uncad::tables::{BlockRecord, Tables};
 use uncad::{CadDatabase, Entity, ReadDiagnostics, Space, ToSvgOptions};
 
@@ -81,7 +81,7 @@ fn diagnostics_survive_the_json_round_trip_and_default_when_absent() {
 fn common(handle: &str) -> EntityCommon {
     EntityCommon {
         handle: handle.to_string(),
-        layer: "0".to_string(),
+        layer: Ref::Resolved("0".to_string()),
         color_index: 256,
         true_color: None,
     }
@@ -94,7 +94,7 @@ fn p3(x: f64, y: f64, z: f64) -> Point3D {
 fn insert(handle: &str, block_name: &str) -> Entity {
     Entity::Insert(InsertEntity {
         common: common(handle),
-        block_name: block_name.to_string(),
+        block_name: Ref::Resolved(block_name.to_string()),
         insertion_point: p3(0.0, 0.0, 0.0),
         scale: p3(1.0, 1.0, 1.0),
         rotation: 0.0,

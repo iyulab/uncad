@@ -21,6 +21,57 @@ pub use crate::dynapi::{Point2D, Point3D};
 
 use serde::{Deserialize, Serialize};
 
+/// A value this model reached through a handle in the source file -- a layer
+/// name, a block name, a style name.
+///
+/// Three states rather than an `Option`, because two different things used
+/// to collapse into one empty string: a field the file carries no handle for
+/// at all (normal for some fields), and a handle that nothing in the drawing
+/// answers to (always a defect in the file or in the read). The unresolved
+/// case keeps the handle: it is the only thing that tells one missing table
+/// row (many entities point at the same dead handle) from references broken
+/// wholesale (every entity points somewhere different).
+///
+/// Serialized adjacently tagged, like [`HatchBoundaryPath`]:
+/// `{"type":"RESOLVED","data":"0"}`, `{"type":"ABSENT"}`,
+/// `{"type":"UNRESOLVED","data":"2A"}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "UPPERCASE")]
+pub enum Ref<T> {
+    /// The handle resolved. `T` is what it resolved to (a name, today).
+    Resolved(T),
+    /// The file carries no handle for this field.
+    Absent,
+    /// The file carries a handle, but nothing in the drawing answers to it.
+    /// The value is the handle as a hex string, the same form as
+    /// [`EntityCommon::handle`].
+    Unresolved(String),
+}
+
+impl<T> Ref<T> {
+    /// The resolved value, if there is one.
+    pub fn resolved(&self) -> Option<&T> {
+        match self {
+            Ref::Resolved(value) => Some(value),
+            Ref::Absent | Ref::Unresolved(_) => None,
+        }
+    }
+
+    /// `true` for [`Ref::Resolved`].
+    pub fn is_resolved(&self) -> bool {
+        matches!(self, Ref::Resolved(_))
+    }
+}
+
+impl Ref<String> {
+    /// The resolved name as a `&str`, or `""` when there is none. For
+    /// consumers that only need a lookup key and treat "no name" and "no such
+    /// name" alike; anything that must tell them apart matches on the enum.
+    pub fn name(&self) -> &str {
+        self.resolved().map_or("", String::as_str)
+    }
+}
+
 /// Fields common to every DWG entity, regardless of type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityCommon {
@@ -28,8 +79,10 @@ pub struct EntityCommon {
     /// (3DSOLID wireframe attachment, INSERT/DIMENSION block lookups, ...).
     pub handle: String,
     /// Owning layer's name, resolved from the entity's `layer` handle field.
-    /// Empty string if unresolvable.
-    pub layer: String,
+    /// [`Ref::Unresolved`] when the handle points at nothing (the R2007+ DXF
+    /// failure looked exactly like that before it was refused up front);
+    /// never an empty string standing in for "could not read".
+    pub layer: Ref<String>,
     /// Raw ACI color index straight from `Dwg_Color.index`: negative means
     /// "layer off" (this tracks color, not visibility, so the sign is
     /// ignored at render time), 0 is BYBLOCK, 256 is BYLAYER, anything else
@@ -146,7 +199,7 @@ pub struct InsertEntity {
     /// Referenced block's name. Callers look it up in
     /// [`crate::tables::Tables::block_records`] to render the block's own
     /// entities (see `render_block_ref` in `svg.rs`).
-    pub block_name: String,
+    pub block_name: Ref<String>,
     pub insertion_point: Point3D,
     /// Per-axis scale factors (DXF 41/42/43); (1,1,1) if never set.
     pub scale: Point3D,
@@ -182,7 +235,7 @@ pub struct ToleranceEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AcadTableEntity {
     pub common: EntityCommon,
-    pub block_name: String,
+    pub block_name: Ref<String>,
     pub insertion_point: Point3D,
     pub scale: Point3D,
     /// Radians.
@@ -367,7 +420,7 @@ pub struct HatchEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionEntity {
     pub common: EntityCommon,
-    pub block_name: String,
+    pub block_name: Ref<String>,
 }
 
 /// Best-effort wireframe extracted from a 3DSOLID's ACIS B-rep data (see
@@ -423,7 +476,7 @@ pub struct MLineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<MLineVertex>,
     pub closed: bool,
-    pub mlinestyle_name: String,
+    pub mlinestyle_name: Ref<String>,
 }
 
 /// WIPEOUT's clip boundary, resolved to 2D points in the entity's own local

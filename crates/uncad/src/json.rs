@@ -22,6 +22,11 @@
 //!   real DXF name in its `type_name` field.
 //! - Points are objects (`{"x":..,"y":..}` / `{"x":..,"y":..,"z":..}`); angles
 //!   are radians, as in the model.
+//! - Reference fields (`common.layer`, an INSERT/DIMENSION/TABLE's `block_name`,
+//!   an MLINE's `mlinestyle_name`) are adjacently tagged three-state values:
+//!   `{"type":"RESOLVED","data":"0"}`, `{"type":"ABSENT"}` or
+//!   `{"type":"UNRESOLVED","data":"2A"}` -- never a bare string, so a name that
+//!   could not be read is not mistaken for a name that is empty.
 //! - HATCH: each item of `boundary_paths` is `{"type":"POLYLINE","data":
 //!   [pt,..]}` or `{"type":"EDGES","data":[edge,..]}`, and each edge is
 //!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own fields
@@ -97,7 +102,7 @@ mod tests {
     fn common(handle: &str) -> EntityCommon {
         EntityCommon {
             handle: handle.to_string(),
-            layer: "0".to_string(),
+            layer: Ref::Resolved("0".to_string()),
             color_index: 256,
             true_color: Some(0x12_34_56),
         }
@@ -194,7 +199,7 @@ mod tests {
             Entity::XLine(ray),
             Entity::Insert(InsertEntity {
                 common: c.clone(),
-                block_name: "DOOR".to_string(),
+                block_name: Ref::Resolved("DOOR".to_string()),
                 insertion_point: p3(0.0, 0.0, 0.0),
                 scale: p3(1.0, 1.0, 1.0),
                 rotation: 0.25,
@@ -241,7 +246,7 @@ mod tests {
             }),
             Entity::Dimension(DimensionEntity {
                 common: c.clone(),
-                block_name: "*D1".to_string(),
+                block_name: Ref::Resolved("*D1".to_string()),
             }),
             Entity::Hatch(HatchEntity {
                 common: c.clone(),
@@ -302,7 +307,7 @@ mod tests {
                     miter_direction: p3(0.0, 1.0, 0.0),
                 }],
                 closed: true,
-                mlinestyle_name: "STANDARD".to_string(),
+                mlinestyle_name: Ref::Resolved("STANDARD".to_string()),
             }),
             Entity::Region(solid3d.clone()),
             Entity::PolylinePFace(solid3d),
@@ -315,7 +320,7 @@ mod tests {
             }),
             Entity::AcadTable(AcadTableEntity {
                 common: c.clone(),
-                block_name: "*T1".to_string(),
+                block_name: Ref::Resolved("*T1".to_string()),
                 insertion_point: p3(0.0, 0.0, 0.0),
                 scale: p3(1.0, 1.0, 1.0),
                 rotation: 0.1,
@@ -444,7 +449,7 @@ mod tests {
 
     #[test]
     fn an_unknown_or_missing_type_tag_is_an_error_not_a_panic() {
-        let common = r#""common":{"handle":"1","layer":"0","color_index":256,"true_color":null}"#;
+        let common = r#""common":{"handle":"1","layer":{"type":"RESOLVED","data":"0"},"color_index":256,"true_color":null}"#;
         assert!(serde_json::from_str::<Entity>(&format!(r#"{{"type":"NOPE",{common}}}"#)).is_err());
         assert!(serde_json::from_str::<Entity>(&format!(r#"{{{common}}}"#)).is_err());
         assert!(
