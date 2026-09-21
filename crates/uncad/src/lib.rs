@@ -91,6 +91,13 @@ pub enum ParseError {
     /// code (>= DWG_ERR_CRITICAL, see dwg.h).
     Critical(i32),
     InvalidPath,
+    /// The DXF declares `$ACADVER` R2007 or later (`AC1021` and up). LibreDWG's
+    /// DXF importer reads these files without reporting an error but loses
+    /// every layer and block name on the way, so this crate refuses them
+    /// instead of returning a drawing that is silently incomplete. The value
+    /// is the `$ACADVER` string as written in the file. See `docs/CAVEATS.md`,
+    /// "DXF reading".
+    UnsupportedDxfVersion(String),
 }
 
 impl std::fmt::Display for ParseError {
@@ -98,6 +105,10 @@ impl std::fmt::Display for ParseError {
         match self {
             ParseError::Critical(code) => write!(f, "LibreDWG critical read error (code {code})"),
             ParseError::InvalidPath => write!(f, "path is not valid UTF-8 / contains a NUL byte"),
+            ParseError::UnsupportedDxfVersion(v) => write!(
+                f,
+                "DXF version {v} (R2007 or later) is not supported: LibreDWG's DXF importer                  would return a silently incomplete drawing -- save it as R2004 DXF or as DWG"
+            ),
         }
     }
 }
@@ -110,7 +121,10 @@ impl std::error::Error for ParseError {}
 /// How complete DXF reading is depends on the entity type: `dxf_read_file()`
 /// is LibreDWG's own function and its documentation describes DXF reading as
 /// working "for most objects" rather than being feature-complete the way DWG
-/// reading is. See `docs/CAVEATS.md`.
+/// reading is. A DXF whose `$ACADVER` is R2007 or later is refused up front
+/// with [`ParseError::UnsupportedDxfVersion`] rather than handed to LibreDWG,
+/// because the importer would return it as a drawing with no entities and no
+/// error. See `docs/CAVEATS.md`.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     let path_str = path.as_ref().to_str().ok_or(ParseError::InvalidPath)?;
     let c_path = CString::new(path_str).map_err(|_| ParseError::InvalidPath)?;
@@ -119,6 +133,18 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+
+    // Decided from the file's own header, before LibreDWG sees it: the R2007+
+    // failure is silent on the C side (error code 0, zero entities), so the
+    // only place it can be turned into an error is here. No lock needed --
+    // this is plain file I/O.
+    if is_dxf {
+        if let Some(acadver) = dxf_acadver(path.as_ref()) {
+            if dxf_version_number(&acadver).is_some_and(|n| n >= DXF_VERSION_R2007) {
+                return Err(ParseError::UnsupportedDxfVersion(acadver));
+            }
+        }
+    }
 
     // See LIBREDWG_LOCK: the whole read/convert/free cycle must run without
     // another thread's LibreDWG call interleaved. Recovering from a poisoned
@@ -169,4 +195,48 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
     Ok(CadDatabase { entities, tables })
+}
+
+/// `$ACADVER` value of the first DXF release LibreDWG's importer reads back
+/// incompletely: `AC1021` = R2007, the release that switched DXF strings to
+/// UTF-16 in the importer's storage. Every later code (`AC1024`, `AC1027`,
+/// `AC1032`, ...) is numerically above it.
+const DXF_VERSION_R2007: u32 = 1021;
+
+/// The numeric part of an `$ACADVER` code (`AC1021` -> `1021`), or `None` for
+/// anything that is not shaped like one. An unrecognised value never rejects a
+/// file: the decision falls back to LibreDWG, as it did before this check.
+fn dxf_version_number(acadver: &str) -> Option<u32> {
+    acadver.strip_prefix("AC")?.parse().ok()
+}
+
+/// Reads `$ACADVER` out of an ASCII DXF's HEADER section, or `None` if the
+/// file has no such variable (pre-R10 files), is not readable, or is not laid
+/// out as (group code, value) line pairs. Binary DXF is not handled here and
+/// falls through to LibreDWG untouched.
+///
+/// The scan is bounded: `$ACADVER` is by convention the first header variable,
+/// and the HEADER section ends at the first `ENDSEC`, so a file that reaches
+/// either bound without it is treated as not declaring a version.
+fn dxf_acadver(path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+
+    const MAX_PAIRS_SCANNED: usize = 4096;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mut lines = BufReader::new(file).lines().map_while(Result::ok);
+    for _ in 0..MAX_PAIRS_SCANNED {
+        let (code, value) = (lines.next()?, lines.next()?);
+        match (code.trim(), value.trim()) {
+            ("9", "$ACADVER") => {
+                let (code, value) = (lines.next()?, lines.next()?);
+                return (code.trim() == "1").then(|| value.trim().to_string());
+            }
+            // End of the HEADER section (or of a headerless file's first
+            // section): $ACADVER cannot appear after this point.
+            ("0", "ENDSEC") | ("0", "EOF") => return None,
+            _ => {}
+        }
+    }
+    None
 }

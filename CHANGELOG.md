@@ -32,15 +32,23 @@ Notable changes to this project are recorded here. The format follows
   when `INCLUDE` was already set; `libredwg-sys`'s build script now forwards the header
   directories `cc` located. Bindings are also generated *before* the C compile, so a
   libclang problem fails in seconds rather than after the whole LibreDWG compile.
-- Documented, not fixed: a DXF saved as R2007 or later reads as an empty drawing without
-  any error. `docs/CAVEATS.md` explains the cause (string width in LibreDWG's DXF
-  importer) and what to do meanwhile.
+- A DXF saved as R2007 or later used to read as an empty drawing without any error; it
+  is now refused (see "Changed"). `docs/CAVEATS.md` explains the cause (string width in
+  LibreDWG's DXF importer) and why reading it partially was rejected.
 - `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
   several types that have a shape still arrive as `Unknown`. The section now states the
   supported list as the contract.
 
 ### Changed
 
+- A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is now refused with
+  `ParseError::UnsupportedDxfVersion` instead of being returned as a drawing with no
+  entities and no error. The decision is made from the file's HEADER section before
+  LibreDWG reads it; R2000/R2004 DXF, files without `$ACADVER`, binary DXF and every DWG
+  are unaffected. Callers that treated the empty result as success will now see an error
+  -- that is the point. `ParseError` is `#[non_exhaustive]`, so the new variant is not a
+  breaking change to matches. Two tests pin it: a walk of the corpus that requires exactly
+  the R2007+ files to be refused, and one drawing under two `$ACADVER` values.
 - No `std` hash collections anywhere in the workspace: `clippy.toml` disallows `HashMap`
   and `HashSet`, and the `iter_over_hash_type` lint is on. Both earlier ordering bugs went
   through `into_iter()`/`into_values()`, which no lint on `for` loops would have seen.
