@@ -201,9 +201,15 @@ read".
 
 Measured across the corpus: 1,034 ACIS edges skipped in 8 files, concentrated in one large
 R2007 drawing (720 across 116 solids) and in the `example_*` drawings (44-52 across 6 solids
-each), while 7 files with solids skipped none. So the wireframe of a typical corpus solid is
-missing several edges -- the SAT record shapes the extractor was written against do not cover
-these files, and the drawing looks read. Block references that drew nothing: 14 files,
+each), while 7 files with solids skipped none. The cause, classified on that R2007 drawing: in
+62 of its 116 solids the SAT text that comes back from the SAB-to-SAT conversion refers to
+records that are not in it -- pointers run 6 to 166 records past the end, so the converter
+dropped records without renumbering the rest -- and in every one of those solids all edges
+fail, while all 54 solids whose pointers stay in range extract completely. Since records are
+addressed by position, such a text cannot be followed safely; the extractor now checks the
+pointer range first and reports the whole solid as unread (`skipped_edges` = its edge count,
+no `wireframe_edges`) instead of attaching edges to whatever record sits at a stale index.
+Why the conversion loses records is an upstream question. Block references that drew nothing: 14 files,
 typically a block holding only ATTDEF or unsupported entities (`BLOCK2` in the R2000 examples,
 dimension blocks `*D…` in the pre-R13 ones).
 

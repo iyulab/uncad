@@ -60,6 +60,19 @@ fn parse_sat_records(sat_text: &str) -> Vec<SatRecord> {
     records
 }
 
+/// `true` when every `$N` pointer in the records the wireframe walk follows
+/// (`edge` and `vertex`) addresses an existing record. Other record types are
+/// not checked: `eye_refinement` carries `$`-prefixed values that are not
+/// pointers at all.
+fn pointers_are_in_range(records: &[SatRecord]) -> bool {
+    records
+        .iter()
+        .filter(|r| r.type_name == "edge" || r.type_name == "vertex")
+        .flat_map(|r| r.tokens.iter())
+        .filter_map(|t| t.strip_prefix('$')?.parse::<usize>().ok())
+        .all(|idx| idx < records.len())
+}
+
 fn resolve_pointer<'a>(records: &'a [SatRecord], token: &str) -> Option<(usize, &'a SatRecord)> {
     let rest = token.strip_prefix('$')?;
     let idx: usize = rest.parse().ok()?;
@@ -87,6 +100,19 @@ fn point_xyz(point_record: &SatRecord) -> Option<[f64; 3]> {
 fn extract_wireframe_segments(records: &[SatRecord]) -> (Vec<[Point3D; 2]>, usize) {
     let mut segments = Vec::new();
     let mut skipped = 0usize;
+
+    // Records are addressed by position, so the text is only readable when
+    // every pointer the walk would follow lands inside it. Measured on a real
+    // R2007 drawing: 62 of 116 solids came back from the SAB-to-SAT conversion
+    // with pointers up to 166 records past the end -- the converter dropped
+    // records it did not handle without renumbering the rest. Following those
+    // pointers would attach edges to whatever record happens to sit at that
+    // index, so such a solid is reported as entirely unread (every edge
+    // counted as skipped) rather than partly, and wrongly, drawn.
+    if !pointers_are_in_range(records) {
+        let edges = records.iter().filter(|r| r.type_name == "edge").count();
+        return (Vec::new(), edges);
+    }
     for record in records {
         if record.type_name != "edge" {
             continue;
@@ -305,5 +331,52 @@ mod tests {
             tokens: vec!["1.0".to_string(), "2.0".to_string()],
         };
         assert_eq!(point_xyz(&too_few), None);
+    }
+
+    /// A text whose edge points past the last record: nothing is drawn and
+    /// every edge is counted, even the one that would have resolved.
+    #[test]
+    fn out_of_range_pointers_make_the_whole_solid_unread_not_partly_drawn() {
+        let sat = "700 0 1 0
+            9 SomeProduct 9 SomeVersion 24 Mon Jan 01 00:00:00 2024
+            1e-06 1e-10
+            point 0.0 0.0 0.0 #
+            point 1.0 2.0 3.0 #
+            vertex $0 #
+            vertex $1 #
+            edge $2 $3 #
+            edge $2 $99 #
+            End-of-ACIS-data
+";
+        let records = parse_sat_records(sat);
+        assert!(!pointers_are_in_range(&records));
+        let (segments, skipped) = extract_wireframe_segments(&records);
+        assert!(
+            segments.is_empty(),
+            "no chord may be drawn from an inconsistent text"
+        );
+        assert_eq!(
+            skipped, 2,
+            "both edges count as unread, including the resolvable one"
+        );
+    }
+
+    #[test]
+    fn a_dollar_value_inside_eye_refinement_is_not_a_pointer() {
+        let sat = "700 0 1 0
+            9 SomeProduct 9 SomeVersion 24 Mon Jan 01 00:00:00 2024
+            1e-06 1e-10
+            eye_refinement $-1 $-1 5 mgrid $3000 #
+            point 0.0 0.0 0.0 #
+            point 1.0 2.0 3.0 #
+            vertex $1 #
+            vertex $2 #
+            edge $3 $4 #
+            End-of-ACIS-data
+";
+        let records = parse_sat_records(sat);
+        assert!(pointers_are_in_range(&records));
+        let (segments, skipped) = extract_wireframe_segments(&records);
+        assert_eq!((segments.len(), skipped), (1, 0));
     }
 }

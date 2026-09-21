@@ -30,6 +30,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A 3DSOLID/REGION whose SAT text (from LibreDWG's SAB-to-SAT conversion) contains pointers
+  past its last record is now reported as entirely unread -- `skipped_edges` equals its edge
+  count and `wireframe_edges` is empty -- instead of edges being resolved against whatever
+  record happened to sit at a stale index. Measured on one R2007 drawing, 62 of 116 solids are
+  like this (the converter drops records without renumbering); the other 54 extract fully.
 - `ToSvgResult::unsupported_types` / `ToPngResult::unsupported_types` (and the CLI
   warning built from them) listed the same types in a different order from run to run.
   They are now sorted by name. A new `tests/determinism.rs` regenerates the JSON, the SVG
