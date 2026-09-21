@@ -209,9 +209,12 @@ fail, while all 54 solids whose pointers stay in range extract completely. Since
 addressed by position, such a text cannot be followed safely; the extractor now checks the
 pointer range first and reports the whole solid as unread (`skipped_edges` = its edge count,
 no `wireframe_edges`) instead of attaching edges to whatever record sits at a stale index.
-Why the conversion loses records is an upstream question. Block references that drew nothing: 14 files,
+Why the conversion loses records is an upstream question. Block references that drew nothing: 20 files,
 typically a block holding only ATTDEF or unsupported entities (`BLOCK2` in the R2000 examples,
-dimension blocks `*D…` in the pre-R13 ones).
+`BLOCK1`/`BLOCK2` and dimension blocks `*D…` in the pre-R13 ones); six of them only became visible
+once pre-R13 block references resolved, since a reference that cannot be looked up is not reported
+as empty. `tests/corpus_sweep.rs` pins these counts, together with the parse outcomes, the
+diagnostic bits and every reference state, so a change in any of them fails the build.
 
 ## A reference that resolves to nothing is not an empty name
 
