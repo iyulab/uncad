@@ -193,6 +193,11 @@ fn main() {
         .allowlist_function("dwg_free")
         .allowlist_function("uncad_3dsolid_sab_to_sat_text")
         .allowlist_function("uncad_free_sat_text")
+        .allowlist_function("uncad_dwg_is_pre_r13")
+        // Resolves a table reference to the entry's name by index for
+        // pre-R13 drawings (their references carry no handle), and by handle
+        // otherwise.
+        .allowlist_function("dwg_handle_name")
         .allowlist_function("dwg_dynapi_.*")
         .allowlist_type("Dwg_Data")
         .allowlist_type("Dwg_Object")

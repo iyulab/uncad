@@ -261,6 +261,48 @@ pub fn resolve_handle_name(
     Some(owned)
 }
 
+/// `true` when the drawing was read from a pre-R13 source (DWG R1.4 .. R12,
+/// or a DXF stamped so). Such a drawing points at its tables by index rather
+/// than by handle -- see [`resolve_table_entry_name`].
+pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: dwg is a live Dwg_Data (caller contract, same as the rest of
+    // this crate's conversion pass); the shim null-checks it again itself.
+    unsafe { libredwg_sys::uncad_dwg_is_pre_r13(dwg) != 0 }
+}
+
+/// Resolves a table reference to the name of the entry it points at in
+/// `table` (`LAYER`, `BLOCK`, `LTYPE`, ...) via `dwg_handle_name`. For a
+/// pre-R13 drawing the library matches the reference's `r11_idx` against the
+/// table's entry order, since such references carry no handle; from R13 on it
+/// matches the handle. Returns `None` when there is no such table or entry.
+/// The library always hands back a copy, freed here once it has been read.
+pub fn resolve_table_entry_name(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    handle: *mut libredwg_sys::Dwg_Object_Ref,
+    table: &CStr,
+) -> Option<String> {
+    if dwg.is_null() || handle.is_null() {
+        return None;
+    }
+    // SAFETY: dwg is a live Dwg_Data and handle a non-null Dwg_Object_Ref it
+    // owns (caller contract); table is a NUL-terminated C string.
+    let name_ptr = unsafe { libredwg_sys::dwg_handle_name(dwg, table.as_ptr(), handle) };
+    if name_ptr.is_null() {
+        return None;
+    }
+    // SAFETY: name_ptr is a NUL-terminated string dwg_handle_name allocated
+    // for its caller (every non-NULL return is a strdup or a fresh utf8text
+    // conversion); ours to free once copied.
+    let owned = unsafe { CStr::from_ptr(name_ptr) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { libc::free(name_ptr.cast()) };
+    Some(owned)
+}
+
 /// Reads a text field (BITCODE_T/TV/TU) as a UTF-8 `String`, via
 /// `dwg_dynapi_entity_utf8text` -- which itself handles the r2007+
 /// UTF-16-wide-string-to-UTF-8 conversion (older DWGs store text fields as

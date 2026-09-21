@@ -105,6 +105,19 @@ char *uncad_3dsolid_sab_to_sat_text(const void *entity, size_t *out_len);
 
 void uncad_free_sat_text(char *text);
 
+/* 1 when the drawing was read from a pre-R13 source (DWG R1.4 .. R12, or a
+ * DXF stamped so), 0 otherwise or when `dwg` is NULL.
+ *
+ * This exists because Dwg_Data is bound as an opaque blob on the Rust side
+ * (see build.rs), so `dwg->header.from_version` cannot be read there. It
+ * reads `from_version` -- the field the library's own table lookup
+ * (dwg_handle_name) gates on, set for DWG and DXF reads alike -- and falls
+ * back to `version` only when that is unset. Pre-R13 drawings address their
+ * tables by index rather than by handle, which is what the Rust side needs
+ * to know to resolve a reference at all.
+ */
+int uncad_dwg_is_pre_r13(const Dwg_Data *dwg);
+
 #ifdef __cplusplus
 }
 #endif

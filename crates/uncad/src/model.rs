@@ -42,9 +42,10 @@ pub enum Ref<T> {
     Resolved(T),
     /// The file carries no handle for this field.
     Absent,
-    /// The file carries a handle, but nothing in the drawing answers to it.
-    /// The value is the handle as a hex string, the same form as
-    /// [`EntityCommon::handle`].
+    /// The file carries a reference, but nothing in the drawing answers to
+    /// it. The value is the handle as a hex string, the same form as
+    /// [`EntityCommon::handle`] -- or, for a pre-R13 drawing, which points at
+    /// its tables by index rather than by handle, the index as `idx:<n>`.
     Unresolved(String),
 }
 

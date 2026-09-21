@@ -361,6 +361,27 @@ mod tests {
         );
     }
 
+    /// The guard covers the vertex -> point hop too: a vertex whose point
+    /// pointer runs past the records makes the whole solid unread, rather
+    /// than each edge failing to find a point one by one.
+    #[test]
+    fn a_vertex_pointing_past_the_records_makes_the_whole_solid_unread() {
+        let sat = "700 0 1 0
+            9 SomeProduct 9 SomeVersion 24 Mon Jan 01 00:00:00 2024
+            1e-06 1e-10
+            point 0.0 0.0 0.0 #
+            vertex $0 #
+            vertex $77 #
+            edge $1 $2 #
+            End-of-ACIS-data
+";
+        let records = parse_sat_records(sat);
+        assert!(!pointers_are_in_range(&records));
+        let (segments, skipped) = extract_wireframe_segments(&records);
+        assert!(segments.is_empty());
+        assert_eq!(skipped, 1);
+    }
+
     #[test]
     fn a_dollar_value_inside_eye_refinement_is_not_a_pointer() {
         let sat = "700 0 1 0

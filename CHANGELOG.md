@@ -30,6 +30,16 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- Table references in pre-R13 drawings (R1.4 to R12) resolve. Such a drawing points at its
+  LAYER and BLOCK tables by index rather than by handle, and every one of those references
+  used to come back `Unresolved("0")` even though the tables themselves were read: 304 layer
+  and 46 block references across the corpus, now all resolved (the R11 drawing names the
+  same layers as its R2000 twin). An index the table does not answer to is kept as
+  `Unresolved("idx:<n>")` -- the index stands in for the handle -- which happens for the
+  22 layers of the one R1.4 drawing whose LAYER table LibreDWG does not read.
+- From R13 on, a reference whose handle is zero is `Absent`, not `Unresolved("0")`: the file
+  carries no reference there. Measured: the 18 DIMENSIONs inside one R2018 file's
+  dynamic-block definitions that have no block.
 - A 3DSOLID/REGION whose SAT text (from LibreDWG's SAB-to-SAT conversion) contains pointers
   past its last record is now reported as entirely unread -- `skipped_edges` equals its edge
   count and `wireframe_edges` is empty -- instead of edges being resolved against whatever
@@ -64,7 +74,8 @@ Notable changes to this project are recorded here. The format follows
   and `MLineEntity::mlinestyle_name` are now `Ref<String>`: `Resolved(name)`, `Absent` (the
   file carries no handle for the field) or `Unresolved(handle)` (the handle points at
   nothing -- the handle is kept, since it is what tells one missing table row from
-  references broken wholesale). Until now all three came back as `""`, so a consumer could
+  references broken wholesale; for a pre-R13 drawing, which references tables by index,
+  the payload is `idx:<n>` instead of a hex handle). Until now all three came back as `""`, so a consumer could
   not tell a layer called nothing from a layer that could not be read. In JSON the field
   is adjacently tagged like hatch boundary paths: `{"type":"RESOLVED","data":"0"}`,
   `{"type":"ABSENT"}`, `{"type":"UNRESOLVED","data":"2A"}`. **This changes the JSON

@@ -11,8 +11,8 @@
 //! scan over every object silently over-collects those.
 
 use crate::dynapi::{
-    get_array_field, get_common_field, get_field, get_utf8_field, resolve_handle_name, Point2D,
-    Point3D, SplineControlPoint,
+    get_array_field, get_common_field, get_field, get_utf8_field, is_pre_r13, resolve_handle_name,
+    resolve_table_entry_name, Point2D, Point3D, SplineControlPoint,
 };
 use crate::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, DimensionEntity,
@@ -320,7 +320,9 @@ unsafe fn convert_entity(
     // SAFETY: obj is valid per this function's own `# Safety` doc contract.
     let handle = unsafe { entity_handle(obj) };
     let layer = reference(
+        dwg,
         get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "layer"),
+        c"LAYER",
         |handle_ptr| resolve_handle_name(dwg, handle_ptr),
     );
     let (color_index, true_color) = entity_color(entity_ptr);
@@ -476,11 +478,13 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
             let block_name = reference(
+                dwg,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
                     entity_ptr,
                     "INSERT",
                     "block_header",
                 ),
+                c"BLOCK",
                 crate::tables::resolve_block_name,
             );
             let insertion_point = get_field::<Point3D>(entity_ptr, "INSERT", "ins_pt")?;
@@ -638,7 +642,9 @@ unsafe fn convert_entity(
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => {
             let dxfname = dimension_dxfname(fixedtype);
             let block_name = reference(
+                dwg,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block"),
+                c"BLOCK",
                 crate::tables::resolve_block_name,
             );
             Entity::Dimension(DimensionEntity { common, block_name })
@@ -650,7 +656,9 @@ unsafe fn convert_entity(
             // dwg_dynapi_entity_value's strict obj->name check, the same
             // pitfall as REGION/3DSOLID (see acis.rs).
             let block_name = reference(
+                dwg,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header"),
+                c"BLOCK",
                 crate::tables::resolve_block_name,
             );
             let insertion_point = get_field::<Point3D>(entity_ptr, "TABLE", "ins_pt")?;
@@ -1030,7 +1038,9 @@ fn convert_mline(
         .collect();
     let flags = get_field::<u16>(entity_ptr, "MLINE", "flags").unwrap_or(0);
     let mlinestyle_name = reference(
+        dwg,
         get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle"),
+        c"MLINESTYLE",
         |handle_ptr| resolve_handle_name(dwg, handle_ptr),
     );
     MLineEntity {
@@ -1087,8 +1097,19 @@ unsafe fn entity_handle(obj: *mut libredwg_sys::Dwg_Object) -> String {
 /// the handle itself (`absolute_ref`, hex, the same form as
 /// [`EntityCommon::handle`]). This is the one place the empty-string fill
 /// used to happen, for every reference field the model has.
+///
+/// Two cases carry no handle to resolve by, and are told apart by the
+/// drawing's version:
+/// - Before R13 a drawing points at its tables by *index* (`r11_idx`), not by
+///   handle, so the entry is looked up by index in `table` (`LAYER`, `BLOCK`,
+///   ...). An index the table does not answer to is `Unresolved("idx:<n>")`
+///   -- the index is kept the way a handle would be.
+/// - From R13 on, a handle whose value is zero is a reference the file does
+///   not carry (a DIMENSION without a block, for instance): `Absent`.
 fn reference(
+    dwg: *mut libredwg_sys::Dwg_Data,
     handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
+    table: &CStr,
     resolve: impl FnOnce(*mut libredwg_sys::Dwg_Object_Ref) -> Option<String>,
 ) -> Ref<String> {
     let Some(handle_ptr) = handle_ptr else {
@@ -1097,13 +1118,34 @@ fn reference(
     if handle_ptr.is_null() {
         return Ref::Absent;
     }
-    match resolve(handle_ptr) {
-        Some(name) => Ref::Resolved(name),
-        // SAFETY: handle_ptr is a non-null Dwg_Object_Ref owned by the live
-        // Dwg_Data this conversion pass walks (same contract as the resolvers
-        // that just read it).
-        None => Ref::Unresolved(format!("{:X}", unsafe { (*handle_ptr).absolute_ref })),
+    if let Some(name) = resolve(handle_ptr) {
+        return Ref::Resolved(name);
     }
+    // SAFETY: handle_ptr is a non-null Dwg_Object_Ref owned by the live
+    // Dwg_Data this conversion pass walks (same contract as the resolvers
+    // that just read it).
+    let (absolute_ref, handle_value, r11_idx) = unsafe {
+        (
+            (*handle_ptr).absolute_ref,
+            (*handle_ptr).handleref.value,
+            (*handle_ptr).r11_idx,
+        )
+    };
+    if is_pre_r13(dwg) {
+        return match resolve_table_entry_name(dwg, handle_ptr, table) {
+            Some(name) => Ref::Resolved(name),
+            None => Ref::Unresolved(format!("idx:{r11_idx}")),
+        };
+    }
+    if absolute_ref != 0 {
+        return Ref::Unresolved(format!("{absolute_ref:X}"));
+    }
+    if handle_value != 0 {
+        // A relative (offset) handle the library never resolved against its
+        // owner: still a reference the file makes, so not `Absent`.
+        return Ref::Unresolved(format!("{handle_value:X}"));
+    }
+    Ref::Absent
 }
 
 /// # Safety

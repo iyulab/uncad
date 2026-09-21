@@ -229,15 +229,21 @@ The R2007+ DXF case that this crate now refuses was the large-scale version of "
 Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
 the model still says which it was.
 
-Measured across the corpus (172 files that parsed): 64,375 entity layers resolved and 322 did
-not -- all 322 carry handle `0`, and all but 18 of them are in pre-R13 drawings (`r1.4` to
-`r11`), where the file references its LAYER table by index rather than by handle and this
-crate does not resolve that yet, even though it reads the table itself. The other 18 are
-DIMENSIONs inside dynamic-block definitions of one R2018 file whose block handle is null.
-Block references: 622 INSERTs resolved and 26 did not; 457 DIMENSIONs resolved, 18 carry no
-block at all (absent) and 20 did not resolve. Every MLINE style resolved. So `Unresolved`
-with a handle of `0` means "the file's reference is not a handle this crate can follow" --
-today that is the pre-R13 case; resolving it is open work.
+Two cases carry no handle at all and are told apart by the drawing's version. Before R13 a
+drawing points at its tables by *index*, not by handle; those references are looked up by
+index in the table (LibreDWG's `dwg_handle_name` does the matching), and an index the table
+does not answer to is kept as `Unresolved("idx:<n>")` -- the index in place of the handle.
+From R13 on, a handle whose value is zero is a reference the file simply does not make, and
+reads as `Absent`.
+
+Measured across the corpus (172 files that parsed, 64,697 entity layer references including
+those inside block definitions): every layer resolves except 22 in the single R1.4 drawing,
+whose LAYER table LibreDWG does not read at all (`idx:1`, table empty). Before the index
+lookup, 322 layers came back `Unresolved("0")`: 304 in the pre-R13 drawings, now resolved
+(the R11 file names the same layers as its R2000 twin), and 18 DIMENSIONs inside the
+dynamic-block definitions of one R2018 file whose block handle is null, now `Absent`. Every
+block reference resolves or is absent (36 absent, none unresolved; 46 were unresolved before,
+all in pre-R13 files). Every MLINE style resolves.
 
 ## The polyline "closed" flag
 

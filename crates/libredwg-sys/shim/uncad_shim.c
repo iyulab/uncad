@@ -167,3 +167,14 @@ uncad_free_sat_text (char *text)
 {
   free (text);
 }
+
+int
+uncad_dwg_is_pre_r13 (const Dwg_Data *dwg)
+{
+  if (!dwg)
+    return 0;
+  Dwg_Version_Type v = dwg->header.from_version;
+  if (v == R_INVALID)
+    v = dwg->header.version;
+  return v < R_13;
+}

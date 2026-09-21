@@ -184,45 +184,152 @@ fn a_reference_to_a_missing_block_is_not_a_name() {
     }
 }
 
-/// Measured across the whole LibreDWG corpus: every entity layer in the pre-R13
-/// drawings comes back `Unresolved("0")` -- the file references its LAYER table
-/// by index, not by handle, and this crate does not resolve that yet -- while
-/// the layer table itself is read (`0`, `DEFPOINTS`). The R2000 drawing of the
-/// same content is the control: every layer resolves. This is the one place in
-/// the corpus where `Unresolved` occurs in a real file, so it is pinned here;
-/// resolving pre-R13 table references would rightly make this test fail and
-/// need rewriting.
+/// Before R13 a drawing points at its LAYER table by index, not by handle.
+/// Measured across the LibreDWG corpus before this was resolved: every entity
+/// layer in the pre-R13 drawings came back `Unresolved("0")` while the table
+/// itself was read. The R2000 drawing of the same content is the oracle: the
+/// R11 file must yield the same set of layer names (the two files hold a
+/// different number of entities, so they are compared as sets), not merely
+/// names that exist in its table -- an off-by-one index would still produce a
+/// valid name.
 #[test]
-fn pre_r13_layer_references_read_as_unresolved_while_r2000_ones_resolve() {
+fn pre_r13_layer_references_resolve_by_index_to_the_same_names_as_the_r2000_twin() {
     let old = uncad::parse(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../lib/libredwg/test/test-data/r11/entities-2d.dwg"
     ))
     .expect("the R11 corpus DWG should parse");
+    let modern = uncad::parse(CORPUS_DXF).expect("the R2000 corpus DXF should parse");
     assert!(!old.entities.is_empty());
     assert!(
         old.tables.layers.contains_key("0"),
-        "the layer table is read even though references into it are not: {:?}",
+        "{:?}",
         old.tables.layers.keys().collect::<Vec<_>>()
     );
-    let unresolved = old
-        .entities
-        .iter()
-        .filter(|e| matches!(layer_of(e), Ref::Unresolved(_)))
-        .count();
+
+    fn resolved_layer_names(db: &uncad::CadDatabase) -> std::collections::BTreeSet<&str> {
+        db.entities
+            .iter()
+            .map(|e| match layer_of(e) {
+                Ref::Resolved(name) => name.as_str(),
+                other => panic!("layer not resolved: {other:?} on {e:?}"),
+            })
+            .collect()
+    }
+    let old_names = resolved_layer_names(&old);
+    let modern_names = resolved_layer_names(&modern);
     assert_eq!(
-        unresolved,
-        old.entities.len(),
-        "every R11 entity layer is expected to be unresolved today: {:?}",
-        old.entities.iter().map(layer_of).collect::<Vec<_>>()
+        old_names, modern_names,
+        "R11 and R2000 twins must name the same layers"
     );
-    for e in &old.entities {
-        assert!(
-            !matches!(layer_of(e), Ref::Resolved(name) if name.is_empty()),
-            "never an empty name: {e:?}"
+    for name in &old_names {
+        assert!(old.tables.layers.contains_key(*name), "{name}");
+    }
+}
+
+/// Every corpus file that parses, tallied by reference state. Measured: no
+/// `Unresolved` carries a bare `0` any more (a null handle is `Absent` from
+/// R13 on -- the 18 DIMENSIONs inside one R2018 file's dynamic-block
+/// definitions -- and a pre-R13 index is looked up in the table); the only
+/// unresolved references left in the corpus are the 22 layers of the R1.4
+/// drawing, whose LAYER table LibreDWG does not read at all, kept as `idx:1`.
+/// No block reference is unresolved. The counts are printed so a change in
+/// the corpus or in the resolver shows up as a number, not as a feeling.
+#[test]
+fn corpus_references_never_carry_a_bare_zero_handle() {
+    use std::collections::BTreeMap;
+    let corpus = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data"
+    ));
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    for entry in std::fs::read_dir(corpus).expect("corpus dir") {
+        let path = entry.expect("entry").path();
+        if path.is_dir() {
+            for sub in std::fs::read_dir(&path).expect("subdir") {
+                files.push(sub.expect("entry").path());
+            }
+        } else {
+            files.push(path);
+        }
+    }
+    files.retain(|p| {
+        matches!(
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("dwg" | "dxf")
+        )
+    });
+    files.sort();
+
+    // (directory, field, state) -> count
+    let mut tally: BTreeMap<(String, &str, &str), usize> = BTreeMap::new();
+    let mut bare_zero: Vec<String> = Vec::new();
+    // (file, payload, size of the file's layer table) per unresolved reference
+    let mut unresolved: Vec<(String, String, usize)> = Vec::new();
+    let mut parsed = 0usize;
+    for path in &files {
+        let Ok(db) = uncad::parse(path) else { continue };
+        parsed += 1;
+        let dir = path
+            .parent()
+            .and_then(|d| d.file_name())
+            .and_then(|d| d.to_str())
+            .unwrap_or("")
+            .to_string();
+        let mut note = |field: &'static str, r: &Ref<String>| {
+            let state = match r {
+                Ref::Resolved(_) => "resolved",
+                Ref::Absent => "absent",
+                Ref::Unresolved(h) => {
+                    if h == "0" {
+                        bare_zero.push(format!("{}:{field}", path.display()));
+                    }
+                    unresolved.push((
+                        path.display().to_string(),
+                        h.clone(),
+                        db.tables.layers.len(),
+                    ));
+                    "unresolved"
+                }
+            };
+            *tally.entry((dir.clone(), field, state)).or_default() += 1;
+        };
+        let in_blocks = db
+            .tables
+            .block_records
+            .values()
+            .flat_map(|b| b.entities.iter());
+        for e in db.entities.iter().chain(in_blocks) {
+            note("layer", layer_of(e));
+            match e {
+                uncad::Entity::Insert(i) => note("block", &i.block_name),
+                uncad::Entity::Dimension(d) => note("block", &d.block_name),
+                uncad::Entity::AcadTable(t) => note("block", &t.block_name),
+                uncad::Entity::MLine(m) => note("mlinestyle", &m.mlinestyle_name),
+                _ => {}
+            }
+        }
+    }
+    println!("parsed {parsed} of {} corpus files", files.len());
+    for ((dir, field, state), n) in &tally {
+        println!("{dir:>14} {field:<10} {state:<10} {n}");
+    }
+    assert!(bare_zero.is_empty(), "bare-zero handles: {bare_zero:?}");
+    assert_eq!(unresolved.len(), 22, "{unresolved:?}");
+    for (file, payload, layer_table_len) in &unresolved {
+        assert!(file.contains("r1.4"), "{file}");
+        assert_eq!(payload, "idx:1", "{file}");
+        assert_eq!(
+            *layer_table_len, 0,
+            "{file}: an index can only go unresolved when the table is missing"
         );
     }
-
-    let modern = uncad::parse(CORPUS_DXF).expect("the R2000 corpus DXF should parse");
-    assert!(modern.entities.iter().all(|e| layer_of(e).is_resolved()));
+    assert!(
+        !tally.contains_key(&("2018".to_string(), "block", "unresolved")),
+        "R13+ null block handles are absent, not unresolved"
+    );
+    assert_eq!(tally[&("2018".to_string(), "block", "absent")], 18);
 }
