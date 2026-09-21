@@ -1101,9 +1101,11 @@ unsafe fn entity_handle(obj: *mut libredwg_sys::Dwg_Object) -> String {
 /// Two cases carry no handle to resolve by, and are told apart by the
 /// drawing's version:
 /// - Before R13 a drawing points at its tables by *index* (`r11_idx`), not by
-///   handle, so the entry is looked up by index in `table` (`LAYER`, `BLOCK`,
-///   ...). An index the table does not answer to is `Unresolved("idx:<n>")`
-///   -- the index is kept the way a handle would be.
+///   handle, so the entry is looked up by index in `table` -- the name of a
+///   `*_CONTROL` table (`LAYER`, `BLOCK`, ...; a dictionary-held object type
+///   such as `MLINESTYLE` has no such table and simply does not resolve this
+///   way, which is moot before R13). An index the table does not answer to is
+///   `Unresolved("idx:<n>")` -- the index is kept the way a handle would be.
 /// - From R13 on, a handle whose value is zero is a reference the file does
 ///   not carry (a DIMENSION without a block, for instance): `Absent`.
 fn reference(
