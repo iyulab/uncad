@@ -179,6 +179,23 @@ in the LibreDWG corpus and checks that exactly the R2007+ files are refused; a s
 feeds the same minimal drawing with two `$ACADVER` values and requires one refusal and one
 successful read.
 
+## What LibreDWG reported but did not fail on
+
+`dwg_read_file`/`dxf_read_file` return a bit set. Bits at or above `DWG_ERR_CLASSESNOTFOUND`
+make `parse()` fail with `ParseError::Critical`; the bits below it used to be discarded. They
+are now carried in `CadDatabase::read_diagnostics` (the raw bits and their dwg.h names), and
+the CLI prints them as a warning. Every example DWG in the LibreDWG corpus comes back with
+`UNHANDLEDCLASS` set, and `example_2018.dwg` with `UNHANDLEDCLASS | VALUEOUTOFBOUNDS`; the
+R2000 DXF from the same corpus comes back clean. What the bits mean for the result is
+LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
+were skipped, and nothing else in the model shows that they existed.
+
+Two more places report what used to vanish: `ToSvgResult::empty_blocks` names the blocks an
+INSERT referenced that drew nothing (an empty definition, or one whose every entity was left
+out), and `Solid3DEntity::skipped_edges` counts the ACIS edges that could not be turned into
+wireframe segments. Neither is an error; both are the difference between "empty" and "not
+read".
+
 ## The polyline "closed" flag
 
 `dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic

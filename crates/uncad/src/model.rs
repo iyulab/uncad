@@ -383,6 +383,12 @@ pub struct DimensionEntity {
 pub struct Solid3DEntity {
     pub common: EntityCommon,
     pub wireframe_edges: Vec<[Point3D; 2]>,
+    /// Edges in the ACIS data that could not be turned into a wireframe
+    /// segment (endpoint vertices not resolvable). `0` for a fully read
+    /// solid; a solid with no `wireframe_edges` and a non-zero count here
+    /// was not read, not empty.
+    #[serde(default)]
+    pub skipped_edges: usize,
 }
 
 /// MULTILEADER's leader-line geometry only: the lines connecting the content

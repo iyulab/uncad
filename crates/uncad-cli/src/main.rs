@@ -117,6 +117,13 @@ fn main() -> ExitCode {
 fn run(args: &Args) -> Result<(), String> {
     let input = args.input.as_deref().expect("checked by the caller");
     let db = parse_input(input)?;
+    if !db.read_diagnostics.is_clean() {
+        eprintln!(
+            "warning: LibreDWG read '{input}' with non-fatal problems ({}); \
+             objects it could not decode are missing from the result",
+            db.read_diagnostics.libredwg_errors.join(", ")
+        );
+    }
 
     let Some(output) = args.output.as_deref() else {
         print_summary(input, &db);
@@ -129,7 +136,7 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let unsupported = match extension.as_str() {
+    let (unsupported, empty_blocks) = match extension.as_str() {
         "json" => {
             let json = db
                 .to_json(ToJsonOptions {
@@ -137,12 +144,12 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, json.as_bytes())?;
-            Vec::new()
+            (Vec::new(), Vec::new())
         }
         "svg" => {
             let result = db.to_svg(svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
-            result.unsupported_types
+            (result.unsupported_types, result.empty_blocks)
         }
         "png" => {
             let result = db
@@ -152,7 +159,7 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
-            result.unsupported_types
+            (result.unsupported_types, result.empty_blocks)
         }
         other => {
             return Err(format!(
@@ -166,6 +173,12 @@ fn run(args: &Args) -> Result<(), String> {
         eprintln!(
             "warning: left out of the image, unsupported entity types: {}",
             unsupported.join(", ")
+        );
+    }
+    if !empty_blocks.is_empty() {
+        eprintln!(
+            "warning: block references that drew nothing: {}",
+            empty_blocks.join(", ")
         );
     }
     Ok(())

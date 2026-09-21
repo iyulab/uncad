@@ -8,6 +8,19 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `CadDatabase::read_diagnostics`: the non-fatal error bits LibreDWG reported while
+  reading (`WRONGCRC`, `UNHANDLEDCLASS`, `VALUEOUTOFBOUNDS`, ...), as the raw bit set and
+  as names. They used to be discarded, so a file LibreDWG read while skipping objects it
+  could not decode was indistinguishable from a clean read. Every corpus example DWG in
+  fact comes back with `UNHANDLEDCLASS` set. The field is serialized with the model and
+  defaults to "clean" when absent from older JSON; the CLI prints a warning when it is
+  not clean.
+- `ToSvgResult::empty_blocks` / `ToPngResult::empty_blocks`: names of blocks an INSERT
+  referenced that contributed nothing to the image (empty definition, or nothing in it
+  drawable). Previously such a reference vanished without trace. The CLI warns about them.
+- `Solid3DEntity::skipped_edges`: how many ACIS edges of a 3DSOLID/REGION could not be
+  turned into wireframe segments. A solid with no `wireframe_edges` and a non-zero count
+  here was not read, not empty; the edges used to be skipped in silence.
 - TRACE is read and drawn: `Entity::Trace`, which reuses `SolidEntity` the way `XLine`
   reuses `RayEntity`. It used to arrive as `Entity::Unknown`. `Entity` is
   `#[non_exhaustive]`, so this is not a breaking change.

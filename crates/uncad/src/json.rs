@@ -1,7 +1,7 @@
 //! JSON export of the parsed model -- [`CadDatabase::to_json`].
 //!
 //! The output is a direct serde serialization of [`CadDatabase`] (`entities` +
-//! `tables`): exactly the model `to_svg()` renders from, so a consumer sees the
+//! `tables` + `read_diagnostics`): exactly the model `to_svg()` renders from, so a consumer sees the
 //! same drawing the SVG shows. It round-trips for any database whose `f64`
 //! fields are all finite (everything `parse()` has produced so far):
 //! `serde_json::from_str::<CadDatabase>` gives back a database equal
@@ -136,6 +136,7 @@ mod tests {
         let solid3d = Solid3DEntity {
             common: c.clone(),
             wireframe_edges: vec![[p3(0.0, 0.0, 0.0), p3(1.0, 1.0, 1.0)]],
+            skipped_edges: 0,
         };
         let all = vec![
             Entity::Line(LineEntity {
@@ -493,6 +494,7 @@ mod tests {
                 block_records,
                 mlinestyles,
             },
+            read_diagnostics: Default::default(),
         };
 
         let compact = to_json(&db, ToJsonOptions::default()).expect("serializable");

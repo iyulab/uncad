@@ -60,6 +60,68 @@ static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 pub struct CadDatabase {
     pub entities: Vec<Entity>,
     pub tables: Tables,
+    /// What LibreDWG reported while reading but did not fail on. Defaults to
+    /// "nothing reported" when absent from JSON written before this field
+    /// existed.
+    #[serde(default)]
+    pub read_diagnostics: ReadDiagnostics,
+}
+
+/// Non-fatal problems LibreDWG reported while reading the file.
+///
+/// `dwg_read_file`/`dxf_read_file` return a bit set (`DWG_ERROR` in dwg.h);
+/// bits at or above `DWG_ERR_CLASSESNOTFOUND` make [`parse`] fail with
+/// [`ParseError::Critical`], and the rest used to be discarded. They are kept
+/// here because "read with warnings" and "read cleanly" are different
+/// outcomes: a file that came back with `UNHANDLEDCLASS` set may be missing
+/// objects that LibreDWG did not know how to decode, and nothing else in the
+/// result says so.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ReadDiagnostics {
+    /// The non-critical bits exactly as LibreDWG returned them; `0` when the
+    /// read was clean.
+    pub libredwg_error_bits: i32,
+    /// The same bits by their dwg.h names (`WRONGCRC`, `NOTYETSUPPORTED`,
+    /// `UNHANDLEDCLASS`, `INVALIDTYPE`, `INVALIDHANDLE`, `INVALIDEED`,
+    /// `VALUEOUTOFBOUNDS`), in ascending bit order so the same read always
+    /// lists them the same way. A bit this crate does not know the name of
+    /// is listed as `BIT<n>`.
+    pub libredwg_errors: Vec<String>,
+}
+
+impl ReadDiagnostics {
+    /// Names for the non-critical `DWG_ERROR` bits, in bit order.
+    const NON_CRITICAL_BIT_NAMES: [&'static str; 7] = [
+        "WRONGCRC",
+        "NOTYETSUPPORTED",
+        "UNHANDLEDCLASS",
+        "INVALIDTYPE",
+        "INVALIDHANDLE",
+        "INVALIDEED",
+        "VALUEOUTOFBOUNDS",
+    ];
+
+    /// Decodes a LibreDWG read result that was below the critical threshold.
+    pub fn from_libredwg_bits(bits: i32) -> Self {
+        let mut libredwg_errors = Vec::new();
+        for bit in 0..31 {
+            if bits & (1 << bit) != 0 {
+                libredwg_errors.push(match Self::NON_CRITICAL_BIT_NAMES.get(bit) {
+                    Some(name) => (*name).to_string(),
+                    None => format!("BIT{bit}"),
+                });
+            }
+        }
+        ReadDiagnostics {
+            libredwg_error_bits: bits,
+            libredwg_errors,
+        }
+    }
+
+    /// `true` when LibreDWG reported nothing at all.
+    pub fn is_clean(&self) -> bool {
+        self.libredwg_error_bits == 0
+    }
 }
 
 impl CadDatabase {
@@ -183,6 +245,11 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         return Err(ParseError::Critical(error));
     }
 
+    // Below the critical threshold the bits still mean something (an
+    // UNHANDLEDCLASS read may be missing objects); they travel with the
+    // result instead of being dropped here.
+    let read_diagnostics = ReadDiagnostics::from_libredwg_bits(error);
+
     // Two walks over the live C structure, neither of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
     let entities = unsafe { convert::convert_entities(dwg.as_mut()) };
@@ -194,7 +261,11 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // Drop, no C memory, Send + Sync by construction).
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
-    Ok(CadDatabase { entities, tables })
+    Ok(CadDatabase {
+        entities,
+        tables,
+        read_diagnostics,
+    })
 }
 
 /// `$ACADVER` value of the first DXF release LibreDWG's importer reads back

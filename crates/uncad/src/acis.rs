@@ -78,12 +78,15 @@ fn point_xyz(point_record: &SatRecord) -> Option<[f64; 3]> {
     Some([nums[0], nums[1], nums[2]])
 }
 
-/// Walks every `edge` record and returns one chord segment per edge.
-/// Edges whose two endpoint vertices can't both be resolved (unexpected
-/// record shape, e.g. a future/older ACIS version this wasn't written
-/// against) are silently skipped.
-fn extract_wireframe_segments(records: &[SatRecord]) -> Vec<[Point3D; 2]> {
+/// Walks every `edge` record and returns one chord segment per edge, plus
+/// the number of edges that were skipped because their two endpoint
+/// vertices could not both be resolved (unexpected record shape, e.g. a
+/// future/older ACIS version this wasn't written against). The count is
+/// what lets a caller tell "this solid has no edges" from "this solid's
+/// edges could not be read".
+fn extract_wireframe_segments(records: &[SatRecord]) -> (Vec<[Point3D; 2]>, usize) {
     let mut segments = Vec::new();
+    let mut skipped = 0usize;
     for record in records {
         if record.type_name != "edge" {
             continue;
@@ -109,9 +112,11 @@ fn extract_wireframe_segments(records: &[SatRecord]) -> Vec<[Point3D; 2]> {
         }
         if vertex_points.len() == 2 {
             segments.push([vertex_points[0], vertex_points[1]]);
+        } else {
+            skipped += 1;
         }
     }
-    segments
+    (segments, skipped)
 }
 
 /// Reads the SAT (v1, ASCII) text for a 3DSOLID/REGION/BODY entity, converting
@@ -199,9 +204,12 @@ unsafe fn read_sat_text_from_entity(entity_ptr: *mut c_void, dxfname: &str) -> O
 ///
 /// # Safety
 /// `entity_ptr` must be a valid, non-null `Dwg_Entity__3DSOLID*`.
-pub unsafe fn extract_wireframe(entity_ptr: *mut c_void, dxfname: &str) -> Vec<[Point3D; 2]> {
+pub unsafe fn extract_wireframe(
+    entity_ptr: *mut c_void,
+    dxfname: &str,
+) -> (Vec<[Point3D; 2]>, usize) {
     let Some(sat_text) = (unsafe { read_sat_text_from_entity(entity_ptr, dxfname) }) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     let records = parse_sat_records(&sat_text);
     extract_wireframe_segments(&records)
@@ -245,7 +253,8 @@ mod tests {
     #[test]
     fn resolves_edge_to_its_two_endpoint_coordinates() {
         let records = parse_sat_records(SAT_TEXT);
-        let segments = extract_wireframe_segments(&records);
+        let (segments, skipped) = extract_wireframe_segments(&records);
+        assert_eq!(skipped, 0);
         assert_eq!(segments.len(), 1);
         assert_eq!(
             segments[0][0],
@@ -271,7 +280,12 @@ mod tests {
         let records = parse_sat_records(
             "h\nh\nh\npoint 0.0 0.0 0.0 #\nvertex $0 #\nedge $1 $9 #\nEnd-of-ACIS-data",
         );
-        assert_eq!(extract_wireframe_segments(&records).len(), 0);
+        let (segments, skipped) = extract_wireframe_segments(&records);
+        assert_eq!(segments.len(), 0);
+        assert_eq!(
+            skipped, 1,
+            "the unresolvable edge must be counted, not just dropped"
+        );
     }
 
     #[test]

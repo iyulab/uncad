@@ -68,6 +68,12 @@ pub struct ToSvgResult {
     /// DXF names of entity types this renderer had nothing to draw for,
     /// sorted by name so the same input always reports them in the same order.
     pub unsupported_types: Vec<String>,
+    /// Names of blocks that an INSERT referenced but that contributed nothing
+    /// to the image -- the block definition is empty, or every entity in it
+    /// was left out. Sorted, one entry per block. Without this, a drawing
+    /// whose INSERTs all resolved to nothing looks the same as one whose
+    /// INSERTs drew.
+    pub empty_blocks: Vec<String>,
 }
 
 // --- block transform ---------------------------------------------------
@@ -147,6 +153,10 @@ struct Ctx<'a> {
     ent_max_y: f64,
     // Copied straight into the public result, in this set's (sorted) order.
     unsupported: BTreeSet<String>,
+    /// Block names whose reference rendered to nothing (see
+    /// `ToSvgResult::empty_blocks`); a set so a block referenced many times
+    /// is reported once.
+    empty_blocks: BTreeSet<String>,
     tables: &'a Tables,
     depth: u32,
     scale: f64,
@@ -175,6 +185,7 @@ impl<'a> Ctx<'a> {
             ent_min_y: f64::INFINITY,
             ent_max_y: f64::NEG_INFINITY,
             unsupported: BTreeSet::new(),
+            empty_blocks: BTreeSet::new(),
             tables,
             depth: 0,
             scale: 1.0,
@@ -416,7 +427,11 @@ fn render_block_ref(
     let Some(block) = ctx.tables.block_records.get(block_name) else {
         return String::new();
     };
-    if block.entities.is_empty() || ctx.depth > MAX_BLOCK_REF_DEPTH || ctx.block_ref_budget == 0 {
+    if block.entities.is_empty() {
+        ctx.empty_blocks.insert(block_name.to_string());
+        return String::new();
+    }
+    if ctx.depth > MAX_BLOCK_REF_DEPTH || ctx.block_ref_budget == 0 {
         return String::new();
     }
     ctx.block_ref_budget -= 1;
@@ -462,6 +477,7 @@ fn render_block_ref(
     ctx.inherited_color = parent_inherited;
 
     if body_parts.is_empty() {
+        ctx.empty_blocks.insert(block_name.to_string());
         return String::new();
     }
 
@@ -978,6 +994,7 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
     ToSvgResult {
         svg,
         unsupported_types: ctx.unsupported.into_iter().collect(),
+        empty_blocks: ctx.empty_blocks.into_iter().collect(),
     }
 }
 

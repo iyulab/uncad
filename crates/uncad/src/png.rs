@@ -35,6 +35,8 @@ impl Default for ToPngOptions {
 pub struct ToPngResult {
     pub png: Vec<u8>,
     pub unsupported_types: Vec<String>,
+    /// See [`ToSvgResult::empty_blocks`](crate::ToSvgResult::empty_blocks).
+    pub empty_blocks: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -80,6 +82,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
     Ok(ToPngResult {
         png,
         unsupported_types: svg_result.unsupported_types,
+        empty_blocks: svg_result.empty_blocks,
     })
 }
 

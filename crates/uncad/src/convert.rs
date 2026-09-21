@@ -713,10 +713,12 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DSOLID => {
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity__3DSOLID*
             // (checked above), matching fixedtype.
-            let wireframe_edges = unsafe { crate::acis::extract_wireframe(entity_ptr, "3DSOLID") };
+            let (wireframe_edges, skipped_edges) =
+                unsafe { crate::acis::extract_wireframe(entity_ptr, "3DSOLID") };
             Entity::Solid3D(Solid3DEntity {
                 common,
                 wireframe_edges,
+                skipped_edges,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_REGION => {
@@ -725,10 +727,12 @@ unsafe fn convert_entity(
             // Dwg_Entity__3DSOLID -- layout-identical, so the cast
             // extract_wireframe does internally is sound. Its real dxfname has
             // to be passed through: dynapi refuses a name mismatch (acis.rs).
-            let wireframe_edges = unsafe { crate::acis::extract_wireframe(entity_ptr, "REGION") };
+            let (wireframe_edges, skipped_edges) =
+                unsafe { crate::acis::extract_wireframe(entity_ptr, "REGION") };
             Entity::Region(Solid3DEntity {
                 common,
                 wireframe_edges,
+                skipped_edges,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_PFACE => {
@@ -739,6 +743,8 @@ unsafe fn convert_entity(
             Entity::PolylinePFace(Solid3DEntity {
                 common,
                 wireframe_edges,
+                // A polyface mesh has no ACIS data to skip edges from.
+                skipped_edges: 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
