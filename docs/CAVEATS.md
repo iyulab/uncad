@@ -186,7 +186,10 @@ make `parse()` fail with `ParseError::Critical`; the bits below it used to be di
 are now carried in `CadDatabase::read_diagnostics` (the raw bits and their dwg.h names), and
 the CLI prints them as a warning. Every example DWG in the LibreDWG corpus comes back with
 `UNHANDLEDCLASS` set, and `example_2018.dwg` with `UNHANDLEDCLASS | VALUEOUTOFBOUNDS`; the
-R2000 DXF from the same corpus comes back clean. What the bits mean for the result is
+R2000 DXF from the same corpus comes back clean. Across the whole corpus (208 files: 141 DWG,
+67 DXF), 100 DWG read clean, 17 with `UNHANDLEDCLASS`, 31 with `VALUEOUTOFBOUNDS` (some with
+both); every DXF that LibreDWG read at all (31) read clean, 32 were refused as R2007+ and 4
+failed critically (3 `INVALIDDWG`, 1 `IOERROR`). What the bits mean for the result is
 LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
 were skipped, and nothing else in the model shows that they existed.
 
@@ -195,6 +198,14 @@ INSERT referenced that drew nothing (an empty definition, or one whose every ent
 out), and `Solid3DEntity::skipped_edges` counts the ACIS edges that could not be turned into
 wireframe segments. Neither is an error; both are the difference between "empty" and "not
 read".
+
+Measured across the corpus: 1,034 ACIS edges skipped in 8 files, concentrated in one large
+R2007 drawing (720 across 116 solids) and in the `example_*` drawings (44-52 across 6 solids
+each), while 7 files with solids skipped none. So the wireframe of a typical corpus solid is
+missing several edges -- the SAT record shapes the extractor was written against do not cover
+these files, and the drawing looks read. Block references that drew nothing: 14 files,
+typically a block holding only ATTDEF or unsupported entities (`BLOCK2` in the R2000 examples,
+dimension blocks `*D…` in the pre-R13 ones).
 
 ## A reference that resolves to nothing is not an empty name
 
@@ -211,6 +222,16 @@ The R2007+ DXF case that this crate now refuses was the large-scale version of "
 
 Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
 the model still says which it was.
+
+Measured across the corpus (172 files that parsed): 64,375 entity layers resolved and 322 did
+not -- all 322 carry handle `0`, and all but 18 of them are in pre-R13 drawings (`r1.4` to
+`r11`), where the file references its LAYER table by index rather than by handle and this
+crate does not resolve that yet, even though it reads the table itself. The other 18 are
+DIMENSIONs inside dynamic-block definitions of one R2018 file whose block handle is null.
+Block references: 622 INSERTs resolved and 26 did not; 457 DIMENSIONs resolved, 18 carry no
+block at all (absent) and 20 did not resolve. Every MLINE style resolved. So `Unresolved`
+with a handle of `0` means "the file's reference is not a handle this crate can follow" --
+today that is the pre-R13 case; resolving it is open work.
 
 ## The polyline "closed" flag
 

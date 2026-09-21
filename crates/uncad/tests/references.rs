@@ -183,3 +183,46 @@ fn a_reference_to_a_missing_block_is_not_a_name() {
         );
     }
 }
+
+/// Measured across the whole LibreDWG corpus: every entity layer in the pre-R13
+/// drawings comes back `Unresolved("0")` -- the file references its LAYER table
+/// by index, not by handle, and this crate does not resolve that yet -- while
+/// the layer table itself is read (`0`, `DEFPOINTS`). The R2000 drawing of the
+/// same content is the control: every layer resolves. This is the one place in
+/// the corpus where `Unresolved` occurs in a real file, so it is pinned here;
+/// resolving pre-R13 table references would rightly make this test fail and
+/// need rewriting.
+#[test]
+fn pre_r13_layer_references_read_as_unresolved_while_r2000_ones_resolve() {
+    let old = uncad::parse(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/r11/entities-2d.dwg"
+    ))
+    .expect("the R11 corpus DWG should parse");
+    assert!(!old.entities.is_empty());
+    assert!(
+        old.tables.layers.contains_key("0"),
+        "the layer table is read even though references into it are not: {:?}",
+        old.tables.layers.keys().collect::<Vec<_>>()
+    );
+    let unresolved = old
+        .entities
+        .iter()
+        .filter(|e| matches!(layer_of(e), Ref::Unresolved(_)))
+        .count();
+    assert_eq!(
+        unresolved,
+        old.entities.len(),
+        "every R11 entity layer is expected to be unresolved today: {:?}",
+        old.entities.iter().map(layer_of).collect::<Vec<_>>()
+    );
+    for e in &old.entities {
+        assert!(
+            !matches!(layer_of(e), Ref::Resolved(name) if name.is_empty()),
+            "never an empty name: {e:?}"
+        );
+    }
+
+    let modern = uncad::parse(CORPUS_DXF).expect("the R2000 corpus DXF should parse");
+    assert!(modern.entities.iter().all(|e| layer_of(e).is_resolved()));
+}
