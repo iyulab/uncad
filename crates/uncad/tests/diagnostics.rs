@@ -72,3 +72,20 @@ fn diagnostics_survive_the_json_round_trip_and_default_when_absent() {
     .expect("old shape");
     assert_eq!(old.read_diagnostics, ReadDiagnostics::default());
 }
+
+// An attempt to probe this crate's attribute path by hand is recorded here
+// rather than left as a passing test, because it did not work and the
+// negative result is the useful part.
+//
+// The other reader of this model reports an attribute that carries no tag
+// (a tag is how a consumer asks for an attribute and how a block definition
+// lines up with its references), and this crate carries the same check with
+// the same wording. But a hand-written DXF cannot exercise it: an ATTRIB
+// written into such a file does not reach this crate's model at all --
+// measured, with a tag present, so it is not the missing tag that loses it.
+// A probe whose control does not stand proves nothing, so none is kept.
+//
+// What is known: the check does not fire on any drawing of the test corpus,
+// and the wording matches the other reader's, so a drawing read through
+// either says the same thing about itself. What is not known: whether a
+// drawing exists that makes it fire here.

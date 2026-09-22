@@ -98,6 +98,47 @@ impl std::fmt::Display for ParseError {
 }
 impl std::error::Error for ParseError {}
 
+/// Groups an entity cannot be understood without, where this crate filled a
+/// value instead of finding one.
+///
+/// Most absent groups have a reading -- a flag word that is not there means
+/// no bit is set, an absent colour means ByLayer -- and those are silent
+/// because there is nothing to report. An attribute's tag is the other
+/// kind: it is how a consumer asks for the attribute and how a block
+/// definition lines up with its references, so an attribute without one is
+/// not an attribute named `""` but an entity nothing can place. Reporting
+/// is not refusing: the entity is kept, and the reader says what it had to
+/// make up.
+///
+/// Read off the finished model rather than threaded through the conversion:
+/// the condition is a property of the value, and checking it in one place
+/// keeps the two from drifting apart. It cannot tell a group that was
+/// absent from one that was present and empty -- and neither can the
+/// condition itself, which is why both read the same way here.
+fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
+    fn walk(entities: &[Entity], out: &mut Vec<String>) {
+        for entity in entities {
+            let name = match entity {
+                Entity::Attrib(a) if a.tag.is_empty() => "ATTRIB",
+                Entity::Attdef(a) if a.tag.is_empty() => "ATTDEF",
+                Entity::Insert(insert) => {
+                    let owned: Vec<Entity> =
+                        insert.attribs.iter().cloned().map(Entity::Attrib).collect();
+                    walk(&owned, out);
+                    continue;
+                }
+                _ => continue,
+            };
+            out.push(format!(
+                "MISSING_REQUIRED_GROUP: {name} carries no tag (group 2);                  the entity is kept with an empty one"
+            ));
+        }
+    }
+    let mut out = Vec::new();
+    walk(entities, &mut out);
+    out
+}
+
 /// Parses a DWG or DXF file at `path` into a [`CadDatabase`] -- the same
 /// model either way, with the format inferred from the `.dwg`/`.dxf`
 /// extension.
@@ -182,6 +223,9 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     let entities = unsafe { convert::convert_entities(dwg.as_mut(), &text) };
     let tables = unsafe { table_convert::convert_tables(dwg.as_mut(), &text) };
     read_diagnostics.warnings.extend(text.into_warnings());
+    read_diagnostics
+        .warnings
+        .extend(missing_required_groups(&entities));
 
     // Nothing needs LibreDWG's structure past this point: this crate has no
     // write path, and the model above is what every export reads. Freeing it
