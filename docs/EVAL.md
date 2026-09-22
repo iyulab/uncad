@@ -71,6 +71,11 @@ render in parallel.
 | `samples/AutoCADSamples6.dwg` (floor plan) | 4845 | 1568 x 756 | z1 6/2, z2 20/8, z3 51/54 | 189 | 10 MB | 2.1 s |
 | `samples/AutoCADSamples5.dwg` (19 891 entities) | 19891 | 1008 x 1176 | z1 9/0 | 236 | 20 MB | 3.4 s |
 
+With frames, the bundled font, measured text boxes and sheets added later
+the same three exports take 0.6 s, 0.9 s and 3.4 s, and
+`samples/AutoCADSamples1.dwg` (6793 entities, one Letter-sized sheet whose
+1:16 viewport composites the elevation) takes 1.7 s.
+
 Sample 5 has no text, so it gets one zoom level; its `report.json` lists 27
 exclusions -- two arcs hundreds of times the size of the 20-unit drawing
 (`scale_outlier`) and 25 empty TEXT entities thousands of units away
