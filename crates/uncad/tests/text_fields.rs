@@ -57,8 +57,12 @@ fn text_dxf() -> String {
     dxf
 }
 
-fn parse_text_dxf() -> uncad::CadDatabase {
-    let dir = TempDir::new("text-fields");
+/// Writes the DXF into a directory of its own (`name` keeps the tests
+/// apart: they run on parallel threads of one process, and a shared
+/// directory would be removed by whichever test finishes first while a
+/// sibling is still writing or parsing its copy) and parses it.
+fn parse_text_dxf(name: &str) -> uncad::CadDatabase {
+    let dir = TempDir::new(&format!("text-fields-{name}"));
     let path = dir.0.join("text.dxf");
     std::fs::write(&path, text_dxf()).expect("writable");
     uncad::parse(&path).expect("the DXF must parse")
@@ -66,7 +70,7 @@ fn parse_text_dxf() -> uncad::CadDatabase {
 
 #[test]
 fn text_justification_and_alignment_point_are_read() {
-    let db = parse_text_dxf();
+    let db = parse_text_dxf("justification");
     let texts: Vec<&uncad::model::TextEntity> = db
         .entities
         .iter()
@@ -100,7 +104,7 @@ fn text_justification_and_alignment_point_are_read() {
 
 #[test]
 fn mtext_reads_attachment_width_and_rotation_from_its_direction_vector() {
-    let db = parse_text_dxf();
+    let db = parse_text_dxf("mtext");
     let mtext = db
         .entities
         .iter()
@@ -126,7 +130,7 @@ fn mtext_reads_attachment_width_and_rotation_from_its_direction_vector() {
 
 #[test]
 fn the_renderer_anchors_justified_text_at_the_alignment_point() {
-    let db = parse_text_dxf();
+    let db = parse_text_dxf("renderer");
     let svg = db.to_svg(Default::default()).svg;
     // Center/middle text: anchored at (50,50) with text-anchor middle, drawn
     // from its decoded string; the old renderer put it at (0,0).
