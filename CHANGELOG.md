@@ -39,6 +39,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   answers five agent questions from the package alone; `tests/export.rs` checks every
   file, the tile grid, sidecar affines and byte-identical output on a second run.
   `docs/EVAL.md` records the sweep, the timings and how to rerun them.
+  `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
+  document -- the `export` subcommand and its options included -- and the parser's
+  refusals.
 - The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
   LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
   profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
