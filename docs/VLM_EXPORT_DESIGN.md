@@ -56,30 +56,51 @@ schema from a separate crate. DXF input is flagged `input_fidelity:
 
 ## 2. Output package layout
 
+> **This is the proposal, not a description of the output.** Lines tagged
+> *(proposal)* below describe something `uncad export` does not write; section
+> 10's "Where the package differs from this document" is the full list,
+> measured against a real export. Everything untagged was checked against the
+> `example_2000.dwg` package and is what the exporter writes today.
+
 ```
 dir/
   README.txt          reading order; entities.json and drawing.svg are tool inputs, not LLM inputs
   manifest.json       source{version,codepage,name}, units, profile, crop, frames[] (each with its own
                       levels[] and legibility), frames_dropped[], overview{png,px,world,both affines},
                       legibility{height_classes}, counts, capabilities, sheets[], svg_origin, generator,
-                      guidance, shard_index, warnings[], files[]  (per-tile hashes live in tiles.json).
+                      guidance, shard_index, warnings[], files[]
+                      (proposal: "per-tile hashes live in tiles.json" -- no hash of any file
+                      is written anywhere in the package).
                       17 KB to 90 KB on the nine drawings docs/EVAL.md measures, not the 12 KB this
                       proposal budgeted: files[] holds one entry per written file with its byte count
                       (89 for example_2000.dwg, 771 for example_2018.dxf) and is most of the weight
-  drawing.json        header variables, units, layers[] (state flags, hex + rendered_hex, entity counts),
-                      block definitions (xref/dynamic flags), layouts[] (paper size, per-viewport scale and model window)
+  drawing.json        header variables, units, counts, layers[] (state flags, entity counts) and
+                      block definitions {name, entity_count}
+                      (proposal: layers' hex + rendered_hex, blocks' xref/dynamic flags, and a
+                      layouts[] array -- the paper layouts are in sheets.json instead)
   overview.png        fitted to the profile budget (claude: <= 1568 px edge and <= 1568 patches), opaque white
   frames/f0/          primary frame: overview.png, tiles/z1..zN/rRR_cCC.png + .json sidecars, tiles.json
   frames/f1/ ...      secondary frames (detached clusters, scale groups), same layout
   geometry.json       every visible non-text entity as a summary record (type, layer, key points, length, bbox, tiles);
-                      sharded per layer above the shard size
+                      sharded above the shard size by id range, not per layer as this proposal says
+                      (geometry.001.json, geometry.002.json, ... each a contiguous run of ids)
   texts.json          TEXT/MTEXT/ATTRIB/dimension labels: plain + raw, world bbox, tiles, px boxes
-  dimensions.json     measured value, displayed string, unit, definition points, agreement
-  regions.json        closed polygons: area, perimeter, centroid, labels; vertex lists only under --full (geometry ref otherwise)
-  blocks.json         definitions {name, count, count_by_layer, attrib_tags, dynamic, xref} and instances
-                      {id, block, at, rot, scale, mirrored, attribs key/value, array}
-  strings.json        normalized string -> [id] inverted index, numeric strings first, id -> shard file
-  tiles.json          every frame/level/tile, including empty ones with a reason; sha256 and bytes
+  dimensions.json     measured value and its source, displayed string and its source, unit, the
+                      definition point and a geometry object per kind
+                      (proposal: agreement, and the rest of the DIMENSION record in section 3)
+  regions.json        closed polygons: area, perimeter, centroid, labels, and `src`, the id of the
+                      geometry record holding the vertices
+                      (proposal: vertex lists under --full -- --full adds entities.json, not
+                      region vertices)
+  blocks.json         definitions {name, entity_count, instances, instance_ids, count_by_layer,
+                      attrib_tags, anonymous} and instances {id, block, layer, at, rotation_deg,
+                      scale, mirrored, attribs key/value, bbox, tiles, px}
+                      (proposal: the definitions' dynamic and xref flags, and an array field)
+  strings.json        normalized string -> [id] inverted index (id -> shard file is manifest.shard_index)
+  tiles.json          every frame/level/tile {id, frame, z, row, col, png, sidecar, px, world, empty},
+                      including empty ones
+                      (proposal: a reason per empty tile, and each tile's sha256 and byte count --
+                      manifest.files[] carries byte counts for written files, nothing carries hashes)
   sheets.json + sheets/<layout>/...   0.3.0: paper size, scale, viewport windows; 0.4.0: model composited per viewport
   report.json         excluded entities with reasons, unshaped characters, code-page fallbacks, dimension paths, timings
   entities.json       --full only: the whole model without the 0.2.0 duplication (block_records definition-only),
@@ -99,13 +120,24 @@ section 4).
 
 ## 3. JSON conventions and example records
 
-- Every file starts with `"$schema": "uncad-package/1"` and a `units` block
-  `{name, insunits, to_mm | null, source, guess?}`.
+> **The example records below are the proposal, not the output.** Every one of
+> them shows fields `uncad export` does not write; the tags mark which. The
+> conventions above them hold, with the two exceptions noted. Section 10 lists
+> the differences in one place, and a package's own files are the contract.
+
+- Every file starts with `"$schema": "uncad-package/1"`. A `units` block
+  `{name, insunits, to_mm | null, source, guess?}` follows it in
+  `manifest.json`, `drawing.json`, `texts.json`, `dimensions.json`,
+  `regions.json` and `blocks.json` -- but **not** in `strings.json`,
+  `tiles.json`, `sheets.json` or `report.json`, which hold no measured
+  quantity. Read units from `manifest.json`, which always has them.
 - ids: upper-case hex handle; `"<insert>/<child>"` through INSERTs;
   `"<dim>/T"` for a dimension's cached text; `"<handle>#r3c4"` for MINSERT
   cells. Image ids: `ov`, `f0/z2/r03_c05`, `sheet:Layout1`, `w:<8hex>`.
 - Points are `[x, y]` arrays rounded to `max(LUPREC, 3)` decimals, derived
-  values to two more. `LUPREC` is a display setting, so the decimals also have
+  values to two more. One exception in 0.3.0: a DIMENSION's `geometry` object
+  carries its definition points as `{"x":..,"y":..,"z":..}` at full `f64`
+  precision, not as rounded `[x, y]` pairs. `LUPREC` is a display setting, so the decimals also have
   a floor from the package's own scale: enough that one unit in the last place
   is a thousandth of a pixel at the deepest level the package can reach
   (0.3.0; without it every tile rectangle of a drawing a few thousandths of a
@@ -115,14 +147,21 @@ section 4).
   with an optional `why`; `numeric` carries `tol`.
 - Every record lists `tiles: [...]` and `px: {"ov": [...], "f0/z1/r02_c00": [...]}`.
 
-LINE:
+LINE. *(proposal: `space` -- a geometry record carries no space field; model
+and paper are separate packages of images, and `drawing.json.counts` carries
+`model_space`.)*
 
 ```json
 {"id":"2F3A","type":"LINE","layer":"A-WALL","space":"model","from":[120.5,48.0],"to":[240.5,48.0],
  "length":120.0,"unit":"mm","confidence":"exact","bbox":[120.5,48.0,240.5,48.0],"tiles":["f0/z1/r02_c00"]}
 ```
 
-Closed LWPOLYLINE with one 90-degree arc. The bulge on vertex i applies to the
+Closed LWPOLYLINE with one 90-degree arc. *(proposal: `space`, `area_unit`,
+`segments`, `centroid` and `region`. The record written today is `{id, type,
+layer, closed, vfmt, vertices, perimeter, area, orientation, simple,
+confidence, why, bbox, tiles, px}`; the per-segment breakdown, the centroid
+and the back-reference to a region are not in it -- regions point at the
+geometry, not the other way round.)* The bulge on vertex i applies to the
 segment i -> i+1 (including the closing segment); bulge = tan(theta/4), positive
 = counter-clockwise. theta = 4 atan(b), r = c (1 + b^2) / (4 b), circular
 segment area r^2/2 (theta - sin theta), signed by orientation. A polyline closed
@@ -138,7 +177,18 @@ by repeating its first vertex is deduplicated and marked `closed_by_repeat`.
  "centroid":[53.61,25.0],"bbox":[0,0,110.355,50],"region":"3B0","tiles":["f0/z1/r00_c00"]}
 ```
 
-DIMENSION:
+DIMENSION. *(proposal: `display_value`, `display_raw`, `agreement`,
+`display_tolerance`, `style_used`, `user_text`, `from`/`to`, `dir_deg` and
+`text_id`. What 0.3.0 writes instead is `{id, kind, layer, dimstyle,
+measurement, measurement_source, measurement_from_points, delta, dimlfac,
+unit, display, display_source, confidence, definition_point, geometry,
+text_at, bbox, tiles, px}` -- `geometry` is a per-kind object (`{kind,
+xline1, xline2}` for LINEAR/ALIGNED, and so on) that replaces `from`/`to`,
+and `delta` replaces `agreement`: it is the stored measurement minus the one
+recomputed from the definition points. The prose below about
+`measurement_source`, `capabilities.dimension_values`, angular kinds and
+`display_source` is accurate; the paragraphs on `display_tolerance` and
+`agreement` describe fields that do not exist yet.)*
 
 ```json
 {"id":"3A1","kind":"LINEAR","layer":"A-DIMS","dimstyle":"ARCH-48",
@@ -174,7 +224,11 @@ DIMENSION:
   suppressed}`; `agreement` in `{exact, whitespace, mismatch, no_cache,
   override}`. A whitespace-only `user_text` is `suppressed`, without a warning.
 
-TEXT:
+TEXT. *(proposal: `decorations`, `align`, `visible` and `space`. A text
+record is `{id, kind, text, raw, layer, height, rotation_deg, anchor, style,
+tag, font_ok, bbox, bbox_confidence, why, tiles, px}`: the `%%u` underline is
+decoded out of `text` but not reported, the justification is applied to
+`anchor` rather than published, and only visible texts are exported at all.)*
 
 ```json
 {"id":"4B2","kind":"TEXT","text":"BOOK RETURN","raw":"%%UBOOK RETURN","decorations":["underline"],"layer":"A-ANNO",
@@ -184,15 +238,19 @@ TEXT:
 ```
 
 Other records: **region** `{id, src, layer, area, area_unit, area_si | null,
-perimeter, centroid, bbox, vertex_count, simple, holes, hatch, labels,
-confidence, tiles, px}` where labels are the texts whose anchor lies inside the
+perimeter, centroid, bbox, vertex_count, simple, labels, confidence, tiles,
+px}` -- *(proposal: `holes` and `hatch`)* -- where labels are the texts whose anchor lies inside the
 polygon and in no smaller region, and `simple` is `null` (with `confidence:
 "estimated"`) for an outline of more than 2 000 vertices, whose pairwise
-self-intersection test is skipped rather than run at O(n^2); **tile sidecar** `{id, png, z, row, col, px,
-world, ppu, world_to_px, px_to_world, overlap_px, neighbors, parent, children,
-empty, layers_present, layers_truncated, layers_total (only when trimmed),
-fits_profile, expected_encoded_px, resize_factor, norm_to_px, records: {texts:
-[[id, px, t]], dims: [[id, px, s, v]], blocks, regions}}`, capped at 32 KB with
+self-intersection test is skipped rather than run at O(n^2); **tile sidecar** `{$schema, id, png, z, row, col, px,
+world, canvas_origin_px, ppu, world_to_px, px_to_world, overlap_px, neighbors,
+parent, children, empty, layers_present, layers_truncated, layers_total (only
+when trimmed), records: {texts: [[id, px, t]], dims: [[id, px, s, v]], blocks,
+regions}, records_truncated}` -- *(proposal: `fits_profile`,
+`expected_encoded_px`, `resize_factor` and `norm_to_px`; every tile is already
+within the profile's budget, so nothing is resized, and pixel coordinates are
+absolute throughout -- a model returning 0-1000 coordinates has to be scaled by
+the reader against `px`)* -- capped at 32 KB with
 text truncated to 24 characters: the record rows are cut first
 (`records_truncated`), then the layer list (`layers_truncated`, with
 `layers_total` saying how many names there were), so the file always says which
@@ -245,10 +303,12 @@ Model space, one crop per frame; every step is deterministic and reported.
 8. **Affine per image**: `px = (x - x0) s`, `py = (y1 - y) s`;
    `world_to_px = [s, 0, -x0 s, 0, -s, y1 s]`, `px_to_world = [1/s, 0, x0, 0,
    -1/s, y1]`, `units_per_px = 1/s`; absolute pixels, never normalised; round
-   trip exact to 1e-9 by unit test. Any image above the profile cap carries
-   `fits_profile: false`, `expected_encoded_px` and `resize_factor` so a
-   coordinate returned from a server-resized image can be mapped back; every
-   sidecar carries `norm_to_px` for models that return 0-1000 coordinates.
+   trip exact to 1e-9 by unit test. *(Proposal, not implemented: an image above
+   the profile cap carrying `fits_profile: false`, `expected_encoded_px` and
+   `resize_factor`, and a `norm_to_px` in every sidecar for models that return
+   0-1000 coordinates. Images are fitted to the profile's budget when they are
+   rendered, so none is above the cap, and no sidecar carries a normalised
+   affine.)*
 9. **Reporting**: `manifest.crop {mode, rect, content_rect, padding_units,
    header_extents, excluded {count, by_type, rect, first 100 handles}}`;
    `report.json` lists every excluded id with a reason in `{excluded_by_trim,
@@ -265,6 +325,12 @@ Model space, one crop per frame; every step is deterministic and reported.
     `VIEWTWIST` is fixed by a fixture before `twist_convention` is recorded.
 
 ## 5. Tiling rule
+
+> The geometry in this section is what `export.rs` implements. The **flag
+> names and the last bullet are the proposal**: `--min-text-px` is spelled
+> `--text-px`, `--sparse-from`, `--dense` and `--mono` do not exist, and
+> neither does the `uncad render` subcommand -- see section 10's CLI
+> paragraph. `uncad --help` is the current list.
 
 | Profile | Overview cap | Tile T | Overlap O | Step | Cost per tile |
 |---|---|---|---|---|---|
@@ -289,13 +355,16 @@ Model space, one crop per frame; every step is deterministic and reported.
   text would drag to a depth that blows the tile budget): z_max = ceil(log2
   (target_px / (h ppu_0))), default target 14 px (floor-plan text measured
   legible at 9-12 px), `--min-text-px 20` for detail work, `--max-levels 5`.
-  `manifest.legibility.height_classes = [{height, count, px_at_zmax, legible}]`
-  tells the agent which classes still need a window. z1 and z2 are complete;
+  `manifest.legibility.per_frame[].height_classes = [{height, count,
+  px_at_zmax, legible}]` tells the agent which classes still need a window (the
+  classes are per frame, one level deeper than this proposal put them; each
+  `manifest.frames[]` entry repeats its own `height_classes`, `z_max` and
+  `reached`). z1 and z2 are complete;
   from `--sparse-from 3` a tile is written only if it holds text of a class
   that first crosses the target at that level. Tiles that intersect no visible
   box are listed `empty: true` and not written. `--max-tiles 400` counts written
-  tiles; when exceeded z_max drops and `legibility.reached = false` points to
-  windows.
+  tiles; when exceeded z_max drops and the frame's `reached: false` (in
+  `manifest.frames[]`) points to windows.
 - **Implementation**: one SVG string and one `usvg::Tree` per level (numbers
   rounded to 0.01 px at the level's ppu, which cuts the SVG ~40 %); `fontdb`
   built once per process (`OnceLock<Arc<Database>>`); tiles rendered in
@@ -305,7 +374,9 @@ Model space, one crop per frame; every step is deterministic and reported.
   is at tile level through the entity-box index. Low levels (overview, z1) may
   render one canvas and crop. PNG: 8-bit RGB (Gray8 under `--mono`) through the
   `png` crate, `Compression::Fast`.
-- **On demand**: `uncad render --around <id> --margin 2.0 --fit 1092`,
+- **On demand** *(proposal: none of this exists in 0.3.0 -- there is no
+  `render` subcommand and no `windows/` output)*: `uncad render --around <id>
+  --margin 2.0 --fit 1092`,
   `--window x0,y0,x1,y1 --ppu 8`, `--layers`/`--exclude-layers` for
   de-cluttered views, `--ruler` for a world-unit scale overlay, `--batch
   windows.json` for many windows per parse; output `windows/w_<8hex>.png` +
@@ -503,14 +574,9 @@ with sharding and a manifest, CLI `uncad export`; frames for detached
 groups, NFKC string keys, per-tile culling and parallel tiles landed after;
 the bundled `Uncad Sans`, usvg-measured text boxes and the paper layouts
 (`sheets.json`, composited sheet images) landed too -- no P7 feature of this
-section's 0.3.0 scope is open, but the package diverges from section 2 in two
-places: `manifest.json` is 17 KB to 90 KB rather than the 12 KB budgeted
-there, because it carries a `files[]` array the design never listed (one entry
-per written file, 89 of them for `example_2000.dwg` and 771 for
-`example_2018.dxf`), and `source` is `{codepage, name, version}` -- there is no
-`producer`, and no `input_fidelity: "dxf-partial"` for DXF input as section 1
-promises; `header.format` and the source file's extension are what say the
-input was a DXF); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
+section's 0.3.0 scope is open, but what it writes is not the package sections
+2 and 3 describe: "Where the package differs from this document" below is the
+measured list); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
 (`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
 with five package questions, determinism test, `docs/EVAL.md`) are in --
 goldens (byte-exact reference packages) are not: with the bundled font the
@@ -545,6 +611,51 @@ reads a `.dxf` extension as DXF and everything else as DWG, so a `.dwf` is
 handed to the DWG decoder and comes back as `ParseError::Critical`, not as an
 `UnsupportedFormat` with an explanation. `ParseError` has two variants,
 `Critical(i32)` and `Io`.
+
+### Which sections describe the code, and which are still the proposal
+
+| Section | Status |
+| --- | --- |
+| 1 Answers, 6 Numeric exactness | description, with `input_fidelity` the one unkept promise (see the table below) |
+| 2 Package layout, 3 JSON conventions and records | **mixed** -- the file list and the conventions hold, the record shapes do not. Every divergence is tagged *(proposal)* in place and listed below |
+| 4 Crop rule | description, except rule 8's `fits_profile`/`norm_to_px` sentence |
+| 5 Tiling rule | the geometry is description; the flag names and the "on demand" bullet are the proposal |
+| 7 Rendering changes, 9 CLI, 11 DWF | the proposal as written -- see the paragraphs above |
+| 8 Rust API | `ExportOptions`/`ExportReport` exist; read `cargo doc` for the current shape |
+| 10 Roadmap | this section |
+| 12 Risks | open questions, unchanged |
+
+### Where the package differs from this document
+
+Measured on `uncad export lib/libredwg/test/test-data/example_2000.dwg` (89
+files) at this commit, by taking the key union of every record in every file.
+A package's own files are the contract; this table is the delta from the
+proposal, and each row is tagged *(proposal)* at its source too.
+
+| Where | The document promises | The package has |
+| --- | --- | --- |
+| §1 `manifest.source` | `input_fidelity: "dxf-partial"` for DXF input (§1, "Answers") | `{codepage, name, version}` only. `drawing.json`'s `header.format` and the source file's extension are what say the input was a DXF |
+| §2 `manifest.json` | "per-tile hashes live in tiles.json" | no hash of anything, anywhere: `sha256` does not occur in `export.rs`. `files[]` gives each written file's byte count, which is the only integrity aid in the package |
+| §2 `drawing.json` | `layers[]` with `hex` + `rendered_hex`; block definitions with xref/dynamic flags; `layouts[]` | `layers[]` = `{name, on, frozen, locked, plot, color_index, linetype, lineweight_mm, entity_count}`; `blocks[]` = `{name, entity_count}`; no `layouts[]` -- paper layouts are `sheets.json` and `sheets/<layout>/` |
+| §2 `geometry.json` | sharded per layer above the shard size | sharded by id range (`geometry.001.json` first_id `8B`, last_id `75A`) |
+| §2 `blocks.json` | definitions `{name, count, count_by_layer, attrib_tags, dynamic, xref}` | `{name, entity_count, instances, instance_ids, count_by_layer, attrib_tags, anonymous}` |
+| §2 `tiles.json` | every tile with `sha256`, `bytes`, and a reason for each empty one | `{id, frame, z, row, col, png, sidecar, px, world, empty}` |
+| §2 `regions.json` | vertex lists under `--full` | never: `src` names the geometry record that holds them. `--full` adds `entities.json`, nothing else |
+| §3 conventions | every file carries a `units` block | `strings.json`, `tiles.json`, `sheets.json` and `report.json` do not. `manifest.json` always does |
+| §3 conventions | points are `[x, y]` rounded to `max(LUPREC, 3)` | true except a DIMENSION's `geometry`, whose points are `{x, y, z}` at full `f64` precision |
+| §3 LINE, LWPOLYLINE, TEXT | `space` on every record | not written; a package is one space |
+| §3 LWPOLYLINE | `area_unit`, `segments`, `centroid`, `region` | not written |
+| §3 DIMENSION | `display_value`, `display_raw`, `agreement`, `display_tolerance`, `style_used`, `user_text`, `from`/`to`, `dir_deg`, `text_id` | `geometry` (a per-kind object) replaces `from`/`to`, `delta` (stored minus recomputed) replaces `agreement`, and `definition_point` is written; the others are absent |
+| §3 TEXT | `decorations`, `align`, `visible` | not written: `%%u` is decoded out of `text` without being reported, justification is applied to `anchor`, and only visible texts are exported |
+| §3 region | `holes`, `hatch` | not written |
+| §3, §4 rule 8 tile sidecar | `fits_profile`, `expected_encoded_px`, `resize_factor`, `norm_to_px` | none of them. Images are fitted to the profile when rendered, so none exceeds the cap; pixels are absolute everywhere. The sidecar also carries `$schema` and `canvas_origin_px`, which the proposal does not list |
+| §5 legibility | `manifest.legibility.height_classes`, `legibility.reached` | `manifest.legibility.per_frame[].height_classes`, and `reached` on each `manifest.frames[]` entry |
+
+None of these is a bug report: they are the design as written against the
+package as built. Changing the package to match the document is a 0.4.0
+decision (`sha256` per tile and `layouts[]` in `drawing.json` are the two a
+reader is most likely to miss); until then the document is the one that
+moves.
 
 | Release | Phase | Files |
 |---|---|---|
