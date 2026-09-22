@@ -21,22 +21,17 @@
 # the `sources` and `bans` checks below walk, so a test-only dependency from an
 # unknown registry or a git URL is caught like any other.
 #
-# It did not widen the license check, and that is worth writing down rather
-# than assuming either way. Measured with cargo-deny 0.20.2 and this config:
-# setting this takes the gathered graph from 92 crates to 134, and the
-# test-only crate does appear in the dependency trees the tool prints -- yet
-# its license is not evaluated. Adding that license to `allow` below reports
-# it as "not encountered", and a per-crate `exceptions` entry for it makes no
-# difference either way. No reason for the omission is reported, so the
-# cause is unknown; only the behaviour is established.
-#
-# Until it is understood, the license grade of a development dependency is
-# established by reading it and recording it in `docs/THIRD_PARTY_NOTICES.md`,
-# which is where the obligation lives anyway. An entry here for such a crate
-# would read as coverage that has not been shown to exist.
+# This setting alone does not bring them into the license check: that check
+# has its own switch, `include-dev` under `[licenses]`, which defaults to
+# false. Both are set.
 exclude-dev = false
 
 [licenses]
+# Development dependencies are licence-checked too. Nothing distributed
+# contains them, but the obligations some licenses carry reach whoever
+# distributes a built form of the tests, and a test-only dependency is still
+# a dependency this repository chose.
+include-dev = true
 # Permissive only. Every entry below was observed in the current graph; this is
 # not a speculative allowlist.
 allow = [
@@ -61,9 +56,8 @@ allow = [
 # terms -- but even an unmodified copy obliges whoever distributes a built
 # form to say where that dependency's source can be obtained. That is one
 # obligation more than permissive, so it would be granted per crate rather
-# than to every crate that might carry the license later. The crate carrying
-# it here is test-only and out of this gate's reach (see `[graph]` above); it
-# is recorded in `docs/THIRD_PARTY_NOTICES.md` instead.
+# than to every crate that might carry the license later: see `exceptions`
+# below.
 
 # Copyleft is granted per crate, never by license name. The GPL lives on the
 # three crates this workspace publishes and nowhere else -- a fourth crate
@@ -73,10 +67,13 @@ exceptions = [
     { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
+    # Weak, file-scope copyleft, consumed unmodified and only by this
+    # workspace's tests; where its source can be obtained is recorded in
+    # `docs/THIRD_PARTY_NOTICES.md`. Granted to this crate by name: a second
+    # MPL crate arriving later must be argued on its own, which is the whole
+    # reason the license is not in the `allow` list above.
+    { crate = "acadrust", allow = ["MPL-2.0"] },
 ]
-# No entry for the test-only MPL-2.0 dependency: this gate does not evaluate
-# development dependencies (see `[graph]`), so an entry would claim a check
-# that does not happen.
 
 [bans]
 # A second copy of a crate is a build-size and correctness smell, but not a

@@ -34,8 +34,7 @@ iron-render-cad = "0.1.0"
 # reaches it, and the crate's public surface does not change. Consumed
 # unmodified; a fork or a patch would be a different decision.
 #
-# Weak (file-scope) copyleft. The workspace license gate does not evaluate
-# development dependencies (see `deny.toml`), so its grade is established by
-# reading it: it is named in `docs/THIRD_PARTY_NOTICES.md` with where its
-# source can be obtained.
+# Weak (file-scope) copyleft, so it is allowed by name in `deny.toml` rather
+# than folded into the permissive list, and it is named in
+# `docs/THIRD_PARTY_NOTICES.md` with where its source can be obtained.
 acadrust = "0.5.5"

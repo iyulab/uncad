@@ -660,11 +660,10 @@ the vendored C sources are not part of the Rust dependency graph). A `licenses` 
 links a GPL library, and the gate is there so a *second* copyleft component cannot arrive
 through a dependency bump unnoticed. `deny.toml` allows only the permissive licenses the
 graph actually uses and names the three crates of this workspace as the sole GPL
-exceptions. Development dependencies are part of the graph it walks, but their licenses
-are not evaluated (observed with cargo-deny 0.20.2; see the `[graph]` note in
-`deny.toml`), so a test-only dependency's license is read and recorded in
-`docs/THIRD_PARTY_NOTICES.md` rather than gated. The gate reads `Cargo.lock` too, so the
-same submodule caveat applies -- what
+exceptions, plus one weak-copyleft test-only dependency granted by name. Development
+dependencies are license-checked as well (`include-dev`): nothing distributed contains
+them, but they are still dependencies this repository chose. The gate reads `Cargo.lock`
+too, so the same submodule caveat applies -- what
 watches the vendored C side is the source-file drift detector in
 `crates/libredwg-sys/build.rs`. The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
