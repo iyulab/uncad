@@ -1096,7 +1096,12 @@ pub fn export_package(
                 }
                 None => (crop::EMPTY_RECT, "empty"),
             };
-            let viewports: Vec<&crate::model::ViewportEntity> = paper_entities
+            // Every viewport of the block, hidden layer or not: a frame on
+            // an off, frozen or non-plotting layer (the usual way to hide
+            // the border) still shows its model window; only the border
+            // goes, since the hidden entity is not among the paper parts.
+            let viewports: Vec<&crate::model::ViewportEntity> = block
+                .entities
                 .iter()
                 .filter_map(|e| match e {
                     Entity::Viewport(v) => Some(v),

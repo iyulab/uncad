@@ -21,7 +21,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   (from the paper size, else the limits, else the paper entities) at the profile's size
   with the layout's own entities and the model composited through each on, plan-view,
   non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
-  layers honoured (`--no-sheets` skips it). `header.format` says `dwg` or `dxf`.
+  layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
+  hide the border) still shows its window, only the border is left out (`--no-sheets`
+  skips it). The twisted-viewport fixture now carries a LAYOUT with A4 plot settings. `header.format` says `dwg` or `dxf`.
 - A bundled font and measured text boxes. `to_png`, the tiles and the package's text
   metrics are shaped with `Uncad Sans`, a 370 KB subset of Noto Sans KR (OFL 1.1; Latin,
   Greek, the 2350 KS X 1001 Hangul syllables, the CAD symbols `∅ ° ± ² ³ Ø ㎡ ㎜ ㎥`) embedded

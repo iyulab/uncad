@@ -176,7 +176,10 @@ its 0.3.0 form. Known gaps:
   through every viewport that is on, looks down the z axis and is not the
   sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
   centred exactly on its frame (a DWG stores no id; the rule held on every
-  corpus file). The twist sign follows ezdxf (a positive twist turns the
+  corpus file). A viewport whose own layer is off, frozen or non-plotting
+  still shows its window and loses only its border (AutoCAD hides the whole
+  viewport for a frozen layer; the content is worth more to a reader than
+  that fidelity). The twist sign follows ezdxf (a positive twist turns the
   picture counter-clockwise) and has not been checked against a plotted
   sheet; perspective and non-plan views are frames only; R13/R14 files
   store no view fields at all. Paper-space texts and geometry are drawn but
