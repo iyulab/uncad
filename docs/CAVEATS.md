@@ -8,9 +8,12 @@ VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DS
 LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
 LIGHT. Details worth knowing:
 
-- **DIMENSION** folds all 7 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
-  ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including the
-  `block` handle to the cached-geometry block that is what actually gets drawn.
+- **DIMENSION** folds all 8 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
+  RADIUS, ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including
+  the `block` handle to the cached-geometry block that is what actually gets drawn. The
+  subtype survives as `DimensionEntity::geometry` with its own definition points
+  (`LINEAR`, `ALIGNED`, `ANGULAR_3POINT`, `ANGULAR_2LINE`, `RADIUS`, `DIAMETER`,
+  `ORDINATE`, `ARC_LENGTH`, and `UNKNOWN` when the points cannot be read).
 - **HATCH** handles boundary paths that are polylines as well as lists of
   line/arc/ellipse/spline edges. Pattern fills are really reproduced, by reading
   `Dwg_HATCH_DefLine` and tiling an SVG `<pattern>` (see "HATCH pattern fill" below);
@@ -774,47 +777,61 @@ layout" covers where a new test belongs. The counts below are what
 `cargo test --workspace -- --list` reports at 0.3.0; regenerate them from that command
 rather than editing them by hand.
 
-`cargo test --workspace` runs 275 tests. 114 of them are `uncad` unit tests, by module:
-`svg*.rs` 30 (HATCH edge approximation and pattern fill, stroke-width substitution,
-block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation, number
-formatting, non-finite coordinate defense, block-reference recursion blowup),
+`cargo test --workspace` runs 326 tests (325 of them by default; `corpus_sweep` is
+listed but `#[ignore]`d). 142 of them are `uncad` unit tests, by module:
+`svg*.rs` 50 -- `svg.rs` 21 (HATCH edge approximation, stroke-width substitution,
+block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation,
+non-finite coordinate defense, block-reference recursion blowup), `svg/infinite.rs` 16
+(clipping a RAY and an XLINE to a viewBox: the four edges, a line that misses the window,
+the direction a RAY keeps, the block matrix folded in), `svg/format.rs` 7 (number and
+string formatting) and `svg/hatch.rs` 6 (pattern and gradient fills) --
 `color.rs` 13 (ACI/BYLAYER resolution, the white-background normalization and the
-gradient helper `tint_toward_white`), `crop.rs` 9 (the outlier rules, the header
-candidate, padding, lattice snap, `detached_groups`), `text.rs` 8 (the `%%` and `\S`
-decoders, the 0.6-em box estimate), `geom.rs` 8 (OCS to world, bulge arcs, polyline
-length/area/bounds), `dimension.rs` 7, `convert.rs` 7 (HATCH gradient color resolution,
-stop ordering, `gradient_name` classification), `json.rs` 6, `acis.rs` 6 (SAT record
+gradient helper `tint_toward_white`), `geom.rs` 11 (OCS to world, bulge arcs, polyline
+length/area/bounds, the bounded arc-bounds walk, `is_sane_angle`), `dimension.rs` 10
+(the formatter, the DIMSTYLE zero rule, the measurement sentinel), `crop.rs` 9 (the
+outlier rules, the header candidate, padding, lattice snap, `detached_groups`),
+`text.rs` 8 (the `%%` and `\S` decoders, the 0.6-em box estimate), `convert.rs` 7 (HATCH
+gradient color resolution, stop ordering, `gradient_name` classification), `export.rs` 7,
+`json.rs` 6, `acis.rs` 6 (SAT record
 parsing, pointer resolution, wireframe extraction), `png.rs` 5 (SVG -> PNG size, scaling,
-errors, the bundled face's cap height, plus the `circle.dwg` pipeline), `export.rs` 5,
+errors, the bundled face's cap height, plus the `circle.dwg` pipeline),
 `tables.rs` 4 (the LAYER TRUECOLOR 256-sentinel fallback), `visibility.rs` 3 and
 `header.rs` 3. Most are pure-function tests verifiable with synthetic data, which makes
 them genuinely useful regression guards: whether `crop::outliers` sets aside the 3256x
 INSERT and nothing else, or whether `parse_sat_records` really stops at the
 `End-of-ACIS-data` marker, is decidable without a DWG file at all.
 
-**Real-file tests**: 118 across the 20 integration files in `crates/uncad/tests/`, plus
-43 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
+**Real-file tests**: 139 across the 22 integration files in `crates/uncad/tests/`, plus
+45 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
 `parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
 (`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
 unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
-precondition). 16 of the 20 integration files read that same corpus:
-`export.rs` (20: every file the design lists, the overview budget, the tile grid per
+precondition). 18 of the 22 integration files read that same corpus:
+`export.rs` (27: every file the design lists, the overview budget, the tile grid per
 level, sidecar affines that round-trip, the 32 KB sidecar cap, records pointing only at
 written tiles, byte-identical output on a second run, a re-export clearing the previous
-package), `dimensions.rs` (8), `sheets.rs` (8), `codepage.rs` (8), `polyline_geometry.rs`
-(8), `header.rs` (7), `read_paths.rs` (6, Korean directory names), `png_output.rs` (9),
+package, the padding option, a drawing far from the origin, a drawing that is one point,
+nested attributes, a sidecar's layer list, an outline too big to test, and that record
+building does not grow with the square of the entity count), `dimensions.rs` (10,
+the RADIUS/DIAMETER/ANGULAR_3POINT kinds and the stored-measurement rule included),
+`png_output.rs` (10), `sheets.rs` (8), `codepage.rs` (8), `polyline_geometry.rs`
+(8), `header.rs` (7), `read_paths.rs` (6, Korean directory names),
 `crop.rs` (5), `dxf_pipeline.rs` (5: DXF parse/render, a JSON round trip through
 `serde_json::from_str` and `PartialEq`, two parses agreeing and producing identical JSON
 with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic on
 garbage input), `visibility.rs` (5), `text_fields.rs` (5), `polyline_closed.rs` (3),
+`r2007_dxf_handles.rs` (3: an R2018 DXF resolving the same layers, block names and hidden
+entities as its DWG twin, and no R2007+ corpus DXF leaving an entity without a layer),
+`corrupt_dwg.rs` (2: a one-byte corruption of a header date and a truncated file return
+an error instead of killing the process),
 `acceptance.rs` (1: five agent questions answered from an exported package alone, see
 `docs/EVAL.md`), `acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
 `entities` and in `tables.block_records`) and `corpus_sweep.rs` (1, `#[ignore]`d: parses
 and renders all 208 corpus files and fails on any panic -- `docs/EVAL.md` records what it
 found). The other four run against this project's own committed DXF fixtures
-(`crates/uncad/tests/fixtures/`, 12 files written by `make_fixtures.py`): `fixtures.rs`
-(10), `block_transforms.rs` (3), `sheets_compositing.rs` (3) and `control_chars.rs` (2).
-`uncad-cli`'s `tests/documented_invocations.rs` (43) runs every call the README and
+(`crates/uncad/tests/fixtures/`, 13 files written by `make_fixtures.py`): `fixtures.rs`
+(14), `block_transforms.rs` (4), `sheets_compositing.rs` (4) and `control_chars.rs` (2).
+`uncad-cli`'s `tests/documented_invocations.rs` (45) runs every call the README and
 `--help` document against the real binary -- the `export` subcommand and each of its
 options included -- and the parser's refusals (an unknown option, a second positional, a
 missing value, a flag of the other command); `--scale`, `--fit`, `--ppu`, `--stroke`,

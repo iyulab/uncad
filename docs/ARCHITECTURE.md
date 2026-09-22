@@ -32,11 +32,12 @@ crates/
                          acis.rs (3DSOLID wireframes) beside them. Read-only: there is
                          no DWG/DXF write path.
     tests/               integration tests against the public API, one file per concern
-                         (20 files: acceptance, acis_sab, block_transforms, codepage,
-                         control_chars, corpus_sweep, crop, dimensions, dxf_pipeline,
-                         export, fixtures, header, png_output, polyline_closed,
-                         polyline_geometry, read_paths, sheets, sheets_compositing,
-                         text_fields, visibility); corpus_sweep.rs is ignored by
+                         (22 files: acceptance, acis_sab, block_transforms, codepage,
+                         control_chars, corpus_sweep, corrupt_dwg, crop, dimensions,
+                         dxf_pipeline, export, fixtures, header, png_output,
+                         polyline_closed, polyline_geometry, r2007_dxf_handles,
+                         read_paths, sheets, sheets_compositing, text_fields,
+                         visibility); corpus_sweep.rs is ignored by
                          default -- see docs/EVAL.md
     tests/fixtures/      this project's own R2000 DXF fixtures (make_fixtures.py)
     examples/            dump.rs / blocks.rs -- manual checks
@@ -57,13 +58,18 @@ hand-written stand-in for what autotools would generate.
 and no submodule at all. A `build.rs` that referenced `repo_root/lib/libredwg` would work
 only inside this workspace and fail for every published consumer -- a failure mode
 confirmed with `cargo publish --dry-run`. So `crates/libredwg-sys/vendor/libredwg/` holds
-a byte-for-byte copy of exactly the files this crate compiles: 24 `.c` files plus every
-header, `.spec`, `.inc` and codepage table they `#include`, 112 files in total
-(`git ls-files crates/libredwg-sys/vendor | wc -l`), unmodified (see
-`docs/THIRD_PARTY_NOTICES.md`) but a subset rather than the whole submodule. The
+exactly the files this crate compiles: 24 `.c` files plus every header, `.spec`, `.inc`
+and codepage table they `#include`, 112 files in total
+(`git ls-files crates/libredwg-sys/vendor | wc -l`). That is a subset of the submodule,
+not all of it, and it is upstream's bytes except in two places: `src/dwg.c` and
+`src/common.c` carry a local patch each, marked in the source with an
+`uncad local patch` comment (`docs/CAVEATS.md`, "Local patches to the vendored
+LibreDWG", and `docs/THIRD_PARTY_NOTICES.md`). `scripts/sync-libredwg-vendor.sh`
+deletes and recopies the directory, so both patches have to be re-applied after a
+re-vendor. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
 tests read fixtures from `lib/libredwg/test/test-data/` -- `png.rs`'s own end-to-end
-test, 16 of the 20 integration files in `uncad` (all but `fixtures.rs`,
+test, 18 of the 22 integration files in `uncad` (all but `fixtures.rs`,
 `block_transforms.rs`, `control_chars.rs` and `sheets_compositing.rs`, which use this
 project's own DXF fixtures) and `tests/documented_invocations.rs` in `uncad-cli`. In
 short, the submodule is a precondition of `cargo test`, not of `cargo build`.
@@ -98,7 +104,8 @@ it needs access to**.
 
 **Unit tests** exist where they are precisely because they can call private helpers.
 Everything that needs no external file -- color resolution, SVG generation, SAT parsing,
-the crop rules, polyline geometry -- lives here: 114 of the 275 tests. One
+the crop rules, polyline geometry -- lives here: 142 of the 326 tests
+(`docs/CAVEATS.md` owns that count; it is repeated here only to size the layer). One
 exception: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` reads a real DWG
 end-to-end but sits here because it needs the private `png_dimensions` helper.
 
