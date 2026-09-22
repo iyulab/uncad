@@ -597,8 +597,9 @@ The walk now stops at the first subentity whose type is not ATTRIB (an INSERT ow
 else, and LibreDWG's own R2000 walker uses the same condition to terminate), and is bounded
 besides by `limits::MAX_SUBENTITY_DEPTH` (2) and `limits::MAX_OWNED_SUBENTITIES` (100 000)
 -- the second against a chain damage has turned into a *ring*, which is not recursion but a
-loop that never ends. The other two owned-subentity walks (`polyline_pface_wireframe`,
-`polyline_2d_bulges`) carry the same length bound. `crates/uncad/tests/corrupt_dwg.rs` is
+loop that never ends. The polyline walk (`polyline_subentities`, shared by the vertex and
+the polyface readers) carries the same length bound, on both its owned-subentity chain and
+its pre-R13 object-list fallback. `crates/uncad/tests/corrupt_dwg.rs` is
 the regression.
 
 **A null dereference below the boundary is still reachable from here.**
