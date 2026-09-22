@@ -876,25 +876,75 @@ mod tests {
 
     #[test]
     fn auto_uses_the_header_when_it_covers_more() {
-        // The guard drops the far dot; a header that reaches it covers 5 > 4.
+        // Twelve collinear lines on y = 0 (x 0..118) and a dot a million
+        // units away. The guard flags the dot as a far outlier (its gap to
+        // the rest is far beyond 20 diagonals), so the content box is the
+        // zero-area (0,0)-(118,0); with no content area the 4x limit does
+        // not apply, the header contains all 12 kept lines (100 % >= 90 %)
+        // and covers 13 entities to the content's 12: the header wins and
+        // the dot, inside it after all, is no longer excluded.
+        let mut extents: Vec<Extent> = (0..12)
+            .map(|i| {
+                ext(
+                    &i.to_string(),
+                    10.0 * f64::from(i),
+                    0.0,
+                    10.0 * f64::from(i) + 8.0,
+                    0.0,
+                )
+            })
+            .collect();
+        extents.push(ext("dot", 1e6, 1e6, 1e6 + 1.0, 1e6 + 1.0));
+        assert_eq!(outliers(&extents), vec![(12, ExcludeReason::FarOutlier)]);
+        let header = header_with((-1.0, -1.0), (1e6 + 2.0, 1e6 + 2.0));
+        let auto = choose(&extents, &header, CropMode::Auto);
+        assert_eq!(auto.source, CropSource::Header);
+        assert_eq!(auto.rect, Rect::new(-1.0, -1.0, 1e6 + 2.0, 1e6 + 2.0));
+        assert!(auto.excluded.is_empty(), "{:?}", auto.excluded);
+        // The content inside the header is everything, dot included.
+        assert_eq!(
+            auto.content,
+            Some(Rect::new(0.0, 0.0, 1e6 + 1.0, 1e6 + 1.0))
+        );
+
+        // The rule is not only for collinear drawings: a 10 x 10 square of
+        // twelve lines (the square plus eight one-unit diagonals inside
+        // it), a 150 x 150 entity and a 210 x 210 one. With 14 entities
+        // the guard may set 3 aside; the rest is the 10 x 10 square (D =
+        // 14.14), so the 210 x 210 entity (diagonal 297 > 20 D = 283) is a
+        // scale outlier while the 150 x 150 one (diagonal 212) is kept.
+        // Content is then (0,0)-(150,150), area 22500; the header
+        // (0,0)-(210,210) is 44100 <= 4 x 22500, holds all 13 kept
+        // entities and covers 14 > 13.
+        let mut extents = square();
+        for i in 0..8 {
+            let o = f64::from(i);
+            extents.push(ext(&format!("s{i}"), o, o, o + 1.0, o + 1.0));
+        }
+        extents.push(ext("big", 0.0, 0.0, 150.0, 150.0));
+        extents.push(ext("huge", 0.0, 0.0, 210.0, 210.0));
+        assert_eq!(outliers(&extents), vec![(13, ExcludeReason::ScaleOutlier)]);
+        let header = header_with((0.0, 0.0), (210.0, 210.0));
+        let auto = choose(&extents, &header, CropMode::Auto);
+        assert_eq!(auto.source, CropSource::Header);
+        assert_eq!(auto.rect, Rect::new(0.0, 0.0, 210.0, 210.0));
+        assert!(auto.excluded.is_empty(), "{:?}", auto.excluded);
+    }
+
+    #[test]
+    fn auto_rejects_a_header_over_four_times_the_content() {
+        // The square and a far dot: the guard drops the dot, the content is
+        // the 10 x 10 square, and a header reaching the dot is a million
+        // units square -- far more than 4x the content's area, so it is no
+        // candidate even though it would cover one entity more.
         let mut extents = square();
         extents.push(ext("5", 1e6, 1e6, 1e6 + 1.0, 1e6 + 1.0));
-        // 4x the content area at most: content is 1001 x 1001 with the dot,
-        // 10 x 10 without; the header must stay within 4x of the latter, so
-        // a header reaching the dot is rejected... unless the content is the
-        // dot-inclusive one. Use a header that is exactly the raw bounds and
-        // a dot close enough to be a far outlier but inside 4x: impossible
-        // by construction, so test the rule the other way round: the header
-        // is rejected and content wins.
         let header = header_with((0.0, 0.0), (1e6 + 1.0, 1e6 + 1.0));
         let auto = choose(&extents, &header, CropMode::Auto);
         assert_eq!(auto.source, CropSource::Content);
         assert_eq!(auto.rect, Rect::new(0.0, 0.0, 10.0, 10.0));
-
-        // A header slightly larger than the content that also contains a
-        // fifth entity the guard flagged (a large but touching one is never
-        // flagged, so build the case with a forced seed): skip -- covered by
-        // the corpus test in tests/crop.rs.
+        assert_eq!(auto.excluded.len(), 1);
+        assert_eq!(auto.excluded[0].reason, ExcludeReason::FarOutlier);
     }
 
     #[test]
