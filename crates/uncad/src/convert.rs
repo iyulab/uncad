@@ -18,11 +18,12 @@ use crate::text::TextDecoder;
 use std::ffi::CStr;
 use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
-    DimensionEntity, EllipseEntity, Entity, EntityCommon, EntityId, Face3DEntity,
-    HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine, InsertEntity,
-    LeaderEntity, LightEntity, LineEntity, LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity,
-    MultiLeaderEntity, Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity,
-    SolidEntity, SplineEntity, TextEntity, ToleranceEntity, ViewportEntity, WipeoutEntity,
+    DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
+    Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
+    InsertEntity, LeaderEntity, LightEntity, LineEntity, LwPolylineEntity, MLineEntity,
+    MLineVertex, MTextEntity, MultiLeaderEntity, Origin, PointEntity, PolylineEntity, RayEntity,
+    Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity,
+    ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D};
 
@@ -855,7 +856,68 @@ unsafe fn convert_entity(
                 c"BLOCK",
                 |handle_ptr| crate::table_convert::resolve_block_name(text, handle_ptr),
             );
-            Entity::Dimension(DimensionEntity { common, block_name })
+            // Which of this backend's points is which DXF group depends on
+            // the subtype: group 13 is the first extension line for a linear
+            // dimension and the feature location for an ordinate one, and a
+            // two-line angular dimension does not store group 10 at all (its
+            // own "definition point" is a different point, and group 16 is
+            // its second extension line's end). The mapping is written out
+            // per subtype rather than passing this backend's field names
+            // through, so one model field never holds two different points.
+            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
+            let point = |field: Option<&'static str>| {
+                field.and_then(|f| get_point3d(entity_ptr, dxfname, f))
+            };
+            let kind = dimension_kind(fixedtype);
+            Entity::Dimension(DimensionEntity {
+                common,
+                block_name,
+                kind,
+                // This backend has no "the file did not carry this group":
+                // an absent DXF 42 and a stated 0.0 arrive the same way. A
+                // dimension that measures nothing is not a measurement, so
+                // zero is reported as "not stated" -- erring toward not
+                // knowing rather than toward a value the file never gave.
+                // Drawings older than R2000 routinely omit the group, and
+                // reporting 0.0 for them would put a false difference
+                // between a drawing and its own twin in the other format.
+                measurement: get_field::<f64>(entity_ptr, dxfname, "act_measurement")
+                    .filter(|m| *m != 0.0),
+                text_override: dimension_text_override(
+                    text.field(entity_ptr, dxfname, "user_text").as_deref(),
+                ),
+                // A two-line angular dimension is the one subtype whose
+                // group 10 this backend does not keep.
+                definition_point: if kind == Some(DimensionKind::Angular2Line) {
+                    None
+                } else {
+                    get_point3d(entity_ptr, dxfname, "def_pt")
+                },
+                text_midpoint: get_point2d(entity_ptr, dxfname, "text_midpt").unwrap_or_default(),
+                points: DimensionPoints {
+                    extension1: point(p13),
+                    extension2: point(p14),
+                    radial: point(p15),
+                    arc: point(p16),
+                },
+                // Group 50 is the measured angle only for a rotated linear
+                // dimension; the other subtypes do not write it, and the
+                // format's default is 0.
+                rotation: if kind == Some(DimensionKind::Rotated) {
+                    get_field::<f64>(entity_ptr, dxfname, "dim_rotation").unwrap_or(0.0)
+                } else {
+                    0.0
+                },
+                text_rotation: get_field::<f64>(entity_ptr, dxfname, "text_rotation")
+                    .unwrap_or(0.0),
+                style_name: reference(
+                    dwg,
+                    text,
+                    get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "dimstyle"),
+                    c"DIMSTYLE",
+                    |handle_ptr| text.handle_name(dwg, handle_ptr),
+                ),
+            })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
             // dynapi's field-table key for this type is "TABLE" (dwg.h's
@@ -1404,6 +1466,76 @@ unsafe fn dxfname(obj: *mut libredwg_sys::Dwg_Object) -> String {
     unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned()
+}
+
+/// Which of this backend's point fields carries DXF group 13, 14, 15 and 16,
+/// per dimension subtype. `None` is a group the subtype does not write.
+///
+/// The library's own names are not a mapping: `xline1_pt` is group 13 for a
+/// linear dimension, while a two-line angular dimension calls its group 13
+/// `xline1start_pt` and its group 16 `xline2end_pt`.
+fn dimension_point_fields(
+    fixedtype: libredwg_sys::Dwg_Object_Type,
+) -> (
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<&'static str>,
+    Option<&'static str>,
+) {
+    match fixedtype {
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_LINEAR
+        | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ALIGNED => {
+            (Some("xline1_pt"), Some("xline2_pt"), None, None)
+        }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG3PT => (
+            Some("xline1_pt"),
+            Some("xline2_pt"),
+            Some("center_pt"),
+            None,
+        ),
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => (
+            Some("xline1start_pt"),
+            Some("xline1end_pt"),
+            Some("xline2start_pt"),
+            Some("xline2end_pt"),
+        ),
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
+        | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {
+            (None, None, Some("first_arc_pt"), None)
+        }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => (
+            Some("feature_location_pt"),
+            Some("leader_endpt"),
+            None,
+            None,
+        ),
+        _ => (None, None, None, None),
+    }
+}
+
+/// The subtype, from the type the library resolved the entity to rather than
+/// from the flag it computes for DXF output.
+fn dimension_kind(fixedtype: libredwg_sys::Dwg_Object_Type) -> Option<DimensionKind> {
+    Some(match fixedtype {
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_LINEAR => DimensionKind::Rotated,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ALIGNED => DimensionKind::Aligned,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => DimensionKind::Angular2Line,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => DimensionKind::Diameter,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS => DimensionKind::Radius,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG3PT => DimensionKind::Angular3Point,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => DimensionKind::Ordinate,
+        _ => return None,
+    })
+}
+
+/// DXF 1 folded to one value per meaning: nothing, an empty string and `<>`
+/// all mean "show the measurement"; a single space means "show nothing".
+fn dimension_text_override(user_text: Option<&str>) -> TextOverride {
+    match user_text {
+        None | Some("") | Some("<>") => TextOverride::Measured,
+        Some(" ") => TextOverride::Suppressed,
+        Some(other) => TextOverride::Literal(other.to_string()),
+    }
 }
 
 #[cfg(test)]

@@ -153,6 +153,40 @@
       "block_name": {
         "type": "RESOLVED",
         "data": "*D1"
+      },
+      "kind": "ROTATED",
+      "measurement": null,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "200"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": -15.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 100.0,
+        "y": 0.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 200.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "ABSENT"
       }
     },
     {
@@ -175,6 +209,40 @@
       "block_name": {
         "type": "RESOLVED",
         "data": "*D2"
+      },
+      "kind": "ROTATED",
+      "measurement": null,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "100"
+      },
+      "definition_point": {
+        "x": -15.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 0.0,
+        "y": 50.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 0.0,
+          "y": 100.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "ABSENT"
       }
     },
     {
@@ -197,6 +265,40 @@
       "block_name": {
         "type": "RESOLVED",
         "data": "*D3"
+      },
+      "kind": "ROTATED",
+      "measurement": null,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "160"
+      },
+      "definition_point": {
+        "x": 20.0,
+        "y": 35.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 100.0,
+        "y": 20.0
+      },
+      "points": {
+        "extension1": {
+          "x": 20.0,
+          "y": 20.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 180.0,
+          "y": 20.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "ABSENT"
       }
     },
     {
@@ -219,6 +321,36 @@
       "block_name": {
         "type": "RESOLVED",
         "data": "*D4"
+      },
+      "kind": "DIAMETER",
+      "measurement": null,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "%%C10"
+      },
+      "definition_point": {
+        "x": 15.0,
+        "y": 20.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 20.0,
+        "y": 20.0
+      },
+      "points": {
+        "extension1": null,
+        "extension2": null,
+        "radial": {
+          "x": 25.0,
+          "y": 20.0,
+          "z": 0.0
+        },
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "ABSENT"
       }
     },
     {
@@ -990,6 +1122,40 @@
             "block_name": {
               "type": "RESOLVED",
               "data": "*D1"
+            },
+            "kind": "ROTATED",
+            "measurement": null,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "200"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": -15.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 100.0,
+              "y": 0.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 200.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "ABSENT"
             }
           },
           {
@@ -1012,6 +1178,40 @@
             "block_name": {
               "type": "RESOLVED",
               "data": "*D2"
+            },
+            "kind": "ROTATED",
+            "measurement": null,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "100"
+            },
+            "definition_point": {
+              "x": -15.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 0.0,
+              "y": 50.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 0.0,
+                "y": 100.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "ABSENT"
             }
           },
           {
@@ -1034,6 +1234,40 @@
             "block_name": {
               "type": "RESOLVED",
               "data": "*D3"
+            },
+            "kind": "ROTATED",
+            "measurement": null,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "160"
+            },
+            "definition_point": {
+              "x": 20.0,
+              "y": 35.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 100.0,
+              "y": 20.0
+            },
+            "points": {
+              "extension1": {
+                "x": 20.0,
+                "y": 20.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 180.0,
+                "y": 20.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "ABSENT"
             }
           },
           {
@@ -1056,6 +1290,36 @@
             "block_name": {
               "type": "RESOLVED",
               "data": "*D4"
+            },
+            "kind": "DIAMETER",
+            "measurement": null,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "%%C10"
+            },
+            "definition_point": {
+              "x": 15.0,
+              "y": 20.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 20.0,
+              "y": 20.0
+            },
+            "points": {
+              "extension1": null,
+              "extension2": null,
+              "radial": {
+                "x": 25.0,
+                "y": 20.0,
+                "z": 0.0
+              },
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "ABSENT"
             }
           },
           {

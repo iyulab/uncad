@@ -313,6 +313,31 @@ dynamic-block definitions of one R2018 file whose block handle is null, now `Abs
 block reference resolves or is absent (36 absent, none unresolved; 46 were unresolved before,
 all in pre-R13 files). Every MLINE style resolves.
 
+## Dimensions: two values this reader cannot state
+
+A DIMENSION now carries what the file says it measures, the measurement, the text and the
+points it was built from. Which of the library's point fields is which DXF group depends on the
+subtype, and this crate writes that mapping out per subtype rather than passing the library's
+own field names through: `xline1_pt` is group 13 for a linear dimension, while a two-line
+angular dimension calls its group 13 `xline1start_pt` and its group 16 `xline2end_pt`. Passing
+the names through would put two different points in one field depending on which subtype was
+read.
+
+Two values come back as "not stated" where another reader of the same file may state them.
+
+**The measurement, when it is zero.** DXF group 42 has no default and drawings older than R2000
+routinely omit it, but this library has no "the file did not carry this group" for a number: an
+absent group and a stated `0.0` both arrive as `0.0`. A dimension that measures nothing is not a
+measurement, so zero is reported as `None`. The cost is a genuine zero-length dimension reading
+as "not stated"; the alternative costs every pre-R2000 dimension a measurement the file never
+gave -- and a false difference between a drawing and its own twin in the other format.
+
+**Group 10 of a two-line angular dimension.** For that one subtype the library does not store
+group 10: its own `def_pt` holds a different point, and group 16 belongs to the second extension
+line's end. Reporting `def_pt` as group 10 would mean the field held one point for most
+drawings and another for these, so it is reported as "not stated" instead. Every other subtype
+reports it.
+
 ## The polyline "closed" flag
 
 Two layouts, one field name. POLYLINE_2D/3D keep DXF's convention (bit 1 of `flag` is
