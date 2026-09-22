@@ -10,41 +10,58 @@ use crate::tables::Tables;
 
 pub const DEFAULT_COLOR: &str = "#000000";
 
-/// The standard AutoCAD Color Index palette: packed 24-bit RGB, index 0-256.
-/// Autodesk's own historical color choices, not derivable from a formula.
+/// The AutoCAD Color Index palette: packed 24-bit RGB, index 0-256, in
+/// hex so each entry can be read off against a published ACI chart.
+///
+/// Autodesk's own historical choices, *not* derivable from a formula: the
+/// grey ramp at 250-254 is `333333 505050 696969 828282 BEBEBE`, which no
+/// interpolation produces. Taken verbatim from `rgb_palette[256]` in
+/// `crates/libredwg-sys/vendor/libredwg/src/dwg.c` -- the table this crate
+/// already ships and the one LibreDWG's own `dwg_rgb_palette_index()`
+/// answers from, so a DXF colour LibreDWG resolved from an index and one
+/// resolved here agree. Until 0.3.0 this table was a linear ramp between
+/// the pure hues and differed from AutoCAD at 222 of the 255 real indices
+/// (ACI 8 `808080` for `414141`, 9 `C0C0C0` for `808080`, 254 `D6D6D6`
+/// for `BEBEBE`, ...).
+///
+/// Index 256 is BYLAYER and index 0 BYBLOCK; both are resolved by
+/// [`resolve_color`] before the table is ever indexed, and the 0/256
+/// entries here are only what a direct [`aci_to_hex`] call gets.
 #[rustfmt::skip]
 pub const ACI_PALETTE: [u32; 257] = [
-    0, 16711680, 16776960, 65280, 65535, 255, 16711935, 16777215, 8421504,
-    12632256, 16711680, 16744319, 13369344, 13395558, 10027008, 10046540, 8323072,
-    8339263, 4980736, 4990502, 16727808, 16752511, 13382400, 13401958, 10036736,
-    10051404, 8331008, 8343359, 4985600, 4992806, 16744192, 16760703, 13395456,
-    13408614, 10046464, 10056268, 8339200, 8347455, 4990464, 4995366, 16760576,
-    16768895, 13408512, 13415014, 10056192, 10061132, 8347392, 8351551, 4995328,
-    4997670, 16776960, 16777087, 13421568, 13421670, 10000384, 10000460, 8355584,
-    8355647, 5000192, 5000230, 12582656, 14679935, 10079232, 11717734, 7510016,
-    8755276, 6258432, 7307071, 3755008, 4344870, 8388352, 12582783, 6736896,
-    10079334, 5019648, 7510092, 4161280, 6258495, 2509824, 3755046, 4194048,
-    10485631, 3394560, 8375398, 2529280, 6264908, 2064128, 5209919, 1264640,
-    3099686, 65280, 8388479, 52224, 6736998, 38912, 5019724, 32512, 4161343,
-    19456, 2509862, 65343, 8388511, 52275, 6737023, 38950, 5019743, 32543,
-    4161359, 19475, 2509871, 65407, 8388543, 52326, 6737049, 38988, 5019762,
-    32575, 4161375, 19494, 2509881, 65471, 8388575, 52377, 6737074, 39026,
-    5019781, 32607, 4161391, 19513, 2509890, 65535, 8388607, 52428, 6737100,
-    39064, 5019800, 32639, 4161407, 19532, 2509900, 49151, 8380415, 39372,
-    6730444, 29336, 5014936, 24447, 4157311, 14668, 2507340, 32767, 8372223,
-    26316, 6724044, 19608, 5010072, 16255, 4153215, 9804, 2505036, 16383, 8364031,
-    13260, 6717388, 9880, 5005208, 8063, 4149119, 4940, 2502476, 255, 8355839,
-    204, 6710988, 152, 5000344, 127, 4145023, 76, 2500172, 4129023, 10452991,
-    3342540, 8349388, 2490520, 6245528, 2031743, 5193599, 1245260, 3089996,
-    8323327, 12550143, 6684876, 10053324, 4980888, 7490712, 4128895, 6242175,
-    2490444, 3745356, 12517631, 14647295, 10027212, 11691724, 7471256, 8735896,
-    6226047, 7290751, 3735628, 4335180, 16711935, 16744447, 13369548, 13395660,
-    9961624, 9981080, 8323199, 8339327, 4980812, 4990540, 16711871, 16744415,
-    13369497, 13395634, 9961586, 9981061, 8323167, 8339311, 4980793, 4990530,
-    16711807, 16744383, 13369446, 13395609, 9961548, 9981042, 8323135, 8339295,
-    4980774, 4990521, 16711743, 16744351, 13369395, 13395583, 9961510, 9981023,
-    8323103, 8339279, 4980755, 4990511, 3355443, 5987163, 8684676, 11382189,
-    14079702, 16777215, 0,
+    0x000000, 0xff0000, 0xffff00, 0x00ff00, 0x00ffff, 0x0000ff, 0xff00ff, 0xffffff, // 0
+    0x414141, 0x808080, 0xff0000, 0xffaaaa, 0xbd0000, 0xbd7e7e, 0x810000, 0x815656, // 8
+    0x680000, 0x684545, 0x4f0000, 0x4f3535, 0xff3f00, 0xffbfaa, 0xbd2e00, 0xbd8d7e, // 16
+    0x811f00, 0x816056, 0x681900, 0x684e45, 0x4f1300, 0x4f3b35, 0xff7f00, 0xffd4aa, // 24
+    0xbd5e00, 0xbd9d7e, 0x814000, 0x816b56, 0x683400, 0x685645, 0x4f2700, 0x4f4235, // 32
+    0xffbf00, 0xffeaaa, 0xbd8d00, 0xbdad7e, 0x816000, 0x817656, 0x684e00, 0x685f45, // 40
+    0x4f3b00, 0x4f4935, 0xffff00, 0xffffaa, 0xbdbd00, 0xbdbd7e, 0x818100, 0x818156, // 48
+    0x686800, 0x686845, 0x4f4f00, 0x4f4f35, 0xbfff00, 0xeaffaa, 0x8dbd00, 0xadbd7e, // 56
+    0x608100, 0x768156, 0x4e6800, 0x5f6845, 0x3b4f00, 0x494f35, 0x7fff00, 0xd4ffaa, // 64
+    0x5ebd00, 0x9dbd7e, 0x408100, 0x6b8156, 0x346800, 0x566845, 0x274f00, 0x424f35, // 72
+    0x3fff00, 0xbfffaa, 0x2ebd00, 0x8dbd7e, 0x1f8100, 0x608156, 0x196800, 0x4e6845, // 80
+    0x134f00, 0x3b4f35, 0x00ff00, 0xaaffaa, 0x00bd00, 0x7ebd7e, 0x008100, 0x568156, // 88
+    0x006800, 0x456845, 0x004f00, 0x354f35, 0x00ff3f, 0xaaffbf, 0x00bd2e, 0x7ebd8d, // 96
+    0x00811f, 0x568160, 0x006819, 0x45684e, 0x004f13, 0x354f3b, 0x00ff7f, 0xaaffd4, // 104
+    0x00bd5e, 0x7ebd9d, 0x008140, 0x56816b, 0x006834, 0x456856, 0x004f27, 0x354f42, // 112
+    0x00ffbf, 0xaaffea, 0x00bd8d, 0x7ebdad, 0x008160, 0x568176, 0x00684e, 0x45685f, // 120
+    0x004f3b, 0x354f49, 0x00ffff, 0xaaffff, 0x00bdbd, 0x7ebdbd, 0x008181, 0x568181, // 128
+    0x006868, 0x456868, 0x004f4f, 0x354f4f, 0x00bfff, 0xaaeaff, 0x008dbd, 0x7eadbd, // 136
+    0x006081, 0x567681, 0x004e68, 0x455f68, 0x003b4f, 0x35494f, 0x007fff, 0xaad4ff, // 144
+    0x005ebd, 0x7e9dbd, 0x004081, 0x566b81, 0x003468, 0x455668, 0x00274f, 0x35424f, // 152
+    0x003fff, 0xaabfff, 0x002ebd, 0x7e8dbd, 0x001f81, 0x566081, 0x001968, 0x454e68, // 160
+    0x00134f, 0x353b4f, 0x0000ff, 0xaaaaff, 0x0000bd, 0x7e7ebd, 0x000081, 0x565681, // 168
+    0x000068, 0x454568, 0x00004f, 0x35354f, 0x3f00ff, 0xbfaaff, 0x2e00bd, 0x8d7ebd, // 176
+    0x1f0081, 0x605681, 0x190068, 0x4e4568, 0x13004f, 0x3b354f, 0x7f00ff, 0xd4aaff, // 184
+    0x5e00bd, 0x9d7ebd, 0x400081, 0x6b5681, 0x340068, 0x564568, 0x27004f, 0x42354f, // 192
+    0xbf00ff, 0xeaaaff, 0x8d00bd, 0xad7ebd, 0x600081, 0x765681, 0x4e0068, 0x5f4568, // 200
+    0x3b004f, 0x49354f, 0xff00ff, 0xffaaff, 0xbd00bd, 0xbd7ebd, 0x810081, 0x815681, // 208
+    0x680068, 0x684568, 0x4f004f, 0x4f354f, 0xff00bf, 0xffaaea, 0xbd008d, 0xbd7ead, // 216
+    0x810060, 0x815676, 0x68004e, 0x68455f, 0x4f003b, 0x4f3549, 0xff007f, 0xffaad4, // 224
+    0xbd005e, 0xbd7e9d, 0x810040, 0x81566b, 0x680034, 0x684556, 0x4f0027, 0x4f3542, // 232
+    0xff003f, 0xffaabf, 0xbd002e, 0xbd7e8d, 0x81001f, 0x815660, 0x680019, 0x68454e, // 240
+    0x4f0013, 0x4f353b, 0x333333, 0x505050, 0x696969, 0x828282, 0xbebebe, 0xffffff, // 248
+    0x000000, // 256 (BYLAYER: resolved before the table is indexed)
 ];
 
 /// ACI index 7 (0xFFFFFF, "white/black") is AutoCAD's own
@@ -85,6 +102,29 @@ pub fn layer_color_hex(tables: &Tables, layer_name: &str) -> Option<String> {
     aci_to_hex(layer.color_index.unsigned_abs())
 }
 
+/// AutoCAD's layer 0, the one name with a meaning inside a block: geometry
+/// created on layer 0 in a block *definition* is placed on the layer of the
+/// block *reference* when the block is inserted, and resolves its BYLAYER
+/// properties against that layer. Every other layer name inside a block is
+/// used as stored.
+pub const LAYER_ZERO: &str = "0";
+
+/// The layer an entity is effectively on. `reference_layer` is the layer of
+/// the enclosing block reference -- `None` at the top level, where there is
+/// none -- and it applies only to an entity on [`LAYER_ZERO`].
+///
+/// Deliberately resolved here, at render/report time, rather than baked into
+/// the model by `convert.rs`: one block definition is placed by many INSERTs
+/// on many layers, so "the layer of this entity" only has an answer per
+/// reference. [`crate::model::EntityCommon::layer`] keeps what the file
+/// stores, and this is the one place that says what that means in context.
+pub fn effective_layer<'a>(layer: &'a str, reference_layer: Option<&'a str>) -> &'a str {
+    match reference_layer {
+        Some(reference) if layer == LAYER_ZERO => reference,
+        _ => layer,
+    }
+}
+
 /// Resolves an entity's rendered color following AutoCAD's own precedence:
 /// explicit 24-bit truecolor overrides everything; otherwise `color_index`
 /// is either BYLAYER (256, resolved through the entity's own layer),
@@ -93,6 +133,11 @@ pub fn layer_color_hex(tables: &Tables, layer_name: &str) -> Option<String> {
 /// AutoCAD's documented BYBLOCK-with-no-enclosing-block fallback), or a
 /// direct ACI palette index. The sign of `color_index` (negative = "layer
 /// off") is deliberately ignored -- this doesn't track visibility, only color.
+///
+/// For an entity being drawn *inside* a block reference, call
+/// [`resolve_color_in_block`] instead: this one has no reference layer to
+/// resolve a layer-0 BYLAYER child against, and so answers with layer 0's own
+/// colour, which is the one thing AutoCAD never does.
 pub fn resolve_color(
     color_index: i16,
     true_color: Option<u32>,
@@ -100,11 +145,35 @@ pub fn resolve_color(
     tables: &Tables,
     inherited_color: &str,
 ) -> String {
+    resolve_color_in_block(
+        color_index,
+        true_color,
+        layer,
+        tables,
+        inherited_color,
+        None,
+    )
+}
+
+/// [`resolve_color`] plus the layer-0-in-a-block rule: a BYLAYER entity on
+/// layer 0 inside a block reference resolves against `reference_layer` (see
+/// [`effective_layer`]), which is how the window, door and fixture blocks
+/// every CAD office draws on layer 0 take their discipline's colour from the
+/// layer they are inserted on. `reference_layer` is `None` at the top level.
+pub fn resolve_color_in_block(
+    color_index: i16,
+    true_color: Option<u32>,
+    layer: &str,
+    tables: &Tables,
+    inherited_color: &str,
+    reference_layer: Option<&str>,
+) -> String {
     if let Some(hex) = true_color_to_hex(true_color) {
         return hex;
     }
     match color_index {
-        256 => layer_color_hex(tables, layer).unwrap_or_else(|| DEFAULT_COLOR.to_string()),
+        256 => layer_color_hex(tables, effective_layer(layer, reference_layer))
+            .unwrap_or_else(|| DEFAULT_COLOR.to_string()),
         0 => inherited_color.to_string(),
         idx => aci_to_hex(idx.unsigned_abs()).unwrap_or_else(|| DEFAULT_COLOR.to_string()),
     }
@@ -186,6 +255,60 @@ mod tests {
     #[test]
     fn aci_index_7_white_normalizes_to_black() {
         assert_eq!(aci_to_hex(7).as_deref(), Some("#000000"));
+    }
+
+    /// A spread of indices read straight off `rgb_palette[256]` in
+    /// `crates/libredwg-sys/vendor/libredwg/src/dwg.c` -- the AutoCAD Color
+    /// Index table this crate vendors, and the one LibreDWG's own
+    /// `dwg_rgb_palette_index()` answers from. Each expectation below is the
+    /// `{ 0xRR, 0xGG, 0xBB }` triple at that index in that file, transcribed
+    /// by hand rather than computed from this table: the pure hues (1-6), the
+    /// two greys AutoCAD keeps distinct at 8/9, four shades a formula gets
+    /// wrong (11, 12, 22, 152), and the whole 250-254 grey ramp, which is the
+    /// proof the palette is not interpolated.
+    #[test]
+    fn aci_palette_matches_the_vendored_autocad_table() {
+        let expected: &[(u16, &str)] = &[
+            (1, "#ff0000"),
+            (2, "#ffff00"),
+            (3, "#00ff00"),
+            (4, "#00ffff"),
+            (5, "#0000ff"),
+            (6, "#ff00ff"),
+            (8, "#414141"),
+            (9, "#808080"),
+            (11, "#ffaaaa"),
+            (12, "#bd0000"),
+            (22, "#bd2e00"),
+            (152, "#005ebd"),
+            (250, "#333333"),
+            (251, "#505050"),
+            (252, "#696969"),
+            (253, "#828282"),
+            (254, "#bebebe"),
+        ];
+        for &(index, expected_hex) in expected {
+            assert_eq!(
+                aci_to_hex(index).as_deref(),
+                Some(expected_hex),
+                "ACI {index}"
+            );
+        }
+        // 7 and 255 are both pure white in the table; the white-background
+        // rule is what turns them black (see `normalize_hex_for_white_bg`).
+        assert_eq!(ACI_PALETTE[7], 0xff_ffff);
+        assert_eq!(ACI_PALETTE[255], 0xff_ffff);
+        // The grey ramp is not a linear interpolation. The pre-0.3.0 table
+        // read 333333 5B5B5B 848484 ADADAD D6D6D6 -- an exact ramp from 0x33
+        // to 0xFF -- and only its first entry happened to be right.
+        for (i, step) in (250..=254usize).zip([0x33u32, 0x5b, 0x84, 0xad, 0xd6]) {
+            let interpolated = (step << 16) | (step << 8) | step;
+            assert_eq!(
+                i == 250,
+                ACI_PALETTE[i] == interpolated,
+                "ACI {i} vs the old linear ramp"
+            );
+        }
     }
 
     #[test]
