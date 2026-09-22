@@ -24,13 +24,18 @@ use crate::model::{
 };
 use std::ffi::CStr;
 
-/// The polyline `flag` bit checked for "closed", shared by LWPOLYLINE,
-/// POLYLINE_2D and POLYLINE_3D. `dwg.h`'s own field comment documents bit 512
-/// instead, but bit 1 is the standard DXF group-70 convention and is what
-/// matches observed rendering; there is no independently verified ground truth
-/// to settle which reading is right, so this follows the DXF convention rather
-/// than "correcting" it. See `docs/CAVEATS.md`.
-const POLYLINE_CLOSED_FLAG: u16 = 1;
+/// LWPOLYLINE's in-memory `flag` bit for "closed" (`FLAG_LWPOLYLINE_CLOSED`
+/// in dwg.h). It is *not* the DXF group-70 convention (bit 1): LibreDWG keeps
+/// the DWG bit layout, where 1 means "an extrusion is stored", and its DXF
+/// reader rewrites group-70 bit 1 to 512 on input, so both input paths agree
+/// on 512. Verified handle by handle against `example_2000.dxf`'s group 70
+/// (see `docs/CAVEATS.md`, "The polyline closed flag"); until 0.3.0 this
+/// tested bit 1 and exported every closed LWPOLYLINE as open.
+const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
+
+/// POLYLINE_2D/POLYLINE_3D keep the classic 1 = closed bit (dwg.h
+/// `Dwg_Entity_POLYLINE_2D.flag`: "1: closed").
+const POLYLINE_CLOSED_FLAG: u8 = 1;
 
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
@@ -199,10 +204,11 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     for face in &faces {
         let idxs: Vec<usize> = face
             .iter()
-            .filter_map(|&i| {
-                let a = i.unsigned_abs() as usize;
-                (a != 0).then_some(a - 1)
-            })
+            // A negative index marks the edge that follows as invisible; the
+            // sign is dropped (every edge is drawn). 0 means "no vertex".
+            // checked_sub, not `then_some(a - 1)`: then_some evaluates its
+            // argument eagerly, so index 0 overflowed in debug builds.
+            .filter_map(|&i| (i.unsigned_abs() as usize).checked_sub(1))
             .collect();
         if idxs.len() < 2 {
             continue;
@@ -369,7 +375,7 @@ unsafe fn convert_entity(
             Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
-                closed: flag & POLYLINE_CLOSED_FLAG != 0,
+                closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -591,7 +597,7 @@ unsafe fn convert_entity(
             Entity::Polyline3D(PolylineEntity {
                 common,
                 vertices,
-                closed: flag & (POLYLINE_CLOSED_FLAG as u8) != 0,
+                closed: flag & POLYLINE_CLOSED_FLAG != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
@@ -608,7 +614,7 @@ unsafe fn convert_entity(
             Entity::Polyline2D(LwPolylineEntity {
                 common,
                 vertices,
-                closed: flag & POLYLINE_CLOSED_FLAG != 0,
+                closed: flag & u16::from(POLYLINE_CLOSED_FLAG) != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE

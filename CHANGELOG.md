@@ -6,6 +6,67 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
+
+### Added
+
+- `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
+  (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
+  `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
+  `$MEASUREMENT`, `$LUNITS`/`$LUPREC`/`$AUNITS`/`$AUPREC`, `$EXTMIN`/`$EXTMAX`,
+  `$LIMMIN`/`$LIMMAX`, `$PEXTMIN`/`$PEXTMAX`, `$PLIMMIN`/`$PLIMMAX`, `$DIMSCALE`,
+  `$DIMLFAC`, `$DIMDEC`, `$DIMLUNIT`, `$DIMPOST`, `$DIMRND`, `$DIMZIN`, `$DIMFRAC`,
+  `$DIMAUNIT`, `$DIMADEC`, `$DIMTXT`, `$DIMASZ`, `$LTSCALE`, `$TEXTSIZE` and `$CLAYER`.
+  Serialized under `"header"` in `to_json`; a document without it (0.2.0) still
+  deserializes with the default header. `CadDatabase::new(entities, tables)` builds a
+  database with that default header. The CLI summary prints the version, code page and
+  units.
+- `uncad::parse_bytes(bytes, Format)` and `uncad::Format` (`Dwg`/`Dxf`, with
+  `Format::from_path`): decode a drawing already held in memory. `parse()` now reads the
+  file itself and calls it.
+- `ParseError::Io(std::io::Error)` for a file `parse()` cannot read; `ParseError` now
+  implements `Error::source`.
+- `libredwg-sys`: shims `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` (memory-based
+  copies of `dwg_read_file`/`dxf_read_file`), `uncad_dwg_version`/`uncad_dwg_from_version`/
+  `uncad_dwg_codepage`/`uncad_dwg_is_tu` (file-header accessors for the opaque
+  `Dwg_Data`), `uncad_tv_to_utf8`/`uncad_entity_tv_to_utf8`/`uncad_free_string`
+  (code-page to UTF-8 through LibreDWG's own `bit_TV_to_utf8`), and the
+  `dwg_resolve_handle` binding.
+- Tests: `crates/uncad/tests/read_paths.rs` (a DWG and a DXF under a Korean directory
+  name, `parse` vs `parse_bytes` equality, error kinds).
+
+### Fixed
+
+- LWPOLYLINE `closed` is read from bit 512 of `flag`, LibreDWG's in-memory closed bit,
+  instead of bit 1 (which marks a stored extrusion). Every closed LWPOLYLINE in a DWG was
+  exported and drawn open before, and mirrored open ones as closed
+  (`docs/CAVEATS.md`, "The polyline closed flag").
+- A POLYLINE_PFACE face whose vertex index is 0 ("no vertex") made `parse()` panic
+  with an integer overflow in debug builds (`example_2000.dwg` and `example_2018.dwg`
+  from the LibreDWG corpus); release builds silently wrapped the index instead.
+- Text, layer names and block names in pre-R2007 DWGs and in pre-R2007 DXF input are now
+  decoded through the file's code page instead of lossily as UTF-8, so Korean text in
+  R2000/R2004 drawings and the plus-minus/degree signs in dimension text no longer come
+  out as U+FFFD; an unmappable character becomes U+FFFD instead of truncating the string,
+  and a corrupt code-page value in the file header no longer indexes LibreDWG's tables
+  out of bounds (`docs/CAVEATS.md`, "Fixed: pre-R2007 and DXF text ...").
+- An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
+  them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
+  selected. The same shim now converts them (same CAVEATS entry).
+- `parse()` opens files under paths with non-ASCII characters on Windows
+  (`docs/CAVEATS.md`, "Fixed: a path with non-ASCII characters ...").
+
+### Changed (breaking)
+
+- `CadDatabase` has a third field, `header`; a struct literal without it no longer
+  compiles (use `CadDatabase::new` or add `header: Header::default()`).
+
+### Removed
+
+- `ParseError::InvalidPath`: paths are no longer passed to C, so a path that is not
+  UTF-8 or contains a NUL byte is no longer a distinct failure (the OS reports it
+  through `ParseError::Io`).
+
 ### Changed
 
 - `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also

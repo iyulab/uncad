@@ -9,19 +9,20 @@ mod acis;
 pub mod color;
 mod convert;
 mod dynapi;
+pub mod header;
 pub mod json;
 pub mod model;
 pub mod png;
 pub mod svg;
 pub mod tables;
 
-use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::path::Path;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
 pub use model::Entity;
 pub use png::{PngError, ToPngOptions, ToPngResult};
@@ -35,34 +36,51 @@ pub use tables::Tables;
 /// cycles overlapped. Sequential reuse across many calls is fine; concurrent
 /// calls are what this lock closes off.
 ///
-/// [`parse`] is the only entry point that touches the FFI boundary and it
-/// holds this lock for its whole duration, so callers never need to know
-/// `libredwg-sys` exists, let alone serialize around it themselves.
+/// [`parse_bytes`] (which [`parse`] calls) is the only entry point that
+/// touches the FFI boundary and it holds this lock for its whole duration, so
+/// callers never need to know `libredwg-sys` exists, let alone serialize
+/// around it themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
 /// A parsed CAD drawing: the model, and nothing else.
 ///
 /// `entities` holds what the drawing shows (everything owned by the
-/// `*Model_Space`/`*Paper_Space*` blocks, see [`crate::model`]) and `tables`
-/// the LAYER / BLOCK_RECORD / MLINESTYLE tables it resolves against. This is
-/// what [`to_json`](Self::to_json) serializes verbatim and what
-/// [`to_svg`](Self::to_svg)/[`to_png`](Self::to_png) render from.
+/// `*Model_Space`/`*Paper_Space*` blocks, see [`crate::model`]), `tables`
+/// the LAYER / BLOCK_RECORD / MLINESTYLE tables it resolves against, and
+/// `header` the file-level facts and header variables (version, code page,
+/// `$INSUNITS`, `$EXTMIN`/`$EXTMAX`, `$DIMLFAC`, ...) that give the numbers
+/// their meaning. This is what [`to_json`](Self::to_json) serializes verbatim
+/// and what [`to_svg`](Self::to_svg)/[`to_png`](Self::to_png) render from.
 ///
 /// It is a plain Rust value: LibreDWG's own `Dwg_Data` is freed inside
-/// [`parse`] as soon as these two fields have been built from it, so a
+/// [`parse_bytes`] as soon as these fields have been built from it, so a
 /// `CadDatabase` owns no C memory, is `Clone`/`PartialEq`/`Send`/`Sync`
-/// without ceremony, and can be constructed directly or deserialized from
-/// the JSON `to_json` produced. It is deliberately *not* a round-trip
-/// representation of the file (no linetypes, lineweights, styles,
-/// dictionaries, header variables...): the model keeps the fields rendering
-/// needs, and this crate has no write path that would need more.
+/// without ceremony, and can be constructed directly (see
+/// [`new`](Self::new)) or deserialized from the JSON `to_json` produced --
+/// JSON written before `header` existed still loads, with a default header.
+/// It is deliberately *not* a round-trip representation of the file (no
+/// linetypes, styles, dictionaries, ...): the model keeps what the exports
+/// need, and this crate has no write path that would need more.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CadDatabase {
     pub entities: Vec<Entity>,
     pub tables: Tables,
+    #[serde(default)]
+    pub header: Header,
 }
 
 impl CadDatabase {
+    /// A database with a default (unitless, versionless) header -- the
+    /// 0.2.0 `CadDatabase { entities, tables }` literal, for callers that
+    /// build a model by hand.
+    pub fn new(entities: Vec<Entity>, tables: Tables) -> Self {
+        CadDatabase {
+            entities,
+            tables,
+            header: Header::default(),
+        }
+    }
+
     /// Serializes this parsed drawing (`entities` + `tables`) to JSON text --
     /// see the [`json`] module doc for the exact shape.
     pub fn to_json(&self, options: ToJsonOptions) -> Result<String, JsonError> {
@@ -87,39 +105,81 @@ impl CadDatabase {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// `dwg_read_file`/`dxf_read_file` returned a critical LibreDWG error
-    /// code (>= DWG_ERR_CRITICAL, see dwg.h).
+    /// LibreDWG's decoder returned a critical error code (>= DWG_ERR_CRITICAL,
+    /// see dwg.h) for the bytes it was given.
     Critical(i32),
-    InvalidPath,
+    /// The file could not be read from disk ([`parse`] only; [`parse_bytes`]
+    /// never produces it).
+    Io(std::io::Error),
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseError::Critical(code) => write!(f, "LibreDWG critical read error (code {code})"),
-            ParseError::InvalidPath => write!(f, "path is not valid UTF-8 / contains a NUL byte"),
+            ParseError::Io(e) => write!(f, "cannot read the file: {e}"),
         }
     }
 }
-impl std::error::Error for ParseError {}
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseError::Critical(_) => None,
+            ParseError::Io(e) => Some(e),
+        }
+    }
+}
+
+/// The on-disk format of a drawing. [`parse`] picks it from the file
+/// extension; [`parse_bytes`] takes it explicitly because bytes carry no
+/// name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Format {
+    Dwg,
+    Dxf,
+}
+
+impl Format {
+    /// `.dxf` (any case) is [`Format::Dxf`]; anything else is read as DWG,
+    /// which is what [`parse`] has always done.
+    pub fn from_path(path: impl AsRef<Path>) -> Format {
+        let is_dxf = path
+            .as_ref()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+        if is_dxf {
+            Format::Dxf
+        } else {
+            Format::Dwg
+        }
+    }
+}
 
 /// Parses a DWG or DXF file at `path` into a [`CadDatabase`] -- the same
 /// model either way, with the format inferred from the `.dwg`/`.dxf`
-/// extension.
+/// extension (see [`Format::from_path`]).
 ///
-/// How complete DXF reading is depends on the entity type: `dxf_read_file()`
-/// is LibreDWG's own function and its documentation describes DXF reading as
-/// working "for most objects" rather than being feature-complete the way DWG
-/// reading is. See `docs/CAVEATS.md`.
+/// The file is read into memory here and decoded by [`parse_bytes`] rather
+/// than handed to LibreDWG as a path: LibreDWG opens paths with `fopen()`,
+/// which on Windows interprets the bytes in the process's ANSI code page and
+/// so cannot open a path with, say, a Korean directory name. `std::fs::read`
+/// has no such limit.
+///
+/// How complete DXF reading is depends on the entity type: LibreDWG's own
+/// DXF reader is documented as working "for most objects" rather than being
+/// feature-complete the way DWG reading is. See `docs/CAVEATS.md`.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
-    let path_str = path.as_ref().to_str().ok_or(ParseError::InvalidPath)?;
-    let c_path = CString::new(path_str).map_err(|_| ParseError::InvalidPath)?;
-    let is_dxf = path
-        .as_ref()
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+    let path = path.as_ref();
+    let format = Format::from_path(path);
+    let bytes = std::fs::read(path).map_err(ParseError::Io)?;
+    parse_bytes(&bytes, format)
+}
 
+/// Parses a drawing already held in memory. This is what [`parse`] calls
+/// after reading the file; it is public for callers that receive drawings
+/// over the network or from an archive and never have a path.
+pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseError> {
     // See LIBREDWG_LOCK: the whole read/convert/free cycle must run without
     // another thread's LibreDWG call interleaved. Recovering from a poisoned
     // lock rather than propagating the poison is deliberate -- a panic here
@@ -131,8 +191,8 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // SAFETY: Dwg_Data is bound as an opaque, correctly-sized byte blob (see
-    // libredwg-sys's build.rs); dwg_read_file/dxf_read_file expect a
-    // zero-initialized instance -- an uninitialized one aborts with
+    // libredwg-sys's build.rs); the readers expect a zero-initialized
+    // instance -- an uninitialized one aborts with
     // STATUS_STACK_BUFFER_OVERRUN (garbage in dwg.opts feeding the runtime
     // loglevel global). Boxed so the C side fills it in place at a stable
     // heap address; it lives only until the two conversion walks below have
@@ -140,10 +200,16 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     let mut dwg: Box<libredwg_sys::Dwg_Data> =
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
 
-    let error = if is_dxf {
-        unsafe { libredwg_sys::dxf_read_file(c_path.as_ptr(), dwg.as_mut()) }
-    } else {
-        unsafe { libredwg_sys::dwg_read_file(c_path.as_ptr(), dwg.as_mut()) }
+    // SAFETY: `bytes` is a live slice for the duration of the call and the
+    // shims only read it (they copy it into their own Bit_Chain); `dwg` is a
+    // valid zeroed Dwg_Data they fill in place.
+    let error = match format {
+        Format::Dwg => unsafe {
+            libredwg_sys::uncad_dwg_read_bytes(bytes.as_ptr(), bytes.len(), dwg.as_mut())
+        },
+        Format::Dxf => unsafe {
+            libredwg_sys::uncad_dxf_read_bytes(bytes.as_ptr(), bytes.len(), dwg.as_mut())
+        },
     };
     // Cast the constant, not `error`: the DWG_ERROR enum constants' width is
     // whatever bindgen inferred for the target (u32 on Linux, i32 on MSVC --
@@ -157,8 +223,9 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         return Err(ParseError::Critical(error));
     }
 
-    // Two walks over the live C structure, neither of which mutates it.
+    // Three walks over the live C structure, none of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
+    let header = unsafe { header::convert_header(dwg.as_mut()) };
     let entities = unsafe { convert::convert_entities(dwg.as_mut()) };
     let tables = unsafe { tables::convert_tables(dwg.as_mut()) };
 
@@ -168,5 +235,9 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // Drop, no C memory, Send + Sync by construction).
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
-    Ok(CadDatabase { entities, tables })
+    Ok(CadDatabase {
+        entities,
+        tables,
+        header,
+    })
 }

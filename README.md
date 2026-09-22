@@ -32,7 +32,7 @@ std::fs::write("drawing.png", png.png)?;
 ## CLI
 
 ```bash
-cargo run -p uncad-cli -- drawing.dwg                            # summary: entity count per type
+cargo run -p uncad-cli -- drawing.dwg                            # summary: version, units, entity count per type
 cargo run -p uncad-cli -- drawing.dwg -o drawing.json --pretty   # export the parsed model
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg             # render to SVG (model space)
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG (via SVG)
@@ -106,3 +106,9 @@ Further reading:
   test layout, the FFI/bindgen boundary, thread safety, the entity model
 - [`docs/CAVEATS.md`](./docs/CAVEATS.md) — entity type coverage, known
   limitations and bugs, cross-platform notes
+- [`docs/VLM_INVESTIGATION.md`](./docs/VLM_INVESTIGATION.md) — what it would
+  take to hand a drawing to a VLM/LLM: extraction and rendering audit, measured
+  numbers, facts settled against real files (2026-09-21)
+- [`docs/VLM_EXPORT_DESIGN.md`](./docs/VLM_EXPORT_DESIGN.md) — the resulting
+  proposal (not implemented): export package, crop and tiling rules, JSON
+  schema, API, roadmap

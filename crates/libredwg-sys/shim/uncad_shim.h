@@ -36,6 +36,98 @@ void *uncad_object_entity_ptr(Dwg_Object *obj);
  */
 void *uncad_object_object_ptr(Dwg_Object *obj);
 
+/* --- reading from memory ------------------------------------------------
+ *
+ * dwg_read_file()/dxf_read_file() take a `const char *filename` and open it
+ * with fopen(). On Windows the MSVC C runtime interprets that byte string in
+ * the process's ANSI code page, so a UTF-8 path with non-ASCII characters
+ * (e.g. a Korean directory name) fails with DWG_ERR_IOERROR even though the
+ * file exists. Reading the bytes in Rust (std::fs::read handles Unicode
+ * paths on every platform) and decoding from memory sidesteps that, and is
+ * also what a server that already holds the file in memory wants.
+ *
+ * Both functions mirror the body of their file-based LibreDWG counterpart
+ * (src/dwg.c): `dwg` is cleared except for the log-level bits of its `opts`
+ * (and, for DXF, its `header.version`), the buffer is copied into a
+ * Bit_Chain LibreDWG owns for the duration of the decode, and the return
+ * value has the same meaning (0 or a DWG_ERROR bit set; >= DWG_ERR_CRITICAL
+ * means the decode failed). `buf` is only read, never retained.
+ */
+int uncad_dwg_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
+int uncad_dxf_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
+
+/* --- file header ----------------------------------------------------------
+ *
+ * Dwg_Data is opaque on the Rust side (see build.rs), and LibreDWG has no
+ * public accessor for these three header fields, which drive how strings
+ * must be decoded (see uncad_tv_to_utf8): `version`/`from_version` are the
+ * Dwg_Version_Type enum values (dwg.h) and `codepage` the Dwg_Codepage enum
+ * (src/codepages.h: 0 = UTF-8, 30 = ANSI_1252, 40 = ANSI_949, ...). All
+ * three return 0 for a NULL `dwg`.
+ */
+int uncad_dwg_version(const Dwg_Data *dwg);
+int uncad_dwg_from_version(const Dwg_Data *dwg);
+unsigned int uncad_dwg_codepage(const Dwg_Data *dwg);
+
+/* LibreDWG's own IS_FROM_TU_DWG(dwg) rule (src/bits.h): 1 when the strings
+ * dynapi hands out are already UTF-8 (converted from the R2007+ UTF-16
+ * storage), 0 when they are the file's raw 8-bit code-page bytes -- which
+ * is the case for every pre-R2007 DWG *and* for every DXF input, whatever
+ * its version. 0 for a NULL `dwg`.
+ */
+int uncad_dwg_is_tu(const Dwg_Data *dwg);
+
+/* The DXF name of a Dwg_Codepage value ("ANSI_1252", "ANSI_949", "UTF-8",
+ * ...) from LibreDWG's own table (dwg_codepage_dxfstr in src/codepages.h,
+ * which is not a public header), or NULL for a value it has no name for.
+ * The string is static; do not free it.
+ */
+const char *uncad_codepage_name(unsigned int codepage);
+
+/* --- strings ---------------------------------------------------------------
+ *
+ * Converts one string as returned by dwg_dynapi_*_utf8text() /
+ * dwg_dynapi_handle_name() with `isnew == 0` (i.e. a raw pointer into the
+ * parsed Dwg_Data, in the file's own code page) to UTF-8.
+ *
+ * This exists because LibreDWG's dynapi only transcodes the R2007+ UTF-16
+ * path; for older files it returns the code-page bytes unchanged, and the
+ * Rust side used to run those through a lossy UTF-8 decode, turning every
+ * non-ASCII character (Korean text in R2000/R2004 drawings, the degree and
+ * plus-minus signs in dimension text) into U+FFFD. LibreDWG does ship the
+ * converter -- bit_TV_to_utf8() in src/bits.c, with built-in CP949/CP936/
+ * CP1252/... tables, used only by its own DXF writer -- so this wraps it:
+ *
+ *   - when IS_FROM_TU_DWG(dwg) the input is already UTF-8 and is copied;
+ *   - for an R2007+ DXF (DWG_OPTS_IN set, version >= R_2007) the string in
+ *     memory is UTF-16 -- in_dxf.c stores it as TU, but IS_FROM_TU_DWG
+ *     excludes DXF input so dynapi never converts it -- and it goes through
+ *     bit_convert_TU() like a DWG's would;
+ *   - a CP_UTF8 code page only has its `\U+XXXX` / `\M+nXXXX` escapes
+ *     expanded (bit_TV_to_utf8);
+ *   - CP_UNDEFINED, CP_UTF16 and any value outside LibreDWG's tables fall
+ *     back to ANSI_1252, LibreDWG's own default (an unchecked value would
+ *     index past its tables);
+ *   - otherwise the string is transcoded with LibreDWG's code-page tables,
+ *     an unmappable character becoming U+FFFD, and the escapes expanded.
+ *
+ * The result is always a fresh heap buffer (or NULL only for a NULL `s` or
+ * out of memory) -- bit_TV_to_utf8() may return its input pointer unchanged,
+ * which is copied here so the caller never has to guess who owns what.
+ * Free with uncad_free_string.
+ */
+char *uncad_tv_to_utf8(const Dwg_Data *dwg, const char *s);
+
+/* Same as uncad_tv_to_utf8, but finds the owning Dwg_Data through the
+ * entity/object struct pointer (what uncad_object_entity_ptr /
+ * uncad_object_object_ptr returned -- the same pointer dynapi takes), via
+ * dwg_obj_generic_to_object(). If that lookup fails the string is copied
+ * without conversion.
+ */
+char *uncad_entity_tv_to_utf8(const void *entity, const char *s);
+
+void uncad_free_string(char *s);
+
 /* One leader-line's vertices from a MULTILEADER, flattened into a single
  * malloc'd (x,y,z) array -- see uncad_multileader_get_lines. */
 typedef struct uncad_multileader_line

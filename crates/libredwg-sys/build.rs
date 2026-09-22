@@ -195,6 +195,25 @@ fn main() {
         .allowlist_function("dwg_free")
         .allowlist_function("uncad_3dsolid_sab_to_sat_text")
         .allowlist_function("uncad_free_sat_text")
+        // Reading from memory (Unicode paths on Windows, in-memory inputs),
+        // the file-header accessors, and the code-page string conversion --
+        // see shim/uncad_shim.h for why each exists.
+        .allowlist_function("uncad_dwg_read_bytes")
+        .allowlist_function("uncad_dxf_read_bytes")
+        .allowlist_function("uncad_dwg_version")
+        .allowlist_function("uncad_dwg_from_version")
+        .allowlist_function("uncad_dwg_codepage")
+        .allowlist_function("uncad_dwg_is_tu")
+        .allowlist_function("uncad_tv_to_utf8")
+        .allowlist_function("uncad_entity_tv_to_utf8")
+        .allowlist_function("uncad_free_string")
+        .allowlist_function("uncad_codepage_name")
+        // Version enum -> "r2004"-style name, for the parsed header.
+        .allowlist_function("dwg_version_type")
+        // Handle -> object resolution (DIMSTYLE/STYLE/LTYPE lookups). Not
+        // dwg_ref_get_object, which only returns an already-resolved
+        // pointer and resolves nothing itself.
+        .allowlist_function("dwg_resolve_handle")
         .allowlist_function("dwg_dynapi_.*")
         .allowlist_type("Dwg_Data")
         .allowlist_type("Dwg_Object")

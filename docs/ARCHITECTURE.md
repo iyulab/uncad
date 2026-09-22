@@ -166,12 +166,16 @@ calls have reproducibly caused `STATUS_HEAP_CORRUPTION`.
 
 `CadDatabase` is a plain Rust value holding `entities` (what the model and paper spaces
 own) and `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE). It derives `Debug`, `Clone`,
-`PartialEq`, `serde::Serialize` and `Deserialize`, and can be constructed directly. The
-`Dwg_Data` that LibreDWG filled in through `dwg_read_file`/`dxf_read_file` is walked twice
-inside `parse()` (`convert_entities`, then `convert_tables`), freed with `dwg_free`
-immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one
-model -> several outputs" is therefore this Rust model, and the outputs are `to_json()`
-(serde, `json.rs`), `to_svg()` and `to_png()` (rasterized from the SVG).
+`PartialEq`, `serde::Serialize` and `Deserialize`, and can be constructed directly.
+`parse()` reads the file with `std::fs::read` and hands the bytes to `parse_bytes()`,
+which decodes them through the `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` shims
+(memory-based copies of LibreDWG's `dwg_read_file`/`dxf_read_file`; see "Strings and
+paths" below for why). The `Dwg_Data` they fill in is walked three times inside
+`parse_bytes()` (`convert_header`, `convert_entities`, then `convert_tables`), freed with
+`dwg_free` immediately afterwards,
+and never reaches the return value. The hub of "DWG/DXF -> one model -> several outputs"
+is therefore this Rust model, and the outputs are `to_json()` (serde, `json.rs`),
+`to_svg()` and `to_png()` (rasterized from the SVG).
 
 The model is deliberately lossy: it keeps the fields rendering needs and nothing else --
 no linetypes, lineweights, layer on/off state, text styles, object dictionaries or header
@@ -184,6 +188,34 @@ depends on them: `dwg.c` gates `dxf_read_file()` on `USE_WRITE`, `in_dxf.c` uses
 `dwg_convert_SAB_to_SAT1`, which the 3DSOLID wireframe extraction needs. No write entry
 point is bound to Rust: `dwg_write_file` is left out of the bindgen allowlist and the DXF
 write shim was deleted.
+
+## Strings and paths: the code page is applied in Rust's one string accessor
+
+Every text field, layer name and block name reaches Rust through two functions in
+`dynapi.rs`: `get_utf8_field` (`dwg_dynapi_entity_utf8text`) and `resolve_handle_name`
+(`dwg_dynapi_handle_name`). LibreDWG converts strings to UTF-8 itself only for an R2007+
+DWG, whose storage is UTF-16 (`IS_FROM_TU_DWG` in `bits.h`). For everything else it
+returns a raw pointer: the file's own 8-bit code-page bytes for a pre-R2007 DWG or DXF,
+and -- because `IS_FROM_TU_DWG` excludes DXF input even though `in_dxf.c` stores R2007+
+DXF strings as UTF-16 too -- the UTF-16 buffer itself for an R2007+ DXF. Those go through
+the `uncad_tv_to_utf8`/`uncad_entity_tv_to_utf8` shims: UTF-16 through `bit_convert_TU`,
+8-bit strings through LibreDWG's code-page tables (`dwg_codepage_uc`/`uwc`, CP949/CP936/
+CP1252/...) with the code page from `Dwg_Data.header.codepage`, validated first because
+LibreDWG indexes its tables with the raw header value, then `\U+XXXX`/`\M+nXXXX` escape
+expansion. The 8-bit loop is the shim's own rather than `bit_TV_to_utf8`'s, which sizes its
+output at 1.5x the input for single-byte code pages and drops the tail of a mostly
+non-ASCII string. The shim always returns a buffer it allocated, so the Rust side never has
+to guess who owns the result. Until 0.3.0 the raw bytes were run through
+`to_string_lossy`, which turned every non-ASCII character in a R2000/R2004 drawing -- all
+Korean text, the degree and plus-minus signs in dimension text -- into U+FFFD, and an
+R2007+ DXF's strings were truncated at the first NUL of their UTF-16 (`"*Model_Space"`
+became `"*"`, so no entity was ever selected).
+
+Paths are never handed to LibreDWG. Its readers open paths with `fopen()`, which on
+Windows interprets the bytes in the process's ANSI code page, so a UTF-8 path with a
+Korean directory name failed with `DWG_ERR_IOERROR`. `parse()` reads the bytes itself
+and `parse_bytes()` decodes from memory; that also gives callers without a file (a server
+holding an upload) an entry point.
 
 ## The entity model and block-based traversal
 

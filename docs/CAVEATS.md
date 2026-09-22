@@ -137,11 +137,18 @@ back with `dxf_read_file` returns exactly 1 entity.
 
 ## The polyline "closed" flag
 
-`dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic
-checks bit 1 (`flag & 1`), the standard DXF group-70 convention -- see the
-`POLYLINE_CLOSED_FLAG` constant in `crates/uncad/src/convert.rs`. With no AutoCAD
-reference available to settle which reading is correct, the DXF convention was kept rather
-than "corrected" on a guess.
+Fixed in 0.3.0. Until then LWPOLYLINE's `closed` was read from bit 1 of `flag`, the DXF
+group-70 convention, on the assumption that LibreDWG normalised to it; `dwg.h`'s own comment
+documents bit 512 and was taken for an inconsistency. Ground truth settled it: comparing
+`test-data/example_2000.dxf` (group code 70) with `example_2000.dwg` handle by handle, the
+DWG's in-memory flag agrees with bit 512 on 11/11 polylines and with bit 1 on 0/11. Bit 1
+means "an extrusion is stored" (every such polyline in the sample drawings carries extrusion
+(0,0,-1), i.e. mirrored OCS geometry), and `in_dxf.c` rewrites DXF bit 1 to 512 on input,
+so both input paths use 512 (`LWPOLYLINE_CLOSED_FLAG` in `crates/uncad/src/convert.rs`,
+tested in `crates/uncad/tests/polyline_closed.rs`). The old reading exported every closed
+LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored open ones
+as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
+extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
 ## MTEXT rotation is always 0
 
@@ -149,6 +156,11 @@ than "corrected" on a guess.
 (`atan2(x_axis_dir.y, x_axis_dir.x)`) looks technically more accurate. Without a verified
 reference to confirm it, the value stays fixed at `0` rather than diverging on an
 unverified guess.
+
+**Update 2026-09-21**: rotated MTEXT is common (74-97 instances per sample drawing), so the
+fixed `0` is visibly wrong rather than merely imprecise. `x_axis_dir` is the standard DXF
+group-11 direction vector; deriving the angle from it is part of the redesign
+(`docs/VLM_EXPORT_DESIGN.md`).
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
@@ -185,6 +197,32 @@ cyan), but **never compared against an actual AutoCAD screen** -- unlike this pr
 other color bugs, this one was verified by plausibility rather than by reference. It also
 inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
 happens not to match the palette is misread as a small ACI index.
+
+## Fixed: pre-R2007 and DXF text lost every non-ASCII character
+
+Before 0.3.0, `parse()` turned every non-ASCII character in an R2000/R2004 DWG (and in a
+DXF of any version) into U+FFFD: LibreDWG's dynapi only transcodes the R2007+ UTF-16
+storage, and for older files it returns the raw code-page bytes, which this crate then
+decoded with `to_string_lossy`. Korean text in the still-common R2000/R2004 exchange
+files, and the plus-minus and degree signs in dimension text, were all lost (measured on
+the sample drawings: `\A1;±3 1/2"` came out as `\A1;\uFFFD3 1/2"`). The
+`uncad_tv_to_utf8` shim now transcodes with LibreDWG's own code-page tables -- see
+`docs/ARCHITECTURE.md`, "Strings and paths". Verified on the samples for CP1252; the CP949
+path is exercised by `crates/uncad/tests/fixtures/` (a DXF this project wrote itself), not
+yet by an AutoCAD-written Korean DWG. A character the table cannot map becomes U+FFFD
+(LibreDWG's own converter wrote a NUL there and truncated the string). Related, also fixed:
+an R2007+ **DXF** parsed to zero entities, because LibreDWG stores its strings as UTF-16 but
+hands them out unconverted for DXF input, so every block name was cut at the first NUL
+(`"*Model_Space"` read as `"*"`); and a corrupt or unknown code-page value in the file
+header is now replaced by ANSI_1252 instead of being used to index LibreDWG's tables.
+
+## Fixed: a path with non-ASCII characters could not be opened on Windows
+
+`parse()` used to pass the path to LibreDWG, whose `fopen()` call the MSVC runtime
+resolves in the ANSI code page; `parse("한글경로/도면.dwg")` failed with
+`DWG_ERR_IOERROR` (4096) while the same file parsed from an ASCII path. The file is now
+read in Rust and decoded from memory (`parse_bytes`), tested in
+`crates/uncad/tests/read_paths.rs`.
 
 ## Fixed: SPLINE control points read at the wrong stride
 

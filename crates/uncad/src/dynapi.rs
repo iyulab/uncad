@@ -231,6 +231,86 @@ pub fn get_common_field<T: Copy>(entity: *mut c_void, field: &str) -> Option<T> 
     Some(unsafe { out.assume_init() })
 }
 
+/// Reads a plain-old-data header variable (`INSUNITS`, `EXTMIN`, `DIMSCALE`,
+/// ...) via `dwg_dynapi_header_value`, with the same size check as
+/// [`get_field`] (through `dwg_dynapi_header_field`). `dwg` must be a live,
+/// successfully read `Dwg_Data`. Returns `None` for an unknown variable name
+/// or a `T` of the wrong size.
+pub fn get_header_field<T: Copy>(dwg: *const libredwg_sys::Dwg_Data, field: &str) -> Option<T> {
+    if dwg.is_null() {
+        return None;
+    }
+    let c_field = CString::new(field).expect("field name has no interior NUL");
+
+    // SAFETY: pure name -> descriptor lookup, no write through any pointer.
+    let field_desc = unsafe { libredwg_sys::dwg_dynapi_header_field(c_field.as_ptr()) };
+    if field_desc.is_null() {
+        return None;
+    }
+    if !field_write_size_matches::<T>(unsafe { &*field_desc }, "<header>", field) {
+        return None;
+    }
+
+    let mut out = MaybeUninit::<T>::uninit();
+    let mut fp: libredwg_sys::Dwg_DYNAPI_field = Default::default();
+    // SAFETY: dwg is live (caller contract); out is sized for T and the size
+    // check above confirms dynapi writes exactly size_of::<T>() bytes.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_header_value(
+            dwg,
+            c_field.as_ptr(),
+            out.as_mut_ptr().cast::<c_void>(),
+            &mut fp,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    // SAFETY: dynapi reported success and wrote size_of::<T>() bytes.
+    Some(unsafe { out.assume_init() })
+}
+
+/// Reads a text header variable (`DIMPOST`, `DWGCODEPAGE`, ...) as UTF-8 via
+/// `dwg_dynapi_header_utf8text`, with the same code-page handling as
+/// [`get_utf8_field`]. Returns `None` for an unknown name or a null string.
+pub fn get_header_utf8(dwg: *const libredwg_sys::Dwg_Data, field: &str) -> Option<String> {
+    if dwg.is_null() {
+        return None;
+    }
+    let c_field = CString::new(field).expect("field name has no interior NUL");
+    let mut text_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
+    let mut is_new: std::os::raw::c_int = 0;
+
+    // SAFETY: dwg is live (caller contract); text_ptr/is_new are valid
+    // out-params for the duration of the call.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_header_utf8text(
+            dwg,
+            c_field.as_ptr(),
+            &mut text_ptr,
+            &mut is_new,
+            std::ptr::null_mut(),
+        )
+    };
+    if !ok || text_ptr.is_null() {
+        return None;
+    }
+    let owned = if is_new != 0 {
+        // SAFETY: as in get_utf8_field -- a malloc'd UTF-8 copy that is ours
+        // to free.
+        let owned = unsafe { CStr::from_ptr(text_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { libc::free(text_ptr.cast()) };
+        owned
+    } else {
+        // SAFETY: dwg is live and text_ptr is a NUL-terminated string it owns.
+        let converted = unsafe { libredwg_sys::uncad_tv_to_utf8(dwg, text_ptr) };
+        owned_utf8(converted, text_ptr)
+    };
+    Some(owned)
+}
+
 /// Resolves a `BITCODE_H` handle reference (e.g. an entity's `layer`
 /// field) to the name of the object it points at, via
 /// `dwg_dynapi_handle_name`. Returns `None` for a null handle or an object
@@ -249,30 +329,77 @@ pub fn resolve_handle_name(
     if name_ptr.is_null() {
         return None;
     }
-    // SAFETY: name_ptr is a valid NUL-terminated C string per dynapi's contract.
-    let owned = unsafe { CStr::from_ptr(name_ptr) }
-        .to_string_lossy()
-        .into_owned();
-    if alloced != 0 {
+    let owned = if alloced != 0 {
         // SAFETY: alloced != 0 means dwg_dynapi_handle_name malloc'd this
-        // buffer itself (documented in dwg_api.h); ours to free.
+        // buffer itself (documented in dwg_api.h) -- already UTF-8, converted
+        // from the R2007+ UTF-16 storage -- and it is ours to free.
+        let owned = unsafe { CStr::from_ptr(name_ptr) }
+            .to_string_lossy()
+            .into_owned();
         unsafe { libc::free(name_ptr.cast()) };
-    }
+        owned
+    } else {
+        // A raw pointer into the Dwg_Data, in the file's own code page (every
+        // pre-R2007 DWG, and every DXF input) -- see codepage_to_utf8.
+        // SAFETY: dwg is live (caller contract) and name_ptr is a valid
+        // NUL-terminated string owned by it.
+        let converted = unsafe { libredwg_sys::uncad_tv_to_utf8(dwg, name_ptr) };
+        owned_utf8(converted, name_ptr)
+    };
     Some(owned)
 }
 
+/// Turns the buffer `uncad_tv_to_utf8`/`uncad_entity_tv_to_utf8` returned
+/// into an owned `String` and frees it. `raw` is the unconverted string the
+/// shim was given, used only as a last-resort lossy fallback when the shim
+/// reports out of memory (a null result), so text is degraded rather than
+/// dropped.
+fn owned_utf8(converted: *mut std::os::raw::c_char, raw: *const std::os::raw::c_char) -> String {
+    if converted.is_null() {
+        // SAFETY: raw is a valid NUL-terminated C string (caller contract).
+        return unsafe { CStr::from_ptr(raw) }
+            .to_string_lossy()
+            .into_owned();
+    }
+    // SAFETY: the shim returns a fresh, NUL-terminated heap buffer that is
+    // ours to free (see uncad_shim.h); nothing else holds a reference to it.
+    let owned = unsafe { CStr::from_ptr(converted) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { libredwg_sys::uncad_free_string(converted) };
+    owned
+}
+
+/// Converts a dynapi string that came back with `isnew == 0` -- a raw pointer
+/// into the parsed `Dwg_Data`, holding the file's own code-page bytes -- to
+/// UTF-8 through the `uncad_entity_tv_to_utf8` shim, which finds the owning
+/// `Dwg_Data` (and so the code page and the R2007+ rule) from the entity
+/// pointer.
+///
+/// This is what makes Korean text in an R2000/R2004 drawing, or a degree
+/// sign in an R2004 dimension, come out as the right characters: LibreDWG's
+/// dynapi only transcodes the R2007+ UTF-16 storage itself, and the
+/// `to_string_lossy` this crate used to apply to the raw bytes replaced every
+/// non-ASCII byte with U+FFFD.
+fn codepage_to_utf8(entity: *const c_void, raw: *const std::os::raw::c_char) -> String {
+    // SAFETY: entity is a live entity/object pointer (caller contract, same as
+    // every dynapi read here) and raw a valid NUL-terminated string owned by
+    // the same Dwg_Data; the shim reads both and allocates its result.
+    let converted = unsafe { libredwg_sys::uncad_entity_tv_to_utf8(entity, raw) };
+    owned_utf8(converted, raw)
+}
+
 /// Reads a text field (BITCODE_T/TV/TU) as a UTF-8 `String`, via
-/// `dwg_dynapi_entity_utf8text` -- which itself handles the r2007+
-/// UTF-16-wide-string-to-UTF-8 conversion (older DWGs store text fields as
-/// plain 8-bit strings already). Returns `None` if the field doesn't exist
+/// `dwg_dynapi_entity_utf8text`. Returns `None` if the field doesn't exist
 /// or is a null string.
 ///
-/// The C function may return a freshly `malloc`'d buffer (r2007+ conversion
-/// path) or a pointer straight into the parsed `Dwg_Data` (older formats) --
-/// `isnew` tells us which. We always copy into an owned Rust `String`
-/// before returning, and `free()` the malloc'd buffer ourselves in the
-/// `isnew` case so this doesn't leak one string per TEXT/MTEXT/... field
-/// read for the lifetime of the process.
+/// The C function returns either a freshly `malloc`'d UTF-8 buffer (the
+/// r2007+ path: it converts the UTF-16 storage itself) or a pointer straight
+/// into the parsed `Dwg_Data` holding the file's own 8-bit code-page bytes
+/// (every older DWG, and every DXF input) -- `isnew` tells us which. The
+/// second case goes through [`codepage_to_utf8`]; both end up as an owned
+/// Rust `String`, with the C-side buffer freed here so nothing leaks per
+/// field read.
 pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option<String> {
     if entity.is_null() {
         return None;
@@ -299,18 +426,21 @@ pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option
         return None;
     }
 
-    // SAFETY: text_ptr is a valid, NUL-terminated C string per dynapi's
-    // contract (checked non-null above).
-    let owned = unsafe { CStr::from_ptr(text_ptr) }
-        .to_string_lossy()
-        .into_owned();
-
-    if is_new != 0 {
+    let owned = if is_new != 0 {
         // SAFETY: is_new != 0 means dwg_dynapi_entity_utf8text malloc'd
-        // this buffer itself (documented in dwg_api.h); it's ours to free
-        // and nothing else holds a reference to it.
+        // this buffer itself (documented in dwg_api.h) -- the UTF-8 it
+        // converted from the R2007+ UTF-16 storage -- and it's ours to free;
+        // nothing else holds a reference to it.
+        let owned = unsafe { CStr::from_ptr(text_ptr) }
+            .to_string_lossy()
+            .into_owned();
         unsafe { libc::free(text_ptr.cast()) };
-    }
+        owned
+    } else {
+        // A raw pointer into the Dwg_Data in the file's own code page
+        // (pre-R2007 DWG, or any DXF input): transcode it.
+        codepage_to_utf8(entity, text_ptr)
+    };
 
     Some(owned)
 }

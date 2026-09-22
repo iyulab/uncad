@@ -5,7 +5,11 @@
 //! same drawing the SVG shows. It round-trips for any database whose `f64`
 //! fields are all finite (everything `parse()` has produced so far):
 //! `serde_json::from_str::<CadDatabase>` gives back a database equal
-//! (`PartialEq`) to the one serialized. It is also reproducible -- `tables.*`
+//! (`PartialEq`) to the one serialized -- exactly when the reader's
+//! `serde_json` has its `float_roundtrip` feature on, and otherwise to within
+//! 1 ULP on the odd coordinate (serde_json's default float parser trades that
+//! last bit for speed; the header extents of `example_2000.dwg` hit it).
+//! It is also reproducible -- `tables.*`
 //! are sorted maps and entity order follows the file, so the same input
 //! serializes to the same bytes every run.
 //!
@@ -14,6 +18,11 @@
 //! [`JsonError`]); bumping either major would be a breaking change.
 //!
 //! Shape notes for consumers:
+//! - `header` (since 0.3.0) carries the file version, code page, `$INSUNITS`
+//!   with its resolved `units {name, to_mm}`, the stored extents/limits and
+//!   the dimension-style header variables -- see [`crate::header::Header`].
+//!   A document written by 0.2.0 has no `header` and deserializes with the
+//!   default (unitless) one.
 //! - Every entity object carries a `"type"` tag holding the DXF name
 //!   [`Entity::type_name`](crate::Entity::type_name) reports (`"LINE"`,
 //!   `"LWPOLYLINE"`, `"3DSOLID"`, `"POLYLINE_PFACE"`, ...), so dispatching on
@@ -479,6 +488,7 @@ mod tests {
         let mut mlinestyles = BTreeMap::new();
         mlinestyles.insert("STANDARD".to_string(), vec![0.5, -0.5]);
         let db = CadDatabase {
+            header: Default::default(),
             entities: one_of_each(),
             tables: Tables {
                 layers,

@@ -13,7 +13,7 @@ const USAGE: &str = "\
 uncad - parse DWG/DXF drawings
 
 Usage:
-  uncad <input.dwg>                 print a summary (entity count per type)
+  uncad <input.dwg>                 print a summary (version, units, entity count per type)
   uncad <input> -o <output.json>    export the parsed model (entities + tables)
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
@@ -230,6 +230,14 @@ fn print_summary(input: &str, db: &CadDatabase) {
     entries.sort_by_key(|&(type_name, count)| (std::cmp::Reverse(count), type_name));
 
     println!("file: {input}");
+    println!(
+        "version: {} (codepage {})",
+        db.header.version, db.header.codepage_name
+    );
+    println!(
+        "units: {} (INSUNITS {})",
+        db.header.units.name, db.header.insunits
+    );
     println!("entities: {}", db.entities.len());
     for (type_name, count) in entries {
         println!("  {type_name}: {count}");
