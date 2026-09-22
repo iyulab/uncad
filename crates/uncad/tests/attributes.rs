@@ -286,12 +286,25 @@ fn every_attribute_definition_in_a_block_is_read() {
         ["ATTDEF", "LINE", "ATTDEF", "ATTDEF"],
         "file order, nothing skipped"
     );
-    let handles: Vec<&str> = block
+    let handles: Vec<Option<&str>> = block
         .entities
         .iter()
-        .map(|e| e.common().handle.as_str())
+        .map(|e| e.common().source_handle.resolved().map(String::as_str))
         .collect();
-    assert_eq!(handles, ["105", "106", "107", "108"]);
+    assert_eq!(
+        handles,
+        [Some("105"), Some("106"), Some("107"), Some("108")]
+    );
+    let ids: Vec<u64> = block
+        .entities
+        .iter()
+        .map(|e| e.common().id.value())
+        .collect();
+    assert_eq!(
+        ids,
+        [0x105, 0x106, 0x107, 0x108],
+        "IDs are the handles' values"
+    );
     let defaults: Vec<&str> = block
         .entities
         .iter()
@@ -317,14 +330,14 @@ fn every_attribute_value_on_an_insert_is_read() {
         })
         .expect("the INSERT is read");
     assert_eq!(insert.block_name, Ref::Resolved("TITLE".to_string()));
-    let values: Vec<(&str, &str)> = insert
+    let values: Vec<(u64, &str)> = insert
         .attribs
         .iter()
-        .map(|a| (a.common.handle.as_str(), a.text.as_str()))
+        .map(|a| (a.common.id.value(), a.text.as_str()))
         .collect();
     assert_eq!(
         values,
-        [("121", "A-100"), ("122", "B"), ("123", "STEEL")],
+        [(0x121, "A-100"), (0x122, "B"), (0x123, "STEEL")],
         "all three, in file order"
     );
 

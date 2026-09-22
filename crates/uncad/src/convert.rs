@@ -17,12 +17,12 @@ use crate::dynapi::{
 };
 use std::ffi::CStr;
 use uncad_model::model::{
-    AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, DimensionEntity,
-    EllipseEntity, Entity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
-    HatchGradient, HatchPatternLine, InsertEntity, LeaderEntity, LightEntity, LineEntity,
-    LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, PointEntity,
-    PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
-    ToleranceEntity, ViewportEntity, WipeoutEntity,
+    AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
+    DimensionEntity, EllipseEntity, Entity, EntityCommon, EntityId, Face3DEntity,
+    HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine, InsertEntity,
+    LeaderEntity, LightEntity, LineEntity, LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity,
+    MultiLeaderEntity, Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity,
+    SolidEntity, SplineEntity, TextEntity, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D};
 
@@ -491,7 +491,7 @@ unsafe fn convert_entity(
     }
 
     // SAFETY: obj is valid per this function's own `# Safety` doc contract.
-    let handle = unsafe { entity_handle(obj) };
+    let (id, source_handle) = unsafe { entity_identity(obj) };
     let layer = reference(
         dwg,
         get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "layer"),
@@ -499,8 +499,14 @@ unsafe fn convert_entity(
         |handle_ptr| resolve_handle_name(dwg, handle_ptr),
     );
     let (color_index, true_color) = entity_color(entity_ptr);
+    // This backend reads vector files: everything it produces is a vector
+    // entity whose values are what the file states. A raster recognizer or
+    // an editor states different markers; nothing here has a default.
     let common = EntityCommon {
-        handle,
+        id,
+        origin: Origin::Vector,
+        confidence: Confidence::High,
+        source_handle,
         layer,
         color_index,
         true_color,
@@ -1262,21 +1268,47 @@ fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
 
 /// # Safety
 /// `obj` must be a valid, non-null pointer from `dwg_get_object`.
-unsafe fn entity_handle(obj: *mut libredwg_sys::Dwg_Object) -> String {
+/// The reference ID this backend mints for an entity, and the file handle
+/// it records as provenance.
+///
+/// The ID is the handle's value: a file's handles are unique within it and
+/// stable, so the same entity gets the same ID on every read -- and the same
+/// ID whether the drawing is read as DWG or as its DXF twin. An entity with
+/// no handle (pre-R13 files may carry none) still needs an ID that is unique
+/// and reproducible: its position in the file's object table, in a range no
+/// handle reaches (the top bit set), with the provenance field left
+/// [`Ref::Absent`]. The test sweep over the corpus checks that the scheme
+/// yields no duplicate within any file.
+///
+/// # Safety
+/// `obj` must be a valid, non-null `Dwg_Object`.
+unsafe fn entity_identity(obj: *mut libredwg_sys::Dwg_Object) -> (EntityId, Ref<String>) {
     let mut error = 0i32;
     let handle_ptr = unsafe { libredwg_sys::dwg_object_get_handle(obj, &mut error) };
-    if handle_ptr.is_null() || error != 0 {
-        return String::new();
+    let value = if handle_ptr.is_null() || error != 0 {
+        0
+    } else {
+        unsafe { (*handle_ptr).value }
+    };
+    if value != 0 {
+        return (EntityId::new(value), Ref::Resolved(format!("{value:X}")));
     }
-    let value = unsafe { (*handle_ptr).value };
-    format!("{value:X}")
+    let index = unsafe { libredwg_sys::dwg_object_get_index(obj as *const _, &mut error) };
+    (
+        EntityId::new(HANDLELESS_ID_BASE | u64::from(index)),
+        Ref::Absent,
+    )
 }
+
+/// Where the IDs of handle-less entities live: above every possible handle
+/// value, so they can never collide with a handle-derived ID.
+const HANDLELESS_ID_BASE: u64 = 1 << 63;
 
 /// Turns a handle field into the model's three-state reference: no field or
 /// a null handle is [`Ref::Absent`]; a handle the resolver turns into a name
 /// is [`Ref::Resolved`]; a handle it cannot is [`Ref::Unresolved`] carrying
 /// the handle itself (`absolute_ref`, hex, the same form as
-/// [`EntityCommon::handle`]). This is the one place the empty-string fill
+/// [`EntityCommon::source_handle`]). This is the one place the empty-string fill
 /// used to happen, for every reference field the model has.
 ///
 /// Two cases carry no handle to resolve by, and are told apart by the

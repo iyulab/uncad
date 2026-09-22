@@ -26,7 +26,7 @@ use bounds::{dominant_cluster_box, Box2D};
 use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use uncad_model::model::{Entity, EntityCommon, MLineVertex, Point2D, Point3D};
+use uncad_model::model::{Entity, EntityCommon, EntityId, MLineVertex, Point2D, Point3D};
 use uncad_model::tables::Tables;
 use uncad_model::CadDatabase;
 
@@ -900,7 +900,7 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
     if space == Space::All {
         return db.entities.iter().collect();
     }
-    let mut handles: BTreeSet<&str> = BTreeSet::new();
+    let mut ids: BTreeSet<EntityId> = BTreeSet::new();
     for (name, record) in &db.tables.block_records {
         let upper = name.to_uppercase();
         let matches = match space {
@@ -912,17 +912,17 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
             continue;
         }
         for e in &record.entities {
-            handles.insert(&e.common().handle);
+            ids.insert(e.common().id);
             if let Entity::Insert(insert) = e {
                 for a in &insert.attribs {
-                    handles.insert(&a.common.handle);
+                    ids.insert(a.common.id);
                 }
             }
         }
     }
     db.entities
         .iter()
-        .filter(|e| handles.contains(e.common().handle.as_str()))
+        .filter(|e| ids.contains(&e.common().id))
         .collect()
 }
 
@@ -1023,7 +1023,10 @@ mod tests {
         // recursion depth, but a full 5-ary tree 20 levels deep is 5^20
         // (~9.5e13) block instantiations, which would never finish.
         let common = EntityCommon {
-            handle: String::new(),
+            id: uncad_model::model::EntityId::new(1),
+            origin: uncad_model::model::Origin::Vector,
+            confidence: uncad_model::model::Confidence::High,
+            source_handle: Ref::Absent,
             layer: Ref::Absent,
             color_index: 0,
             true_color: None,

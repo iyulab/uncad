@@ -3,7 +3,13 @@
     {
       "type": "LWPOLYLINE",
       "common": {
-        "handle": "120",
+        "id": 288,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "120"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "OUTLINE"
@@ -34,7 +40,13 @@
     {
       "type": "CIRCLE",
       "common": {
-        "handle": "121",
+        "id": 289,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "121"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "HOLES"
@@ -52,7 +64,13 @@
     {
       "type": "CIRCLE",
       "common": {
-        "handle": "122",
+        "id": 290,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "122"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "HOLES"
@@ -70,7 +88,13 @@
     {
       "type": "CIRCLE",
       "common": {
-        "handle": "123",
+        "id": 291,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "123"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "HOLES"
@@ -88,7 +112,13 @@
     {
       "type": "CIRCLE",
       "common": {
-        "handle": "124",
+        "id": 292,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "124"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "HOLES"
@@ -106,7 +136,13 @@
     {
       "type": "DIMENSION",
       "common": {
-        "handle": "125",
+        "id": 293,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "125"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "DIMS"
@@ -122,7 +158,13 @@
     {
       "type": "DIMENSION",
       "common": {
-        "handle": "126",
+        "id": 294,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "126"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "DIMS"
@@ -138,7 +180,13 @@
     {
       "type": "DIMENSION",
       "common": {
-        "handle": "127",
+        "id": 295,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "127"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "DIMS"
@@ -154,7 +202,13 @@
     {
       "type": "DIMENSION",
       "common": {
-        "handle": "128",
+        "id": 296,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "128"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "DIMS"
@@ -170,7 +224,13 @@
     {
       "type": "INSERT",
       "common": {
-        "handle": "129",
+        "id": 297,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "129"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "TITLE"
@@ -196,7 +256,13 @@
       "attribs": [
         {
           "common": {
-            "handle": "12A",
+            "id": 298,
+            "origin": "VECTOR",
+            "confidence": "HIGH",
+            "source_handle": {
+              "type": "RESOLVED",
+              "data": "12A"
+            },
             "layer": {
               "type": "RESOLVED",
               "data": "TITLE"
@@ -214,7 +280,13 @@
         },
         {
           "common": {
-            "handle": "12B",
+            "id": 299,
+            "origin": "VECTOR",
+            "confidence": "HIGH",
+            "source_handle": {
+              "type": "RESOLVED",
+              "data": "12B"
+            },
             "layer": {
               "type": "RESOLVED",
               "data": "TITLE"
@@ -232,7 +304,13 @@
         },
         {
           "common": {
-            "handle": "12C",
+            "id": 300,
+            "origin": "VECTOR",
+            "confidence": "HIGH",
+            "source_handle": {
+              "type": "RESOLVED",
+              "data": "12C"
+            },
             "layer": {
               "type": "RESOLVED",
               "data": "TITLE"
@@ -253,7 +331,13 @@
     {
       "type": "ATTRIB",
       "common": {
-        "handle": "12A",
+        "id": 298,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12A"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "TITLE"
@@ -272,7 +356,13 @@
     {
       "type": "ATTRIB",
       "common": {
-        "handle": "12B",
+        "id": 299,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12B"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "TITLE"
@@ -291,7 +381,13 @@
     {
       "type": "ATTRIB",
       "common": {
-        "handle": "12C",
+        "id": 300,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12C"
+        },
         "layer": {
           "type": "RESOLVED",
           "data": "TITLE"
@@ -338,7 +434,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "10B",
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -360,7 +462,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "10C",
+              "id": 268,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10C"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -382,7 +490,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "10D",
+              "id": 269,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10D"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -404,7 +518,13 @@
           {
             "type": "TEXT",
             "common": {
-              "handle": "10E",
+              "id": 270,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10E"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -428,7 +548,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "111",
+              "id": 273,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "111"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -450,7 +576,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "112",
+              "id": 274,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "112"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -472,7 +604,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "113",
+              "id": 275,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "113"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -494,7 +632,13 @@
           {
             "type": "TEXT",
             "common": {
-              "handle": "114",
+              "id": 276,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "114"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -518,7 +662,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "117",
+              "id": 279,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "117"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -540,7 +690,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "118",
+              "id": 280,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "118"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -562,7 +718,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "119",
+              "id": 281,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "119"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -584,7 +746,13 @@
           {
             "type": "TEXT",
             "common": {
-              "handle": "11A",
+              "id": 282,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11A"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -608,7 +776,13 @@
           {
             "type": "LINE",
             "common": {
-              "handle": "11D",
+              "id": 285,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11D"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -630,7 +804,13 @@
           {
             "type": "TEXT",
             "common": {
-              "handle": "11E",
+              "id": 286,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11E"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -654,7 +834,13 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "handle": "120",
+              "id": 288,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "120"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "OUTLINE"
@@ -685,7 +871,13 @@
           {
             "type": "CIRCLE",
             "common": {
-              "handle": "121",
+              "id": 289,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "121"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "HOLES"
@@ -703,7 +895,13 @@
           {
             "type": "CIRCLE",
             "common": {
-              "handle": "122",
+              "id": 290,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "122"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "HOLES"
@@ -721,7 +919,13 @@
           {
             "type": "CIRCLE",
             "common": {
-              "handle": "123",
+              "id": 291,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "123"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "HOLES"
@@ -739,7 +943,13 @@
           {
             "type": "CIRCLE",
             "common": {
-              "handle": "124",
+              "id": 292,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "124"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "HOLES"
@@ -757,7 +967,13 @@
           {
             "type": "DIMENSION",
             "common": {
-              "handle": "125",
+              "id": 293,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "125"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "DIMS"
@@ -773,7 +989,13 @@
           {
             "type": "DIMENSION",
             "common": {
-              "handle": "126",
+              "id": 294,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "126"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "DIMS"
@@ -789,7 +1011,13 @@
           {
             "type": "DIMENSION",
             "common": {
-              "handle": "127",
+              "id": 295,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "127"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "DIMS"
@@ -805,7 +1033,13 @@
           {
             "type": "DIMENSION",
             "common": {
-              "handle": "128",
+              "id": 296,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "128"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "DIMS"
@@ -821,7 +1055,13 @@
           {
             "type": "INSERT",
             "common": {
-              "handle": "129",
+              "id": 297,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "129"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "TITLE"
@@ -847,7 +1087,13 @@
             "attribs": [
               {
                 "common": {
-                  "handle": "12A",
+                  "id": 298,
+                  "origin": "VECTOR",
+                  "confidence": "HIGH",
+                  "source_handle": {
+                    "type": "RESOLVED",
+                    "data": "12A"
+                  },
                   "layer": {
                     "type": "RESOLVED",
                     "data": "TITLE"
@@ -865,7 +1111,13 @@
               },
               {
                 "common": {
-                  "handle": "12B",
+                  "id": 299,
+                  "origin": "VECTOR",
+                  "confidence": "HIGH",
+                  "source_handle": {
+                    "type": "RESOLVED",
+                    "data": "12B"
+                  },
                   "layer": {
                     "type": "RESOLVED",
                     "data": "TITLE"
@@ -883,7 +1135,13 @@
               },
               {
                 "common": {
-                  "handle": "12C",
+                  "id": 300,
+                  "origin": "VECTOR",
+                  "confidence": "HIGH",
+                  "source_handle": {
+                    "type": "RESOLVED",
+                    "data": "12C"
+                  },
                   "layer": {
                     "type": "RESOLVED",
                     "data": "TITLE"
@@ -913,7 +1171,13 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "handle": "105",
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -944,7 +1208,13 @@
           {
             "type": "ATTDEF",
             "common": {
-              "handle": "106",
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -963,7 +1233,13 @@
           {
             "type": "ATTDEF",
             "common": {
-              "handle": "107",
+              "id": 263,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "107"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"
@@ -982,7 +1258,13 @@
           {
             "type": "ATTDEF",
             "common": {
-              "handle": "108",
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
               "layer": {
                 "type": "RESOLVED",
                 "data": "0"

@@ -27,15 +27,15 @@ const SAB_DWG: &str = concat!(
     "/../../lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg"
 );
 
-/// handle -> wireframe edges, for every 3DSOLID/REGION in `entities`.
+/// reference ID -> wireframe edges, for every 3DSOLID/REGION in `entities`.
 fn wireframes_by_handle(
     entities: &[uncad::Entity],
-) -> BTreeMap<&str, &[[uncad::model::Point3D; 2]]> {
+) -> BTreeMap<u64, &[[uncad::model::Point3D; 2]]> {
     entities
         .iter()
         .filter_map(|e| match e {
             uncad::Entity::Solid3D(s) | uncad::Entity::Region(s) => {
-                Some((s.common.handle.as_str(), s.wireframe_edges.as_slice()))
+                Some((s.common.id.value(), s.wireframe_edges.as_slice()))
             }
             _ => None,
         })

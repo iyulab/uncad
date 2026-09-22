@@ -173,6 +173,9 @@ fn main() {
         .allowlist_function("dwg_object_get_fixedtype")
         .allowlist_function("dwg_object_get_dxfname")
         .allowlist_function("dwg_object_get_handle")
+        // The object's position in the file's object table: the reference
+        // ID falls back to it for an entity without a handle.
+        .allowlist_function("dwg_object_get_index")
         .allowlist_function("get_first_owned_entity")
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")

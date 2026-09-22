@@ -83,6 +83,16 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Every entity carries a reference ID, its origin and its confidence.** `EntityCommon`
+  gains `id` (an `EntityId`, the name consumers point at an entity by -- minted by this
+  backend as the file handle's value, or from the object's position in the file for an
+  entity without a handle), `origin` (`Vector`, for everything this backend reads) and
+  `confidence` (`High`: the values are what the file states). The file handle moves to
+  `source_handle: Ref<String>`, provenance rather than identity, `Absent` when the file
+  gave none. **JSON shape**: `common.handle` is gone; `common.id` is an integer,
+  `common.origin`/`common.confidence` upper-case strings, `common.source_handle` a
+  three-state reference like `common.layer`. None of the three has a default: a producer
+  states them or the entity cannot be built.
 - **The entity model is now the `uncad-model` crate.** `CadDatabase`, `Entity`, every
   `*Entity` struct, `Ref`, `Tables`/`LayerRecord`/`BlockRecord`, `ReadDiagnostics`, the ACI
   palette and the JSON serialization (`CadDatabase::to_json`, `ToJsonOptions`, `JsonError`)

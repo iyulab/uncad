@@ -281,6 +281,18 @@ the 64,697 layer references the sweep test pins (blocks with several ATTDEFs in 
 and R13/R14 files). The two gaps are reported upstream; `tests/attributes.rs` pins the
 behaviour with a self-written R2000 DXF.
 
+## Reference IDs are the file's handles, with a fallback for entities that have none
+
+Every entity carries a reference ID (`common.id`) that consumers point at it by. This
+backend mints it from the file handle's value: handles are unique within a file and stable,
+so the same entity gets the same ID on every read, and the same ID whether the drawing is
+read as DWG or as its DXF twin. The handle itself is kept separately as provenance
+(`common.source_handle`). An entity the file gives no handle (possible in pre-R13 files)
+gets an ID from its position in the file's object table, in a range above every possible
+handle value (the top bit set), and its `source_handle` is `Absent`. The corpus sweep checks
+that no file yields two different entities with one ID and counts how often the fallback
+was needed -- over the current corpus, never.
+
 ## MTEXT rotation is always 0
 
 `dwg.h` says the `x_axis_dir` field "defines the rotation", and deriving an angle from it

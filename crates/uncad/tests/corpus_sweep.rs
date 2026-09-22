@@ -61,6 +61,12 @@ struct Sweep {
     files_with_empty_blocks: usize,
     /// (file, blocks that drew nothing), one row per file that had any.
     empty_blocks: Vec<(String, Vec<String>)>,
+    /// (file, reference ID) for every ID two different entities of one
+    /// file share -- the model requires none.
+    duplicate_ids: Vec<(String, u64)>,
+    /// Entities whose ID had to be minted from the object index because the
+    /// file gave them no handle.
+    handleless: usize,
 }
 
 fn sweep() -> Sweep {
@@ -100,6 +106,31 @@ fn sweep() -> Sweep {
 
         let dir = dir_name(path);
         let layer_table = db.tables.layers.len();
+
+        // Reference IDs: unique within the file, across the top level and
+        // every block (the same entity may appear in both -- that is not a
+        // duplicate, so IDs are compared by entity value).
+        let mut by_id: BTreeMap<u64, &Entity> = BTreeMap::new();
+        let all = db.entities.iter().chain(
+            db.tables
+                .block_records
+                .values()
+                .flat_map(|b| b.entities.iter()),
+        );
+        for e in all {
+            let id = e.common().id.value();
+            if e.common().source_handle == Ref::Absent {
+                s.handleless += 1;
+            }
+            match by_id.get(&id) {
+                Some(other) if *other != e => {
+                    s.duplicate_ids.push((path.display().to_string(), id))
+                }
+                _ => {
+                    by_id.insert(id, e);
+                }
+            }
+        }
         let in_blocks = db
             .tables
             .block_records
@@ -203,6 +234,11 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // now that this crate walks the R13..R2000 block chain itself instead of
     // through the library's walker, which skipped them.
     assert_eq!(layers, 64_733);
+
+    // --- reference IDs: the handle-derived scheme yields no duplicate in any
+    // file, and the index fallback is measured, not assumed ---
+    assert!(s.duplicate_ids.is_empty(), "{:?}", s.duplicate_ids);
+    println!("handle-less entities (index-derived IDs): {}", s.handleless);
 
     // --- ACIS edges that could not be read (the SAB-to-SAT texts whose
     // pointers run past their records) and block references that drew nothing.

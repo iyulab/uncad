@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use uncad::model::{EntityCommon, LineEntity, Point3D, Ref};
+use uncad::model::{Confidence, EntityCommon, EntityId, LineEntity, Origin, Point3D, Ref};
 use uncad::{CadDatabase, Entity};
 
 const CORPUS_DXF: &str = concat!(
@@ -35,7 +35,10 @@ fn the_three_states_serialize_distinguishably_and_round_trip() {
     fn line(layer: Ref<String>) -> Entity {
         Entity::Line(LineEntity {
             common: EntityCommon {
-                handle: "1".to_string(),
+                id: EntityId::new(1),
+                origin: Origin::Vector,
+                confidence: Confidence::High,
+                source_handle: Ref::Resolved("1".to_string()),
                 layer,
                 color_index: 256,
                 true_color: None,

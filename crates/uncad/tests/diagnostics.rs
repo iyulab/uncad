@@ -5,7 +5,9 @@
 
 use std::collections::BTreeMap;
 
-use uncad::model::{EntityCommon, InsertEntity, LineEntity, Point3D, Ref};
+use uncad::model::{
+    Confidence, EntityCommon, EntityId, InsertEntity, LineEntity, Origin, Point3D, Ref,
+};
 use uncad::tables::{BlockRecord, Tables};
 use uncad::{
     read_diagnostics_from_libredwg_bits, CadDatabase, Entity, ReadDiagnostics, Space, ToSvgOptions,
@@ -81,7 +83,10 @@ fn diagnostics_survive_the_json_round_trip_and_default_when_absent() {
 
 fn common(handle: &str) -> EntityCommon {
     EntityCommon {
-        handle: handle.to_string(),
+        id: EntityId::new(u64::from_str_radix(handle, 16).unwrap()),
+        origin: Origin::Vector,
+        confidence: Confidence::High,
+        source_handle: Ref::Resolved(handle.to_string()),
         layer: Ref::Resolved("0".to_string()),
         color_index: 256,
         true_color: None,
