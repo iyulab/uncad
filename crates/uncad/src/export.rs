@@ -2220,12 +2220,6 @@ pub fn export_package(
         "warnings": warnings,
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
-    std::fs::write(dir.join("manifest.json"), &manifest_text).map_err(|source| {
-        ExportError::Io {
-            path: dir.join("manifest.json"),
-            source,
-        }
-    })?;
     let readme = format!(
         "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window; sheets/<layout>/overview.png\n  6. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
@@ -2240,6 +2234,17 @@ pub fn export_package(
     std::fs::write(dir.join("report.json"), &report_text).map_err(|source| ExportError::Io {
         path: dir.join("report.json"),
         source,
+    })?;
+    // manifest.json is written last, after every file it names: a directory
+    // that holds one is a finished package, and one that does not is
+    // nothing a reader should trust. (It is also what the next run's
+    // `clear_previous_package` reads, so a half-written package is cleared
+    // by its own manifest only once that manifest is true.)
+    std::fs::write(dir.join("manifest.json"), &manifest_text).map_err(|source| {
+        ExportError::Io {
+            path: dir.join("manifest.json"),
+            source,
+        }
     })?;
 
     Ok(ExportReport {
@@ -2489,6 +2494,14 @@ struct OverviewFit {
     padding: f64,
 }
 
+/// The most characters of a layout name a sheet directory keeps. Well
+/// under every per-component limit even after the `_99` dedup suffix, and
+/// well under what is left of Windows' 260-character path budget once the
+/// package directory and `sheets/<name>/overview.png` are counted -- while
+/// still long enough to read a real layout name off the path (the longest
+/// in the corpus is 22 characters).
+const MAX_SHEET_DIR: usize = 100;
+
 /// The directory one sheet's image goes in, under `sheets/`: the layout's
 /// name with every character outside `[A-Za-z0-9_-]` replaced by `_` (so
 /// the path is portable and an ASCII name stays readable), `sheet` when
@@ -2499,6 +2512,16 @@ struct OverviewFit {
 /// sanitises to `_`, so two three-syllable Korean names both became `___`
 /// and the second layout's PNG silently overwrote the first's while both
 /// `sheets.json` entries pointed at the one surviving file.
+///
+/// The name is also cut to [`MAX_SHEET_DIR`] characters. A layout name
+/// longer than the filesystem's 255-byte per-component limit (NTFS, ext4)
+/// made the first `sheets/<name>/overview.png` write fail, and with it the
+/// whole export: the other layouts, the tiles and every record file were
+/// lost to one bad string, and what stayed on disk was a directory with no
+/// `manifest.json` -- not a package, and not something the next run's
+/// `clear_previous_package` would tidy up either, since that reads the
+/// manifest. The dedup suffix alone could push a legal 255-character name
+/// over the edge.
 fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
     let safe: String = name
         .chars()
@@ -2509,6 +2532,9 @@ fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
                 '_'
             }
         })
+        // Sanitising leaves pure ASCII, so this cuts characters and bytes
+        // alike and can never split one.
+        .take(MAX_SHEET_DIR)
         .collect();
     let base = if safe.is_empty() {
         "sheet".to_string()
@@ -3338,6 +3364,32 @@ mod tests {
         assert_eq!(sheet_dir("", &mut used), "sheet");
         assert_eq!(sheet_dir("", &mut used), "sheet_2");
         assert_eq!(used.len(), 7, "every name got its own directory");
+    }
+
+    #[test]
+    fn a_sheet_directory_is_short_enough_for_the_filesystem() {
+        // A layout name of 300 characters made `sheets/<name>/overview.png`
+        // longer than the 255-byte per-component limit NTFS and ext4 both
+        // impose; the write failed, `export_package` returned Err, and the
+        // four other layouts, the tiles and every record file went with it,
+        // leaving a directory with no manifest.json. The same file with a
+        // 255-character name exported fine, so the limit itself was the
+        // threshold -- and the dedup suffix could cross it on its own.
+        let mut used = BTreeSet::new();
+        let long = "L".repeat(300);
+        let first = sheet_dir(&long, &mut used);
+        assert_eq!(first, "L".repeat(MAX_SHEET_DIR));
+        // Two names that differ only past the cut still get a directory
+        // each, and the suffix stays inside the limit.
+        let second = sheet_dir(&format!("{long}-other"), &mut used);
+        assert_eq!(second, format!("{}_2", "L".repeat(MAX_SHEET_DIR)));
+        for dir in [&first, &second] {
+            assert!(dir.len() < 255, "{} bytes", dir.len());
+            assert!(dir.is_ascii(), "sanitising leaves ASCII: {dir}");
+        }
+        // A name at the cap keeps every character of it.
+        let exact = "N".repeat(MAX_SHEET_DIR);
+        assert_eq!(sheet_dir(&exact, &mut used), exact);
     }
 
     #[test]
