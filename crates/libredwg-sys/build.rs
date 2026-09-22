@@ -179,10 +179,14 @@ fn main() {
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")
         .allowlist_function("get_next_owned_subentity")
-        .allowlist_function("dwg_object_polyline_2d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_2d_get_points")
-        .allowlist_function("dwg_object_polyline_3d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_3d_get_points")
+        // Pre-R13 files fill neither `first_vertex` nor `vertex[]`, so a
+        // polyline's vertices are only reachable by object order there; this
+        // is what LibreDWG's own pre-R13 branch walks. `dwg_object_polyline_
+        // {2,3}d_get_{points,numpoints}` are deliberately *not* bound: for
+        // R13-R2000 they walk `first_vertex..last_vertex` with a condition
+        // that ends the loop before the last vertex and so return N-1 (see
+        // `convert::polyline_vertices`).
+        .allowlist_function("dwg_next_object")
         // Named explicitly because src/lib.rs's hand-written
         // Dwg_MLINE_vertex refers to it, not only because the polyline
         // accessors above return it.

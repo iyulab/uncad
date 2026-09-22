@@ -390,7 +390,8 @@ mod tests {
                 mlinestyle_name: "STANDARD".to_string(),
             }),
             Entity::Region(solid3d.clone()),
-            Entity::PolylinePFace(solid3d),
+            Entity::PolylinePFace(solid3d.clone()),
+            Entity::PolylineMesh(solid3d),
             Entity::Polyline2D(lwpoly),
             Entity::Tolerance(ToleranceEntity {
                 common: c.clone(),
@@ -451,6 +452,7 @@ mod tests {
                 | Entity::MLine(_)
                 | Entity::Region(_)
                 | Entity::PolylinePFace(_)
+                | Entity::PolylineMesh(_)
                 | Entity::Polyline2D(_)
                 | Entity::Tolerance(_)
                 | Entity::AcadTable(_)

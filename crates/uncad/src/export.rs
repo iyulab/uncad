@@ -58,6 +58,7 @@ use std::time::Instant;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
+use crate::color::effective_layer;
 use crate::crop::{self, CropMode, CropReport, Extent, Rect};
 use crate::model::{Entity, InsertEntity, Point2D, Point3D};
 use crate::png::{self, Fonts, PngError};
@@ -626,7 +627,7 @@ fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
     // [`crate::limits`].
     let mut budget = crate::limits::MAX_BLOCK_REFS;
     for e in top {
-        collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut budget, &mut out);
+        collect_texts(db, e, &Affine::IDENTITY, "", None, 0, &mut budget, &mut out);
     }
     // One text can be reached twice: a DXF whose ATTRIB is owned by the
     // block record gives the containing block an ATTRIB child *and* (from
@@ -638,11 +639,18 @@ fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
     out
 }
 
+/// `reference_layer` is the layer of the innermost enclosing block
+/// reference (`None` at the top level): a text created on layer 0 inside a
+/// block definition is on the layer of the INSERT that places it, so that is
+/// the layer its record must name -- the same resolution the renderer uses
+/// for its colour (`crate::color::effective_layer`).
+#[allow(clippy::too_many_arguments)]
 fn collect_texts(
     db: &CadDatabase,
     e: &Entity,
     affine: &Affine,
     prefix: &str,
+    reference_layer: Option<&str>,
     depth: u32,
     budget: &mut u32,
     out: &mut Vec<PlacedText>,
@@ -657,6 +665,7 @@ fn collect_texts(
             format!("{prefix}/{handle}")
         }
     };
+    let layer_of = |layer: &str| effective_layer(layer, reference_layer).to_string();
     let scale = affine.length_scale();
     match e {
         Entity::Text(t) => {
@@ -686,7 +695,7 @@ fn collect_texts(
             out.push(PlacedText {
                 id: id(&t.common.handle),
                 kind: "TEXT",
-                layer: t.common.layer.clone(),
+                layer: layer_of(&t.common.layer),
                 text: t.text_plain.clone(),
                 raw: t.text.clone(),
                 height,
@@ -723,7 +732,7 @@ fn collect_texts(
             out.push(PlacedText {
                 id: id(&a.common.handle),
                 kind: "ATTRIB",
-                layer: a.common.layer.clone(),
+                layer: layer_of(&a.common.layer),
                 text: a.text_plain.clone(),
                 raw: a.text.clone(),
                 height,
@@ -755,7 +764,7 @@ fn collect_texts(
             out.push(PlacedText {
                 id: id(&m.common.handle),
                 kind: "MTEXT",
-                layer: m.common.layer.clone(),
+                layer: layer_of(&m.common.layer),
                 text: m.text_plain.clone(),
                 raw: m.text.clone(),
                 height,
@@ -793,6 +802,7 @@ fn collect_texts(
                         &Entity::Attrib(a.clone()),
                         affine,
                         prefix,
+                        reference_layer,
                         depth,
                         budget,
                         out,
@@ -812,6 +822,7 @@ fn collect_texts(
                     child,
                     &child_affine,
                     &child_prefix,
+                    Some(effective_layer(&i.common.layer, reference_layer)),
                     depth + 1,
                     budget,
                     out,
@@ -847,6 +858,7 @@ fn collect_texts(
                     child,
                     &child_affine,
                     &child_prefix,
+                    Some(effective_layer(&t.common.layer, reference_layer)),
                     depth + 1,
                     budget,
                     out,
@@ -866,7 +878,7 @@ fn collect_texts(
             out.push(PlacedText {
                 id: id(&t.common.handle),
                 kind: "TOLERANCE",
-                layer: t.common.layer.clone(),
+                layer: layer_of(&t.common.layer),
                 text: t.text_plain.clone(),
                 raw: t.text_value.clone(),
                 height: t.text_height * scale,

@@ -35,10 +35,15 @@ pub struct EntityCommon {
     /// ignored at render time), 0 is BYBLOCK, 256 is BYLAYER, anything else
     /// is a direct palette index.
     pub color_index: i16,
-    /// Explicit 24-bit truecolor override, present only when
-    /// `Dwg_Color.method == DWG_COLOR_METHOD_TRUECOLOR`. `Dwg_Color.rgb`
-    /// always holds *something*, so the method is what decides whether the
-    /// entity really opted into a direct RGB color.
+    /// Explicit 24-bit truecolor override (DXF group 420), present only when
+    /// the file really states one. `Dwg_Color.rgb` always holds *something*
+    /// -- LibreDWG's DXF reader fills it from its own ACI palette for an
+    /// entity that gave only a group 62 index, and its R2004+ DWG reader
+    /// leaves `method` unset even for a real override -- so
+    /// `convert::split_entity_color` decides from the flag, the method and
+    /// the palette together. See its doc for the two cases it cannot tell
+    /// apart. Before 0.3.0 this was `method == TRUECOLOR` alone, which no
+    /// DWG entity ever satisfied and every ACI-only DXF entity did.
     pub true_color: Option<u32>,
     /// The entity's own invisible flag (DXF 60). Since 0.3.0; see
     /// [`crate::visibility`] for what hides an entity.
@@ -1045,6 +1050,12 @@ pub enum Entity {
     /// inherently 3D as an ACIS solid's wireframe.
     #[serde(rename = "POLYLINE_PFACE")]
     PolylinePFace(Solid3DEntity),
+    /// POLYLINE_MESH ("polygon mesh"): an `m` by `n` grid of vertices, whose
+    /// wireframe is the grid lines. `convert.rs` builds the edges from
+    /// `num_m_verts`/`num_n_verts` and the closed-in-M/closed-in-N flags --
+    /// rendered like [`Entity::PolylinePFace`], the other old-style mesh.
+    #[serde(rename = "POLYLINE_MESH")]
+    PolylineMesh(Solid3DEntity),
     #[serde(rename = "POLYLINE_2D")]
     Polyline2D(LwPolylineEntity),
     #[serde(rename = "TOLERANCE")]
@@ -1095,6 +1106,7 @@ impl Entity {
             Entity::MLine(e) => &e.common,
             Entity::Region(e) => &e.common,
             Entity::PolylinePFace(e) => &e.common,
+            Entity::PolylineMesh(e) => &e.common,
             Entity::Polyline2D(e) => &e.common,
             Entity::Tolerance(e) => &e.common,
             Entity::AcadTable(e) => &e.common,
@@ -1133,6 +1145,7 @@ impl Entity {
             Entity::MLine(_) => "MLINE",
             Entity::Region(_) => "REGION",
             Entity::PolylinePFace(_) => "POLYLINE_PFACE",
+            Entity::PolylineMesh(_) => "POLYLINE_MESH",
             Entity::Polyline2D(_) => "POLYLINE_2D",
             Entity::Tolerance(_) => "TOLERANCE",
             Entity::AcadTable(_) => "ACAD_TABLE",
