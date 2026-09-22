@@ -10,6 +10,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- `uncad::limits`: the renderer's robustness caps (`MAX_BLOCK_REF_DEPTH`,
+  `MAX_BLOCK_REFS`, `MAX_SVG_BODY_BYTES`, `MAX_ENTITY_POINTS`, `MAX_HATCH_TILE_SPAN`) in
+  one documented place, and `LimitReport`, which says what they took away from a render.
+  It is carried by `ToSvgResult::limits` and `ToPngResult::limits`, printed by the CLI as
+  a warning, and written into a package's `report.json` under `limits` (and as a
+  `warnings` entry). Empty for every well-formed drawing.
 - `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
   (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
   `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
@@ -227,6 +233,57 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Not fixed, newly measured and documented: one changed byte in a class name makes
+  LibreDWG's own DXF reader peak at 11.3 GB on a 143 KB file -- and succeed. It is below
+  the FFI boundary, so nothing in this crate can refuse it; see `docs/CAVEATS.md`, "A
+  corrupt DWG can abort the process below the FFI boundary", which the measurement is
+  filed under along with the unchecked null dereference in `get_next_owned_subentity`.
+- A corrupt DWG could make *this crate* (not LibreDWG) recurse until the stack ran out.
+  An INSERT owns its ATTRIBs, the one place `convert_entity` recurses; three flipped bytes
+  of `example_2000.dwg` point that chain back at the INSERT, and the conversion then
+  recursed endlessly -- a 512 MB stack did not survive it, while the decoder alone read
+  the same file without complaint. The walk now stops at the first subentity that is not
+  an ATTRIB, and is bounded by `limits::MAX_SUBENTITY_DEPTH` and
+  `limits::MAX_OWNED_SUBENTITIES` (the latter against a chain damage turned into a ring);
+  the POLYLINE subentity walks carry the same length bound. See `docs/CAVEATS.md`, which
+  also records the unchecked null dereference this exposed in the vendored
+  `get_next_owned_subentity`, left in place as a below-the-boundary fix.
+- A corrupt drawing could make `uncad export` peak at 5.7 GB over 132 s. A tile
+  rasterizes every part whose extent touches it, so one INSERT that expanded into a
+  picture-wide part is re-assembled and re-parsed for every tile at every zoom level, on
+  up to sixteen threads at once -- where the largest real sample's 18 MB of body is spread
+  over 40 000 small parts and exports in 3.2 s at 402 MB. Rendering one top-level entity
+  now stops at `limits::MAX_ENTITY_SVG_BYTES` (4 MiB) and the part is dropped whole rather
+  than shown half-drawn; the package leaves such an entity out of its records as well, on
+  the rule the crop and the hidden-entity screen already follow. Its text walk gained the
+  block-expansion budget too. The same file now exports in 3.6 s at 344 MB, with a 2.8 MB
+  package instead of a 150 MB one holding 200 000 copies of the same string.
+- A corrupt drawing could make the *rasterizer* run for minutes on a small SVG. Two
+  finite-but-absurd numbers did it, both found by re-running the fuzz sweep after the
+  allocation caps landed. A coordinate of 1e150 is finite, and one entity carrying it
+  dragged the measured extents, the viewBox (1.45e150 units wide) and the automatic
+  stroke width (5.2e149) with it; an entity's coordinates are now held to
+  `limits::MAX_WORLD_COORDINATE` (1e15), the bound `crop::Rect::is_sane` already applied
+  to a header's `$EXTMIN`/`$EXTMAX`, both as written and after the block transform. And a
+  bulge of 1e-160 over a hundred-unit segment is an arc of radius 1e238, which the same
+  drawing emitted as an SVG `A` command; rasterizing it did not finish in five minutes at
+  any image size, 200 px included. A radius that large is a straight line and is now drawn
+  as one. The drawing rasterizes in 0.46 s.
+- A corrupt drawing could make the *renderer* attempt a multi-gigabyte allocation and
+  abort the process on the failure. One flipped byte of `example_2000.dwg` (offset
+  130005) redirects a block record's owned-entity chain so the block holds eight INSERTs
+  of itself beside its fifty drawable entities; the file parsed in 0.03 s and rendering
+  it then spent three minutes growing one SVG string until a 12,074,460,607-byte
+  reallocation killed the process. Every number the renderer turns into an allocation
+  size or a loop bound is now capped, with the caps named and explained in one place
+  (`uncad::limits`): block-reference nesting (20) and total expansions (100 000), the
+  emitted drawing body (64 MiB, the backstop behind the rest), the points one entity may
+  draw with (100 000), and how much larger than the shape it fills a HATCH pattern's tile
+  may be (16x -- a corrupt spacing of 1e12 over a ten-unit boundary asks resvg for a
+  pixmap 1e11 pixels on a side). The same drawing now renders in 1.4 s. No corpus file
+  and none of the seven AutoCAD samples engages any cap: their documents are unchanged
+  byte for byte. See `docs/CAVEATS.md`, "Every number the renderer takes from the file
+  is bounded".
 - A DXF of R2007 or later resolved no layer name and no block reference. Every entity
   whose layer name was longer than one character came back with `layer: ""`, and every
   INSERT with `block_name: ""`, so the renderer drew nothing for any block reference,

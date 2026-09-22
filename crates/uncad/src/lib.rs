@@ -15,6 +15,7 @@ pub mod export;
 pub mod geom;
 pub mod header;
 pub mod json;
+pub mod limits;
 pub mod model;
 pub mod png;
 pub mod svg;
@@ -32,6 +33,7 @@ pub use crop::{CropMode, CropReport, CropSource, Rect};
 pub use export::{ExportError, ExportOptions, ExportReport, Profile};
 pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
+pub use limits::LimitReport;
 pub use model::Entity;
 pub use png::{
     Background, Fonts, PngError, PngSize, ToPngOptions, ToPngResult, BUNDLED_FONT_FAMILY,

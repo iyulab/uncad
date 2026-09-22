@@ -449,6 +449,127 @@ angle made the arc-bounds walk (`geom::BulgeArc::bounds`, one step per quarter t
 spin forever -- `to_svg`, `to_png` and `export_package` never returned. That walk is now
 bounded at four quarter crossings by construction, which is all any arc can have.
 
+## Every number the renderer takes from the file is bounded (since 0.3.0)
+
+A coordinate that is `NaN` costs one undrawn entity (the section above). A *count* that is
+wrong costs the process: it becomes an allocation size or a loop bound, and nothing in the
+arithmetic says how big is too big. One flipped byte of `lib/libredwg/test/test-data/`
+`example_2000.dwg` (offset 130005, `0x80` -> `0x4B`) redirects the `CIRKLO_PUNKTOJ` block
+record's owned-entity chain so the block holds eight INSERTs **of itself** beside its fifty
+drawable entities. The file parsed in 0.03 s and reported nothing odd; rendering it then
+spent three minutes growing one SVG string and aborted the process on a **12,074,460,607-byte**
+reallocation. A depth cap alone does not help -- eight self-references reach 8^20 instances
+long before twenty levels of nesting.
+
+`uncad::limits` now names every such bound in one place, with the reasoning on each
+constant:
+
+| Constant | Value | What it bounds |
+| --- | --- | --- |
+| `MAX_BLOCK_REF_DEPTH` | 20 | how deep block references may nest |
+| `MAX_BLOCK_REFS` | 100 000 | how many references one render expands in total (the *breadth* the depth cap cannot see) |
+| `MAX_SVG_BODY_BYTES` | 64 MiB | how large the emitted drawing body may grow -- the backstop behind the rest |
+| `MAX_ENTITY_SVG_BYTES` | 4 MiB | how much one top-level entity may draw before it is left out altogether |
+| `MAX_ENTITY_POINTS` | 100 000 | how many file-supplied points one entity may draw with |
+| `MAX_HATCH_TILE_SPAN` | 16x the boundary | how much larger than the shape it fills a HATCH pattern's tile may be |
+| `MAX_WORLD_COORDINATE` | 1e15 | the largest coordinate, radius or size an entity may be drawn with |
+| `MAX_SUBENTITY_DEPTH` | 2 | how deep an owned-subentity walk may recurse on the way in (see the section below) |
+| `MAX_OWNED_SUBENTITIES` | 100 000 | how many subentities one such walk may hand back |
+
+Every cap engaging is *reported*, never silent: `ToSvgResult::limits` and
+`ToPngResult::limits` carry a `LimitReport`, the CLI prints it as a warning, and a package
+puts it in `report.json` under `limits` and in `warnings`. The same drawing now renders in
+1.4 s to a 67 MB SVG saying it dropped 3 496 block references and 869 entities.
+
+Not every one of these is about memory. Two of them bound the *rasterizer's* work, which a
+finite number can run away with just as easily; both were found by the fuzz sweep after the
+allocation caps landed, on drawings that produced a perfectly small SVG:
+
+- **A coordinate of 1e150 is finite,** and one entity carrying it takes the measured
+  extents with it -- and so the viewBox, the automatic stroke width and every length
+  derived from them. One fuzzed `example_2000.dwg` wrote a 590 KB SVG with a viewBox
+  1.45e150 units wide and `stroke-width="5.2e149"`; `to_png` had not returned after five
+  minutes. `MAX_WORLD_COORDINATE` is the bound `crop::Rect::is_sane` already applied to a
+  header's `$EXTMIN`/`$EXTMAX`, now applied to an entity's own coordinates too -- both as
+  written and after the block transform, since a corrupt block scale lands a sane
+  coordinate just as far out.
+- **A bulge of 1e-160 over a hundred-unit segment is an arc of radius 1e238.** The same
+  drawing emitted `A 7.1e238 7.1e238 ...` between two points a few thousand units apart,
+  and rasterizing that did not finish in five minutes at *any* image size -- 200 px
+  included, so it was the arc-to-bezier conversion and not the pixel count. A radius that
+  large is a straight line, and is now drawn as one. (This was 0.46 s after the fix.)
+
+Three of the caps deserve their reasoning spelled out:
+
+- **One entity covering the whole picture is what costs a package, not a large drawing.**
+  A tile rasterizes every part whose extent touches it, so a single INSERT that expanded
+  into a picture-wide part is re-assembled and re-parsed for every tile at every zoom
+  level, on up to sixteen threads at once. The 18 MB of body the largest real sample emits
+  is spread over 40 000 small parts, so each tile keeps a handful and `uncad export` peaks
+  at 402 MB in 3.2 s; a fuzzed `example_2000.dwg` whose body was the same order of
+  magnitude but held in a few huge parts peaked at **5.7 GB over 132 s**. So rendering one
+  part stops at `MAX_ENTITY_SVG_BYTES` -- which bounds the work -- and the part is then
+  dropped whole rather than shown half-drawn. The package excludes such an entity from its
+  *records* too, on the same rule the crop and the hidden-entity screen already follow:
+  records cover what the picture shows. That file now exports in 3.6 s at 344 MB, and its
+  package is 2.8 MB instead of 150 MB (it had been writing 200 000 text records -- the same
+  string repeated by the self-referencing block -- across 1 502 shard files). The
+  package's own text walk carries the expansion budget too, for the same
+  breadth-versus-depth reason.
+
+
+- **The output budget is what actually bounds the allocation.** It is checked before each
+  entity, at every level of the block walk, so exhausting it unwinds the whole walk rather
+  than merely skipping one entity. The finished document can exceed it only by the last
+  entity drawn plus the `<g>` wrappers closing above it.
+- **A HATCH pattern's spacing is the SVG `<pattern>` tile's size in user units,** and resvg
+  allocates a pixmap for that tile at the *device* scale of the element being filled. A
+  corrupt spacing of 1e12 over a ten-unit boundary therefore asks for a pixmap around 1e11
+  pixels on a side. Such a tile can show at most one line anyway, so the pattern is dropped
+  and the hatch keeps its outline. The opposite direction (a spacing far *below* the pixel
+  grid) is safe without a cap: the tile rounds to a pixel or to nothing, and tiny-skia's
+  pattern shader costs one pass over the filled pixels however many repeats that is.
+
+The caps are far above any real drawing: the largest sample this project renders
+(`AutoCADSamples5.dwg`, ~40 000 entities) emits 18 MB of SVG, under a third of the output
+budget, and none of the corpus files or the seven AutoCAD samples engage any cap at all --
+their documents are byte-for-byte what they were before. `crates/uncad/tests/limits.rs` is
+the regression: the one-byte corruption above, a self-referencing block, a block chain
+deeper than the cap, a block fanning out below it, a polyline past `MAX_ENTITY_POINTS` and
+a hatch whose tile dwarfs its shape.
+
+## Fixed: a corrupt attribute chain recursed until the stack ran out (since 0.3.0)
+
+An INSERT owns its ATTRIBs, and an ATTRIB is itself an entity, so converting an INSERT
+converts them too -- the one place `convert::convert_entity` recurses. Three flipped bytes
+of `example_2000.dwg` (offsets 581356, 581784 and 582336, bisected out of a fuzzed file's
+1 155 mutated offsets) point that chain back at the INSERT, and the conversion then
+recursed endlessly: a 512 MB stack was not enough either, and the process died with
+STATUS_STACK_OVERFLOW (0xC00000FD). The decoder itself was untouched by this -- reading the
+same file through `uncad_dwg_read_bytes` alone returned normally -- so it was this crate's
+walk, above the FFI boundary, that died.
+
+The walk now stops at the first subentity whose type is not ATTRIB (an INSERT owns nothing
+else, and LibreDWG's own R2000 walker uses the same condition to terminate), and is bounded
+besides by `limits::MAX_SUBENTITY_DEPTH` (2) and `limits::MAX_OWNED_SUBENTITIES` (100 000)
+-- the second against a chain damage has turned into a *ring*, which is not recursion but a
+loop that never ends. The other two owned-subentity walks (`polyline_pface_wireframe`,
+`polyline_2d_bulges`) carry the same length bound. `crates/uncad/tests/corrupt_dwg.rs` is
+the regression.
+
+**A null dereference below the boundary is still reachable from here.**
+`get_next_owned_subentity()` in the vendored `dwg.c` (line 1426) calls
+`dwg_next_object (current)` and then reads `obj->fixedtype` in the R13-R2000 INSERT, MINSERT
+and POLYLINE branches without checking for null -- and `dwg_next_object` returns null when
+`current` is the last object in the file. With only the recursion bounded, the three-byte
+file above reached exactly that and died with an access violation (0xC0000005); adding
+`if (!obj) return NULL;` at the top of the function made the same file parse cleanly, which
+is how the diagnosis was confirmed. Stopping the walk at the first non-ATTRIB takes this
+crate off that path for that file, but not in general: a corrupt drawing whose *last* object
+is a real ATTRIB on an INSERT's chain can still reach the unchecked read. It is left in
+place here because it is below the FFI boundary -- the one-line fix belongs upstream, and
+this vendored copy already carries two local patches that a submodule update must re-apply.
+
 ## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
@@ -572,10 +693,29 @@ run, and a sweep of 24 corpus drawings x (5 truncations + 4 byte-flip mutations 
 tag) hit the same abort on 8 of 12 seeds. After the fix the same sweep over 12 seeds (5 760
 CLI runs: summary, PNG and `export`) plus 18 parse-only seeds (4 320 more runs) produced no
 abort at all. That is evidence, not a guarantee: the decoder is ~100 000 lines of C over
-attacker-controlled offsets and lengths, so treat the risk as still present. The sweep did
-find that a corrupt drawing can still make the *renderer* (not the parser) attempt a
-multi-gigabyte allocation and abort on the failure, which the same out-of-process advice
-covers.
+attacker-controlled offsets and lengths, so treat the risk as still present.
+
+The sweep also found that a corrupt drawing could make the *renderer* (not the parser)
+attempt a multi-gigabyte allocation and abort on the failure. That one was above the FFI
+boundary and is fixed -- see "Every number the renderer takes from the file is bounded"
+above.
+
+**A one-byte DXF corruption can still cost eleven gigabytes, inside the decoder.** Re-running
+the sweep against the fixed renderer turned up `lib/libredwg/test/test-data/2018/Leader.dxf`
+with byte 8479 changed from `0x65` to `0xEF` -- the final `e` of `AcDbVisualStyle`, a class
+name in the CLASSES section. `uncad_dxf_read_bytes` then peaks at **11.3 GB of working set
+over 7 seconds** on a 143 KB file, and *succeeds*: it returns 0 with 182 objects, and the
+summary, the SVG and the PNG that follow are all fine. Nothing above the boundary sees the
+allocation happen, and nothing above it can refuse it; on a machine with less memory than
+this one the allocation fails and the process dies with it. Bisected to that single byte
+from a fuzzed file's 71 mutated offsets; measured with `GetProcessMemoryInfo` on the
+release build, calling the shim directly so the cost is unambiguously the C decoder's.
+There is no regression test for it -- a test that allocates 11 GB does not belong in a
+suite -- which is the other half of why the out-of-process advice above is not optional.
+The same sweep found a milder DWG case in the same place: a 31 KB `2000/Spline.dwg` with
+32 flipped bytes reaches 634 MB before the decoder gives up and returns a clean
+`ParseError` (critical read error 320), which is a transient cost rather than a hazard but
+has the same shape and the same absence of anything this crate can do about it.
 
 ## Local patches to the vendored LibreDWG
 

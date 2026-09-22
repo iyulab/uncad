@@ -4,6 +4,7 @@
 use super::format::{clean, neg};
 use super::Ctx;
 use crate::dynapi::Point2D;
+use crate::limits::MAX_HATCH_TILE_SPAN;
 use crate::model::{HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine};
 use std::fmt::Write as _;
 
@@ -16,6 +17,16 @@ use std::fmt::Write as _;
 /// color), so the other order would always shadow the gradient branch.
 pub(super) fn render_hatch(h: &HatchEntity, color: &str, ctx: &mut Ctx) -> Option<String> {
     let mut subpaths = Vec::new();
+    // The boundary's own extent, in the coordinates the pattern tiles:
+    // `render_pattern_line` needs it to tell a pattern apart from one whose
+    // spacing dwarfs the shape (see [`MAX_HATCH_TILE_SPAN`]).
+    let mut span = 0.0f64;
+    let (mut lo_x, mut hi_x, mut lo_y, mut hi_y) = (
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    );
     for path in &h.boundary_paths {
         let pts: Vec<Point2D> = match path {
             HatchBoundaryPath::Polyline(vertices) => vertices.clone(),
@@ -23,6 +34,14 @@ pub(super) fn render_hatch(h: &HatchEntity, color: &str, ctx: &mut Ctx) -> Optio
         };
         if pts.len() < 2 {
             continue;
+        }
+        for p in &pts {
+            if p.x.is_finite() && p.y.is_finite() {
+                lo_x = lo_x.min(p.x);
+                hi_x = hi_x.max(p.x);
+                lo_y = lo_y.min(p.y);
+                hi_y = hi_y.max(p.y);
+            }
         }
         ctx.consider_all(&pts);
         let frame = ctx.frame;
@@ -53,11 +72,14 @@ pub(super) fn render_hatch(h: &HatchEntity, color: &str, ctx: &mut Ctx) -> Optio
         ));
     }
 
+    if lo_x.is_finite() {
+        span = (hi_x - lo_x).hypot(hi_y - lo_y);
+    }
     let scale = ctx.scale;
     let pattern_fills: Vec<String> = h
         .pattern_lines
         .iter()
-        .filter_map(|pl| render_pattern_line(pl, color, scale, &d, ctx))
+        .filter_map(|pl| render_pattern_line(pl, color, scale, span, &d, ctx))
         .collect();
     if pattern_fills.is_empty() {
         // No usable pattern data (unreadable deflines, or every defline
@@ -182,6 +204,7 @@ fn render_pattern_line(
     pl: &HatchPatternLine,
     color: &str,
     stroke_scale: f64,
+    boundary_span: f64,
     path_d: &str,
     ctx: &mut Ctx,
 ) -> Option<String> {
@@ -199,6 +222,18 @@ fn render_pattern_line(
     } else {
         spacing
     };
+    // A spacing (or dash cycle) far larger than the shape it fills. The
+    // file's number is the SVG `<pattern>` tile's size in user units, and
+    // the rasterizer allocates a pixmap for that tile at the *device* scale
+    // of the filled element -- so a corrupt 1e12 over a ten-unit boundary
+    // is a request for a pixmap 1e11 pixels on a side, which is how a bad
+    // hatch takes the process down. Such a tile can show at most one line
+    // anyway: the pattern is dropped and the caller's outline stands in.
+    // See [`crate::limits`].
+    if boundary_span > 0.0 && width.max(spacing) > MAX_HATCH_TILE_SPAN * boundary_span {
+        ctx.limits.hatch_patterns_dropped += 1;
+        return None;
+    }
     let dasharray = if dashes.is_empty() {
         String::new()
     } else {
@@ -334,7 +369,7 @@ mod tests {
             offset: Point2D { x: 1.0, y: 0.0 },
             dash_pattern: vec![],
         };
-        assert!(render_pattern_line(&pl, "#000000", 1.0, "M 0 0 Z", &mut ctx).is_none());
+        assert!(render_pattern_line(&pl, "#000000", 1.0, 100.0, "M 0 0 Z", &mut ctx).is_none());
         assert!(ctx.defs.is_empty());
     }
 
@@ -349,13 +384,13 @@ mod tests {
             dash_pattern: vec![],
         };
         let path_d = "M 0 0 L 1 1 Z";
-        let first = render_pattern_line(&pl, "#000000", 1.0, path_d, &mut ctx)
+        let first = render_pattern_line(&pl, "#000000", 1.0, 100.0, path_d, &mut ctx)
             .expect("valid spacing should produce a fill");
         assert_eq!(ctx.defs.len(), 1);
         assert!(ctx.defs[0].contains("<pattern"));
         assert!(first.contains("fill=\"url(#hp0)\""));
 
-        let second = render_pattern_line(&pl, "#000000", 1.0, path_d, &mut ctx)
+        let second = render_pattern_line(&pl, "#000000", 1.0, 100.0, path_d, &mut ctx)
             .expect("second call should also succeed");
         assert_eq!(
             ctx.defs.len(),
