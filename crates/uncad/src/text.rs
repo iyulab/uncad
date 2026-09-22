@@ -291,7 +291,9 @@ pub const LINE_SPACING: f64 = 5.0 / 3.0;
 /// character (the renderer's own guess; glyph metrics refine it later),
 /// one text height tall per line (the cap height; descenders are not
 /// counted), placed by its alignment (DXF 72 / 73) and rotated about its
-/// anchor. The renderer's extents and the export's records both use this.
+/// anchor. This is what the renderer's extents, and so the crop, are built
+/// from; the export overwrites it in `texts.json` with the usvg-measured box
+/// wherever it gets one.
 pub fn estimate_text_box(
     anchor: crate::model::Point2D,
     height: f64,

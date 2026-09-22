@@ -13,8 +13,9 @@
 //! Layout of this module: options and results, the block transform, the
 //! rendering context, per-entity rendering, then [`to_svg`] itself.
 //! Submodules hold the parts that stand on their own -- [`format`] (number and
-//! string formatting), [`hatch`] (HATCH fills) and [`bounds`] (viewBox and
-//! outlier trim).
+//! string formatting), [`hatch`] (HATCH fills) and [`bounds`] (per-entity
+//! boxes and proximity clustering). The viewBox is [`crate::crop`]'s
+//! decision, taken from the extents this module measures while it draws.
 
 pub(crate) mod bounds;
 mod format;

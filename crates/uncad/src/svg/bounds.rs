@@ -1,5 +1,9 @@
-//! Per-entity bounding boxes and the proximity clustering the crop rule
-//! (`crate::crop`) builds its scale-outlier guard on.
+//! Per-entity bounding boxes, plus the corner-proximity clustering 0.2.0's
+//! trim was built on. Neither the crop rule (`crate::crop`, whose outlier
+//! guard compares sizes and distances to the median centre) nor the frame
+//! split (`crop::detached_groups`, a square-grid union-find) uses the
+//! clustering any more; it is kept for the record of why a simpler rule was
+//! rejected.
 //!
 //! A straight per-axis gap test is fundamentally wrong for drawings: a
 //! rectangular room's opposite walls only touch at the corners, so an axis-gap
@@ -30,8 +34,11 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 /// Groups boxes whose corners lie within a scale-derived epsilon of each
 /// other, via union-find over a grid of corner buckets. Returns the index
 /// groups, each sorted, in a deterministic order (by their smallest index).
-/// Not used by the crop rule any more (0.2.0's trim was built on it); kept
-/// for the frame split the export (design section 4, step 5) will need.
+/// Not used by anything the crate ships any more: 0.2.0's trim was built on
+/// it, the crop rule replaced that, and the frame split the export does
+/// (design section 4, step 5) groups by a square grid in
+/// `crop::detached_groups` instead. Kept, with its tests, as the record of
+/// the rule a corner-proximity clustering gives.
 #[allow(dead_code)]
 pub(crate) fn cluster_indices(boxes: &[Box2D]) -> Vec<Vec<usize>> {
     let n = boxes.len();

@@ -1,9 +1,9 @@
 //! Safe DWG/DXF parsing on top of `libredwg-sys`, plus JSON/SVG/PNG export
-//! of the parsed model.
+//! of the parsed model and the LLM/VLM package built from it.
 //!
 //! Reading only -- this crate does not write DWG or DXF. The shape is
-//! `DWG/DXF -> CadDatabase (entities + tables) -> to_json() | to_svg() |
-//! to_png()`.
+//! `DWG/DXF -> CadDatabase (entities + tables + header) -> to_json() |
+//! to_svg() | to_png() | export::export_package()`.
 
 mod acis;
 pub mod color;
@@ -56,7 +56,8 @@ static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 ///
 /// `entities` holds what the drawing shows (everything owned by the
 /// `*Model_Space`/`*Paper_Space*` blocks, see [`crate::model`]), `tables`
-/// the LAYER / BLOCK_RECORD / MLINESTYLE tables it resolves against, and
+/// the LAYER / BLOCK_RECORD / MLINESTYLE / DIMSTYLE / LAYOUT records it
+/// resolves against, and
 /// `header` the file-level facts and header variables (version, code page,
 /// `$INSUNITS`, `$EXTMIN`/`$EXTMAX`, `$DIMLFAC`, ...) that give the numbers
 /// their meaning. This is what [`to_json`](Self::to_json) serializes verbatim

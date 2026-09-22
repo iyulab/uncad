@@ -10,30 +10,46 @@
 //! ```text
 //! dir/
 //!   README.txt        reading order
-//!   manifest.json     source, units, crop, overview, levels, legibility, counts, files, shard_index, guidance
+//!   manifest.json     source, units, profile, crop, overview, frames, sheets, legibility, capabilities, counts, warnings, files, shard_index, guidance
 //!   drawing.json      header, units, layers with their state, blocks, counts
 //!   overview.png      the whole crop, fitted to the profile (Claude: <= 1568 px edge, <= 1568 patches)
-//!   frames/f0/tiles/z{z}/r{rr}_c{cc}.png + .json   tiles (1092 px, 224 px overlap) and sidecars
-//!   tiles.json        every tile of every level, written or empty
+//!   frames/fN/tiles/z{z}/r{rr}_c{cc}.png + .json   tiles (1092 px, 224 px overlap) and sidecars
+//!   frames/fN/overview.png   one per frame when the drawing splits into several; a single-frame drawing has overview.png alone
+//!   tiles.json        every tile of every level and frame, written or empty
+//!   sheets.json       the paper layouts: sheet rectangle and its source, plot settings, viewports
+//!   sheets/<layout>/overview.png   each layout, with the model composited through its viewports
 //!   texts.json        TEXT/MTEXT/ATTRIB, block contents included, with world boxes and tiles
 //!   dimensions.json   measured value, display string, definition points
 //!   geometry.json     every other visible entity: key points, length, area, bbox, tiles
 //!   regions.json      closed polylines: area, perimeter, centroid, the texts inside
 //!   blocks.json       block definitions and INSERT instances with attributes
-//!   strings.json      normalised string -> record ids
+//!   strings.json      NFKC-normalised string -> record ids
 //!   report.json       excluded and hidden entities with reasons, unsupported types, timings
 //!   drawing.svg       with `svg: true`;  entities.json  with `full: true`
 //! ```
 //!
+//! Two manifest fields are worth knowing about: `capabilities` says which
+//! questions this package answers exactly, and `svg_origin` is the origin
+//! `drawing.svg` is written relative to -- set only when the drawing sits
+//! far enough from zero that single-precision rasterizing would lose it.
+//!
 //! Every JSON file carries `"$schema": "uncad-package/1"` and a `units`
 //! block; record files above `shard_kb` are split into `name.NNN.json` and
-//! listed in the manifest's `shard_index`. Output is deterministic for a
-//! given input and options (maps are sorted, records ordered by id) except
-//! for `report.json`'s timings.
+//! listed in the manifest's `shard_index`. Tile sidecars are written compact,
+//! the form their 32 KB cap measures. Output is deterministic for a given
+//! input and options (maps are sorted, records ordered by id) except for
+//! `report.json`'s timings. Re-exporting into a directory first clears what
+//! the previous `manifest.json` listed, and leaves anything else there alone.
 //!
-//! Still open (0.4.0): frames for detached clusters, paper layouts, text
-//! boxes from glyph metrics (they are 0.6-em estimates here), NFKC string
-//! normalisation, a bundled font.
+//! `texts.json` boxes are measured from the shaped glyph outlines of the
+//! bundled `Uncad Sans` ([`crate::png::Fonts::Bundled`], `bbox_confidence:
+//! "measured"`), and those boxes widen the drawn extents before the frames
+//! are grouped and the tiles culled. The crop is decided before any of that,
+//! from the 0.6-em estimate in [`crate::text`].
+//!
+//! Still open (0.4.0): lineweights and linetypes in the picture, MINSERT,
+//! frames grouped by drawing scale rather than by proximity, and feeding the
+//! measured text boxes back into the crop.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
