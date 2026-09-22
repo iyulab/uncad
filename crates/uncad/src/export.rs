@@ -148,6 +148,12 @@ pub struct ExportOptions {
     /// level. Default 14.
     pub target_text_px: f64,
     pub crop: CropMode,
+    /// The padding around the crop, in drawing units, for the overview and
+    /// each frame's window. `None` (the default) is
+    /// [`crate::crop::auto_padding`]: 2 % of the longer side, at least 24
+    /// output pixels. The sheets keep their own zero padding -- a sheet is
+    /// the paper exactly. Since 0.3.0.
+    pub padding: Option<f64>,
     /// Draw hidden entities at 50 % (they never enter the records or the
     /// crop). Default `false`.
     pub include_hidden: bool,
@@ -182,6 +188,7 @@ impl Default for ExportOptions {
             max_tiles: 400,
             target_text_px: 14.0,
             crop: CropMode::Auto,
+            padding: None,
             include_hidden: false,
             shard_kb: 96,
             svg: false,
@@ -1008,7 +1015,7 @@ pub fn export_package(
 
     // --- overview: the whole crop, sized to the profile ---------------------
     let stroke_px = 1.25;
-    let fit = fit_overview(&content, &profile, None);
+    let fit = fit_overview(&content, &profile, options.padding);
     // The short edge: `fit_overview` pins the long edge at the patch
     // budget, so the aspect ratio can only squeeze the other one.
     if fit.width.min(fit.height) < 200 {
@@ -2463,7 +2470,7 @@ fn build_frame(
     tile_budget: &mut usize,
     warnings: &mut Vec<String>,
 ) -> FrameBuild {
-    let fit = fit_overview(&content, profile, None);
+    let fit = fit_overview(&content, profile, options.padding);
     let overview = reuse.unwrap_or_else(|| {
         ImageInfo::new(
             &format!("{id}/ov"),

@@ -30,6 +30,12 @@ Usage:
                                     docs/VLM_EXPORT_DESIGN.md). Re-exporting into
                                     the same directory replaces the previous package
 
+Both commands:
+  -o, --output <path>         where the result goes: the output file above
+                                (its extension picks the format) or, under
+                                'export', the package directory
+  -h, --help                  print this usage
+
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
 
@@ -82,7 +88,12 @@ Export options (uncad export):
   --no-sheets                 skip sheets.json and the paper-layout images
   --svg                       also write drawing.svg
   --full                      also write entities.json (the whole model)
-  (--crop, --no-trim, --include-hidden and --fonts apply too)
+  --padding <units>           padding around the overview and each frame's
+                                window, in drawing units (default: the
+                                automatic 2 %); the sheets keep their own
+                                zero padding
+  (--crop, --no-trim, --include-hidden and --fonts apply too; --lattice does
+   not -- the package's patch size is the profile's)
 
 Examples:
   uncad drawing.dwg
@@ -113,10 +124,10 @@ struct Args {
     crop: String,
     fonts: String,
     include_hidden: bool,
+    padding: Option<String>,
     help: bool,
     // The plain command only.
     space: String,
-    padding: Option<String>,
     lattice: Option<String>,
     fit: Option<String>,
     ppu: Option<String>,
@@ -150,9 +161,9 @@ fn parse_args(argv: &[String], command: Command) -> Result<Args, String> {
         crop: "auto".to_string(),
         fonts: "bundled".to_string(),
         include_hidden: false,
+        padding: None,
         help: false,
         space: "model".to_string(),
-        padding: None,
         lattice: None,
         fit: None,
         ppu: None,
@@ -196,10 +207,9 @@ fn parse_args(argv: &[String], command: Command) -> Result<Args, String> {
                 plain_only(flag, command)?;
                 args.space = value()?;
             }
-            "--padding" => {
-                plain_only(flag, command)?;
-                args.padding = Some(value()?);
-            }
+            // Both commands: the plain one pads its viewBox with it, the
+            // package its overview and frame windows.
+            "--padding" => args.padding = Some(value()?),
             "--lattice" => {
                 plain_only(flag, command)?;
                 args.lattice = Some(value()?);
@@ -504,6 +514,10 @@ fn export_options(args: &Args, input: &str) -> Result<ExportOptions, String> {
             None => defaults.target_text_px,
         },
         crop: parse_crop(&args.crop)?,
+        padding: match &args.padding {
+            Some(value) => Some(parse_non_negative("--padding", value)?),
+            None => None,
+        },
         include_hidden: args.include_hidden,
         shard_kb: match &args.shard_kb {
             Some(value) => parse_whole("--shard-kb", "kilobytes", value)? as usize,

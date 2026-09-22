@@ -177,6 +177,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   document -- the `export` subcommand and its options included -- and the parser's
   refusals, and `tests/read_paths.rs` reads a DWG and a DXF under a Korean
   directory name (`parse` against `parse_bytes`, error kinds).
+- `ExportOptions::padding` (CLI `uncad export --padding <units>`): the margin around the
+  overview and around each frame's own window, in drawing units. `None`, the default,
+  keeps the automatic 2 %; `Some(0.0)` puts the drawing flush against the image's edge.
+  The flag used to be refused as a rendering-only option, so a package could never have
+  anything but the automatic padding. The sheets keep their own zero padding -- a sheet
+  is the paper exactly -- and `--lattice` stays a rendering option, since the package's
+  patch size is the profile's.
 
 ### Changed
 
@@ -220,6 +227,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- `--output`, the long form of `-o`, appeared in neither `--help` nor the README, so the
+  only documented spelling was `-o`. Both now list it, in both commands.
 - A panic inside the rasterizer took the process with it. tiny-skia's scan converter
   asserts rather than returning an error when a path's coordinates overflow its
   fixed-point edge list, and the export ran it on worker threads, where the panic came

@@ -120,6 +120,32 @@ fn writes_an_svg() {
     assert!(written.contains("<svg"), "not an SVG document: {written}");
 }
 
+/// `--output` is the long spelling of `-o`, in both commands (USAGE's
+/// "Both commands" block, the README's CLI section). It reached neither,
+/// so nothing exercised the arm that accepts it.
+#[test]
+fn output_is_the_long_form_of_o() {
+    let short = TempFile::new("long-form-short.svg");
+    let long = TempFile::new("long-form-long.svg");
+    ok(&run(&[CORPUS_DXF, "-o", short.arg()]), "-o");
+    ok(&run(&[CORPUS_DXF, "--output", long.arg()]), "--output");
+    assert_eq!(
+        short.bytes(),
+        long.bytes(),
+        "--output should write what -o writes"
+    );
+
+    // And under `uncad export`, where it names the package directory.
+    let dir = TempDir::new("long-form-export");
+    let mut args = vec!["export", CORPUS_DXF, "--output", dir.arg()];
+    args.extend_from_slice(&QUICK);
+    ok(&run(&args), "export --output");
+    assert!(
+        dir.join("manifest.json").exists(),
+        "export --output should fill the package directory"
+    );
+}
+
 #[test]
 fn writes_a_png() {
     let png = TempFile::new("out.png");
@@ -344,6 +370,7 @@ fn help_exits_successfully_and_lists_the_options() {
     // Every flag a test in this file passes, so a flag cannot be added to
     // the parser without being documented (or documented without a test).
     for flag in [
+        "--output",
         "--pretty",
         "--space",
         "--crop",
@@ -800,6 +827,54 @@ fn export_max_tiles_drops_a_level_that_would_exceed_it() {
     assert!(
         uncapped.manifest()["counts"]["tiles"].as_u64().unwrap_or(0) > 1,
         "the same level fits the default budget"
+    );
+}
+
+/// `uncad export --padding`: the flag used to be refused as plain-only, so
+/// a package could only ever have the automatic 2 %.
+#[test]
+fn export_padding_sets_the_window_around_the_drawing() {
+    let input = TempFile::new("export-padding.dxf");
+    write_square(&input);
+    let world = |dir: &TempDir| -> [f64; 4] {
+        let w = dir.manifest()["overview"]["world"].clone();
+        let a = w.as_array().expect("world is [x0, y0, x1, y1]");
+        [
+            a[0].as_f64().unwrap(),
+            a[1].as_f64().unwrap(),
+            a[2].as_f64().unwrap(),
+            a[3].as_f64().unwrap(),
+        ]
+    };
+    let padding_units =
+        |dir: &TempDir| -> f64 { dir.manifest()["crop"]["padding_units"].as_f64().unwrap() };
+
+    let automatic = TempDir::new("export-padding-auto");
+    ok(&export(input.arg(), &automatic, &QUICK), "export");
+    // 2 % of the square's 10 units, and at least 24 px at the overview's
+    // scale: a fraction of a unit either way.
+    let auto = padding_units(&automatic);
+    assert!(auto > 0.0 && auto < 1.0, "automatic padding was {auto}");
+
+    let none = TempDir::new("export-padding-0");
+    let mut flags = vec!["--padding", "0"];
+    flags.extend_from_slice(&QUICK);
+    ok(&export(input.arg(), &none, &flags), "export --padding 0");
+    assert_eq!(padding_units(&none), 0.0, "--padding 0 is no padding");
+
+    let wide = TempDir::new("export-padding-20");
+    let mut flags = vec!["--padding", "20"];
+    flags.extend_from_slice(&QUICK);
+    ok(&export(input.arg(), &wide, &flags), "export --padding 20");
+    assert_eq!(padding_units(&wide), 20.0, "--padding 20 reaches the crop");
+
+    // 20 units a side around a 10-unit square is a 50-unit window, against
+    // the square itself with none: the images really do show more.
+    let (tight, roomy) = (world(&none), world(&wide));
+    let width = |w: [f64; 4]| w[2] - w[0];
+    assert!(
+        width(roomy) > width(tight) + 30.0,
+        "--padding 20 should widen the window: {tight:?} vs {roomy:?}"
     );
 }
 

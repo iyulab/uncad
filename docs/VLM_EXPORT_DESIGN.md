@@ -496,9 +496,10 @@ comes from the profile and the crop rule, so `--tile`, `--overlap`,
 not exist; and neither do `--layers`, `--exclude-layers`, `--layout`,
 `--units`, `--weights`, `--view`, `--mono`, `--jobs`, `--force`,
 `--dry-run`, `--json-report` or `-q`. Only `--crop`, `--no-trim`,
-`--include-hidden` and `--fonts` are shared with the plain command; the other
-render flags (`--space`, `--padding`, `--stroke`, `--fit`, ...) are refused
-by name on an `export` line. The `info`, `render`, `dims` and `measure`
+`--include-hidden`, `--padding` and `--fonts` are shared with the plain
+command; the other render flags (`--space`, `--stroke`, `--fit`, `--lattice`,
+...) are refused by name on an `export` line -- the package's patch size is
+the profile's, not a flag. The `info`, `render`, `dims` and `measure`
 subcommands do not exist. `uncad --help` is the current list.
 
 | Release | Phase | Files |

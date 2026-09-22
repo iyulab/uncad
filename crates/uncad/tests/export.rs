@@ -437,6 +437,72 @@ fn the_export_is_deterministic_and_options_are_honoured() {
     assert!(rc.frames[0].levels.is_empty());
 }
 
+/// `ExportOptions::padding`: the package used to take the automatic 2 %
+/// and nothing else, so a caller who wanted the drawing flush to the edge,
+/// or room around it, had no way to ask.
+#[test]
+fn padding_sets_the_window_of_the_overview_and_every_frame() {
+    // Two islands: one frame per group, so the option has to reach the
+    // frames' own windows and not only the overview's.
+    let db = two_islands();
+    let run = |name: &str, padding: Option<f64>| {
+        let tmp = TempDir::new(name);
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                frame_gap: 0.05,
+                sheets: false,
+                padding,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        (tmp, report)
+    };
+
+    let (_auto, automatic) = run("pad_auto", None);
+    let (_tight, tight) = run("pad_0", Some(0.0));
+    let (_roomy, roomy) = run("pad_200", Some(200.0));
+    assert!(automatic.frames.len() > 1, "two islands, two frames");
+
+    // With no padding the overview is the content, give or take the
+    // lattice snap; 200 units a side add 400 to a 1100-unit drawing.
+    let content = tight.crop.content.expect("the drawing has content");
+    assert!(
+        tight.overview.world.width() < content.width() * 1.05,
+        "no padding: {:?} vs {:?}",
+        tight.overview.world,
+        content
+    );
+    assert!(
+        roomy.overview.world.width() > tight.overview.world.width() + 390.0,
+        "200 units a side: {:?} vs {:?}",
+        roomy.overview.world,
+        tight.overview.world
+    );
+    // The automatic padding sits between the two.
+    assert!(
+        automatic.overview.world.width() > tight.overview.world.width()
+            && automatic.overview.world.width() < roomy.overview.world.width()
+    );
+    assert_eq!(tight.crop.padding_units, 0.0);
+    assert_eq!(roomy.crop.padding_units, 200.0);
+
+    // Each frame's own window, not just the whole crop's.
+    for (a, b) in tight.frames.iter().zip(&roomy.frames) {
+        assert_eq!(a.content, b.content, "the same group either way");
+        assert!(
+            b.overview.world.width() > a.overview.world.width() + 390.0,
+            "frame {}: {:?} vs {:?}",
+            a.id,
+            b.overview.world,
+            a.overview.world
+        );
+    }
+}
+
 #[test]
 fn hidden_entities_stay_out_of_the_records() {
     let db = uncad::parse(HIDDEN).expect("fixture must parse");
