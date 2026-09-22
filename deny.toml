@@ -21,15 +21,19 @@
 # the `sources` and `bans` checks below walk, so a test-only dependency from an
 # unknown registry or a git URL is caught like any other.
 #
-# It does NOT widen the license check, and that is worth knowing rather than
-# assuming. Measured with cargo-deny 0.20.2: setting this takes the gathered
-# graph from 92 crates to 134, yet a test-only dependency's license is still
-# never evaluated -- adding its license to `allow` below reports the license as
-# "not encountered", and removing the matching entry from `exceptions` does not
-# make the check fail. So the license grade of a development dependency is
+# It did not widen the license check, and that is worth writing down rather
+# than assuming either way. Measured with cargo-deny 0.20.2 and this config:
+# setting this takes the gathered graph from 92 crates to 134, and the
+# test-only crate does appear in the dependency trees the tool prints -- yet
+# its license is not evaluated. Adding that license to `allow` below reports
+# it as "not encountered", and deleting the matching `exceptions` entry does
+# not make the check fail. No reason for the omission is reported, so the
+# cause is unknown; only the behaviour is established.
+#
+# Until it is understood, the license grade of a development dependency is
 # established by reading it and recording it in `docs/THIRD_PARTY_NOTICES.md`,
-# not by this gate. An entry here for such a crate would read as coverage that
-# does not exist, which is worse than no entry.
+# which is where the obligation lives anyway. An entry here for such a crate
+# would read as coverage that has not been shown to exist.
 exclude-dev = false
 
 [licenses]
