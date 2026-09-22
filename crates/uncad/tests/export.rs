@@ -1694,10 +1694,21 @@ fn a_drawing_that_is_one_point_gets_a_window_it_can_be_seen_in() {
             "{name}: {} px/unit",
             report.overview.ppu
         );
-        // The picture shows the entity: a POINT is a filled dot, a RAY and
-        // an XLINE cross the window.
+        // The picture shows the entity. A RAY and an XLINE cross the whole
+        // window, so they blacken thousands of pixels; a POINT is drawn as
+        // a cross sized in *pixels* (5 px across at the 1.25 px stroke --
+        // see `svg::POINT_CROSS_ARMS`), so its ink is the two 5 x 1.25 px
+        // arms, about a dozen pixels before antialiasing. Until 0.3.0 the
+        // POINT was a half-*unit* dot, which is this big only because this
+        // drawing is ten units wide; on an ordinary plan it was sub-pixel
+        // and rasterized to nothing at all.
         let png = std::fs::read(tmp.0.join("overview.png")).unwrap();
-        assert!(dark_pixels(&png) > 100, "{name}: a blank overview");
+        let floor = if name == "Point" { 8 } else { 100 };
+        assert!(
+            dark_pixels(&png) > floor,
+            "{name}: {} dark pixels",
+            dark_pixels(&png)
+        );
 
         // The rounded world box is a real rectangle, and the sidecar's
         // affine still maps that box's corner to the image's corner.
@@ -2533,4 +2544,152 @@ fn record_building_does_not_grow_with_the_square_of_the_entity_count() {
         "50 000 entities took {big:.2}s against {small:.2}s for 12 500 ({:.1}x)",
         big / small
     );
+}
+
+/// A model space of `entities`, wired up the way a parsed file has it.
+fn model_space(entities: Vec<uncad::Entity>) -> uncad::CadDatabase {
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+fn common(handle: &str) -> uncad::model::EntityCommon {
+    uncad::model::EntityCommon {
+        handle: handle.into(),
+        layer: "0".into(),
+        ..uncad::model::EntityCommon::default()
+    }
+}
+
+#[test]
+fn a_lines_length_is_its_length_in_three_dimensions() {
+    use uncad::model::{LineEntity, Point3D};
+    // W7. `from`/`to` are the plan projection, so a LINE that rises had no
+    // way to be checked from the record -- and its plan length was
+    // published under a bare `length` with `confidence: "exact"`.
+    //
+    // The expected numbers are 3-4-5 triangles, not this crate's output:
+    // (0,50,0)->(300,50,400) is 300 across and 400 up, so 500; the
+    // vertical one is 0 across and 100 up, so 100; the flat one is 400
+    // across and 0 up, so 400 and no `dz` at all.
+    let db = model_space(vec![
+        uncad::Entity::Line(LineEntity {
+            common: common("A"),
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 100.0,
+            },
+        }),
+        uncad::Entity::Line(LineEntity {
+            common: common("B"),
+            start_point: Point3D {
+                x: 0.0,
+                y: 50.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 300.0,
+                y: 50.0,
+                z: 400.0,
+            },
+        }),
+        uncad::Entity::Line(LineEntity {
+            common: common("C"),
+            start_point: Point3D {
+                x: 0.0,
+                y: 100.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 400.0,
+                y: 100.0,
+                z: 0.0,
+            },
+        }),
+    ]);
+    let tmp = TempDir::new("line3d");
+    export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+    let geometry = records(&tmp.0, "geometry");
+    let by_id = |id: &str| {
+        geometry
+            .iter()
+            .find(|g| g["id"] == id)
+            .unwrap_or_else(|| panic!("{id} in {geometry:?}"))
+            .clone()
+    };
+
+    let vertical = by_id("A");
+    assert_eq!(vertical["length"], 100.0);
+    assert_eq!(vertical["length_plan"], 0.0);
+    assert_eq!(vertical["dz"], 100.0);
+    assert_eq!(vertical["confidence"], "exact");
+
+    let rafter = by_id("B");
+    assert_eq!(rafter["length"], 500.0);
+    assert_eq!(rafter["length_plan"], 300.0);
+    assert_eq!(rafter["dz"], 400.0);
+    assert_eq!(rafter["confidence"], "exact");
+
+    // A drawing that stays in the plane reads exactly as before: one
+    // `length`, no `dz`, nothing new to ignore.
+    let flat = by_id("C");
+    assert_eq!(flat["length"], 400.0);
+    assert!(flat.get("length_plan").is_none(), "{flat}");
+    assert!(flat.get("dz").is_none(), "{flat}");
+}
+
+#[test]
+fn a_donut_reports_its_area_and_gets_a_region_record() {
+    use uncad::model::{LwPolylineEntity, Point2D, Point3D};
+    // W13. A closed two-vertex bulged polyline is what AutoCAD's DONUT
+    // writes; two bulges of 1 over a 100-unit chord are a circle of radius
+    // 50, so the area is pi * 50^2 = 7853.98163397 and the perimeter is
+    // 2 * pi * 50 = 314.15926536. Both come from the circle, not from
+    // uncad. 100 of the 227 closed polylines in AutoCADSamples3.dwg are
+    // this shape, and every one of them used to carry a `closed: true`,
+    // `confidence: "exact"` record with no `area` key and no `why`.
+    let donut = uncad::Entity::LwPolyline(LwPolylineEntity {
+        common: common("D"),
+        vertices: vec![Point2D { x: 0.0, y: 0.0 }, Point2D { x: 100.0, y: 0.0 }],
+        closed: true,
+        bulges: vec![1.0, 1.0],
+        widths: Vec::new(),
+        const_width: 0.0,
+        elevation: 0.0,
+        extrusion: Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    });
+    let db = model_space(vec![donut]);
+    let tmp = TempDir::new("donut");
+    let report = export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+
+    let geometry = records(&tmp.0, "geometry");
+    let g = &geometry[0];
+    assert_eq!(g["area"], 7853.98163397, "{g}");
+    assert_eq!(g["perimeter"], 314.15926536, "{g}");
+    assert_eq!(g["orientation"], "ccw", "{g}");
+    assert_eq!(g["confidence"], "exact", "{g}");
+
+    assert_eq!(report.counts.regions, 1);
+    let regions = records(&tmp.0, "regions");
+    assert_eq!(regions[0]["area"], 7853.98163397, "{:?}", regions[0]);
+    // The two vertices are diametrically opposite, so their midpoint is
+    // the circle's centre.
+    assert_eq!(regions[0]["centroid"], serde_json::json!([50.0, 0.0]));
+    assert_eq!(regions[0]["vertex_count"], 2);
 }

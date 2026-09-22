@@ -1139,18 +1139,16 @@ pub fn export_package(
     let mut limits = rendered.limits.clone();
     let content = rendered.choice.rect;
     let top: Vec<&Entity> = svg::select_entities_for_space(db, Space::Model);
-    // Records cover what the picture shows: not the hidden entities, not
-    // the ones the crop left out (they are listed in report.json), and not
-    // the ones the renderer refused as oversized -- a block reference that
-    // expanded over the whole drawing is not in the picture, and its
-    // hundreds of thousands of repeated strings do not belong in the text
-    // records either.
+    // Records cover what the picture shows: not the hidden entities and
+    // not the ones the crop left out (they are listed in report.json). An
+    // entity the renderer only had room to draw part of *is* in the
+    // picture, so it keeps its records, and `limits.dropped` is what says
+    // the part is incomplete.
     let excluded_handles: BTreeSet<&str> = rendered
         .choice
         .excluded
         .iter()
         .map(|e| e.handle.as_str())
-        .chain(rendered.oversized.iter().map(String::as_str))
         .collect();
     let shown: Vec<&Entity> = top
         .iter()
@@ -1718,8 +1716,29 @@ pub fn export_package(
             Entity::Line(l) => {
                 v.insert("from".into(), rounder.pt3(l.start_point));
                 v.insert("to".into(), rounder.pt3(l.end_point));
-                let len = (l.end_point.x - l.start_point.x).hypot(l.end_point.y - l.start_point.y);
-                v.insert("length".into(), json!(rounder.derived(len)));
+                // `length` is the length the *file* holds: the 3D
+                // distance. It used to be the plan projection published
+                // under a bare `length` with `confidence: "exact"`, which
+                // is a false claim about a rafter from (0,50,0) to
+                // (300,50,400) -- 300 where the drawing says 500 -- and
+                // `from`/`to` are the plan projection, so the record did
+                // not even carry the z to catch it with.
+                //
+                // `length_plan` (the key POLYLINE_3D already uses for the
+                // same quantity) and `dz` are added only when the line
+                // leaves the plane, which is also the only signal in an
+                // otherwise planar record that it does.
+                let (dx, dy, dz) = (
+                    l.end_point.x - l.start_point.x,
+                    l.end_point.y - l.start_point.y,
+                    l.end_point.z - l.start_point.z,
+                );
+                let plan = dx.hypot(dy);
+                v.insert("length".into(), json!(rounder.derived(plan.hypot(dz))));
+                if rounder.derived(dz) != 0.0 {
+                    v.insert("length_plan".into(), json!(rounder.derived(plan)));
+                    v.insert("dz".into(), json!(rounder.derived(dz)));
+                }
             }
             Entity::Arc(a) => {
                 let mut sweep = a.end_angle - a.start_angle;
@@ -1823,7 +1842,11 @@ pub fn export_package(
                             v.insert("why".into(), json!(UNTESTED_OUTLINE));
                         }
                     }
-                    if p.closed && p.vertices.len() >= 3 {
+                    // Whatever `area()` could measure gets a region record:
+                    // a closed two-vertex bulged polyline (AutoCAD's DONUT)
+                    // is as much a closed shape as a triangle, and used to
+                    // be missing from regions.json with nothing saying why.
+                    if p.closed && p.vertices.len() >= 2 {
                         let centroid = polygon_centroid(&p.vertices);
                         let mut r = Map::new();
                         r.insert("id".into(), json!(handle));
@@ -2173,6 +2196,25 @@ pub fn export_package(
         ));
     }
     let crop_report = rendered.choice.report(fit.rect, padding);
+    // "What is missing from the picture, and why" is one list: the crop's
+    // own exclusions plus every entity a robustness cap acted on. Before
+    // 0.3.0 shipped, three of the caps named nothing at all, so a consumer
+    // auditing the package could not tell a dropped entity from one the
+    // file never had.
+    // The crop's list keeps its order and its shape (it carries a `rect`);
+    // the cap's entries follow, each naming the cap under `reason`.
+    let excluded: Vec<Value> = crop_report
+        .excluded
+        .iter()
+        .map(|e| json!(e))
+        .chain(limits.dropped.iter().map(|d| {
+            json!({
+                "handle": d.handle,
+                "type_name": d.type_name,
+                "reason": d.cap.as_str(),
+            })
+        }))
+        .collect();
     let counts = Counts {
         entities: top.len(),
         texts: text_records.len(),
@@ -2181,7 +2223,7 @@ pub fn export_package(
         regions: region_records.len(),
         blocks: block_records.len(),
         hidden: rendered.hidden,
-        excluded: crop_report.excluded.len(),
+        excluded: excluded.len(),
         tiles: written_total,
         frames: frame_reports.len(),
         sheets: sheet_reports.len(),
@@ -2191,7 +2233,7 @@ pub fn export_package(
     // the manifest lists), so it is listed without a size.
     let report_value = json!({
         "$schema": SCHEMA,
-        "excluded": crop_report.excluded,
+        "excluded": excluded,
         "hidden": {
             "count": hidden_top_level,
             "inside_blocks": rendered.hidden.saturating_sub(hidden_top_level),

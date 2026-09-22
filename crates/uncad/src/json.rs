@@ -388,6 +388,7 @@ mod tests {
                 }],
                 closed: true,
                 mlinestyle_name: "STANDARD".to_string(),
+                scale: 20.0,
             }),
             Entity::Region(solid3d.clone()),
             Entity::PolylinePFace(solid3d),

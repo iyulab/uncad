@@ -30,7 +30,7 @@ mod infinite;
 use crate::color::{contrast_on_white, resolve_color, DEFAULT_COLOR};
 use crate::dynapi::{Point2D, Point3D};
 use crate::limits::{
-    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
+    Cap, LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
     MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
 };
 use crate::model::{Entity, EntityCommon, MLineVertex};
@@ -38,7 +38,7 @@ use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::Box2D;
 
-use crate::crop::{self, CropMode, CropReport, Extent, Rect};
+use crate::crop::{self, CropMode, CropReport, ExcludeReason, Excluded, Extent, Rect};
 use format::{clean, escape_xml, neg, rotate_transform_attr, xy, Frame};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -349,6 +349,11 @@ struct Ctx<'a> {
     /// the per-part bound: a tile re-assembles and re-parses every part
     /// that touches it.
     entity_start: usize,
+    /// Whether [`MAX_ENTITY_SVG_BYTES`] cut the current top-level entity's
+    /// expansion short. Reset by [`render_selected`] for each one; a part
+    /// that merely *ended* near the budget is not truncated, and saying so
+    /// would be a false claim that the picture is missing something.
+    part_truncated: bool,
     /// What the caps in [`crate::limits`] took away from this render.
     limits: LimitReport,
     /// [`ToSvgOptions::include_hidden`].
@@ -379,6 +384,7 @@ impl<'a> Ctx<'a> {
             block_ref_budget: MAX_BLOCK_REFS,
             emitted: 0,
             entity_start: 0,
+            part_truncated: false,
             limits: LimitReport::default(),
             include_hidden: false,
             hidden: 0,
@@ -410,23 +416,20 @@ impl<'a> Ctx<'a> {
     /// Records one *local* coordinate pair, applying the current (possibly
     /// block-nested) transform first.
     ///
-    /// A result that is not finite, or larger than
-    /// [`MAX_WORLD_COORDINATE`] (from a malformed source file or a
-    /// degenerate transform), is dropped rather than recorded. Letting
+    /// A result that is not finite (from a malformed source file or a
+    /// degenerate transform) is dropped rather than recorded. Letting
     /// `Infinity` into the running bounds can pin both the min and the max
     /// to `Infinity` (the min-side update never fires because
     /// `Infinity < Infinity` is false), and the box's diagonal then computes
     /// as `NaN`, which panics the `partial_cmp(..).unwrap()` calls in
-    /// [`bounds`] instead of just rendering a degenerate point; letting
-    /// 1e150 in takes the viewBox -- and every length derived from it -- up
-    /// with it.
+    /// [`bounds`] instead of just rendering a degenerate point.
+    ///
+    /// A merely *large* result is recorded. It is what the crop needs in
+    /// order to call the entity an outlier and say so; what it must not
+    /// reach is the viewBox, and [`measurable`] is the screen for that,
+    /// applied once per entity where the exclusion can be reported.
     fn consider(&mut self, local_x: f64, local_y: f64) {
         let (x, y) = self.transform.apply(local_x, local_y);
-        // The same screen `finite` applies to a coordinate as written, but
-        // on the value *after* the block transform: a sane coordinate under
-        // a corrupt block scale lands just as far out, and the bounds are
-        // what the viewBox (and so every length derived from it) is built
-        // from. See [`MAX_WORLD_COORDINATE`].
         if !finite([x, y]) {
             return;
         }
@@ -519,7 +522,7 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
 }
 
 /// Whether every one of these values is a real number the renderer can draw
-/// with -- finite, and below [`MAX_WORLD_COORDINATE`] in magnitude.
+/// with.
 ///
 /// The entity-level screen for coordinates, radii and sizes: an arm that
 /// returns `None` here leaves the entity undrawn, which is the honest
@@ -527,16 +530,53 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
 /// entity used to reach the document as `x1="NaN"` or `r="inf"`, neither of
 /// which is in SVG's `<number>` grammar. [`format::clean`] is the backstop
 /// underneath for anything not screened here; this is what keeps a bogus
-/// entity from being *drawn* at the fallback value.
+/// entity from being *drawn* at the fallback value. An arm that turns one
+/// away should do it through [`unreadable`], so the entity is counted and
+/// named rather than quietly missing.
 ///
-/// The magnitude half of the test matters just as much and is easier to
-/// miss: 1e150 is finite, and one entity carrying it takes the measured
-/// extents, the viewBox and every length derived from them with it -- see
-/// [`MAX_WORLD_COORDINATE`], which is the bound [`crate::crop::Rect::is_sane`]
-/// already held a header's extents to.
+/// Magnitude is deliberately *not* part of this test. 1e20 is a real
+/// number; an entity carrying it is a drawing a long way from its
+/// neighbours, and [`crate::crop`]'s outlier rule is what answers that --
+/// out loud, in `report.json`'s `excluded`. Until 0.3.0 shipped, this
+/// screen also refused anything at or above [`MAX_WORLD_COORDINATE`],
+/// which deleted such an entity from the picture, from every record and
+/// from every report at once. What the magnitude bound still guards is the
+/// rasterizer: see [`within_raster_range`] and [`measurable`].
 fn finite<const N: usize>(vals: [f64; N]) -> bool {
-    vals.iter()
-        .all(|v| v.is_finite() && v.abs() < MAX_WORLD_COORDINATE)
+    vals.iter().all(|v| v.is_finite())
+}
+
+/// Whether `v` is one the rasterizer can be handed where the work it does
+/// grows with the number -- an arc radius it converts to beziers, a span
+/// it divides into dashes. See [`MAX_WORLD_COORDINATE`].
+fn within_raster_range(v: f64) -> bool {
+    v.is_finite() && v.abs() < MAX_WORLD_COORDINATE
+}
+
+/// Whether an entity's measured box is one a viewBox can be built from.
+///
+/// The stroke width, the padding, the tile lattice and every dash length
+/// are derived from the viewBox, so one box past [`MAX_WORLD_COORDINATE`]
+/// takes all of them with it: a fuzzed `example_2000.dwg` produced a
+/// viewBox 1.45e150 units wide, and rasterizing its dashed strokes asked
+/// tiny-skia's dasher for ~1e149 dashes. [`crate::crop`]'s outlier rule
+/// reaches the same answer for an ordinary far-away entity, but only once
+/// a drawing has four of them; this is the backstop under it, and -- unlike
+/// the screen it replaced -- it leaves the entity measured, recorded and
+/// listed among the crop's exclusions.
+fn measurable(rect: &Rect) -> bool {
+    [rect.min_x, rect.min_y, rect.max_x, rect.max_y]
+        .into_iter()
+        .all(within_raster_range)
+}
+
+/// Turns one entity away because a number in it is not a real number,
+/// counting it and naming it in the [`LimitReport`] on the way out.
+fn unreadable(e: &Entity, ctx: &mut Ctx) -> Option<String> {
+    ctx.limits.unreadable_entities += 1;
+    ctx.limits
+        .note(Cap::NotANumber, &e.common().handle, e.type_name());
+    None
 }
 
 /// The points of `pts` that can be drawn at all. One corrupt vertex does not
@@ -594,7 +634,7 @@ fn bulged_polyline_element(
                 // rasterizing after five minutes, at any image size. A
                 // radius that large *is* a straight line, so it is drawn as
                 // one. See [`MAX_WORLD_COORDINATE`].
-                if !finite([arc.radius]) {
+                if !within_raster_range(arc.radius) {
                     let _ = write!(d, " L {} {}", frame.x(to.x), frame.y(to.y));
                     continue;
                 }
@@ -614,6 +654,47 @@ fn bulged_polyline_element(
         d.push_str(" Z");
     }
     format!("<path d=\"{d}\" fill=\"none\" stroke=\"{color}\"/>")
+}
+
+/// Half the arm length of the cross a POINT draws, in stroke widths.
+///
+/// The stroke is a fixed number of pixels wide (`png.rs` and the CLI both
+/// use 1.25 px), so this makes the cross a fixed number of pixels across
+/// too: 2 x 2 x 1.25 = 5 px, which is the size
+/// `docs/VLM_EXPORT_DESIGN.md`'s rendering table asks for.
+const POINT_CROSS_ARMS: f64 = 2.0;
+
+/// The marker a POINT draws: a cross whose size is set in *pixels*, not in
+/// drawing units.
+///
+/// A POINT has no size of its own, so whatever it is drawn at is a choice.
+/// Until 0.3.0 it was a half-unit dot, which is sub-pixel at any scale
+/// below 2 px per unit -- so on an ordinary plan the dot antialiased away
+/// to nothing while the package went on publishing the point's tiles and
+/// pixel boxes, pointing a reader at pure white.
+///
+/// The size comes from the same [`stroke_width_placeholder`] machinery the
+/// strokes use, which is the only quantity here that is known in pixels:
+/// the arms are written at `POINT_CROSS_ARMS` local units and the element
+/// is then scaled by one stroke width, so a `stroke-width` of 1 on top of
+/// that scale still draws a one-stroke-wide line. The placeholder carries
+/// `ctx.scale` so a POINT inside a scaled block comes out the same size as
+/// one outside it.
+///
+/// Only the point itself is measured into the bounds ([`Ctx::consider`] is
+/// the caller's job): the cross is a pixel-space decoration, and letting it
+/// into the extent would make the entity's recorded box depend on the
+/// image's scale.
+fn point_cross_element(x: f64, y: f64, color: &str, ctx: &Ctx) -> String {
+    let a = clean(POINT_CROSS_ARMS);
+    format!(
+        "<path d=\"M -{a} 0 L {a} 0 M 0 -{a} L 0 {a}\" \
+         transform=\"translate({} {}) scale({})\" \
+         fill=\"none\" stroke=\"{color}\" stroke-width=\"1\"/>",
+        ctx.frame.x(x),
+        ctx.frame.y(y),
+        stroke_width_placeholder(ctx.scale)
+    )
 }
 
 /// A dashed outline, used for the shapes this renderer draws as an indication
@@ -789,14 +870,60 @@ fn project_isometric(p: &Point3D) -> (f64, f64) {
     ((p.x - p.z) * cos30, p.y + (p.x + p.z) * sin30)
 }
 
-/// One `<line>` per edge, isometrically projected -- shared by 3DSOLID, REGION
-/// and POLYLINE_PFACE, which all reduce to a set of 3D edges.
+/// Whether every one of these edges lies in one plane parallel to XY, so
+/// the body has a true plan view and does not need projecting at all.
+///
+/// A REGION is built from a closed 2D profile, so this is the normal case
+/// for one; 3DSOLID and POLYLINE_PFACE reach it whenever the body is flat.
+/// The test is on the z *span* against the xy span, relatively, because an
+/// ACIS body's vertices come back with rounding noise around their plane
+/// rather than an exact z; the `1.0` floor keeps a body that is flat but
+/// tiny (a 0.001-unit profile) from being judged by its own size.
+fn flat_in_xy(edges: &[[Point3D; 2]]) -> bool {
+    let (mut lo_z, mut hi_z) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for p in edges.iter().flatten() {
+        if !finite([p.x, p.y, p.z]) {
+            return false;
+        }
+        lo_z = lo_z.min(p.z);
+        hi_z = hi_z.max(p.z);
+        lo = lo.min(p.x).min(p.y);
+        hi = hi.max(p.x).max(p.y);
+    }
+    if !lo_z.is_finite() {
+        return false;
+    }
+    (hi_z - lo_z) <= 1e-9 * (hi - lo).max(1.0)
+}
+
+/// One `<line>` per edge -- shared by 3DSOLID, REGION and POLYLINE_PFACE,
+/// which all reduce to a set of 3D edges.
+///
+/// A body that is flat in the XY plane is drawn **in that plane**, exactly
+/// where the file puts it. Only a body with real depth goes through
+/// [`project_isometric`]. Until 0.3.0 every body did, and since the map
+/// `(x, y, 0) -> (x cos30, y + x sin30)` both scales x and shears y, a flat
+/// axis-aligned rectangle came out as a parallelogram of the wrong size,
+/// moved away from the rest of the drawing -- and `ctx.consider` recorded
+/// *that* box, so the extent the package published (its `bbox`, its tiles,
+/// its `px` maps) was in projection space while every other record's was in
+/// world space. A REGION is a closed 2D profile by construction, so this
+/// was the usual case, not a corner one.
 fn wireframe_element(edges: &[[Point3D; 2]], color: &str, ctx: &mut Ctx) -> String {
+    let flat = flat_in_xy(edges);
+    let place = |p: &Point3D| {
+        if flat {
+            (p.x, p.y)
+        } else {
+            project_isometric(p)
+        }
+    };
     edges
         .iter()
         .map(|[a, b]| {
-            let (x1, y1) = project_isometric(a);
-            let (x2, y2) = project_isometric(b);
+            let (x1, y1) = place(a);
+            let (x2, y2) = place(b);
             ctx.consider(x1, y1);
             ctx.consider(x2, y2);
             let frame = ctx.frame;
@@ -852,6 +979,7 @@ fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
 #[allow(clippy::too_many_arguments)]
 fn render_block_ref(
     owner_handle: &str,
+    owner_type: &str,
     block_name: &str,
     insertion_point: Point2D,
     x_scale: f64,
@@ -872,6 +1000,9 @@ fn render_block_ref(
     // counted -- see [`crate::limits`].
     if ctx.depth >= MAX_BLOCK_REF_DEPTH || ctx.block_ref_budget == 0 {
         ctx.limits.block_refs_dropped += 1;
+        // The reference's own handle, so `report.json` can say *which*
+        // block reference went unexpanded instead of only how many.
+        ctx.limits.note(Cap::BlockRefs, owner_handle, owner_type);
         return String::new();
     }
     ctx.block_ref_budget -= 1;
@@ -1030,17 +1161,24 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
     // walk -- however deep inside nested block references it happens.
     if ctx.emitted >= MAX_SVG_BODY_BYTES {
         ctx.limits.entities_dropped += 1;
+        ctx.limits
+            .note(Cap::DocumentBytes, &e.common().handle, e.type_name());
         return None;
     }
     if ctx.emitted - ctx.entity_start >= MAX_ENTITY_SVG_BYTES {
-        // Inside a top-level entity that has already drawn more than one
-        // entity may. Building stops here, which bounds the work; the part
-        // is then dropped whole by `render_selected`, which is also where
-        // it is counted.
+        // Inside a top-level entity that has already drawn as much as one
+        // entity may. Building stops here, which bounds the work; what was
+        // drawn is *kept*, and `render_selected` reports the part as
+        // truncated. Because the walk unwinds at an entity boundary every
+        // enclosing `<g>` still closes, so the part stays well-formed and
+        // ends at a whole block's edge rather than mid-element.
+        ctx.part_truncated = true;
         return None;
     }
     if drawn_point_count(e) > MAX_ENTITY_POINTS {
         ctx.limits.oversized_entities += 1;
+        ctx.limits
+            .note(Cap::EntityPoints, &e.common().handle, e.type_name());
         return None;
     }
     let before = ctx.emitted;
@@ -1108,7 +1246,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 l.end_point.x,
                 l.end_point.y,
             ]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(l.start_point.x, l.start_point.y);
             ctx.consider(l.end_point.x, l.end_point.y);
@@ -1122,7 +1260,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::Circle(c) => {
             if !finite([c.center.x, c.center.y, c.radius]) {
-                return None;
+                return unreadable(e, ctx);
             }
             // All four corners of the local box: `consider` transforms each
             // point, and two diagonal corners of a box do not bound it
@@ -1150,7 +1288,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 || !crate::geom::is_sane_angle(a.start_angle)
                 || !crate::geom::is_sane_angle(a.end_angle)
             {
-                return None;
+                return unreadable(e, ctx);
             }
             let (x, y, r) = (a.center.x, a.center.y, a.radius);
             let (x1, y1) = (x + r * a.start_angle.cos(), y + r * a.start_angle.sin());
@@ -1189,7 +1327,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ]) || !crate::geom::is_sane_angle(el.start_angle)
                 || !crate::geom::is_sane_angle(el.end_angle)
             {
-                return None;
+                return unreadable(e, ctx);
             }
             // DXF 41/42 are parameters on the major axis, not angles -- see
             // [`crate::geom::EllipseArc`]. An ellipse with no stored sweep
@@ -1209,7 +1347,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             };
             let (min_x, min_y, max_x, max_y) = arc.bounds();
             if !finite([min_x, min_y, max_x, max_y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
             let rx = arc.major_radius();
@@ -1279,7 +1417,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 t.vertical_alignment,
             );
             if !finite([anchor.at.x, anchor.at.y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(anchor.at.x, anchor.at.y);
             ctx.consider_rect(&crate::text::estimate_text_box(
@@ -1309,7 +1447,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 a.vertical_alignment,
             );
             if !finite([anchor.at.x, anchor.at.y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(anchor.at.x, anchor.at.y);
             if a.text.is_empty() || a.invisible {
@@ -1336,7 +1474,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::Tolerance(t) => {
             if !finite([t.insertion_point.x, t.insertion_point.y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(t.insertion_point.x, t.insertion_point.y);
             if t.text_value.is_empty() {
@@ -1362,7 +1500,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::MText(m) => {
             if !finite([m.insertion_point.x, m.insertion_point.y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(m.insertion_point.x, m.insertion_point.y);
             ctx.consider_rect(&crate::text::estimate_mtext_box(
@@ -1473,21 +1611,17 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::Point(p) => {
             if !finite([p.position.x, p.position.y]) {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider(p.position.x, p.position.y);
-            Some(format!(
-                "<circle cx=\"{}\" cy=\"{}\" r=\"0.5\" fill=\"{color}\" stroke=\"none\"/>",
-                frame.x(p.position.x),
-                frame.y(p.position.y)
-            ))
+            Some(point_cross_element(p.position.x, p.position.y, &color, ctx))
         }
         Entity::Solid(s) => {
             // Classic AutoCAD SOLID vertex order is 1-2-4-3, not 1-2-3-4.
             let pts = [s.corner1, s.corner2, s.corner4, s.corner3];
             // A filled quadrilateral is all four corners or none.
             if drawable_points(&pts).len() < pts.len() {
-                return None;
+                return unreadable(e, ctx);
             }
             ctx.consider_all(&pts);
             Some(format!(
@@ -1544,6 +1678,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             };
             Some(render_block_ref(
                 &i.common.handle,
+                e.type_name(),
                 &i.block_name,
                 Point2D {
                     x: i.insertion_point.x,
@@ -1558,6 +1693,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::AcadTable(a) => Some(render_block_ref(
             &a.common.handle,
+            e.type_name(),
             &a.block_name,
             Point2D {
                 x: a.insertion_point.x,
@@ -1576,6 +1712,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             // belongs in the render's own frame, not in a block-local one.
             let svg = render_block_ref(
                 &d.common.handle,
+                e.type_name(),
                 &d.block_name,
                 Point2D { x: 0.0, y: 0.0 },
                 1.0,
@@ -1691,24 +1828,26 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             if l.vertices.is_empty() {
                 return None;
             }
-            for v in &l.vertices {
-                ctx.consider(v.point.x, v.point.y);
-            }
             // A single 0.0 offset is exactly the centerline-only fallback:
             // point + miter_direction * 0.0 is just point.
             let offsets = match ctx.tables.mlinestyles.get(&l.mlinestyle_name) {
                 Some(offsets) if !offsets.is_empty() => offsets.clone(),
                 _ => vec![0.0],
             };
+            // The style's offsets are in style units; the entity's own
+            // MLSCALE is what puts them in drawing units. A 200 mm wall is
+            // STANDARD (+-0.5) drawn at scale 200, so leaving the scale out
+            // drew every multi-line exactly one unit wide.
+            let scale = if l.scale.is_finite() { l.scale } else { 1.0 };
             let lines: Vec<String> = offsets
                 .iter()
                 .map(|&offset| {
-                    polyline_element(
-                        &mline_offset_points(&l.vertices, offset),
-                        l.closed,
-                        &color,
-                        frame,
-                    )
+                    let pts = mline_offset_points(&l.vertices, offset * scale);
+                    // The offset lines are what is drawn, so they are what
+                    // the extent must cover: measuring the centerline alone
+                    // gave a 200-unit wall a bbox of no width at all.
+                    ctx.consider_all(&pts);
+                    polyline_element(&pts, l.closed, &color, frame)
                 })
                 .collect();
             Some(lines.join("\n  "))
@@ -1832,10 +1971,6 @@ pub(crate) struct Rendered {
     pub(crate) unbounded: HashSet<String>,
     /// What the caps in [`crate::limits`] took away from this render.
     pub(crate) limits: LimitReport,
-    /// The handles of the entities [`MAX_ENTITY_SVG_BYTES`] left out. The
-    /// package excludes them from its records too: the records cover what
-    /// the picture shows, and this is not in it.
-    pub(crate) oversized: HashSet<String>,
 }
 
 impl Rendered {
@@ -1954,7 +2089,6 @@ pub(crate) fn render_selected(
     let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<(String, String)> = Vec::new();
     let mut unbounded: HashSet<String> = HashSet::new();
-    let mut oversized: HashSet<String> = HashSet::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
@@ -1969,17 +2103,20 @@ pub(crate) fn render_selected(
         let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
         ctx.reset_entity_bounds();
         ctx.entity_start = ctx.emitted;
+        ctx.part_truncated = false;
         if let Some(svg) = render_entity(e, &mut ctx) {
-            if svg.len() >= MAX_ENTITY_SVG_BYTES {
-                // One entity that drew more than any entity may. It is left
-                // out whole rather than shown half-drawn: a part this size
-                // is a block reference that expanded over the entire
-                // picture, and a package re-assembles and re-parses every
-                // part each of its tiles touches. See [`crate::limits`].
-                ctx.limits.oversized_parts += 1;
-                ctx.emitted = ctx.entity_start;
-                oversized.insert(e.common().handle.clone());
-            } else if !svg.is_empty() {
+            if ctx.part_truncated {
+                // One entity whose expansion reached the budget one entity
+                // may spend. Rendering stopped at a block boundary, which
+                // bounds the work; what it had drawn by then is kept, and
+                // the part is reported as incomplete. Dropping it whole --
+                // which 0.3.0's first cut did -- blanked any drawing that
+                // is a single INSERT of a single large block.
+                ctx.limits.truncated_parts += 1;
+                ctx.limits
+                    .note(Cap::EntityBytes, &e.common().handle, e.type_name());
+            }
+            if !svg.is_empty() {
                 if svg.contains(infinite::MARKER) {
                     unbounded.insert(e.common().handle.clone());
                 }
@@ -1998,7 +2135,22 @@ pub(crate) fn render_selected(
         }
     }
 
-    let choice = crop::choose(&extents, &db.header, options.crop);
+    // An entity whose measured box runs past what a viewBox can be built
+    // from is held out of the crop *decision* -- but it is measured, it
+    // keeps its records, and it is listed as an outlier, which is what the
+    // 0.3.0 screen that simply refused to draw it could not do. See
+    // [`measurable`].
+    let (measured, immeasurable): (Vec<Extent>, Vec<Extent>) =
+        extents.iter().cloned().partition(|e| measurable(&e.rect));
+    let mut choice = crop::choose(&measured, &db.header, options.crop);
+    choice
+        .excluded
+        .extend(immeasurable.into_iter().map(|e| Excluded {
+            handle: e.handle,
+            type_name: e.type_name,
+            rect: e.rect,
+            reason: ExcludeReason::ScaleOutlier,
+        }));
     // What the crop leaves out is not drawn either: a 3256x INSERT clipped
     // by the viewBox would still cross the whole picture.
     let excluded: HashSet<&str> = choice.excluded.iter().map(|x| x.handle.as_str()).collect();
@@ -2024,7 +2176,6 @@ pub(crate) fn render_selected(
         extents,
         origin,
         unbounded,
-        oversized,
         limits: ctx.limits,
     }
 }
@@ -2381,6 +2532,7 @@ mod tests {
         let mut ctx = Ctx::new(&tables);
         let svg = render_block_ref(
             "T",
+            "INSERT",
             "R",
             Point2D { x: 0.0, y: 0.0 },
             1.0,
@@ -3272,5 +3424,163 @@ mod tests {
 
         let pts_negative = mline_offset_points(&verts, -5.0);
         close(pts_negative[0].y, -5.0);
+    }
+
+    fn mline(scale: f64) -> Entity {
+        let vertex = |x: f64| MLineVertex {
+            point: Point3D { x, y: 0.0, z: 0.0 },
+            miter_direction: Point3D {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        };
+        Entity::MLine(crate::model::MLineEntity {
+            common: EntityCommon {
+                handle: "M1".to_string(),
+                ..EntityCommon::default()
+            },
+            vertices: vec![vertex(0.0), vertex(200.0)],
+            closed: false,
+            mlinestyle_name: "STANDARD".to_string(),
+            scale,
+        })
+    }
+
+    fn standard_mlinestyle() -> Tables {
+        let mut mlinestyles = std::collections::BTreeMap::new();
+        mlinestyles.insert("STANDARD".to_string(), vec![0.5, -0.5]);
+        Tables {
+            mlinestyles,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_mline_is_drawn_at_its_own_scale_not_at_one_unit() {
+        // The STANDARD style's offsets are +-0.5 *style* units, so a 200 mm
+        // wall is that style at MLSCALE 200: the two lines must come out
+        // 200 units apart (+-100), not 1 unit apart. Derived from the DXF
+        // definition of group 40, not from this crate's output -- the
+        // arithmetic is offset * scale and nothing else.
+        let tables = standard_mlinestyle();
+        let mut ctx = Ctx::new(&tables);
+        let svg = render_shown_entity(&mline(200.0), &mut ctx).expect("drawn");
+        assert!(svg.contains("points=\"0,-100 200,-100\""), "{svg}");
+        assert!(svg.contains("points=\"0,100 200,100\""), "{svg}");
+        // The offset lines are the geometry, so they are what the extent
+        // covers: the wall is 200 units wide, not a zero-height centerline.
+        let b = ctx.entity_box().expect("measured");
+        close(b.min_y, -100.0);
+        close(b.max_y, 100.0);
+
+        // Scale 1 is the old behaviour, and still the right answer for a
+        // file that really stores 1.
+        let mut ctx = Ctx::new(&tables);
+        let svg = render_shown_entity(&mline(1.0), &mut ctx).expect("drawn");
+        assert!(svg.contains("points=\"0,-0.5 200,-0.5\""), "{svg}");
+    }
+
+    fn region(edges: Vec<[Point3D; 2]>) -> Entity {
+        Entity::Region(crate::model::Solid3DEntity {
+            common: EntityCommon {
+                handle: "R1".to_string(),
+                ..EntityCommon::default()
+            },
+            wireframe_edges: edges,
+        })
+    }
+
+    fn p3(x: f64, y: f64, z: f64) -> Point3D {
+        Point3D { x, y, z }
+    }
+
+    #[test]
+    fn a_region_flat_in_the_xy_plane_is_drawn_where_the_file_puts_it() {
+        // The world square (10,10)-(20,20) at z = 0. Through the isometric
+        // map (x, y, 0) -> (x cos30, y + x sin30) its corners would land at
+        // (8.66, 15) .. (17.32, 30) -- a parallelogram of the wrong size,
+        // 10 units from where the file says. The expected numbers here are
+        // the file's own coordinates, y-flipped for SVG, and nothing else.
+        let edges = vec![
+            [p3(10.0, 10.0, 0.0), p3(20.0, 10.0, 0.0)],
+            [p3(20.0, 10.0, 0.0), p3(20.0, 20.0, 0.0)],
+            [p3(20.0, 20.0, 0.0), p3(10.0, 20.0, 0.0)],
+            [p3(10.0, 20.0, 0.0), p3(10.0, 10.0, 0.0)],
+        ];
+        let tables = Tables::default();
+        let mut ctx = Ctx::new(&tables);
+        let svg = render_shown_entity(&region(edges), &mut ctx).expect("drawn");
+        assert!(
+            svg.contains("x1=\"10\" y1=\"-10\" x2=\"20\" y2=\"-10\""),
+            "{svg}"
+        );
+        // And the measured box is the world box, which is what the
+        // package publishes as the entity's bbox.
+        let b = ctx.entity_box().expect("measured");
+        close(b.min_x, 10.0);
+        close(b.min_y, 10.0);
+        close(b.max_x, 20.0);
+        close(b.max_y, 20.0);
+    }
+
+    #[test]
+    fn a_body_with_depth_still_gets_the_isometric_wireframe() {
+        // One edge out of the plane is enough: there is no plan view that
+        // shows a box, so the approximation stays. cos30 = 0.8660254 and
+        // sin30 = 0.5, so (10, 10, 0) -> (8.66..., 15) by hand.
+        let edges = vec![
+            [p3(10.0, 10.0, 0.0), p3(20.0, 10.0, 0.0)],
+            [p3(10.0, 10.0, 0.0), p3(10.0, 10.0, 5.0)],
+        ];
+        let tables = Tables::default();
+        let mut ctx = Ctx::new(&tables);
+        let svg = render_shown_entity(&region(edges), &mut ctx).expect("drawn");
+        let (x, y) = project_isometric(&p3(10.0, 10.0, 0.0));
+        close(x, 10.0 * (std::f64::consts::PI / 6.0).cos());
+        close(y, 15.0);
+        assert!(svg.contains(&format!("x1=\"{}\"", clean(x))), "{svg}");
+    }
+
+    #[test]
+    fn flat_in_xy_tolerates_rounding_noise_but_not_real_depth() {
+        // An ACIS body's vertices come back with noise around their plane,
+        // not an exact z, so the test is relative: 1e-12 over a ten-unit
+        // profile is flat, 1e-3 is not.
+        let flat = [[p3(0.0, 0.0, 0.0), p3(10.0, 10.0, 1e-12)]];
+        let deep = [[p3(0.0, 0.0, 0.0), p3(10.0, 10.0, 1e-3)]];
+        assert!(flat_in_xy(&flat));
+        assert!(!flat_in_xy(&deep));
+        // A tiny but flat profile is judged against the 1.0 floor, not
+        // against its own size.
+        let small = [[p3(0.0, 0.0, 0.0), p3(0.001, 0.001, 0.0)]];
+        assert!(flat_in_xy(&small));
+    }
+
+    #[test]
+    fn a_point_draws_a_cross_sized_in_stroke_widths_not_in_drawing_units() {
+        // A POINT has no size, so whatever it is drawn at is a choice; a
+        // half-unit dot is sub-pixel wherever a unit is under two pixels.
+        // The arms are written in local units and the element is scaled by
+        // one stroke width, so resolving the placeholder at a stroke of
+        // 0.25 units must put the arm ends at +-2 * 0.25 = +-0.5 units.
+        let tables = Tables::default();
+        let mut ctx = Ctx::new(&tables);
+        let svg = point_cross_element(7.0, 9.0, "#000000", &ctx);
+        assert!(svg.contains("translate(7 -9)"), "{svg}");
+        assert!(svg.contains("stroke-width=\"1\""), "{svg}");
+        let resolved = resolve_stroke_widths(&svg, 0.25);
+        assert!(resolved.contains("scale(0.25)"), "{resolved}");
+        assert_eq!(POINT_CROSS_ARMS * 0.25, 0.5);
+        // And at the 1.25 px stroke the CLI and the package both use, the
+        // cross is 2 * 2 * 1.25 = 5 px across -- the size the design's
+        // rendering table asks for.
+        assert_eq!(2.0 * POINT_CROSS_ARMS * 1.25, 5.0);
+
+        // Inside a block scaled 4x the placeholder carries that scale, so
+        // the cross still comes out one stroke width wide on the page.
+        ctx.scale = 4.0;
+        let nested = resolve_stroke_widths(&point_cross_element(0.0, 0.0, "#000000", &ctx), 0.25);
+        assert!(nested.contains("scale(0.0625)"), "{nested}");
     }
 }
