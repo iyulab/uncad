@@ -1557,6 +1557,7 @@ pub fn export_package(
     // the layout's paper units, so they carry the sheet image's pixel box
     // instead of model tiles.
     let mut paper_texts: Vec<(PlacedText, usize)> = Vec::new();
+    let mut paper_text_ids: BTreeSet<String> = BTreeSet::new();
     if options.sheets {
         for spec in sheet_specs(db) {
             let block = &db.tables.block_records[&spec.block];
@@ -1690,13 +1691,17 @@ pub fn export_package(
             // The sheet's own texts, measured through the same shaping the
             // sheet image got (the paper render, so the boxes are in paper
             // units). A text drawn by an entity the renderer refused as
-            // oversized is not in the picture and does not become a record.
+            // oversized is not in the picture and does not become a record,
+            // and a text already taken by an earlier sheet is not minted
+            // twice: two LAYOUTs of a malformed file can name one paper
+            // block, and a record file must not hold an id twice.
             let sheet_index = sheet_reports.len();
             let mut sheet_texts = placed_texts(db, &paper_entities);
             sheet_texts.retain(|t| {
                 !paper_rendered
                     .oversized
                     .contains(t.id.split('/').next().unwrap_or(t.id.as_str()))
+                    && paper_text_ids.insert(t.id.clone())
             });
             measure_texts(&paper_rendered, &fit.rect, &mut sheet_texts, options.fonts)?;
             paper_texts.extend(sheet_texts.into_iter().map(|t| (t, sheet_index)));
