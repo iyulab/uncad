@@ -133,3 +133,32 @@ fn dimension_fields_survive_the_json_round_trip() {
         assert_eq!(x.dimstyle, y.dimstyle);
     }
 }
+
+#[test]
+fn a_tolerance_takes_its_text_height_from_its_dimension_style() {
+    // An R2000+ TOLERANCE stores no height of its own (LibreDWG decodes
+    // `height` for R13/R14 only), so the feature control frame 4F1 in
+    // example_2000.dwg draws at its style's DIMTXT: ISO-25, 2.5 (which the
+    // header's DIMTXT also is). It used to come out as 0 and render as a
+    // `font-size="0"` text usvg drops.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tolerance = db
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Tolerance(t) if t.common.handle == "4F1" => Some(t),
+            _ => None,
+        })
+        .expect("TOLERANCE 4F1");
+    assert_eq!(tolerance.dimstyle, "ISO-25");
+    let style = &db.tables.dimstyles["ISO-25"];
+    assert_eq!(style.dimtxt, 2.5);
+    assert_eq!(tolerance.text_height, style.dimtxt);
+    assert!(tolerance.text_height > 0.0);
+    let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
+    assert!(!svg.contains("font-size=\"0\""), "a zero-height text");
+    assert!(
+        svg.contains("id=\"4F1\"") && svg.contains("font-size=\"2.5\""),
+        "4F1 at its style's height"
+    );
+}

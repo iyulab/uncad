@@ -1121,15 +1121,26 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
             let insertion_point = get_field::<Point3D>(entity_ptr, "TOLERANCE", "ins_pt")?;
-            let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
+            // `height` is only decoded for R13/R14 (`dwg.spec`); every later
+            // file leaves it at 0.0 and takes the height from the DIMSTYLE
+            // -- dimension::attach_display_text fills that in once the
+            // tables exist.
+            let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height")
+                .filter(|h| h.is_finite() && *h > 0.0)
+                .unwrap_or(0.0);
             let text_value =
                 get_utf8_field(entity_ptr, "TOLERANCE", "text_value").unwrap_or_default();
+            let dimstyle =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TOLERANCE", "dimstyle")
+                    .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+                    .unwrap_or_default();
             Entity::Tolerance(ToleranceEntity {
                 common,
                 insertion_point,
                 text_height,
                 text_plain: crate::text::decode_text(&text_value).plain,
                 text_value,
+                dimstyle,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_WIPEOUT => {

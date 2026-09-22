@@ -332,12 +332,19 @@ pub struct InsertEntity {
 pub struct ToleranceEntity {
     pub common: EntityCommon,
     pub insertion_point: Point3D,
+    /// The frame's text height: the height stored in the entity when the
+    /// file has one (R13/R14 only), else the DIMSTYLE's `DIMTXT`, else the
+    /// header's, else 1.0 -- never 0. An R2000+ TOLERANCE stores no height
+    /// of its own, it takes it from its dimension style.
     pub text_height: f64,
     pub text_value: String,
     /// `text_value` with its `%%` codes decoded; the GD&T frame codes
     /// themselves are left as they are.
     #[serde(default)]
     pub text_plain: String,
+    /// The DIMSTYLE's name (DXF 3); empty if unresolvable. Since 0.3.0.
+    #[serde(default)]
+    pub dimstyle: String,
 }
 
 /// ACAD_TABLE -- the same field shape as [`InsertEntity`] minus `attribs`

@@ -95,7 +95,10 @@ mesh being just as inherently 3D as an ACIS solid's wireframe.
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
 `text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
 this project does not parse or strip (there is no dedicated stripper the way MTEXT has
-`strip_mtext_formatting`). Readable, but not real GD&T symbols.
+`strip_mtext_formatting`). Readable, but not real GD&T symbols. Its `text_height` is
+the entity's own only in R13/R14 files (LibreDWG decodes `height` for those alone);
+an R2000+ frame takes its DIMSTYLE's `DIMTXT`, else the header's, else 1.0 -- it used
+to come out as 0 and draw nothing.
 
 **ACAD_TABLE** has nearly INSERT's field shape in `dwg.h` (`ins_pt`/`scale`/`rotation`/
 `block_header`), and its own `flag_for_table_value` comment states that 0x06 ("has a

@@ -178,6 +178,10 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   *open* polyline to the straight segment that closes it for the area, which AutoCAD
   leaves behind after BREAK/TRIM: a 0.77 x 0.45 in sketch reported 63646 in^2. The
   helpers take the `closed` flag now, like `polyline_length` and `polyline_bounds`.
+- TOLERANCE (a GD&T feature control frame) rendered invisibly in every R2000+ file:
+  LibreDWG decodes its `height` for R13/R14 only, so `text_height` was 0 and the SVG
+  carried `font-size="0"`. The height is the DIMSTYLE's `DIMTXT` now (the new
+  `ToleranceEntity::dimstyle` names it), else the header's, else 1.0.
 - Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
   offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
   anchored at its left-baseline point, i.e. displaced by up to its own width (541 of

@@ -261,27 +261,45 @@ fn split_fraction(value: f64, dimdec: u16) -> (u64, Option<String>) {
 
 /// Fills `display_text`, `display_text_raw`, `display_source` and `dimlfac`
 /// on every DIMENSION in `db` (top level and inside block definitions) from
-/// the override text, the cached `*D` block label, or a formatted value.
+/// the override text, the cached `*D` block label, or a formatted value;
+/// and gives every TOLERANCE without a stored height its style's
+/// (see [`tolerance_text_height`]).
 pub(crate) fn attach_display_text(db: &mut CadDatabase) {
     let labels = cached_labels(db);
     let header = db.header.clone();
     let dimstyles = db.tables.dimstyles.clone();
-    let resolve = |dim: &mut DimensionEntity| {
-        let style = EffectiveStyle::resolve(dimstyles.get(&dim.dimstyle), &header);
-        resolve_display(dim, &style, labels.get(&dim.block_name));
+    let resolve = |entity: &mut Entity| match entity {
+        Entity::Dimension(dim) => {
+            let style = EffectiveStyle::resolve(dimstyles.get(&dim.dimstyle), &header);
+            resolve_display(dim, &style, labels.get(&dim.block_name));
+        }
+        Entity::Tolerance(t) => {
+            t.text_height =
+                tolerance_text_height(t.text_height, dimstyles.get(&t.dimstyle), &header);
+        }
+        _ => {}
     };
     for entity in &mut db.entities {
-        if let Entity::Dimension(dim) = entity {
-            resolve(dim);
-        }
+        resolve(entity);
     }
     for record in db.tables.block_records.values_mut() {
         for entity in &mut record.entities {
-            if let Entity::Dimension(dim) = entity {
-                resolve(dim);
-            }
+            resolve(entity);
         }
     }
+}
+
+/// The text height a TOLERANCE is drawn at: the height stored in the
+/// entity when positive (LibreDWG decodes one for R13/R14 files only), else
+/// the DIMSTYLE's `DIMTXT`, else the header's `DIMTXT`, else 1.0. The
+/// result is always positive: an R2000+ feature control frame stores no
+/// height of its own, and a zero height would render nothing.
+pub fn tolerance_text_height(stored: f64, style: Option<&DimStyleRecord>, header: &Header) -> f64 {
+    let positive = |h: f64| (h.is_finite() && h > 0.0).then_some(h);
+    positive(stored)
+        .or_else(|| style.and_then(|s| positive(s.dimtxt)))
+        .or_else(|| positive(header.dimtxt))
+        .unwrap_or(1.0)
 }
 
 /// The text inside each block a DIMENSION could reference: `(raw, plain)`,
@@ -480,6 +498,32 @@ mod tests {
         assert_eq!(format_measurement(3.0, false, &s), "3");
         s.dimadec = 1;
         assert_eq!(format_measurement(108.0, true, &s), "108.0\u{00B0}");
+    }
+
+    #[test]
+    fn tolerance_height_prefers_stored_then_style_then_header_then_one() {
+        let header = Header {
+            dimtxt: 2.5,
+            ..Default::default()
+        };
+        let style = DimStyleRecord {
+            name: "BIG".into(),
+            dimtxt: 3.5,
+            ..Default::default()
+        };
+        let unset = DimStyleRecord::default();
+        // An R13/R14 file's own height wins outright.
+        assert_eq!(tolerance_text_height(4.0, Some(&style), &header), 4.0);
+        // No stored height: the style's DIMTXT, else the header's.
+        assert_eq!(tolerance_text_height(0.0, Some(&style), &header), 3.5);
+        assert_eq!(tolerance_text_height(0.0, Some(&unset), &header), 2.5);
+        assert_eq!(tolerance_text_height(0.0, None, &header), 2.5);
+        // Nothing set anywhere: 1.0, never 0 (a zero-height text draws
+        // nothing).
+        let blank = Header::default();
+        assert_eq!(tolerance_text_height(0.0, Some(&unset), &blank), 1.0);
+        assert_eq!(tolerance_text_height(f64::NAN, None, &blank), 1.0);
+        assert_eq!(tolerance_text_height(-1.0, None, &header), 2.5);
     }
 
     #[test]
