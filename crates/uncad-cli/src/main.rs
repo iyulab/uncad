@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 use uncad::{
-    Background, CadDatabase, CropMode, PngSize, Rect, Space, ToJsonOptions, ToPngOptions,
-    ToSvgOptions,
+    Background, CadDatabase, CropMode, ExportOptions, PngSize, Profile, Rect, Space, ToJsonOptions,
+    ToPngOptions, ToSvgOptions,
 };
 
 const USAGE: &str = "\
@@ -20,6 +20,8 @@ Usage:
   uncad <input> -o <output.json>    export the parsed model (entities + tables)
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
+  uncad export <input> -o <dir>     write the LLM/VLM package (overview, tiles,
+                                    JSON records; see docs/VLM_EXPORT_DESIGN.md)
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -55,8 +57,19 @@ PNG options:
   --lattice <px>              round the image size up to a multiple of this,
                                 the model's patch size (default: 28; 0 = off)
 
+Export options (uncad export):
+  --profile <name>            claude (default), claude-hires, openai-patch
+  --max-levels <n>            deepest zoom level (default: 5)
+  --max-tiles <n>             most tiles written (default: 400)
+  --text-px <px>              target pixel height of the dominant text (default: 14)
+  --shard-kb <kb>             split record files above this size (default: 96)
+  --svg                       also write drawing.svg
+  --full                      also write entities.json (the whole model)
+  (--crop, --include-hidden apply too)
+
 Examples:
   uncad drawing.dwg
+  uncad export drawing.dwg -o drawing_pkg
   uncad drawing.dwg -o drawing.json --pretty
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
@@ -166,6 +179,15 @@ fn parse_args(argv: &[String]) -> Args {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("export") {
+        return match run_export(&argv[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let args = parse_args(&argv);
 
     if args.help || args.input.is_none() {
@@ -263,6 +285,94 @@ fn run(args: &Args) -> Result<(), String> {
                 if crop.excluded.len() > 5 { ", ..." } else { "" }
             );
         }
+    }
+    Ok(())
+}
+
+fn run_export(argv: &[String]) -> Result<(), String> {
+    let args = parse_args(argv);
+    if args.help {
+        eprintln!("{USAGE}");
+        return Ok(());
+    }
+    let input = args
+        .input
+        .as_deref()
+        .ok_or_else(|| "export needs an input file: uncad export <input> -o <dir>".to_string())?;
+    let output = args
+        .output
+        .as_deref()
+        .ok_or_else(|| "export needs an output directory: -o <dir>".to_string())?;
+    let mut options = ExportOptions {
+        crop: parse_crop(&args.crop)?,
+        include_hidden: args.include_hidden,
+        source_name: Path::new(input)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    let mut i = 0;
+    while i < argv.len() {
+        let next = || {
+            argv.get(i + 1)
+                .cloned()
+                .ok_or_else(|| format!("{} needs a value", argv[i]))
+        };
+        match argv[i].as_str() {
+            "--profile" => {
+                let name = next()?;
+                options.profile = Profile::by_name(&name).ok_or_else(|| {
+                    format!("unsupported --profile '{name}' (claude, claude-hires, openai-patch)")
+                })?;
+                i += 1;
+            }
+            "--max-levels" => {
+                options.max_levels = parse_pixels("--max-levels", &next()?)?;
+                i += 1;
+            }
+            "--max-tiles" => {
+                options.max_tiles = parse_pixels("--max-tiles", &next()?)? as usize;
+                i += 1;
+            }
+            "--text-px" => {
+                options.target_text_px = parse_positive("--text-px", &next()?)?;
+                i += 1;
+            }
+            "--shard-kb" => {
+                options.shard_kb = parse_pixels("--shard-kb", &next()?)? as usize;
+                i += 1;
+            }
+            "--svg" => options.svg = true,
+            "--full" => options.full = true,
+            _ => {}
+        }
+        i += 1;
+    }
+    let db = parse_input(input)?;
+    let report = uncad::export::export_package(&db, Path::new(output), &options)
+        .map_err(|e| e.to_string())?;
+    println!(
+        "wrote: {} ({} files; overview {}x{} px; {} tiles over {} levels; {} texts, {} dimensions, {} geometry, {} regions, {} block instances)",
+        report.dir.display(),
+        report.files.len(),
+        report.overview.px[0],
+        report.overview.px[1],
+        report.counts.tiles,
+        report.levels.len(),
+        report.counts.texts,
+        report.counts.dimensions,
+        report.counts.geometry,
+        report.counts.regions,
+        report.counts.blocks
+    );
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+    if !report.crop.excluded.is_empty() {
+        eprintln!(
+            "note: {} entities outside the crop, listed in report.json",
+            report.crop.excluded.len()
+        );
     }
     Ok(())
 }

@@ -10,6 +10,21 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
+  LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
+  profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
+  pyramid (`frames/f0/tiles/z*/rRR_cCC.png`, 1092 px with 224 px overlap, edge tiles
+  shifted inward, empty tiles listed but not written, depth chosen so the dominant text
+  height reaches 14 px) with a JSON sidecar per tile (world rectangle, both affines,
+  neighbours, parent and children, the texts, dimensions, blocks and regions on it with
+  pixel boxes); and the records -- `texts.json` (block contents included, ids
+  `<insert>/<child>`), `dimensions.json`, `geometry.json`, `regions.json` (area,
+  perimeter, centroid, the texts inside), `blocks.json`, `strings.json` (normalised
+  string -> ids), `drawing.json`, `report.json` (excluded and hidden entities with
+  reasons), `tiles.json`, `README.txt`. `--svg` / `--full` add `drawing.svg` /
+  `entities.json`; record files above `--shard-kb` (96) are sharded and indexed in the
+  manifest; profiles `claude`, `claude-hires`, `openai-patch`. Output is deterministic
+  except for the timings in `report.json`.
 - The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
   is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
   most `max(3, 1 %)` entities: the largest when they dwarf everything else 20x, or

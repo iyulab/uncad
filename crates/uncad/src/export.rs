@@ -1,0 +1,2155 @@
+//! The LLM/VLM package (docs/VLM_EXPORT_DESIGN.md, sections 2, 3 and 5):
+//! [`export_package`] turns a parsed drawing into a directory an agent can
+//! read -- an overview image sized for the model, a pyramid of overlapping
+//! tiles with JSON sidecars saying what is on each, and JSON records with
+//! the exact numbers (lengths, areas, dimension values, texts) that a
+//! picture cannot give.
+//!
+//! What this 0.3.0 form writes:
+//!
+//! ```text
+//! dir/
+//!   README.txt        reading order
+//!   manifest.json     source, units, crop, overview, levels, legibility, counts, files, shard_index, guidance
+//!   drawing.json      header, units, layers with their state, blocks, counts
+//!   overview.png      the whole crop, fitted to the profile (Claude: <= 1568 px edge, <= 1568 patches)
+//!   frames/f0/tiles/z{z}/r{rr}_c{cc}.png + .json   tiles (1092 px, 224 px overlap) and sidecars
+//!   tiles.json        every tile of every level, written or empty
+//!   texts.json        TEXT/MTEXT/ATTRIB, block contents included, with world boxes and tiles
+//!   dimensions.json   measured value, display string, definition points
+//!   geometry.json     every other visible entity: key points, length, area, bbox, tiles
+//!   regions.json      closed polylines: area, perimeter, centroid, the texts inside
+//!   blocks.json       block definitions and INSERT instances with attributes
+//!   strings.json      normalised string -> record ids
+//!   report.json       excluded and hidden entities with reasons, unsupported types, timings
+//!   drawing.svg       with `svg: true`;  entities.json  with `full: true`
+//! ```
+//!
+//! Every JSON file carries `"$schema": "uncad-package/1"` and a `units`
+//! block; record files above `shard_kb` are split into `name.NNN.json` and
+//! listed in the manifest's `shard_index`. Output is deterministic for a
+//! given input and options (maps are sorted, records ordered by id) except
+//! for `report.json`'s timings.
+//!
+//! Still open (0.4.0): frames for detached clusters, paper layouts, text
+//! boxes from glyph metrics (they are 0.6-em estimates here), NFKC string
+//! normalisation, a bundled font.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use serde::Serialize;
+use serde_json::{json, Map, Value};
+
+use crate::crop::{self, CropMode, CropReport, Extent, Rect};
+use crate::model::{Entity, InsertEntity, Point2D, Point3D};
+use crate::png::{self, PngError};
+use crate::svg::{self, Space, ToSvgOptions, ViewBox};
+use crate::visibility::hidden_reason;
+use crate::{CadDatabase, ToJsonOptions};
+
+/// The `$schema` value every JSON file in the package carries.
+pub const SCHEMA: &str = "uncad-package/1";
+
+/// The image budget of one model family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Profile {
+    pub name: &'static str,
+    /// The overview's longest edge, in pixels.
+    pub overview_edge: u32,
+    /// The most patches (lattice x lattice squares) the overview may hold.
+    pub overview_patches: u32,
+    /// Tile edge, in pixels.
+    pub tile: u32,
+    /// Overlap between neighbouring tiles, in pixels.
+    pub overlap: u32,
+    /// The patch size every image size is rounded up to.
+    pub lattice: u32,
+}
+
+impl Profile {
+    /// Claude's standard tier: 1568 px edge, 1568 patches of 28 px.
+    pub const CLAUDE: Profile = Profile {
+        name: "claude",
+        overview_edge: 1568,
+        overview_patches: 1568,
+        tile: 1092,
+        overlap: 224,
+        lattice: 28,
+    };
+    /// Claude's high-resolution tier.
+    pub const CLAUDE_HIRES: Profile = Profile {
+        name: "claude-hires",
+        overview_edge: 2576,
+        overview_patches: 4784,
+        tile: 1932,
+        overlap: 392,
+        lattice: 28,
+    };
+    /// OpenAI's patch-based models (gpt-5.x): 32 px patches.
+    pub const OPENAI_PATCH: Profile = Profile {
+        name: "openai-patch",
+        overview_edge: 2048,
+        overview_patches: 4096,
+        tile: 1600,
+        overlap: 320,
+        lattice: 32,
+    };
+
+    pub fn by_name(name: &str) -> Option<Profile> {
+        [
+            Profile::CLAUDE,
+            Profile::CLAUDE_HIRES,
+            Profile::OPENAI_PATCH,
+        ]
+        .into_iter()
+        .find(|p| p.name == name)
+    }
+
+    fn step(&self) -> u32 {
+        self.tile - self.overlap
+    }
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Profile::CLAUDE
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportOptions {
+    pub profile: Profile,
+    /// The deepest zoom level written (levels are `z1..=z_max`, each 2x the
+    /// previous). Default 5.
+    pub max_levels: u32,
+    /// The most tiles written across all levels; deeper levels are dropped
+    /// whole when this would be exceeded. Default 400.
+    pub max_tiles: usize,
+    /// The pixel height the dominant text class should reach at the deepest
+    /// level. Default 14.
+    pub target_text_px: f64,
+    pub crop: CropMode,
+    /// Draw hidden entities at 50 % (they never enter the records or the
+    /// crop). Default `false`.
+    pub include_hidden: bool,
+    /// Record files larger than this are sharded. Default 96.
+    pub shard_kb: usize,
+    /// Also write `drawing.svg`. Default `false`.
+    pub svg: bool,
+    /// Also write `entities.json`, the whole model. Default `false`.
+    pub full: bool,
+    /// What the manifest records as the source's name (a file name, say).
+    pub source_name: Option<String>,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        ExportOptions {
+            profile: Profile::CLAUDE,
+            max_levels: 5,
+            max_tiles: 400,
+            target_text_px: 14.0,
+            crop: CropMode::Auto,
+            include_hidden: false,
+            shard_kb: 96,
+            svg: false,
+            full: false,
+            source_name: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ExportError {
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Render(PngError),
+    Json(serde_json::Error),
+    /// The whole-model `entities.json` could not be serialized.
+    Model(crate::JsonError),
+}
+
+impl std::fmt::Display for ExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExportError::Io { path, source } => {
+                write!(f, "cannot write {}: {source}", path.display())
+            }
+            ExportError::Render(e) => write!(f, "rendering failed: {e}"),
+            ExportError::Json(e) => write!(f, "JSON serialization failed: {e}"),
+            ExportError::Model(e) => write!(f, "entities.json failed: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ExportError {}
+
+impl From<PngError> for ExportError {
+    fn from(e: PngError) -> Self {
+        ExportError::Render(e)
+    }
+}
+
+impl From<serde_json::Error> for ExportError {
+    fn from(e: serde_json::Error) -> Self {
+        ExportError::Json(e)
+    }
+}
+
+impl From<crate::JsonError> for ExportError {
+    fn from(e: crate::JsonError) -> Self {
+        ExportError::Model(e)
+    }
+}
+
+/// One image of the package: where it is and how its pixels map to the
+/// drawing.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImageInfo {
+    pub id: String,
+    pub png: String,
+    /// `[width, height]` in pixels.
+    pub px: [u32; 2],
+    /// The world rectangle the image shows.
+    pub world: Rect,
+    /// Pixels per drawing unit.
+    pub ppu: f64,
+    /// Row-major `[a, b, c, d, e, f]` with `px = a x + b y + c` and
+    /// `py = d x + e y + f` (the design's `[s, 0, -x0 s, 0, -s, y1 s]`).
+    pub world_to_px: [f64; 6],
+    pub px_to_world: [f64; 6],
+}
+
+impl ImageInfo {
+    fn new(id: &str, png: &str, world: Rect, ppu: f64, width: u32, height: u32) -> ImageInfo {
+        ImageInfo {
+            id: id.to_string(),
+            png: png.to_string(),
+            px: [width, height],
+            world,
+            ppu,
+            world_to_px: [ppu, 0.0, -world.min_x * ppu, 0.0, -ppu, world.max_y * ppu],
+            px_to_world: [1.0 / ppu, 0.0, world.min_x, 0.0, -1.0 / ppu, world.max_y],
+        }
+    }
+
+    /// A world rectangle in this image's pixels, `[x0, y0, x1, y1]` with y
+    /// down, rounded to whole pixels.
+    fn px_box(&self, r: &Rect) -> [i64; 4] {
+        let x0 = ((r.min_x - self.world.min_x) * self.ppu).floor();
+        let x1 = ((r.max_x - self.world.min_x) * self.ppu).ceil();
+        let y0 = ((self.world.max_y - r.max_y) * self.ppu).floor();
+        let y1 = ((self.world.max_y - r.min_y) * self.ppu).ceil();
+        [x0 as i64, y0 as i64, x1 as i64, y1 as i64]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LevelInfo {
+    pub z: u32,
+    pub ppu: f64,
+    pub canvas_px: [u32; 2],
+    pub cols: u32,
+    pub rows: u32,
+    pub tile_px: u32,
+    pub overlap_px: u32,
+    pub step_px: u32,
+    pub tiles_written: usize,
+    pub tiles_empty: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WrittenFile {
+    pub path: String,
+    pub bytes: u64,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
+pub struct Counts {
+    pub entities: usize,
+    pub texts: usize,
+    pub dimensions: usize,
+    pub geometry: usize,
+    pub regions: usize,
+    pub blocks: usize,
+    pub hidden: usize,
+    pub excluded: usize,
+    pub tiles: usize,
+}
+
+/// What [`export_package`] wrote.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportReport {
+    pub dir: PathBuf,
+    pub files: Vec<WrittenFile>,
+    pub overview: ImageInfo,
+    pub levels: Vec<LevelInfo>,
+    pub crop: CropReport,
+    pub counts: Counts,
+    pub warnings: Vec<String>,
+}
+
+// ---------------------------------------------------------------- records
+
+/// One entity's export record before its images are known.
+struct Record {
+    id: String,
+    bbox: Rect,
+    value: Map<String, Value>,
+}
+
+/// A text placed in the world (top level or inside a block reference).
+struct PlacedText {
+    id: String,
+    kind: &'static str,
+    layer: String,
+    text: String,
+    raw: String,
+    height: f64,
+    rotation: f64,
+    anchor: Point2D,
+    bbox: Rect,
+    style: String,
+    tag: Option<String>,
+}
+
+/// A 2D affine: `p' = origin + rot * scale * p`, with the mirror folded in
+/// as a negative x scale and a negated rotation, as the renderer does.
+#[derive(Clone, Copy)]
+struct Affine {
+    origin: Point2D,
+    x_scale: f64,
+    y_scale: f64,
+    rotation: f64,
+}
+
+impl Affine {
+    const IDENTITY: Affine = Affine {
+        origin: Point2D { x: 0.0, y: 0.0 },
+        x_scale: 1.0,
+        y_scale: 1.0,
+        rotation: 0.0,
+    };
+
+    fn for_insert(i: &InsertEntity) -> Affine {
+        let (x_scale, rotation) = if i.extrusion.z < 0.0 {
+            (-i.scale.x, -i.rotation)
+        } else {
+            (i.scale.x, i.rotation)
+        };
+        Affine {
+            origin: Point2D {
+                x: i.insertion_point.x,
+                y: i.insertion_point.y,
+            },
+            x_scale,
+            y_scale: i.scale.y,
+            rotation,
+        }
+    }
+
+    fn apply(&self, p: Point2D) -> Point2D {
+        let (c, s) = (self.rotation.cos(), self.rotation.sin());
+        let (x, y) = (p.x * self.x_scale, p.y * self.y_scale);
+        Point2D {
+            x: self.origin.x + c * x - s * y,
+            y: self.origin.y + s * x + c * y,
+        }
+    }
+
+    /// `self` then `outer`: the transform of a child placed by `self`
+    /// inside a block that `outer` places.
+    fn then(&self, outer: &Affine) -> Affine {
+        Affine {
+            origin: outer.apply(self.origin),
+            x_scale: self.x_scale * outer.x_scale,
+            y_scale: self.y_scale * outer.y_scale,
+            rotation: self.rotation + outer.rotation,
+        }
+    }
+
+    fn length_scale(&self) -> f64 {
+        (self.x_scale.abs() * self.y_scale.abs()).sqrt()
+    }
+}
+
+const MAX_BLOCK_DEPTH: u32 = 8;
+const MAX_PLACED_TEXTS: usize = 200_000;
+
+/// Estimated world box of a text: 0.6 em per character (the renderer's
+/// own guess), placed by its alignment and rotated about its anchor.
+fn text_box(
+    anchor: Point2D,
+    height: f64,
+    rotation: f64,
+    text: &str,
+    width_factor: f64,
+    h_align: u16,
+    v_align: u16,
+) -> Rect {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let chars = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let width = 0.6 * height * width_factor.abs().max(0.1) * chars;
+    let total_height = height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0);
+    let (x0, x1) = match h_align {
+        1 | 3 | 4 | 5 => (-width / 2.0, width / 2.0),
+        2 => (-width, 0.0),
+        _ => (0.0, width),
+    };
+    let (y0, y1) = match (h_align, v_align) {
+        (4, _) | (_, 2) => (-total_height / 2.0, total_height / 2.0),
+        (_, 3) => (-total_height, 0.0),
+        _ => (0.0, total_height),
+    };
+    rotated_box(anchor, rotation, x0, y0, x1, y1)
+}
+
+/// MTEXT: attachment 1-9 (top/middle/bottom rows, left/center/right
+/// columns) with the stored extents when the file has them.
+fn mtext_box(
+    anchor: Point2D,
+    height: f64,
+    rotation: f64,
+    text: &str,
+    attachment: u16,
+    extents_width: f64,
+    extents_height: f64,
+) -> Rect {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let chars = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let width = if extents_width > 0.0 {
+        extents_width
+    } else {
+        0.6 * height * chars
+    };
+    let total_height = if extents_height > 0.0 {
+        extents_height
+    } else {
+        height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0)
+    };
+    let column = (attachment.clamp(1, 9) - 1) % 3;
+    let row = (attachment.clamp(1, 9) - 1) / 3;
+    let (x0, x1) = match column {
+        1 => (-width / 2.0, width / 2.0),
+        2 => (-width, 0.0),
+        _ => (0.0, width),
+    };
+    let (y0, y1) = match row {
+        0 => (-total_height, 0.0),
+        1 => (-total_height / 2.0, total_height / 2.0),
+        _ => (0.0, total_height),
+    };
+    rotated_box(anchor, rotation, x0, y0, x1, y1)
+}
+
+fn rotated_box(anchor: Point2D, rotation: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
+    let (c, s) = (rotation.cos(), rotation.sin());
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    let mut rect = Rect::new(
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for (x, y) in corners {
+        let (wx, wy) = (anchor.x + c * x - s * y, anchor.y + s * x + c * y);
+        rect.min_x = rect.min_x.min(wx);
+        rect.min_y = rect.min_y.min(wy);
+        rect.max_x = rect.max_x.max(wx);
+        rect.max_y = rect.max_y.max(wy);
+    }
+    rect
+}
+
+fn p2(p: Point3D) -> Point2D {
+    Point2D { x: p.x, y: p.y }
+}
+
+/// Collects every visible text at the top level and inside visible block
+/// references (ids `<insert>/<child>`), transformed to world coordinates.
+fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
+    let mut out = Vec::new();
+    for e in top {
+        collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut out);
+    }
+    out
+}
+
+fn collect_texts(
+    db: &CadDatabase,
+    e: &Entity,
+    affine: &Affine,
+    prefix: &str,
+    depth: u32,
+    out: &mut Vec<PlacedText>,
+) {
+    if out.len() >= MAX_PLACED_TEXTS || hidden_reason(e.common(), &db.tables).is_some() {
+        return;
+    }
+    let id = |handle: &str| {
+        if prefix.is_empty() {
+            handle.to_string()
+        } else {
+            format!("{prefix}/{handle}")
+        }
+    };
+    let scale = affine.length_scale();
+    match e {
+        Entity::Text(t) => {
+            if t.text_plain.trim().is_empty() {
+                return;
+            }
+            let base = if t.horizontal_alignment != 0 || t.vertical_alignment != 0 {
+                t.alignment_point.unwrap_or(t.start_point)
+            } else {
+                t.start_point
+            };
+            let anchor = affine.apply(base);
+            let height = t.text_height * scale;
+            let rotation = t.rotation + affine.rotation;
+            out.push(PlacedText {
+                id: id(&t.common.handle),
+                kind: "TEXT",
+                layer: t.common.layer.clone(),
+                text: t.text_plain.clone(),
+                raw: t.text.clone(),
+                height,
+                rotation,
+                anchor,
+                bbox: text_box(
+                    anchor,
+                    height,
+                    rotation,
+                    &t.text_plain,
+                    t.width_factor,
+                    t.horizontal_alignment,
+                    t.vertical_alignment,
+                ),
+                style: t.style.clone(),
+                tag: None,
+            });
+        }
+        Entity::Attrib(a) => {
+            if a.invisible || a.text_plain.trim().is_empty() {
+                return;
+            }
+            let base = if a.horizontal_alignment != 0 || a.vertical_alignment != 0 {
+                a.alignment_point.unwrap_or(a.start_point)
+            } else {
+                a.start_point
+            };
+            let anchor = affine.apply(base);
+            let height = a.text_height * scale;
+            let rotation = a.rotation + affine.rotation;
+            out.push(PlacedText {
+                id: id(&a.common.handle),
+                kind: "ATTRIB",
+                layer: a.common.layer.clone(),
+                text: a.text_plain.clone(),
+                raw: a.text.clone(),
+                height,
+                rotation,
+                anchor,
+                bbox: text_box(
+                    anchor,
+                    height,
+                    rotation,
+                    &a.text_plain,
+                    a.width_factor,
+                    a.horizontal_alignment,
+                    a.vertical_alignment,
+                ),
+                style: a.style.clone(),
+                tag: Some(a.tag.clone()),
+            });
+        }
+        Entity::MText(m) => {
+            if m.text_plain.trim().is_empty() {
+                return;
+            }
+            let anchor = affine.apply(p2(m.insertion_point));
+            let height = m.text_height * scale;
+            let rotation = m.rotation + affine.rotation;
+            out.push(PlacedText {
+                id: id(&m.common.handle),
+                kind: "MTEXT",
+                layer: m.common.layer.clone(),
+                text: m.text_plain.clone(),
+                raw: m.text.clone(),
+                height,
+                rotation,
+                anchor,
+                bbox: mtext_box(
+                    anchor,
+                    height,
+                    rotation,
+                    &m.text_plain,
+                    m.attachment,
+                    m.extents_width * scale,
+                    m.extents_height * scale,
+                ),
+                style: m.style.clone(),
+                tag: None,
+            });
+        }
+        Entity::Insert(i) => {
+            if depth >= MAX_BLOCK_DEPTH {
+                return;
+            }
+            let Some(block) = db.tables.block_records.get(&i.block_name) else {
+                return;
+            };
+            let child_affine = Affine::for_insert(i).then(affine);
+            let child_prefix = id(&i.common.handle);
+            for child in &block.entities {
+                if matches!(child, Entity::Attdef(_) | Entity::Attrib(_)) {
+                    // Attribute values are the INSERT's own ATTRIBs, which
+                    // the top-level walk already sees.
+                    continue;
+                }
+                collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+// ------------------------------------------------------------- rounding
+
+fn round_to(v: f64, decimals: u16) -> f64 {
+    let f = 10f64.powi(i32::from(decimals));
+    let r = (v * f).round() / f;
+    if r == 0.0 {
+        0.0
+    } else {
+        r
+    }
+}
+
+struct Rounder {
+    coords: u16,
+    derived: u16,
+}
+
+impl Rounder {
+    fn coord(&self, v: f64) -> f64 {
+        round_to(v, self.coords)
+    }
+
+    fn derived(&self, v: f64) -> f64 {
+        round_to(v, self.derived)
+    }
+
+    fn pt2(&self, p: Point2D) -> Value {
+        json!([self.coord(p.x), self.coord(p.y)])
+    }
+
+    fn pt3(&self, p: Point3D) -> Value {
+        json!([self.coord(p.x), self.coord(p.y)])
+    }
+
+    fn rect(&self, r: &Rect) -> Value {
+        json!([
+            self.coord(r.min_x),
+            self.coord(r.min_y),
+            self.coord(r.max_x),
+            self.coord(r.max_y)
+        ])
+    }
+}
+
+/// Sorts handles numerically (they are hex), then lexically.
+fn id_key(id: &str) -> (u64, String) {
+    let first = id.split('/').next().unwrap_or(id);
+    (
+        u64::from_str_radix(first, 16).unwrap_or(u64::MAX),
+        id.to_string(),
+    )
+}
+
+/// The normalisation `strings.json` keys use: trimmed, case-folded,
+/// whitespace collapsed.
+pub fn normalize_string(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+// ----------------------------------------------------------- the package
+
+struct Writer<'a> {
+    dir: &'a Path,
+    files: Vec<WrittenFile>,
+    shard_index: Vec<Value>,
+    units: Value,
+    shard_kb: usize,
+}
+
+impl Writer<'_> {
+    fn write_bytes(&mut self, rel: &str, bytes: &[u8], kind: &str) -> Result<(), ExportError> {
+        let path = self.dir.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| ExportError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        std::fs::write(&path, bytes).map_err(|source| ExportError::Io { path, source })?;
+        self.files.push(WrittenFile {
+            path: rel.to_string(),
+            bytes: bytes.len() as u64,
+            kind: kind.to_string(),
+        });
+        Ok(())
+    }
+
+    fn write_json(&mut self, rel: &str, value: &Value, kind: &str) -> Result<(), ExportError> {
+        let text = serde_json::to_string_pretty(value)?;
+        self.write_bytes(rel, text.as_bytes(), kind)
+    }
+
+    /// Writes `records` (already sorted by id) as `name.json`, or as
+    /// `name.NNN.json` shards under the size rule, and indexes them.
+    fn write_records(
+        &mut self,
+        name: &str,
+        kind: &str,
+        records: &[Record],
+    ) -> Result<(), ExportError> {
+        let limit = self.shard_kb.max(1) * 1024;
+        let mut shards: Vec<Vec<&Record>> = vec![Vec::new()];
+        let mut bytes = 0usize;
+        for r in records {
+            let size = serde_json::to_string(&r.value)?.len() + 8;
+            if bytes + size > limit && !shards.last().is_none_or(Vec::is_empty) {
+                shards.push(Vec::new());
+                bytes = 0;
+            }
+            shards.last_mut().expect("one shard").push(r);
+            bytes += size;
+        }
+        let single = shards.len() == 1;
+        for (n, shard) in shards.iter().enumerate() {
+            let file = if single {
+                format!("{name}.json")
+            } else {
+                format!("{name}.{:03}.json", n + 1)
+            };
+            let value = json!({
+                "$schema": SCHEMA,
+                "kind": kind,
+                "units": self.units,
+                "count": shard.len(),
+                "records": shard.iter().map(|r| Value::Object(r.value.clone())).collect::<Vec<_>>(),
+            });
+            let text = serde_json::to_string(&value)?;
+            self.write_bytes(&file, text.as_bytes(), kind)?;
+            self.shard_index.push(json!({
+                "file": file,
+                "kind": kind,
+                "first_id": shard.first().map(|r| r.id.as_str()),
+                "last_id": shard.last().map(|r| r.id.as_str()),
+                "count": shard.len(),
+                "bytes": text.len(),
+            }));
+        }
+        Ok(())
+    }
+}
+
+struct Tile {
+    id: String,
+    z: u32,
+    row: u32,
+    col: u32,
+    /// Pixel origin on the level canvas.
+    origin_px: (u32, u32),
+    width: u32,
+    height: u32,
+    world: Rect,
+    empty: bool,
+}
+
+/// Writes the package for `db` into `dir` (created if needed; existing
+/// files with the same names are overwritten).
+pub fn export_package(
+    db: &CadDatabase,
+    dir: &Path,
+    options: &ExportOptions,
+) -> Result<ExportReport, ExportError> {
+    let started = Instant::now();
+    let profile = options.profile;
+    std::fs::create_dir_all(dir).map_err(|source| ExportError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    let mut warnings: Vec<String> = Vec::new();
+
+    // --- render once, decide the crop ---------------------------------
+    let svg_options = ToSvgOptions {
+        crop: options.crop,
+        include_hidden: options.include_hidden,
+        padding: None,
+        space: Space::Model,
+        ..Default::default()
+    };
+    let rendered = svg::render(db, svg_options);
+    let content = rendered.choice.rect;
+    let top: Vec<&Entity> = svg::select_entities_for_space(db, Space::Model);
+    // Records cover what the picture shows: neither hidden entities nor
+    // the ones the crop left out (they are listed in report.json).
+    let excluded_handles: BTreeSet<&str> = rendered
+        .choice
+        .excluded
+        .iter()
+        .map(|e| e.handle.as_str())
+        .collect();
+    let shown: Vec<&Entity> = top
+        .iter()
+        .copied()
+        .filter(|e| {
+            hidden_reason(e.common(), &db.tables).is_none()
+                && !excluded_handles.contains(e.common().handle.as_str())
+        })
+        .collect();
+    let visible: &[&Entity] = &shown;
+    let extents: &[Extent] = &rendered.extents;
+
+    // --- overview size: profile edge and patch budget --------------------
+    let lattice = f64::from(profile.lattice.max(1));
+    let edge_patches = (f64::from(profile.overview_edge) / lattice)
+        .floor()
+        .max(1.0);
+    let (w, h) = (content.width().max(1e-9), content.height().max(1e-9));
+    let aspect = w / h;
+    let budget = f64::from(profile.overview_patches);
+    let pw = edge_patches.min((budget * aspect).sqrt().floor()).max(1.0);
+    let ph = edge_patches
+        .min((budget / pw).floor())
+        .min((pw / aspect).ceil())
+        .max(1.0);
+    let seed_ppu = (pw * lattice / (1.04 * w)).min(ph * lattice / (1.04 * h));
+    let padding = crop::auto_padding(&content, Some(seed_ppu));
+    let padded = content.padded(padding);
+    let ppu_0 = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
+    let (rect0, w0, h0) = crop::snap_to_lattice(&padded, ppu_0, profile.lattice);
+    if w0.max(h0) < 200 {
+        warnings.push(format!(
+            "TinyOverview: the overview is only {w0} x {h0} px; the drawing's aspect leaves little of the patch budget"
+        ));
+    }
+    let overview_view_box = ViewBox::from_world(&rect0);
+    let stroke_px = 1.25;
+    let overview_svg = svg::assemble(&rendered, &overview_view_box, stroke_px / ppu_0);
+    let overview_tree = png::parse_tree(&overview_svg)?;
+    let overview_png = png::render_region(&overview_tree, ppu_0, (0.0, 0.0), w0, h0)?;
+    let overview = ImageInfo::new("ov", "overview.png", rect0, ppu_0, w0, h0);
+
+    // --- records: texts, dimensions, geometry, regions, blocks ---------
+    let rounder = Rounder {
+        coords: db.header.luprec.clamp(3, 12),
+        derived: db.header.luprec.clamp(3, 12) + 2,
+    };
+    let unit = db.header.units.name.clone();
+    let texts = placed_texts(db, visible);
+    let heights: Vec<(f64, usize)> = height_classes(&texts);
+
+    // --- levels and tiles ------------------------------------------------
+    let z_max = depth_for(&heights, ppu_0, options);
+    let mut levels: Vec<LevelInfo> = Vec::new();
+    let mut tiles: Vec<Tile> = Vec::new();
+    let mut written_total = 0usize;
+    let mut reached = true;
+    for z in 1..=z_max {
+        let factor = 2f64.powi(z as i32);
+        let ppu = ppu_0 * factor;
+        let (cw, ch) = (w0 * 2u32.pow(z), h0 * 2u32.pow(z));
+        let plan = plan_tiles(z, cw, ch, &rect0, ppu, &profile, extents);
+        let written = plan.iter().filter(|t| !t.empty).count();
+        if written_total + written > options.max_tiles {
+            reached = false;
+            warnings.push(format!(
+                "MaxTiles: level z{z} would need {written} more tiles ({} so far, limit {}); stopping at z{}",
+                written_total,
+                options.max_tiles,
+                z - 1
+            ));
+            break;
+        }
+        written_total += written;
+        let (cols, rows) = grid(cw, ch, &profile);
+        levels.push(LevelInfo {
+            z,
+            ppu,
+            canvas_px: [cw, ch],
+            cols,
+            rows,
+            tile_px: profile.tile,
+            overlap_px: profile.overlap,
+            step_px: profile.step(),
+            tiles_written: written,
+            tiles_empty: plan.len() - written,
+        });
+        tiles.extend(plan);
+    }
+    let z_reached = levels.last().map_or(0, |l| l.z);
+
+    // --- write images ---------------------------------------------------
+    let mut writer = Writer {
+        dir,
+        files: Vec::new(),
+        shard_index: Vec::new(),
+        units: json!({
+            "name": unit,
+            "insunits": db.header.insunits,
+            "to_mm": db.header.units.to_mm,
+            "source": "header",
+        }),
+        shard_kb: options.shard_kb,
+    };
+    writer.write_bytes("overview.png", &overview_png, "image")?;
+    let mut tile_images: Vec<ImageInfo> = Vec::new();
+    for level in &levels {
+        let level_view_box = overview_view_box;
+        let level_svg = svg::assemble(&rendered, &level_view_box, stroke_px / level.ppu);
+        let tree = png::parse_tree(&level_svg)?;
+        for tile in tiles.iter().filter(|t| t.z == level.z && !t.empty) {
+            let bytes = png::render_region(
+                &tree,
+                level.ppu,
+                (f64::from(tile.origin_px.0), f64::from(tile.origin_px.1)),
+                tile.width,
+                tile.height,
+            )?;
+            let png_path = format!(
+                "frames/f0/tiles/z{}/r{:02}_c{:02}.png",
+                tile.z, tile.row, tile.col
+            );
+            writer.write_bytes(&png_path, &bytes, "tile")?;
+            tile_images.push(ImageInfo::new(
+                &tile.id,
+                &png_path,
+                tile.world,
+                level.ppu,
+                tile.width,
+                tile.height,
+            ));
+        }
+    }
+
+    // --- records with their images ---------------------------------------
+    let images_for = |bbox: &Rect| -> Vec<&ImageInfo> {
+        tile_images
+            .iter()
+            .filter(|img| img.world.intersects(bbox))
+            .collect()
+    };
+    let px_map = |bbox: &Rect| -> Value {
+        let mut m = Map::new();
+        m.insert("ov".to_string(), json!(overview.px_box(bbox)));
+        for img in images_for(bbox) {
+            m.insert(img.id.clone(), json!(img.px_box(bbox)));
+        }
+        Value::Object(m)
+    };
+    let tiles_for =
+        |bbox: &Rect| -> Vec<String> { images_for(bbox).iter().map(|i| i.id.clone()).collect() };
+
+    let extent_of = |handle: &str| -> Option<Rect> {
+        extents.iter().find(|e| e.handle == handle).map(|e| e.rect)
+    };
+
+    // texts
+    let mut text_records: Vec<Record> = texts
+        .iter()
+        .map(|t| {
+            let mut v = Map::new();
+            v.insert("id".into(), json!(t.id));
+            v.insert("kind".into(), json!(t.kind));
+            v.insert("text".into(), json!(t.text));
+            if t.raw != t.text {
+                v.insert("raw".into(), json!(t.raw));
+            }
+            if let Some(tag) = &t.tag {
+                v.insert("tag".into(), json!(tag));
+            }
+            v.insert("layer".into(), json!(t.layer));
+            v.insert("height".into(), json!(rounder.derived(t.height)));
+            v.insert(
+                "rotation_deg".into(),
+                json!(rounder.derived(t.rotation.to_degrees())),
+            );
+            v.insert("anchor".into(), rounder.pt2(t.anchor));
+            if !t.style.is_empty() {
+                v.insert("style".into(), json!(t.style));
+            }
+            v.insert("bbox".into(), rounder.rect(&t.bbox));
+            v.insert("bbox_confidence".into(), json!("estimated"));
+            v.insert("why".into(), json!("0.6 em per character from the anchor"));
+            v.insert("tiles".into(), json!(tiles_for(&t.bbox)));
+            v.insert("px".into(), px_map(&t.bbox));
+            Record {
+                id: t.id.clone(),
+                bbox: t.bbox,
+                value: v,
+            }
+        })
+        .collect();
+    text_records.sort_by_key(|r| id_key(&r.id));
+
+    // dimensions
+    let mut dim_records: Vec<Record> = Vec::new();
+    for e in visible {
+        let Entity::Dimension(d) = e else { continue };
+        let bbox = extent_of(&d.common.handle).unwrap_or_else(|| {
+            Rect::new(
+                d.definition_point.x,
+                d.definition_point.y,
+                d.definition_point.x,
+                d.definition_point.y,
+            )
+        });
+        let angular = d.geometry.is_angular();
+        let (measurement, source) = match (d.measurement, d.measurement_from_points) {
+            (Some(m), _) => (Some(m), "act_measurement"),
+            (None, Some(p)) => (Some(p), "from_points"),
+            (None, None) => (None, "none"),
+        };
+        let delta = match (d.measurement, d.measurement_from_points) {
+            (Some(m), Some(p)) => Some(rounder.derived(m - p)),
+            _ => None,
+        };
+        let mut v = Map::new();
+        v.insert("id".into(), json!(d.common.handle));
+        v.insert(
+            "kind".into(),
+            serde_json::to_value(&d.geometry)?["kind"].clone(),
+        );
+        v.insert("layer".into(), json!(d.common.layer));
+        v.insert("dimstyle".into(), json!(d.dimstyle));
+        v.insert(
+            "measurement".into(),
+            json!(measurement.map(|m| rounder.derived(m))),
+        );
+        v.insert("measurement_source".into(), json!(source));
+        v.insert(
+            "measurement_from_points".into(),
+            json!(d.measurement_from_points.map(|m| rounder.derived(m))),
+        );
+        v.insert("delta".into(), json!(delta));
+        v.insert(
+            "unit".into(),
+            json!(if angular { "deg" } else { unit.as_str() }),
+        );
+        v.insert("dimlfac".into(), json!(d.dimlfac));
+        v.insert("display".into(), json!(d.display_text));
+        if d.display_text_raw != d.display_text {
+            v.insert("display_raw".into(), json!(d.display_text_raw));
+        }
+        v.insert(
+            "display_source".into(),
+            serde_json::to_value(d.display_source)?,
+        );
+        if !d.user_text.is_empty() {
+            v.insert("user_text".into(), json!(d.user_text));
+        }
+        v.insert("geometry".into(), serde_json::to_value(&d.geometry)?);
+        v.insert("definition_point".into(), rounder.pt3(d.definition_point));
+        v.insert("text_at".into(), rounder.pt2(d.text_midpoint));
+        v.insert(
+            "confidence".into(),
+            json!(if measurement.is_some() {
+                "stored"
+            } else {
+                "unavailable"
+            }),
+        );
+        v.insert("bbox".into(), rounder.rect(&bbox));
+        v.insert("tiles".into(), json!(tiles_for(&bbox)));
+        v.insert("px".into(), px_map(&bbox));
+        dim_records.push(Record {
+            id: d.common.handle.clone(),
+            bbox,
+            value: v,
+        });
+    }
+    dim_records.sort_by_key(|r| id_key(&r.id));
+
+    // geometry and regions
+    let mut geo_records: Vec<Record> = Vec::new();
+    let mut region_records: Vec<Record> = Vec::new();
+    for e in visible {
+        if matches!(
+            e,
+            Entity::Text(_)
+                | Entity::MText(_)
+                | Entity::Attrib(_)
+                | Entity::Attdef(_)
+                | Entity::Dimension(_)
+                | Entity::Insert(_)
+        ) {
+            continue;
+        }
+        let handle = e.common().handle.clone();
+        let Some(bbox) = extent_of(&handle) else {
+            continue;
+        };
+        let mut v = Map::new();
+        v.insert("id".into(), json!(handle));
+        v.insert("type".into(), json!(e.type_name()));
+        v.insert("layer".into(), json!(e.common().layer));
+        let mut confidence = "exact";
+        match e {
+            Entity::Line(l) => {
+                v.insert("from".into(), rounder.pt3(l.start_point));
+                v.insert("to".into(), rounder.pt3(l.end_point));
+                let len = (l.end_point.x - l.start_point.x).hypot(l.end_point.y - l.start_point.y);
+                v.insert("length".into(), json!(rounder.derived(len)));
+            }
+            Entity::Arc(a) => {
+                let mut sweep = a.end_angle - a.start_angle;
+                if sweep <= 0.0 {
+                    sweep += std::f64::consts::TAU;
+                }
+                v.insert("center".into(), rounder.pt3(a.center));
+                v.insert("r".into(), json!(rounder.derived(a.radius)));
+                v.insert(
+                    "start_deg".into(),
+                    json!(rounder.derived(a.start_angle.to_degrees())),
+                );
+                v.insert(
+                    "end_deg".into(),
+                    json!(rounder.derived(a.end_angle.to_degrees())),
+                );
+                v.insert(
+                    "sweep_deg".into(),
+                    json!(rounder.derived(sweep.to_degrees())),
+                );
+                v.insert("length".into(), json!(rounder.derived(a.radius * sweep)));
+            }
+            Entity::Circle(c) => {
+                v.insert("center".into(), rounder.pt3(c.center));
+                v.insert("r".into(), json!(rounder.derived(c.radius)));
+                v.insert(
+                    "length".into(),
+                    json!(rounder.derived(std::f64::consts::TAU * c.radius)),
+                );
+                v.insert(
+                    "area".into(),
+                    json!(rounder.derived(std::f64::consts::PI * c.radius * c.radius)),
+                );
+            }
+            Entity::Ellipse(el) => {
+                let a = el.major_axis_endpoint.x.hypot(el.major_axis_endpoint.y);
+                v.insert("center".into(), rounder.pt3(el.center));
+                v.insert("major_axis".into(), rounder.pt3(el.major_axis_endpoint));
+                v.insert("ratio".into(), json!(rounder.derived(el.axis_ratio)));
+                let full = (el.end_angle - el.start_angle - std::f64::consts::TAU).abs() < 1e-9
+                    || (el.start_angle == 0.0 && el.end_angle == 0.0);
+                if full {
+                    v.insert(
+                        "area".into(),
+                        json!(rounder.derived(std::f64::consts::PI * a * a * el.axis_ratio)),
+                    );
+                } else {
+                    confidence = "unavailable";
+                    v.insert("why".into(), json!("elliptical arc length is not computed"));
+                }
+            }
+            Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
+                let bulged = !p.bulges.is_empty();
+                v.insert("closed".into(), json!(p.closed));
+                v.insert(
+                    "vfmt".into(),
+                    json!(if bulged { "[x,y,bulge]" } else { "[x,y]" }),
+                );
+                let vertices: Vec<Value> = p
+                    .vertices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, pt)| {
+                        if bulged {
+                            json!([
+                                rounder.coord(pt.x),
+                                rounder.coord(pt.y),
+                                p.bulges.get(i).copied().unwrap_or(0.0)
+                            ])
+                        } else {
+                            rounder.pt2(*pt)
+                        }
+                    })
+                    .collect();
+                v.insert("vertices".into(), json!(vertices));
+                let length = p.length();
+                v.insert(
+                    if p.closed { "perimeter" } else { "length" }.into(),
+                    json!(rounder.derived(length)),
+                );
+                if let Some(area) = p.area() {
+                    let signed = crate::geom::polyline_signed_area(&p.vertices, &p.bulges);
+                    let simple = crate::geom::is_simple(&p.vertices);
+                    v.insert("area".into(), json!(rounder.derived(area)));
+                    v.insert(
+                        "orientation".into(),
+                        json!(if signed >= 0.0 { "ccw" } else { "cw" }),
+                    );
+                    v.insert("simple".into(), json!(simple));
+                    if !simple {
+                        confidence = "unavailable";
+                        v.insert(
+                            "why".into(),
+                            json!("self-intersecting outline: the area has no meaning"),
+                        );
+                    }
+                    if p.closed && p.vertices.len() >= 3 {
+                        let centroid = polygon_centroid(&p.vertices);
+                        let mut r = Map::new();
+                        r.insert("id".into(), json!(handle));
+                        r.insert("src".into(), json!(e.type_name()));
+                        r.insert("layer".into(), json!(e.common().layer));
+                        r.insert("area".into(), json!(rounder.derived(area)));
+                        r.insert("area_unit".into(), json!(area_unit(&unit)));
+                        r.insert(
+                            "area_si".into(),
+                            json!(db
+                                .header
+                                .units
+                                .to_mm
+                                .map(|mm| rounder.derived(area * mm * mm / 1e6))),
+                        );
+                        r.insert("perimeter".into(), json!(rounder.derived(length)));
+                        r.insert("centroid".into(), rounder.pt2(centroid));
+                        r.insert("vertex_count".into(), json!(p.vertices.len()));
+                        r.insert("simple".into(), json!(simple));
+                        r.insert(
+                            "confidence".into(),
+                            json!(if simple { "exact" } else { "unavailable" }),
+                        );
+                        r.insert("bbox".into(), rounder.rect(&bbox));
+                        r.insert("tiles".into(), json!(tiles_for(&bbox)));
+                        r.insert("px".into(), px_map(&bbox));
+                        region_records.push(Record {
+                            id: handle.clone(),
+                            bbox,
+                            value: r,
+                        });
+                    }
+                }
+            }
+            Entity::Polyline3D(p) => {
+                v.insert("closed".into(), json!(p.closed));
+                v.insert("vertex_count".into(), json!(p.vertices.len()));
+                let len: f64 = p
+                    .vertices
+                    .windows(2)
+                    .map(|w| (w[1].x - w[0].x).hypot(w[1].y - w[0].y))
+                    .sum();
+                v.insert("length_plan".into(), json!(rounder.derived(len)));
+            }
+            Entity::Spline(s) => {
+                v.insert("control_points".into(), json!(s.control_points.len()));
+                v.insert("fit_points".into(), json!(s.fit_points.len()));
+                confidence = "estimated";
+                v.insert(
+                    "why".into(),
+                    json!("spline length is not evaluated in 0.3.0"),
+                );
+            }
+            Entity::Point(p) => {
+                v.insert("at".into(), rounder.pt3(p.position));
+            }
+            Entity::Solid(s) => {
+                v.insert(
+                    "corners".into(),
+                    json!([
+                        rounder.pt2(s.corner1),
+                        rounder.pt2(s.corner2),
+                        rounder.pt2(s.corner3),
+                        rounder.pt2(s.corner4)
+                    ]),
+                );
+            }
+            Entity::Hatch(h) => {
+                v.insert("paths".into(), json!(h.boundary_paths.len()));
+                v.insert("solid_fill".into(), json!(h.solid_fill));
+                confidence = "estimated";
+            }
+            Entity::Leader(l) => {
+                v.insert("vertex_count".into(), json!(l.vertices.len()));
+                v.insert("arrowhead".into(), json!(l.has_arrowhead));
+            }
+            Entity::Ray(r) | Entity::XLine(r) => {
+                v.insert("point".into(), rounder.pt3(r.point));
+                v.insert("vector".into(), rounder.pt3(r.vector));
+            }
+            _ => {
+                confidence = "estimated";
+            }
+        }
+        v.insert("unit".into(), json!(unit));
+        v.insert("confidence".into(), json!(confidence));
+        v.insert("bbox".into(), rounder.rect(&bbox));
+        v.insert("tiles".into(), json!(tiles_for(&bbox)));
+        v.insert("px".into(), px_map(&bbox));
+        geo_records.push(Record {
+            id: handle,
+            bbox,
+            value: v,
+        });
+    }
+    geo_records.sort_by_key(|r| id_key(&r.id));
+    region_records.sort_by_key(|r| id_key(&r.id));
+    label_regions(db, visible, &texts, &mut region_records);
+
+    // blocks
+    let mut instances: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut block_records: Vec<Record> = Vec::new();
+    for e in visible {
+        let Entity::Insert(i) = e else { continue };
+        let Some(bbox) = extent_of(&i.common.handle) else {
+            continue;
+        };
+        instances
+            .entry(i.block_name.clone())
+            .or_default()
+            .push(i.common.handle.clone());
+        let attribs: Map<String, Value> = i
+            .attribs
+            .iter()
+            .filter(|a| !a.tag.is_empty())
+            .map(|a| (a.tag.clone(), json!(a.text_plain)))
+            .collect();
+        let mut v = Map::new();
+        v.insert("id".into(), json!(i.common.handle));
+        v.insert("block".into(), json!(i.block_name));
+        v.insert("layer".into(), json!(i.common.layer));
+        v.insert("at".into(), rounder.pt3(i.insertion_point));
+        v.insert(
+            "rotation_deg".into(),
+            json!(rounder.derived(i.rotation.to_degrees())),
+        );
+        v.insert("scale".into(), json!([i.scale.x, i.scale.y, i.scale.z]));
+        v.insert(
+            "mirrored".into(),
+            json!(i.extrusion.z < 0.0 || i.scale.x * i.scale.y < 0.0),
+        );
+        v.insert("attribs".into(), Value::Object(attribs));
+        v.insert("bbox".into(), rounder.rect(&bbox));
+        v.insert("tiles".into(), json!(tiles_for(&bbox)));
+        v.insert("px".into(), px_map(&bbox));
+        block_records.push(Record {
+            id: i.common.handle.clone(),
+            bbox,
+            value: v,
+        });
+    }
+    block_records.sort_by_key(|r| id_key(&r.id));
+    let definitions: Vec<Value> = db
+        .tables
+        .block_records
+        .values()
+        .filter(|b| {
+            let upper = b.name.to_uppercase();
+            !upper.starts_with("*MODEL_SPACE") && !upper.starts_with("*PAPER_SPACE")
+        })
+        .map(|b| {
+            let mut by_layer: BTreeMap<String, usize> = BTreeMap::new();
+            let mut tags: BTreeSet<String> = BTreeSet::new();
+            for e in &b.entities {
+                *by_layer.entry(e.common().layer.clone()).or_default() += 1;
+                if let Entity::Attdef(a) = e {
+                    tags.insert(a.tag.clone());
+                }
+            }
+            let ids = instances.get(&b.name).cloned().unwrap_or_default();
+            json!({
+                "name": b.name,
+                "entity_count": b.entities.len(),
+                "count_by_layer": by_layer,
+                "attrib_tags": tags,
+                "anonymous": b.name.starts_with('*'),
+                "instances": ids.len(),
+                "instance_ids": ids,
+            })
+        })
+        .collect();
+
+    // --- strings ----------------------------------------------------------
+    let mut strings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for t in &texts {
+        strings
+            .entry(normalize_string(&t.text))
+            .or_default()
+            .insert(t.id.clone());
+    }
+    for r in &dim_records {
+        if let Some(Value::String(d)) = r.value.get("display") {
+            if !d.is_empty() {
+                strings
+                    .entry(normalize_string(d))
+                    .or_default()
+                    .insert(r.id.clone());
+            }
+        }
+    }
+    for r in &block_records {
+        if let Some(Value::Object(attribs)) = r.value.get("attribs") {
+            for value in attribs.values() {
+                if let Value::String(s) = value {
+                    if !s.trim().is_empty() {
+                        strings
+                            .entry(normalize_string(s))
+                            .or_default()
+                            .insert(r.id.clone());
+                    }
+                }
+            }
+        }
+    }
+    strings.remove("");
+
+    // --- write the JSON files ----------------------------------------------
+    writer.write_records("texts", "text", &text_records)?;
+    writer.write_records("dimensions", "dimension", &dim_records)?;
+    writer.write_records("geometry", "geometry", &geo_records)?;
+    writer.write_records("regions", "region", &region_records)?;
+    let blocks_value = json!({
+        "$schema": SCHEMA,
+        "units": writer.units,
+        "definitions": definitions,
+        "instances": block_records.iter().map(|r| Value::Object(r.value.clone())).collect::<Vec<_>>(),
+    });
+    writer.write_json("blocks.json", &blocks_value, "blocks")?;
+    let strings_value = json!({
+        "$schema": SCHEMA,
+        "normalization": "trim, case fold, whitespace collapse",
+        "strings": strings,
+    });
+    writer.write_json("strings.json", &strings_value, "strings")?;
+
+    // sidecars and tiles.json
+    let mut tiles_json: Vec<Value> = Vec::new();
+    for tile in &tiles {
+        let image = tile_images.iter().find(|i| i.id == tile.id);
+        let mut entry = json!({
+            "id": tile.id,
+            "z": tile.z,
+            "row": tile.row,
+            "col": tile.col,
+            "px": [tile.width, tile.height],
+            "world": rounder.rect(&tile.world),
+            "empty": tile.empty,
+        });
+        if let Some(img) = image {
+            entry["png"] = json!(img.png);
+            let sidecar = sidecar(
+                img,
+                tile,
+                &tiles,
+                &profile,
+                &text_records,
+                &dim_records,
+                &block_records,
+                &region_records,
+                &rounder,
+            );
+            let sidecar_path = img.png.replace(".png", ".json");
+            writer.write_json(&sidecar_path, &sidecar, "sidecar")?;
+            entry["sidecar"] = json!(sidecar_path);
+        }
+        tiles_json.push(entry);
+    }
+    writer.write_json(
+        "tiles.json",
+        &json!({ "$schema": SCHEMA, "frame": "f0", "levels": levels, "tiles": tiles_json }),
+        "tiles",
+    )?;
+
+    // drawing.json
+    let mut layer_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut type_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for e in &top {
+        *layer_counts.entry(e.common().layer.clone()).or_default() += 1;
+        *type_counts.entry(e.type_name().to_string()).or_default() += 1;
+    }
+    let layers: Vec<Value> = db
+        .tables
+        .layers
+        .values()
+        .map(|l| {
+            json!({
+                "name": l.name,
+                "color_index": l.color_index,
+                "on": l.on,
+                "frozen": l.frozen,
+                "locked": l.locked,
+                "plot": l.plot,
+                "lineweight_mm": l.lineweight_mm,
+                "linetype": l.linetype,
+                "entity_count": layer_counts.get(&l.name).copied().unwrap_or(0),
+            })
+        })
+        .collect();
+    let drawing_value = json!({
+        "$schema": SCHEMA,
+        "units": writer.units,
+        "header": serde_json::to_value(&db.header)?,
+        "layers": layers,
+        "blocks": db.tables.block_records.values().map(|b| json!({"name": b.name, "entity_count": b.entities.len()})).collect::<Vec<_>>(),
+        "counts": { "model_space": top.len(), "by_type": type_counts },
+    });
+    writer.write_json("drawing.json", &drawing_value, "drawing")?;
+
+    // optional whole-model files
+    if options.svg {
+        let doc = db.to_svg(svg_options);
+        writer.write_bytes("drawing.svg", doc.svg.as_bytes(), "svg")?;
+    }
+    if options.full {
+        let text = db.to_json(ToJsonOptions { pretty: false })?;
+        writer.write_bytes("entities.json", text.as_bytes(), "entities")?;
+    }
+
+    // report.json
+    let mut hidden_by_reason: BTreeMap<String, usize> = BTreeMap::new();
+    let mut hidden_handles: Vec<String> = Vec::new();
+    for e in &top {
+        if let Some(reason) = hidden_reason(e.common(), &db.tables) {
+            *hidden_by_reason
+                .entry(reason.as_str().to_string())
+                .or_default() += 1;
+            if hidden_handles.len() < 100 {
+                hidden_handles.push(e.common().handle.clone());
+            }
+        }
+    }
+    let crop_report = rendered.choice.report(rect0, padding);
+    let counts = Counts {
+        entities: top.len(),
+        texts: text_records.len(),
+        dimensions: dim_records.len(),
+        geometry: geo_records.len(),
+        regions: region_records.len(),
+        blocks: block_records.len(),
+        hidden: rendered.hidden,
+        excluded: crop_report.excluded.len(),
+        tiles: written_total,
+    };
+    let hidden_top_level: usize = hidden_by_reason.values().sum();
+    let report_value = json!({
+        "$schema": SCHEMA,
+        "excluded": crop_report.excluded,
+        "hidden": {
+            "count": hidden_top_level,
+            "inside_blocks": rendered.hidden.saturating_sub(hidden_top_level),
+            "by_reason": hidden_by_reason,
+            "handles": hidden_handles,
+        },
+        "unsupported_types": rendered.unsupported_types(),
+        "warnings": warnings,
+        "timings_ms": { "total": started.elapsed().as_millis() as u64 },
+    });
+    writer.write_json("report.json", &report_value, "report")?;
+
+    // manifest.json and README.txt, last (they list the files)
+    let legibility = json!({
+        "target_px": options.target_text_px,
+        "z_max": z_reached,
+        "reached": reached,
+        "height_classes": heights.iter().map(|(h, n)| {
+            let px = h * ppu_0 * 2f64.powi(z_reached as i32);
+            json!({"height": rounder.derived(*h), "count": n, "px_at_zmax": rounder.derived(px), "legible": px >= options.target_text_px})
+        }).collect::<Vec<_>>(),
+    });
+    let capabilities = json!({
+        "dimension_values": if dim_records.iter().any(|r| r.value.get("measurement").is_some_and(|m| !m.is_null())) { "exact" } else if dim_records.is_empty() { "none" } else { "text_only" },
+        "areas": "exact",
+        "text_boxes": "estimated",
+        "paper_layouts": "none",
+        "frames": 1,
+    });
+    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; tiles z1..zN are 2x zooms with 224 px overlap, row 0 at the top, and report.json lists what was left out and why.";
+    writer.files.push(WrittenFile {
+        path: "manifest.json".into(),
+        bytes: 0,
+        kind: "manifest".into(),
+    });
+    writer.files.push(WrittenFile {
+        path: "README.txt".into(),
+        bytes: 0,
+        kind: "readme".into(),
+    });
+    let manifest = json!({
+        "$schema": SCHEMA,
+        "generator": { "name": "uncad", "version": env!("CARGO_PKG_VERSION") },
+        "profile": profile.name,
+        "source": {
+            "name": options.source_name,
+            "version": db.header.version,
+            "codepage": db.header.codepage_name,
+        },
+        "units": writer.units,
+        "crop": crop_report,
+        "overview": overview,
+        "levels": levels,
+        "legibility": legibility,
+        "counts": counts,
+        "capabilities": capabilities,
+        "guidance": guidance,
+        "files": writer.files,
+        "shard_index": writer.shard_index,
+        "warnings": warnings,
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest)?;
+    std::fs::write(dir.join("manifest.json"), &manifest_text).map_err(|source| {
+        ExportError::Io {
+            path: dir.join("manifest.json"),
+            source,
+        }
+    })?;
+    let readme = format!(
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f0/tiles/z*/  zoomed tiles with .json sidecars\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        options.shard_kb
+    );
+    std::fs::write(dir.join("README.txt"), readme.as_bytes()).map_err(|source| {
+        ExportError::Io {
+            path: dir.join("README.txt"),
+            source,
+        }
+    })?;
+
+    Ok(ExportReport {
+        dir: dir.to_path_buf(),
+        files: writer.files,
+        overview,
+        levels,
+        crop: crop_report,
+        counts,
+        warnings,
+    })
+}
+
+fn area_unit(unit: &str) -> String {
+    if unit == "du" {
+        "du2".to_string()
+    } else {
+        format!("{unit}2")
+    }
+}
+
+/// Count-weighted text height classes (heights rounded to 3 decimals),
+/// most common first.
+fn height_classes(texts: &[PlacedText]) -> Vec<(f64, usize)> {
+    let mut classes: BTreeMap<i64, usize> = BTreeMap::new();
+    for t in texts {
+        if t.height > 0.0 && t.height.is_finite() {
+            *classes
+                .entry((t.height * 1000.0).round() as i64)
+                .or_default() += 1;
+        }
+    }
+    let mut out: Vec<(f64, usize)> = classes
+        .into_iter()
+        .map(|(k, n)| (k as f64 / 1000.0, n))
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.total_cmp(&b.0)));
+    out
+}
+
+/// The deepest level: where the dominant text class (the count-weighted
+/// median height) reaches the target pixel height; one level without text.
+fn depth_for(heights: &[(f64, usize)], ppu_0: f64, options: &ExportOptions) -> u32 {
+    if options.max_levels == 0 {
+        return 0;
+    }
+    let total: usize = heights.iter().map(|(_, n)| n).sum();
+    if total == 0 {
+        return 1;
+    }
+    let mut sorted: Vec<(f64, usize)> = heights.to_vec();
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut seen = 0;
+    let mut median = sorted[0].0;
+    for (h, n) in &sorted {
+        seen += n;
+        if seen * 2 >= total {
+            median = *h;
+            break;
+        }
+    }
+    let px_now = median * ppu_0;
+    if px_now <= 0.0 {
+        return 1;
+    }
+    let z = (options.target_text_px / px_now).log2().ceil();
+    if z.is_finite() {
+        (z.max(1.0) as u32).min(options.max_levels)
+    } else {
+        1
+    }
+}
+
+fn grid(canvas_w: u32, canvas_h: u32, profile: &Profile) -> (u32, u32) {
+    let count = |extent: u32| -> u32 {
+        if extent <= profile.tile {
+            1
+        } else {
+            (extent - profile.tile).div_ceil(profile.step()) + 1
+        }
+    };
+    (count(canvas_w), count(canvas_h))
+}
+
+/// The tiles of one level: SAHI-style, the last row and column shifted
+/// inward so every tile is the full size (or the whole canvas when that
+/// is smaller); a tile is empty when no visible extent touches it.
+fn plan_tiles(
+    z: u32,
+    canvas_w: u32,
+    canvas_h: u32,
+    rect0: &Rect,
+    ppu: f64,
+    profile: &Profile,
+    extents: &[Extent],
+) -> Vec<Tile> {
+    let (cols, rows) = grid(canvas_w, canvas_h, profile);
+    let origin = |index: u32, extent: u32| -> (u32, u32) {
+        if extent <= profile.tile {
+            (0, extent)
+        } else {
+            let o = (index * profile.step()).min(extent - profile.tile);
+            (o, profile.tile)
+        }
+    };
+    let mut tiles = Vec::new();
+    for row in 0..rows {
+        let (oy, th) = origin(row, canvas_h);
+        for col in 0..cols {
+            let (ox, tw) = origin(col, canvas_w);
+            let x0 = rect0.min_x + f64::from(ox) / ppu;
+            let y1 = rect0.max_y - f64::from(oy) / ppu;
+            let world = Rect::new(x0, y1 - f64::from(th) / ppu, x0 + f64::from(tw) / ppu, y1);
+            let empty = !extents.iter().any(|e| e.rect.intersects(&world));
+            tiles.push(Tile {
+                id: format!("f0/z{z}/r{row:02}_c{col:02}"),
+                z,
+                row,
+                col,
+                origin_px: (ox, oy),
+                width: tw,
+                height: th,
+                world,
+                empty,
+            });
+        }
+    }
+    tiles
+}
+
+const SIDECAR_LIMIT: usize = 32 * 1024;
+
+#[allow(clippy::too_many_arguments)]
+fn sidecar(
+    img: &ImageInfo,
+    tile: &Tile,
+    tiles: &[Tile],
+    profile: &Profile,
+    texts: &[Record],
+    dims: &[Record],
+    blocks: &[Record],
+    regions: &[Record],
+    rounder: &Rounder,
+) -> Value {
+    let find = |z: u32, row: i64, col: i64| -> Option<String> {
+        if row < 0 || col < 0 {
+            return None;
+        }
+        tiles
+            .iter()
+            .find(|t| t.z == z && i64::from(t.row) == row && i64::from(t.col) == col)
+            .map(|t| t.id.clone())
+    };
+    let (r, c) = (i64::from(tile.row), i64::from(tile.col));
+    let neighbors = json!({
+        "n": find(tile.z, r - 1, c),
+        "s": find(tile.z, r + 1, c),
+        "w": find(tile.z, r, c - 1),
+        "e": find(tile.z, r, c + 1),
+    });
+    let centre = Point2D {
+        x: (tile.world.min_x + tile.world.max_x) / 2.0,
+        y: (tile.world.min_y + tile.world.max_y) / 2.0,
+    };
+    let parent = tiles
+        .iter()
+        .find(|t| {
+            t.z + 1 == tile.z
+                && t.world.min_x <= centre.x
+                && centre.x <= t.world.max_x
+                && t.world.min_y <= centre.y
+                && centre.y <= t.world.max_y
+        })
+        .map(|t| t.id.clone());
+    let children: Vec<String> = tiles
+        .iter()
+        .filter(|t| t.z == tile.z + 1 && t.world.intersects(&tile.world) && !t.empty)
+        .map(|t| t.id.clone())
+        .collect();
+    fn on_tile<'a>(records: &'a [Record], world: &Rect) -> Vec<&'a Record> {
+        records
+            .iter()
+            .filter(|rec| rec.bbox.intersects(world))
+            .collect()
+    }
+    let truncate = |s: &str| -> String {
+        if s.chars().count() > 24 {
+            let cut: String = s.chars().take(24).collect();
+            format!("{cut}...")
+        } else {
+            s.to_string()
+        }
+    };
+    let mut text_rows: Vec<Value> = on_tile(texts, &tile.world)
+        .iter()
+        .map(|rec| {
+            json!([
+                rec.id,
+                img.px_box(&rec.bbox),
+                truncate(rec.value.get("text").and_then(Value::as_str).unwrap_or(""))
+            ])
+        })
+        .collect();
+    let mut dim_rows: Vec<Value> = on_tile(dims, &tile.world)
+        .iter()
+        .map(|rec| {
+            json!([
+                rec.id,
+                img.px_box(&rec.bbox),
+                truncate(
+                    rec.value
+                        .get("display")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                ),
+                rec.value.get("measurement").cloned().unwrap_or(Value::Null)
+            ])
+        })
+        .collect();
+    let mut block_rows: Vec<Value> = on_tile(blocks, &tile.world)
+        .iter()
+        .map(|rec| {
+            json!([
+                rec.id,
+                img.px_box(&rec.bbox),
+                rec.value.get("block").cloned().unwrap_or(Value::Null)
+            ])
+        })
+        .collect();
+    let mut region_rows: Vec<Value> = on_tile(regions, &tile.world)
+        .iter()
+        .map(|rec| {
+            json!([
+                rec.id,
+                img.px_box(&rec.bbox),
+                rec.value.get("area").cloned().unwrap_or(Value::Null)
+            ])
+        })
+        .collect();
+    let mut layers: BTreeSet<String> = BTreeSet::new();
+    for rec in on_tile(texts, &tile.world)
+        .iter()
+        .chain(on_tile(dims, &tile.world).iter())
+        .chain(on_tile(blocks, &tile.world).iter())
+    {
+        if let Some(Value::String(l)) = rec.value.get("layer") {
+            layers.insert(l.clone());
+        }
+    }
+    let build = |text_rows: &[Value],
+                 dim_rows: &[Value],
+                 block_rows: &[Value],
+                 region_rows: &[Value],
+                 truncated: bool| {
+        json!({
+            "$schema": SCHEMA,
+            "id": img.id,
+            "png": img.png,
+            "z": tile.z,
+            "row": tile.row,
+            "col": tile.col,
+            "px": img.px,
+            "world": rounder.rect(&img.world),
+            "ppu": img.ppu,
+            "world_to_px": img.world_to_px,
+            "px_to_world": img.px_to_world,
+            "overlap_px": profile.overlap,
+            "neighbors": neighbors,
+            "parent": parent,
+            "children": children,
+            "empty": tile.empty,
+            "layers_present": layers,
+            "records": { "texts": text_rows, "dims": dim_rows, "blocks": block_rows, "regions": region_rows },
+            "records_truncated": truncated,
+        })
+    };
+    let mut truncated = false;
+    let mut value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+    while serde_json::to_string(&value).map_or(0, |s| s.len()) > SIDECAR_LIMIT {
+        truncated = true;
+        let longest = [
+            text_rows.len(),
+            dim_rows.len(),
+            block_rows.len(),
+            region_rows.len(),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        if longest == 0 {
+            break;
+        }
+        for rows in [
+            &mut text_rows,
+            &mut dim_rows,
+            &mut block_rows,
+            &mut region_rows,
+        ] {
+            let keep = rows.len() * 3 / 4;
+            rows.truncate(keep);
+        }
+        value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+    }
+    value
+}
+
+/// Area-weighted centroid of a polygon's vertices (straight segments).
+fn polygon_centroid(vertices: &[Point2D]) -> Point2D {
+    let n = vertices.len();
+    let (mut cx, mut cy, mut area) = (0.0, 0.0, 0.0);
+    for i in 0..n {
+        let (a, b) = (vertices[i], vertices[(i + 1) % n]);
+        let cross = a.x * b.y - b.x * a.y;
+        cx += (a.x + b.x) * cross;
+        cy += (a.y + b.y) * cross;
+        area += cross;
+    }
+    if area.abs() < 1e-12 {
+        let sx: f64 = vertices.iter().map(|p| p.x).sum();
+        let sy: f64 = vertices.iter().map(|p| p.y).sum();
+        return Point2D {
+            x: sx / n as f64,
+            y: sy / n as f64,
+        };
+    }
+    Point2D {
+        x: cx / (3.0 * area),
+        y: cy / (3.0 * area),
+    }
+}
+
+fn point_in_polygon(p: Point2D, vertices: &[Point2D]) -> bool {
+    let n = vertices.len();
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (a, b) = (vertices[i], vertices[j]);
+        if (a.y > p.y) != (b.y > p.y) {
+            let x = (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x;
+            if p.x < x {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Gives every region the ids of the texts whose anchor lies inside it and
+/// in no smaller region.
+fn label_regions(
+    db: &CadDatabase,
+    visible: &[&Entity],
+    texts: &[PlacedText],
+    regions: &mut [Record],
+) {
+    let polygons: BTreeMap<&str, &[Point2D]> = visible
+        .iter()
+        .filter_map(|e| match e {
+            Entity::LwPolyline(p) | Entity::Polyline2D(p) if p.closed && p.vertices.len() >= 3 => {
+                Some((p.common.handle.as_str(), p.vertices.as_slice()))
+            }
+            _ => None,
+        })
+        .collect();
+    let _ = db;
+    let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for t in texts {
+        let mut best: Option<(f64, &str)> = None;
+        for r in regions.iter() {
+            if !r
+                .bbox
+                .intersects(&Rect::new(t.anchor.x, t.anchor.y, t.anchor.x, t.anchor.y))
+            {
+                continue;
+            }
+            let Some(vertices) = polygons.get(r.id.as_str()) else {
+                continue;
+            };
+            if point_in_polygon(t.anchor, vertices) {
+                let area = r
+                    .value
+                    .get("area")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(f64::INFINITY);
+                if best.is_none_or(|(a, _)| area < a) {
+                    best = Some((area, r.id.as_str()));
+                }
+            }
+        }
+        if let Some((_, id)) = best {
+            labels.entry(id.to_string()).or_default().push(t.id.clone());
+        }
+    }
+    for r in regions.iter_mut() {
+        let ids = labels.remove(&r.id).unwrap_or_default();
+        r.value.insert("labels".into(), json!(ids));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_boxes_follow_alignment_and_rotation() {
+        let anchor = Point2D { x: 10.0, y: 20.0 };
+        // Left/baseline: from the anchor to the right and up.
+        let b = text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 0, 0);
+        assert_eq!(
+            (b.min_x, b.min_y, b.max_x, b.max_y),
+            (10.0, 20.0, 14.8, 22.0)
+        );
+        // Middle-centre.
+        let b = text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 4, 0);
+        assert!((b.min_x - 7.6).abs() < 1e-9 && (b.max_x - 12.4).abs() < 1e-9);
+        assert!((b.min_y - 19.0).abs() < 1e-9 && (b.max_y - 21.0).abs() < 1e-9);
+        // Rotated 90 degrees: the width goes up.
+        let b = text_box(anchor, 2.0, std::f64::consts::FRAC_PI_2, "ABCD", 1.0, 0, 0);
+        assert!(
+            (b.max_y - 24.8).abs() < 1e-9 && (b.min_x - 8.0).abs() < 1e-9,
+            "{b:?}"
+        );
+        // MTEXT top-left attachment hangs below the anchor.
+        let b = mtext_box(anchor, 2.0, 0.0, "AB\nCD", 1, 0.0, 0.0);
+        assert!((b.max_y - 20.0).abs() < 1e-9 && b.min_y < 16.0, "{b:?}");
+        assert!((b.max_x - 12.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn insert_affines_compose_and_mirror() {
+        let inner = Affine {
+            origin: Point2D { x: 1.0, y: 0.0 },
+            x_scale: 2.0,
+            y_scale: 2.0,
+            rotation: 0.0,
+        };
+        let outer = Affine {
+            origin: Point2D { x: 0.0, y: 10.0 },
+            x_scale: 1.0,
+            y_scale: 1.0,
+            rotation: std::f64::consts::FRAC_PI_2,
+        };
+        let both = inner.then(&outer);
+        // inner: (1,1) -> (3,2); outer rotates 90 degrees about the origin and lifts by 10: (-2, 13).
+        let p = both.apply(Point2D { x: 1.0, y: 1.0 });
+        assert!(
+            (p.x + 2.0).abs() < 1e-9 && (p.y - 13.0).abs() < 1e-9,
+            "{p:?}"
+        );
+        assert!((both.length_scale() - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn grid_and_tile_plan_match_the_design() {
+        let profile = Profile::CLAUDE;
+        assert_eq!(grid(1000, 500, &profile), (1, 1));
+        // 2688 px: (2688 - 1092) / 868 = 1.84 -> 2 + 1 = 3 columns.
+        assert_eq!(grid(2688, 1792, &profile), (3, 2));
+        let rect0 = Rect::new(0.0, 0.0, 2688.0, 1792.0);
+        let extents = vec![Extent {
+            handle: "1".into(),
+            type_name: "LINE".into(),
+            rect: Rect::new(2600.0, 100.0, 2650.0, 150.0),
+        }];
+        let tiles = plan_tiles(1, 2688, 1792, &rect0, 1.0, &profile, &extents);
+        assert_eq!(tiles.len(), 6);
+        assert!(tiles.iter().all(|t| t.width == 1092 && t.height == 1092));
+        // The last column is shifted inward to end at the canvas edge.
+        let last = tiles.iter().find(|t| t.row == 0 && t.col == 2).unwrap();
+        assert_eq!(last.origin_px, (2688 - 1092, 0));
+        assert_eq!(last.id, "f0/z1/r00_c02");
+        // Only the tiles touching the line at the top right are non-empty:
+        // rows are y-down, so row 0 holds y in [700, 1792] and the line at
+        // y 100..150 lies in row 1.
+        let non_empty: Vec<&str> = tiles
+            .iter()
+            .filter(|t| !t.empty)
+            .map(|t| t.id.as_str())
+            .collect();
+        assert_eq!(non_empty, ["f0/z1/r01_c02"]);
+    }
+
+    #[test]
+    fn depth_reaches_the_target_text_height() {
+        let options = ExportOptions::default();
+        // 2.5-unit text at 0.5 px/unit is 1.25 px: 14 / 1.25 = 11.2 -> 2^4 = 16x.
+        assert_eq!(depth_for(&[(2.5, 10)], 0.5, &options), 4);
+        // Already legible: still one level.
+        assert_eq!(depth_for(&[(50.0, 10)], 1.0, &options), 1);
+        // No text: one level; max_levels caps.
+        assert_eq!(depth_for(&[], 1.0, &options), 1);
+        let capped = ExportOptions {
+            max_levels: 2,
+            ..Default::default()
+        };
+        assert_eq!(depth_for(&[(0.01, 1)], 0.1, &capped), 2);
+    }
+
+    #[test]
+    fn rounding_ids_and_strings() {
+        assert_eq!(round_to(1.23456789, 3), 1.235);
+        assert_eq!(round_to(-0.0001, 3), 0.0);
+        assert!(id_key("1F") < id_key("20"));
+        assert!(id_key("A") < id_key("A/3"));
+        assert_eq!(normalize_string("  Room   101 \n"), "room 101");
+        assert_eq!(area_unit("mm"), "mm2");
+        assert_eq!(area_unit("du"), "du2");
+        let sq = [
+            Point2D { x: 0.0, y: 0.0 },
+            Point2D { x: 4.0, y: 0.0 },
+            Point2D { x: 4.0, y: 2.0 },
+            Point2D { x: 0.0, y: 2.0 },
+        ];
+        let c = polygon_centroid(&sq);
+        assert!((c.x - 2.0).abs() < 1e-12 && (c.y - 1.0).abs() < 1e-12);
+        assert!(point_in_polygon(Point2D { x: 1.0, y: 1.0 }, &sq));
+        assert!(!point_in_polygon(Point2D { x: 5.0, y: 1.0 }, &sq));
+    }
+}

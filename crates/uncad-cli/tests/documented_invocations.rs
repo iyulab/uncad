@@ -128,13 +128,30 @@ fn scale_actually_scales_the_raster() {
     let two = TempFile::new("scale2.png");
 
     // Both runs pass --scale: the default sizing is a pixel fit, not a
-    // unit multiplier, so "no flag" would not be the 1x baseline.
-    assert!(run(&[CORPUS_DXF, "-o", one.arg(), "--scale", "1"])
-        .status
-        .success());
-    assert!(run(&[CORPUS_DXF, "-o", two.arg(), "--scale", "2"])
-        .status
-        .success());
+    // unit multiplier, so "no flag" would not be the 1x baseline. The
+    // lattice is off so a small drawing is not rounded up to 28 px twice.
+    assert!(run(&[
+        CORPUS_DXF,
+        "-o",
+        one.arg(),
+        "--scale",
+        "1",
+        "--lattice",
+        "0"
+    ])
+    .status
+    .success());
+    assert!(run(&[
+        CORPUS_DXF,
+        "-o",
+        two.arg(),
+        "--scale",
+        "2",
+        "--lattice",
+        "0"
+    ])
+    .status
+    .success());
 
     let (w1, h1) = png_size(&one.bytes());
     let (w2, h2) = png_size(&two.bytes());

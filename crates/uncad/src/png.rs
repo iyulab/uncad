@@ -287,7 +287,27 @@ fn rasterize(
     }
 }
 
-fn parse_tree(svg_text: &str) -> Result<usvg::Tree, PngError> {
+/// Renders the `width` x `height` pixel window of `tree` whose top-left
+/// corner sits at `origin_px` on the canvas `tree` covers at `px_per_unit`,
+/// on white, as 8-bit RGB PNG bytes. The export writes its overview and
+/// tiles through this with one parsed tree per zoom level.
+pub(crate) fn render_region(
+    tree: &usvg::Tree,
+    px_per_unit: f64,
+    origin_px: (f64, f64),
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, PngError> {
+    let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(PngError::EmptyCanvas)?;
+    pixmap.fill(tiny_skia::Color::WHITE);
+    let scale = px_per_unit as f32;
+    let transform = tiny_skia::Transform::from_scale(scale, scale)
+        .post_translate(-(origin_px.0 as f32), -(origin_px.1 as f32));
+    resvg::render(tree, transform, &mut pixmap.as_mut());
+    encode_rgb8(&pixmap)
+}
+
+pub(crate) fn parse_tree(svg_text: &str) -> Result<usvg::Tree, PngError> {
     let options = usvg::Options {
         fontdb: font_database(),
         ..Default::default()

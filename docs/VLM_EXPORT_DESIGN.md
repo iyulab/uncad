@@ -461,7 +461,14 @@ header candidate,
 `CropMode::{Auto, Raw, Header, Fixed}`, automatic padding, lattice snap with
 exact pixel/unit proportion, `CropReport` in both results, CLI `--crop`,
 `--padding`, `--lattice`; the text metrics pre-pass and the frame split are
-still open). Everything else below is still open.
+still open); **P7** is in its 0.3.0 form (`export.rs`: the overview fitted
+to the profile's edge and patch budget, the tile pyramid with 224 px overlap
+and inward-shifted edge tiles, sidecars with both affines and per-tile record
+lists, texts/dimensions/geometry/regions/blocks/strings/report/drawing JSON
+with sharding and a manifest, CLI `uncad export`; still open: frames, paper
+layouts, glyph-metric text boxes, NFKC, tile culling and parallel tiles, a
+bundled font). P8 (CLI and docs polish) and P9 (corpus sweep, goldens,
+acceptance questions) remain.
 
 | Release | Phase | Files |
 |---|---|---|

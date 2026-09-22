@@ -26,8 +26,8 @@
 //!    rectangle grows on the right and bottom so that pixels and units stay
 //!    in exact proportion -- the affine in [`crate::ViewBox`] then round-trips.
 //!
-//! Excluded entities stay in the SVG (clipped by the viewBox); the report
-//! lists them so an export can leave them out of its records.
+//! Excluded entities are not drawn; the report lists them so an export
+//! can leave them out of its records too.
 
 use serde::{Deserialize, Serialize};
 

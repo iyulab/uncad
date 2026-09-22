@@ -1132,7 +1132,7 @@ fn render_wireframe_entity(
 
 /// `db.entities` only ever contains model and paper space (see `convert.rs`),
 /// so [`Space::All`] returns everything; the other two narrow by block name.
-fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
+pub(crate) fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
     if space == Space::All {
         return db.entities.iter().collect();
     }
@@ -1184,6 +1184,8 @@ pub(crate) struct Rendered {
     /// `view_box`'s world rectangle, exact (the viewBox round trip loses a
     /// bit).
     pub(crate) padded_rect: Rect,
+    /// Every visible top-level entity's measured extent, in drawing order.
+    pub(crate) extents: Vec<Extent>,
 }
 
 impl Rendered {
@@ -1200,7 +1202,7 @@ impl Rendered {
 /// decides the crop ([`crate::crop`]), leaving the stroke width unresolved.
 pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     let mut extents: Vec<Extent> = Vec::new();
-    let mut body: Vec<String> = Vec::new();
+    let mut body: Vec<(String, String)> = Vec::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
@@ -1210,7 +1212,7 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
         ctx.reset_entity_bounds();
         if let Some(svg) = render_entity(e, &mut ctx) {
             if !svg.is_empty() {
-                body.push(svg);
+                body.push((e.common().handle.clone(), svg));
             }
         }
         if hidden {
@@ -1226,6 +1228,14 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     }
 
     let choice = crop::choose(&extents, &db.header, options.crop);
+    // What the crop leaves out is not drawn either: a 3256x INSERT clipped
+    // by the viewBox would still cross the whole picture.
+    let excluded: HashSet<&str> = choice.excluded.iter().map(|x| x.handle.as_str()).collect();
+    let body: Vec<String> = body
+        .into_iter()
+        .filter(|(handle, _)| !excluded.contains(handle.as_str()))
+        .map(|(_, svg)| svg)
+        .collect();
     let padding_units = options
         .padding
         .unwrap_or_else(|| crop::auto_padding(&choice.rect, None));
@@ -1241,6 +1251,7 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
         choice,
         padding_units,
         padded_rect,
+        extents,
     }
 }
 

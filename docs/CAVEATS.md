@@ -150,6 +150,28 @@ LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
 extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
+## The package: what `uncad export` does not do yet (since 0.3.0)
+
+`export_package` writes the directory the design describes (section 2) in
+its 0.3.0 form. Known gaps:
+
+- **Text boxes are estimates** (0.6 em per character from the anchor,
+  `bbox_confidence: "estimated"` on every text record); a tile's sidecar may
+  therefore list a label a few pixels off, or one whose last characters lie
+  on the neighbouring tile. Glyph-metric boxes are 0.4.0 work.
+- **Every tile renders the whole drawing.** There is no per-tile culling of
+  the SVG tree, so a level with many tiles costs `tiles x (full render)`:
+  about a second per tile for a 70-entity drawing in a debug build, much
+  less in release, but a 20 000-entity drawing at z3 is slow. `--max-tiles`
+  (400) and `--max-levels` (5) bound it.
+- **One frame, model space only.** Detached clusters do not get their own
+  tile pyramid and paper layouts are not exported (design section 4, steps
+  5 and 10).
+- `strings.json` normalises with trim, case fold and whitespace collapse,
+  not NFKC; text is rendered with the host's fonts (no bundled face).
+- Records for entities inside block references are limited to texts;
+  geometry inside blocks is drawn but not listed (INSERT instances are).
+
 ## The crop: what the picture shows (since 0.3.0)
 
 `uncad::crop` decides the viewBox (design section 4). The overview shows
@@ -178,8 +200,8 @@ Two things to know:
   own extents include outliers (`example_2018.dwg`'s 3256x INSERT), so they
   are no rescue there.
 
-Excluded entities stay in the SVG, clipped by the viewBox; they are not
-removed from the document.
+Excluded entities are not drawn at all (a 3256x INSERT clipped by the
+viewBox would still cross the whole picture); `--crop raw` shows them.
 
 ## Hidden entities are left out of the picture (since 0.3.0)
 

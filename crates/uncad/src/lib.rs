@@ -11,6 +11,7 @@ mod convert;
 pub mod crop;
 pub mod dimension;
 mod dynapi;
+pub mod export;
 pub mod geom;
 pub mod header;
 pub mod json;
@@ -28,6 +29,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 pub use crop::{CropMode, CropReport, CropSource, Rect};
+pub use export::{ExportError, ExportOptions, ExportReport, Profile};
 pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
 pub use model::Entity;
