@@ -18,7 +18,7 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `status_flag`, `on`, `id`, `frozen_layers`) with `scale()`, `model_window()`,
   `model_to_paper()` / `paper_to_model()` and `is_overall()`. `uncad export` writes
   `sheets.json` and `sheets/<layout>/overview.png` for every paper layout: the sheet
-  (from the paper size, else the limits, else the paper entities) at the profile's size
+  (the layout's limits, else the paper size, else the paper entities) at the profile's size
   with the layout's own entities and the model composited through each on, plan-view,
   non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
   layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
@@ -97,10 +97,10 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
   `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()`,
   `area()` and `signed_area()`; POLYLINE_2D bulges are collected from its VERTEX_2D
-  subentities. The renderer
-  draws bulges as SVG arcs instead of chords (the 25-arc revision cloud in
-  `example_2000.dwg` was a 25-gon). The design document's worked example -- a 100 x 50
-  outline with one 90-degree arc -- measures 305.536 around and 5356.748 in area.
+  subentities. The renderer draws bulges as SVG arcs instead of chords (the 25-arc
+  revision cloud in `example_2000.dwg` was a 25-gon). The design document's worked
+  example -- a 100 x 50 outline with one 90-degree arc -- measures 305.536 around and
+  5356.748 in area.
 - `extrusion` on CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, INSERT and SOLID (serde default
   `(0,0,1)`), so a consumer can tell a mirrored entity apart.
 - Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
@@ -181,6 +181,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   in a DWG -- was never read, so every DXF ordinate was a Y datum. `definition_point`
   is the arc point (DXF 16) for `ANGULAR_2LINE` from both readers now, and the model
   docs say so.
+- The sheet rectangle ignored the plot origin (DXF 46/47). `PlotSettings::sheet_rect`
+  placed the paper by the margins alone, so with the usual "origin = minus the margins"
+  page setup the exported sheet was shifted by a margin and the title block's top and
+  right edges fell off `sheets/<layout>/overview.png` (six of seven AutoCAD-written
+  samples). The export now takes the layout's own `LIMMIN`/`LIMMAX` first
+  (`rect_source: "layout_limits"`; AutoCAD keeps them equal to the paper's placement,
+  rotation included) and `sheet_rect` folds the offset in as ezdxf does for the
+  `paper_size` fallback.
 - `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
   package's `area` / `orientation`) applied the bulge stored on the last vertex of an
   *open* polyline to the straight segment that closes it for the area, which AutoCAD

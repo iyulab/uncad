@@ -8,11 +8,11 @@ and mirrored OCS, `DIMLFAC` versus `act_measurement`, and a twisted VIEWPORT.
 they land.
 
 Every file was written from scratch by `make_fixtures.py` in this directory
-on 2026-09-21 (the viewport fixture's LAYOUT on 2026-09-22) -- no
-third-party drawing was copied, so they are redistributable under the
-repository's GPL-3. All are R2000 (`$ACADVER AC1015`) text DXF with CRLF
-line endings, at most 2.3 KB each, and above the 256-byte minimum
-LibreDWG's `dwg_read_dxf` enforces.
+on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin and the
+angular/ordinate fixtures on 2026-09-22) -- no third-party drawing was
+copied, so they are redistributable under the repository's GPL-3. All are
+R2000 (`$ACADVER AC1015`) text DXF with CRLF line endings, at most 2.5 KB
+each, and above the 256-byte minimum LibreDWG's `dwg_read_dxf` enforces.
 
 Ground truth below was read back through LibreDWG itself (a throw-away probe
 linked against `libredwg-sys`, reading `Dwg_Data.header.codepage` and every
@@ -29,6 +29,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `dimlfac12_r2000.dxf` | 1304 | 12 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 2253 | 16 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
+| `plot_origin_r2000.dxf` | 2430 | 17 | A LAYOUT `Layout1` in inches (ANSI B landscape, rotation 0) with asymmetric margins and a non-zero plot origin (DXF 46/47), so the sheet is not at `(-left, -bottom)`; a paper-space border LWPOLYLINE and a 1:5 plan VIEWPORT over a model LINE |
 | `angular_ordinate_r2000.dxf` | 1491 | 10 | A 2-line angular DIMENSION (60 degrees) and an X- and a Y-type ordinate DIMENSION (30 and 50): the two kinds whose definition points LibreDWG's DXF reader lays out differently from its DWG decoder |
 
 ## cp949_r2000.dxf
@@ -278,6 +279,41 @@ Why the file carries an OBJECTS section, and what the reader needs from it
   refers to an ENDBLK), but new handles in this file must avoid 1, 2, 20-23
   as well as C, 1A, 1C, 1F, 24, 2A and 2B.
 
+## plot_origin_r2000.dxf
+
+The same skeleton as the viewport fixture (`*Model_Space` 1F, `*Paper_Space`
+1C with `340 = 2B`, BLOCK/ENDBLK 20-23, the named object dictionary `C`,
+`ACAD_LAYOUT` `1A`, LAYOUT `2B`, VIEWPORT `2A`), `$INSUNITS 1` (inches),
+and the page setup AutoCAD-written drawings usually carry: `72 = 0` (inch
+paper units), `73 = 0` (no rotation), ANSI B `44/45 = 431.8 x 279.4` mm
+(17 x 11 in), margins `40..43 = 6.35 / 19.05 / 6.35 / 19.05` mm (0.25 /
+0.75 / 0.25 / 0.75 in) and a plot origin `46/47 = -6.35 / -12.7` mm
+(-0.25 / -0.5 in). AutoCAD places the layout origin at the printable
+corner moved by the plot origin, so the paper runs from
+`-(margin + origin)` = `(-(0.25 - 0.25), -(0.75 - 0.5))` = `(0, -0.25)` to
+`(17, 10.75)` in, and that is what the file's `LIMMIN/LIMMAX` (10/11) say.
+The rule is ezdxf 1.4.4's `reset_paper_limits`; on 2026-09-22 it was
+checked against the seven AutoCAD-written sample layouts (`-(margin +
+origin)` equals the stored limits within 0.005 in on the six with rotation
+0; the rotated one keeps limits matching neither formula, which is why
+`export` trusts the stored limits first).
+
+ENTITIES: a model LINE `24` (0,0) -> (100,50) owned by 1F; on paper (owner
+1C, `67 = 1`) a closed border LWPOLYLINE `25` (0.5, 0.25) .. (16.5, 10.5)
+-- its top edge lies above the 10.25 in a margins-only sheet would end at
+-- and the VIEWPORT `2A`: centre (8.5, 5.5), 12 x 8 in, `VIEWCTR` (50,
+25), `VIEWSIZE` 40 (scale 8 / 40 = 1:5), no twist, `68 = 1`, `69 = 2`,
+`90 = 32864`.
+
+Verified through LibreDWG (17 objects; the probe of the viewport fixture's
+section): `LIMMIN (0, -0.25)`, `LIMMAX (17, 10.75)`, `plotsettings`
+`margins 6.35/19.05/6.35/19.05`, `paper 431.8 x 279.4`, `plot_origin
+(-6.35, -12.7)`, `plot_paper_unit 0`, `plot_rotation_mode 0`, VIEWPORT
+`entmode 1`. `tests/sheets.rs` asserts `PlotSettings::sheet_rect()` and the
+limits both give `(0, -0.25) .. (17, 10.75)`, that the export takes the
+limits (`rect_source: "layout_limits"`) and that the border's top edge is
+inside the sheet image.
+
 ## angular_ordinate_r2000.dxf
 
 HEADER: `$INSUNITS 4`, `$DIMDEC 2`, `$DIMADEC 0`, `$DIMLUNIT 2`. TABLES: a
@@ -336,6 +372,11 @@ agree between the two readers.
    in the viewport fixture (its `Layout1` LAYOUT was added 2026-09-22): the
    reader needs none of them, and the `num_viewports` list cannot come from
    DXF at all.
+5. **A rotated sheet with a plot origin** is not in the plot-origin
+   fixture: how AutoCAD folds the offset into a rotated layout's limits is
+   not known from the one rotated sample (its limits match neither the
+   margins-only nor the `-(margin + origin)` placement), and the export
+   takes the stored limits first for exactly that reason.
 
 ## Regenerating
 
@@ -343,6 +384,7 @@ agree between the two readers.
 python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
+python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, cp949, mirrored, dimlfac, viewport, hidden)
 ```
 
 The default mode is meant to reproduce the shipped bytes exactly; check with

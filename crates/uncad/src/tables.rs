@@ -160,11 +160,23 @@ impl PlotSettings {
         }
     }
 
-    /// The sheet as it lies on the layout, in paper units: the printable
-    /// area's lower-left corner at the origin (how AutoCAD places it), so
-    /// the sheet runs from `(-left, -bottom)` to `(width - left, height -
-    /// bottom)` with the physical size turned by `rotation`. `None` without
-    /// a paper size.
+    /// The sheet as it lies on the layout, in paper units, computed from
+    /// the page setup: the layout origin is the printable area's lower-left
+    /// corner moved by the plot origin (DXF 46/47), so the sheet runs from
+    /// `(-(left + origin_x), -(bottom + origin_y))` to that plus the
+    /// physical size turned by `rotation` -- ezdxf's `reset_paper_limits`
+    /// rule, which is what AutoCAD writes into a paper layout's
+    /// `LIMMIN`/`LIMMAX`. The common page setup "origin = minus the
+    /// margins" therefore puts the paper's own corner at (0,0). `None`
+    /// without a paper size.
+    ///
+    /// The export prefers the layout's stored limits
+    /// ([`LayoutRecord::limmin`] / [`LayoutRecord::limmax`]) whenever they
+    /// span a rectangle and uses this only as the fallback: the limits are
+    /// AutoCAD's own placement and stay right where the offset's
+    /// interaction with a rotated sheet is not modelled here (a rotation of
+    /// 1 or 3 turns the size but keeps the left/bottom margins and the
+    /// offset on the layout's own axes).
     pub fn sheet_rect(&self) -> Option<crate::crop::Rect> {
         if !(self.paper_width_mm > 0.0 && self.paper_height_mm > 0.0) {
             return None;
@@ -176,11 +188,14 @@ impl PlotSettings {
             (self.paper_width_mm, self.paper_height_mm)
         };
         let [left, bottom, _, _] = self.margins_mm;
+        let finite = |v: f64| if v.is_finite() { v } else { 0.0 };
+        let shift_x = left + finite(self.plot_origin.x);
+        let shift_y = bottom + finite(self.plot_origin.y);
         Some(crate::crop::Rect::new(
-            -left * k,
-            -bottom * k,
-            (w - left) * k,
-            (h - bottom) * k,
+            -shift_x * k,
+            -shift_y * k,
+            (w - shift_x) * k,
+            (h - shift_y) * k,
         ))
     }
 }
@@ -632,5 +647,62 @@ mod tests {
         let resolved =
             resolve_layer_color_index(256, libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI, 0);
         assert_eq!(resolved, 256);
+    }
+
+    #[test]
+    fn the_sheet_rect_moves_the_paper_by_the_plot_origin() {
+        // AutoCAD's usual "origin at the paper corner" page setup: an ARCH D
+        // sheet (36 x 24 in = 914.4 x 609.6 mm) in inches, margins
+        // (0.25, 0.75, 0.25, 0.75) in and a plot origin of exactly minus
+        // the margins, so the layout origin is the paper's corner and the
+        // sheet is (0,0)..(36,24) -- the LIMMIN/LIMMAX AutoCAD stores for
+        // that setup (samples/AutoCADSamples2.dwg, Layout1).
+        let mut p = PlotSettings {
+            paper_width_mm: 914.4,
+            paper_height_mm: 609.6,
+            margins_mm: [6.35, 19.05, 6.35, 19.05],
+            plot_origin: Point2D {
+                x: -6.35,
+                y: -19.05,
+            },
+            paper_units: 0,
+            ..Default::default()
+        };
+        let r = p.sheet_rect().expect("a paper size");
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert!(
+            close(r.min_x, 0.0)
+                && close(r.min_y, 0.0)
+                && close(r.max_x, 36.0)
+                && close(r.max_y, 24.0),
+            "{r:?}"
+        );
+        // A different offset: shift = (left + ox, bottom + oy) in inches =
+        // (0.25 - 0.25, 0.75 - 0.5) = (0, 0.25), so the sheet is
+        // (0, -0.25)..(36, 23.75).
+        p.plot_origin = Point2D { x: -6.35, y: -12.7 };
+        let r = p.sheet_rect().unwrap();
+        assert!(
+            close(r.min_x, 0.0)
+                && close(r.min_y, -0.25)
+                && close(r.max_x, 36.0)
+                && close(r.max_y, 23.75),
+            "{r:?}"
+        );
+        // No offset, millimetres, turned 90 degrees: the size swaps and the
+        // margins alone place it -- (-6.35, -19.05)..(603.25, 895.35).
+        p.plot_origin = Point2D { x: 0.0, y: 0.0 };
+        p.paper_units = 1;
+        p.rotation = 1;
+        let r = p.sheet_rect().unwrap();
+        assert!(
+            close(r.min_x, -6.35)
+                && close(r.min_y, -19.05)
+                && close(r.max_x, 609.6 - 6.35)
+                && close(r.max_y, 914.4 - 19.05),
+            "{r:?}"
+        );
+        p.paper_width_mm = 0.0;
+        assert!(p.sheet_rect().is_none());
     }
 }

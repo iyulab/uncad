@@ -172,10 +172,12 @@ its 0.3.0 form. Known gaps:
   content on the tile; a dense drawing whose every entity touches every
   tile still costs `tiles x content`. Tiles of a level render in parallel;
   `--max-tiles` (400) and `--max-levels` (5) bound the total.
-- **Sheets are plan views composited by rule.** The sheet is the paper size
-  from the layout's plot settings (portrait size turned by the rotation
-  code, printable corner at the origin, as AutoCAD lays it out), else the
-  layout's limits, else the paper entities' extents. The model is drawn
+- **Sheets are plan views composited by rule.** The sheet is the layout's
+  own limits (`LIMMIN`/`LIMMAX`, AutoCAD's placement of the paper, margins
+  and plot origin folded in), else the paper size from the plot settings
+  (portrait size turned by the rotation code, the printable corner moved
+  by the plot origin at the layout origin), else the paper entities'
+  extents; `sheets.json` says which (`rect_source`). The model is drawn
   through every viewport that is on, looks down the z axis and is not the
   sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
   centred exactly on its frame (a DWG stores no id; the rule held on every
