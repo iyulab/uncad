@@ -28,6 +28,21 @@ pub fn is_world_z(normal: Point3D) -> bool {
         || (normal.x == 0.0 && normal.y == 0.0 && normal.z == 0.0)
 }
 
+/// The largest magnitude, in radians, this crate will read a stored angle
+/// (or ellipse parameter) at. Real files store an angle in `0..2*pi`;
+/// LibreDWG hands one through unchecked, so a corrupt or mis-decoded field
+/// can arrive as 1e20 or 1e247. Past ~1e6 rad an `f64` step is already
+/// coarser than 1e-10 rad and the value names no direction any more, so the
+/// arc it would describe is not geometry but noise.
+pub const MAX_ANGLE: f64 = 1.0e6;
+
+/// Whether `a` can be read as a stored angle at all -- finite and within
+/// [`MAX_ANGLE`]. The entity-level screen for angles, the way
+/// [`crate::crop::Rect::is_sane`] screens rectangles.
+pub fn is_sane_angle(a: f64) -> bool {
+    a.is_finite() && a.abs() <= MAX_ANGLE
+}
+
 /// A stored extrusion, normalized: a zero or non-finite vector becomes the
 /// world Z axis, anything else is scaled to unit length.
 pub fn normalize_extrusion(normal: Point3D) -> Point3D {
@@ -147,21 +162,136 @@ impl BulgeArc {
         take(self.point_at(0.0));
         take(self.point_at(1.0));
         let tau = std::f64::consts::TAU;
+        let quarter = tau / 4.0;
         let (a0, a1) = if self.sweep >= 0.0 {
             (self.start_angle, self.start_angle + self.sweep)
         } else {
             (self.end_angle, self.end_angle - self.sweep)
         };
-        // Every multiple of 90 degrees between a0 and a1 (counter-clockwise).
-        let first = (a0 / (tau / 4.0)).ceil();
-        let mut k = first;
-        while k * (tau / 4.0) <= a1 + 1e-12 {
-            let angle = k * (tau / 4.0);
+        // Every multiple of 90 degrees between a0 and a1 (counter-clockwise),
+        // and *at most four* of them: a fifth crossing would only repeat the
+        // first one's axis direction, so four already pin every extreme a
+        // circle has. The bound is by construction rather than by trusting
+        // a1: a corrupt file's start angle of 1e20 rad (or 1e247, seen in a
+        // fuzzed DWG) made this walk run a1 / (pi/2) times, and past 2^53
+        // `k += 1.0` stops advancing at all, so the loop never ended. A NaN
+        // angle is tested for on its own, since every comparison against it
+        // is false.
+        let first = (a0 / quarter).ceil();
+        for i in 0..4 {
+            let angle = (first + f64::from(i)) * quarter;
+            if angle.is_nan() || angle > a1 + 1e-12 {
+                break;
+            }
             take(Point2D {
                 x: self.center.x + self.radius * angle.cos(),
                 y: self.center.y + self.radius * angle.sin(),
             });
-            k += 1.0;
+        }
+        (min_x, min_y, max_x, max_y)
+    }
+}
+
+/// The elliptical arc an ELLIPSE entity describes, in world coordinates.
+///
+/// DXF 41/42 (`start_angle`/`end_angle` in the model, and in LibreDWG) are
+/// *parameters*, not angles: the point at parameter `t` is
+/// `center + major cos t + minor sin t`, where `minor` is `major` turned a
+/// quarter turn counter-clockwise and scaled by the axis ratio. Only on a
+/// circle (ratio 1) is `t` the angle to the point; on a flattened ellipse
+/// the parameter runs ahead of the polar angle everywhere but on the axes.
+/// A full ellipse stores `0 .. 2*pi`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EllipseArc {
+    pub center: Point2D,
+    /// The major-axis endpoint *relative to* `center` (DXF 11), i.e. the
+    /// major radius as a vector.
+    pub major: Point2D,
+    /// Minor/major radius ratio (DXF 40).
+    pub ratio: f64,
+    /// DXF 41, radians.
+    pub start_param: f64,
+    /// DXF 42, radians.
+    pub end_param: f64,
+}
+
+impl EllipseArc {
+    /// The major radius: the length of [`major`](Self::major).
+    pub fn major_radius(&self) -> f64 {
+        self.major.x.hypot(self.major.y)
+    }
+
+    /// The minor-axis vector: [`major`](Self::major) turned a quarter turn
+    /// counter-clockwise and scaled by [`ratio`](Self::ratio).
+    pub fn minor(&self) -> Point2D {
+        Point2D {
+            x: -self.major.y * self.ratio,
+            y: self.major.x * self.ratio,
+        }
+    }
+
+    pub fn point_at_param(&self, t: f64) -> Point2D {
+        let m = self.minor();
+        let (sin, cos) = t.sin_cos();
+        Point2D {
+            x: self.center.x + self.major.x * cos + m.x * sin,
+            y: self.center.y + self.major.y * cos + m.y * sin,
+        }
+    }
+
+    /// The counter-clockwise sweep from `start_param` to `end_param`, in
+    /// `(0, 2*pi]`. A pair that does not advance (equal parameters) means a
+    /// full ellipse, which is how AutoCAD stores one, so zero maps to a
+    /// full turn rather than to nothing.
+    pub fn sweep(&self) -> f64 {
+        let tau = std::f64::consts::TAU;
+        let raw = self.end_param - self.start_param;
+        if !raw.is_finite() || raw >= tau {
+            return tau;
+        }
+        let s = if raw <= 0.0 { raw + tau } else { raw };
+        if s >= tau {
+            tau
+        } else {
+            s
+        }
+    }
+
+    /// Whether this is a closed ellipse rather than an arc of one.
+    pub fn is_full(&self) -> bool {
+        self.sweep() >= std::f64::consts::TAU - 1e-9
+    }
+
+    /// Axis-aligned bounds of the arc itself (not of the whole ellipse): its
+    /// two ends plus whichever of the four points where `dx/dt` or `dy/dt`
+    /// vanishes fall inside the sweep. `x(t) = cx + Mx cos t + mx sin t` is
+    /// stationary where `tan t = mx / Mx`, i.e. at `atan2(mx, Mx)` and half
+    /// a turn later; `y` likewise from the other components.
+    pub fn bounds(&self) -> (f64, f64, f64, f64) {
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
+        let mut take = |p: Point2D| {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        };
+        let sweep = self.sweep();
+        take(self.point_at_param(self.start_param));
+        take(self.point_at_param(self.start_param + sweep));
+        let m = self.minor();
+        for base in [m.x.atan2(self.major.x), m.y.atan2(self.major.y)] {
+            for half_turn in [0.0, std::f64::consts::PI] {
+                let offset =
+                    (base + half_turn - self.start_param).rem_euclid(std::f64::consts::TAU);
+                if offset <= sweep + 1e-12 {
+                    take(self.point_at_param(self.start_param + offset));
+                }
+            }
         }
         (min_x, min_y, max_x, max_y)
     }
@@ -649,5 +779,139 @@ mod tests {
         assert!(!is_simple(&bowtie));
         let square = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 10.0)];
         assert!(is_simple(&square));
+    }
+
+    #[test]
+    fn arc_bounds_terminate_for_any_angle_however_absurd() {
+        // The quarter-turn walk used to run once per quarter turn between
+        // the two angles, so a start angle of 1e20 rad meant ~6e19 steps --
+        // and past 2^53 (1.4e16 rad) `k += 1.0` no longer advances at all,
+        // so it never ended. 1e20 is the hand-written repro's DXF group 50;
+        // 1.4052120271735542e247 is what a fuzzed `entities-2d.dwg` stored.
+        // Whatever the angles, the answer must contain the two endpoints,
+        // which is all that is asserted here -- the point of the test is
+        // that it returns.
+        for (start, end, radius) in [
+            (1.0e20, 1.0, 2.0),
+            (1.4052120271735542e247, 1.0, 0.0),
+            (-1.0e18, 1.0e18, 5.0),
+            (0.0, f64::INFINITY, 1.0),
+            (f64::NAN, 1.0, 1.0),
+        ] {
+            let arc = BulgeArc {
+                center: p(0.0, 0.0),
+                radius,
+                start_angle: start,
+                end_angle: end,
+                sweep: end - start,
+            };
+            let (min_x, min_y, max_x, max_y) = arc.bounds();
+            assert!(min_x <= max_x || min_x.is_infinite(), "{min_x} {max_x}");
+            assert!(min_y <= max_y || min_y.is_infinite(), "{min_y} {max_y}");
+        }
+        // And a real arc is unaffected: a 270-degree arc of radius 2 about
+        // the origin from 0 to 3*pi/2 crosses +y and -x and -y, so its box
+        // is x -2..2, y -2..2 (only the +x extreme is missing, and the
+        // start point (2,0) supplies it).
+        let arc = BulgeArc {
+            center: p(0.0, 0.0),
+            radius: 2.0,
+            start_angle: 0.0,
+            end_angle: 3.0 * std::f64::consts::FRAC_PI_2,
+            sweep: 3.0 * std::f64::consts::FRAC_PI_2,
+        };
+        let (min_x, min_y, max_x, max_y) = arc.bounds();
+        assert!(close(min_x, -2.0) && close(max_x, 2.0), "{min_x} {max_x}");
+        assert!(close(min_y, -2.0) && close(max_y, 2.0), "{min_y} {max_y}");
+        // A quarter arc in the first quadrant keeps its own box, not the
+        // circle's: (0,2) to (2,0) via the +45 degree point.
+        let quarter = BulgeArc {
+            center: p(0.0, 0.0),
+            radius: 2.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        let (min_x, min_y, max_x, max_y) = quarter.bounds();
+        assert!(close(min_x, 0.0) && close(max_x, 2.0), "{min_x} {max_x}");
+        assert!(close(min_y, 0.0) && close(max_y, 2.0), "{min_y} {max_y}");
+    }
+
+    #[test]
+    fn is_sane_angle_screens_what_no_file_can_mean() {
+        assert!(is_sane_angle(0.0));
+        assert!(is_sane_angle(-std::f64::consts::TAU));
+        assert!(is_sane_angle(MAX_ANGLE));
+        assert!(!is_sane_angle(MAX_ANGLE * 1.001));
+        assert!(!is_sane_angle(1.0e20));
+        assert!(!is_sane_angle(f64::NAN));
+        assert!(!is_sane_angle(f64::INFINITY));
+    }
+
+    #[test]
+    fn an_ellipse_arc_runs_the_parameter_range_not_the_whole_ellipse() {
+        // Major axis (20, 0), ratio 0.5, so the minor axis vector is
+        // (0, 10): the point at parameter t is (20 cos t, 10 sin t).
+        let half = EllipseArc {
+            center: p(0.0, 0.0),
+            major: p(20.0, 0.0),
+            ratio: 0.5,
+            start_param: 0.0,
+            end_param: std::f64::consts::PI,
+        };
+        assert!(close(half.sweep(), std::f64::consts::PI));
+        assert!(!half.is_full());
+        let start = half.point_at_param(0.0);
+        let end = half.point_at_param(std::f64::consts::PI);
+        assert!(close(start.x, 20.0) && close(start.y, 0.0));
+        assert!(close(end.x, -20.0) && close(end.y, 0.0));
+        // The upper half only: y from 0 (both ends) to 10 (t = pi/2).
+        let (min_x, min_y, max_x, max_y) = half.bounds();
+        assert!(close(min_x, -20.0) && close(max_x, 20.0), "{min_x} {max_x}");
+        assert!(close(min_y, 0.0) && close(max_y, 10.0), "{min_y} {max_y}");
+
+        // A quarter of the same ellipse, pi/2 .. pi: x -20..0, y 0..10.
+        let quarter = EllipseArc {
+            start_param: std::f64::consts::FRAC_PI_2,
+            ..half
+        };
+        let (min_x, min_y, max_x, max_y) = quarter.bounds();
+        assert!(close(min_x, -20.0) && close(max_x, 0.0), "{min_x} {max_x}");
+        assert!(close(min_y, 0.0) && close(max_y, 10.0), "{min_y} {max_y}");
+
+        // AutoCAD writes a closed ellipse as 0 .. 2*pi (and a wrapped
+        // sweep, 2*pi .. 3*pi, is the half again -- both forms occur in
+        // samples/AutoCADSamples3.dwg).
+        let full = EllipseArc {
+            start_param: 0.0,
+            end_param: std::f64::consts::TAU,
+            ..half
+        };
+        assert!(full.is_full());
+        let (min_x, min_y, max_x, max_y) = full.bounds();
+        assert!(close(min_x, -20.0) && close(max_x, 20.0));
+        assert!(close(min_y, -10.0) && close(max_y, 10.0));
+        let wrapped = EllipseArc {
+            start_param: std::f64::consts::TAU,
+            end_param: 3.0 * std::f64::consts::PI,
+            ..half
+        };
+        assert!(close(wrapped.sweep(), std::f64::consts::PI));
+        let (_, min_y, _, max_y) = wrapped.bounds();
+        assert!(close(min_y, 0.0) && close(max_y, 10.0), "{min_y} {max_y}");
+
+        // A major axis along +y turns the frame a quarter turn: the point
+        // at t is (0,20) cos t + (-10,0) sin t, so 0 .. pi is the left
+        // half, x -10..0 and y -20..20.
+        let turned = EllipseArc {
+            center: p(0.0, 0.0),
+            major: p(0.0, 20.0),
+            ratio: 0.5,
+            start_param: 0.0,
+            end_param: std::f64::consts::PI,
+        };
+        let (min_x, min_y, max_x, max_y) = turned.bounds();
+        assert!(close(min_x, -10.0) && close(max_x, 0.0), "{min_x} {max_x}");
+        assert!(close(min_y, -20.0) && close(max_y, 20.0), "{min_y} {max_y}");
     }
 }

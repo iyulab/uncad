@@ -351,7 +351,7 @@ Model space, one crop per frame; every step is deterministic and reported.
 | Fonts | `bundled-fonts` feature (default on): Noto Sans Latin + symbols (degree, plus-minus, U+2205, U+2300, ㎡, ㎜) and a Noto Sans KR KS X 1001 subset (target ~1 MB; 4.4 MB unsubsetted), registered as family `uncad-sans` via `push_face_info`; `font-family` on every `<text>`; unshaped characters counted; `--fonts bundled+system` | SHX look-alike face; `--shx-dir` |
 | Text | `text-anchor` from `horiz/vert_alignment` with `alignment_pt` as an `Option` set only when they are non-zero; `id="<handle>"` on `<text>` so `Node::abs_bounding_box` gives exact boxes | `width_factor`, `oblique`, generation flags, MTEXT attachment / wrap / rotation from `x_axis_dir` |
 | Visibility | hidden layers, DEFPOINTS, invisible entities not drawn; `--include-hidden` at 50 % | per-viewport frozen layers |
-| Geometry | OCS applied; RAY/XLINE clipped to the crop; all 3D in plan (`--view iso` opt-in); bulges as arc paths | ELLIPSE arcs, NURBS, HATCH spline edges |
+| Geometry | OCS applied; RAY/XLINE clipped to the crop; all 3D in plan (`--view iso` opt-in); bulges as arc paths; ELLIPSE arcs from the stored parameter range, with the arc's own extent | NURBS, HATCH spline edges |
 | Sizing | `PngSize::{FitLongEdge, FitTokens, PxPerUnit, Scale}`, default `FitLongEdge(1568)`, hard cap 8000 px -> `TooLarge` | -- |
 | Sheets | LAYOUT/PLOTSETTINGS read; `layouts[]` with paper size and per-viewport scale; frames-only sheet overview | model composited per VIEWPORT inside a `clipPath`; `sheets.json` complete |
 | Input | bytes read in Rust, decoded through a `dwg_decode`-from-memory shim (fixes Hangul paths on Windows, enables `parse_bytes`) | -- |

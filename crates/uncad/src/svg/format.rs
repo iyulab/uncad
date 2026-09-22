@@ -5,19 +5,31 @@
 use crate::dynapi::{Point2D, Point3D};
 use std::fmt::Write as _;
 
-/// Snaps a subnormal `f64` (magnitude roughly below 2.2e-308) to exactly
-/// `0.0`. Rust's `f64` `Display` never switches to scientific notation, so a
-/// subnormal coordinate stringifies as several hundred characters of leading
-/// zeros.
+/// Below this magnitude a value is geometrically indistinguishable from `0`
+/// at any realistic drawing scale, and Rust's `f64` `Display` -- which never
+/// switches to scientific notation -- would spell it out with that many
+/// leading zeros (1e-300 prints as 300 characters).
+const NEGLIGIBLE: f64 = 1e-12;
+
+/// Makes `x` safe to write into an SVG attribute: every non-finite value
+/// becomes `0.0`, and so does anything below [`NEGLIGIBLE`] (subnormals
+/// included).
 ///
-/// At subnormal magnitude a value is geometrically indistinguishable from `0`
-/// at any realistic drawing scale, whatever made it that small -- this is a
-/// cheap backstop for any path that ends up formatting a float read straight
-/// out of memory. (One such bug, a wrong element stride in
-/// [`crate::dynapi::SplineControlPoint`], was found through exactly this
-/// symptom and fixed at its real source.)
+/// `NaN` and `inf` are not in SVG's `<number>` grammar at all -- Rust's
+/// `Display` writes them as the literals `NaN` and `inf`, which put the
+/// attribute, and for a conforming SVG 1.1 consumer the whole element, in
+/// error. They reach here from a corrupt or half-decoded entity (a fuzzed
+/// DWG, a hand-written DXF). This is the document-level backstop that keeps
+/// the output well-formed whatever the input; `svg::finite` screens the
+/// entities themselves, so a bogus coordinate is normally left undrawn
+/// rather than drawn at the origin.
+///
+/// The small-magnitude half is a cheap backstop for any path that ends up
+/// formatting a float read straight out of memory. (One such bug, a wrong
+/// element stride in [`crate::dynapi::SplineControlPoint`], was found
+/// through exactly this symptom and fixed at its real source.)
 pub(super) fn clean(x: f64) -> f64 {
-    if x != 0.0 && x.is_subnormal() {
+    if !x.is_finite() || (x != 0.0 && x.abs() < NEGLIGIBLE) {
         0.0
     } else {
         x
@@ -44,8 +56,11 @@ pub(super) fn xy(points: &[Point3D]) -> Vec<Point2D> {
 
 /// The origin the emitted coordinates are relative to: an SVG user unit is
 /// the world minus this, y flipped. `(0, 0)` unless the drawing sits far
-/// from the origin (see `svg::choose_origin`), and always `(0, 0)` inside a
-/// block reference, whose own `<g transform>` carries the shift.
+/// from the origin (see `svg::choose_origin`). Inside a block reference it
+/// is the block-local point that reference's own placement sends to the
+/// enclosing frame's origin (`(0, 0)` when that is `(0, 0)`, so a drawing
+/// near the origin writes block interiors in their own coordinates as
+/// before) -- see `svg::render_block_ref`.
 ///
 /// Every coordinate the renderer writes goes through [`x`](Self::x),
 /// [`y`](Self::y) or [`points`](Self::points): usvg and tiny-skia keep path

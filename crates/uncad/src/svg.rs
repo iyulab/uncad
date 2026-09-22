@@ -1,10 +1,12 @@
 //! SVG rendering of a parsed [`CadDatabase`].
 //!
 //! Entity coverage matches [`crate::model::Entity`]'s variants. The one type
-//! left permanently unsupported is `ACAD_PROXY_ENTITY`: an opaque per-app
-//! serialized blob with no geometry to draw at all. Anything this renderer
-//! cannot draw is reported through [`ToSvgResult::unsupported_types`] rather
-//! than dropped silently.
+//! left *permanently* unsupported is `ACAD_PROXY_ENTITY`: an opaque per-app
+//! serialized blob with no geometry to draw at all. A handful of types that
+//! do carry geometry are not converted yet either (MINSERT, TRACE,
+//! POLYLINE_MESH, SHAPE, BODY, OLE2FRAME) -- see `docs/CAVEATS.md`. Anything
+//! this renderer cannot draw is reported through
+//! [`ToSvgResult::unsupported_types`] rather than dropped silently.
 //!
 //! Several types render as deliberate approximations -- curves as chords, 3D
 //! solids as isometric wireframes, VIEWPORT and WIPEOUT as outlines only. See
@@ -229,19 +231,41 @@ impl Transform {
         )
     }
 
+    /// The local point this transform sends to `(x, y)`: [`apply`](Self::apply)
+    /// run backwards. `None` when the placement is singular (a zero scale
+    /// collapses the block) or the answer is not a usable number.
+    fn invert_point(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        let det = self.a * self.d - self.b * self.c;
+        if !det.is_finite() || det == 0.0 {
+            return None;
+        }
+        let (dx, dy) = (x - self.e, y - self.f);
+        let local = (
+            (self.d * dx - self.c * dy) / det,
+            (self.a * dy - self.b * dx) / det,
+        );
+        (local.0.is_finite() && local.1.is_finite()).then_some(local)
+    }
+
     /// The SVG `matrix(a b c d e f)` equivalent, composed with the renderer's
-    /// CAD-y-up to SVG-y-down flip on both sides: an SVG-local point
-    /// `(u, v) = (x, -y)` maps to the SVG-parent point `(X, -Y)`. The
-    /// translation is written in the parent's `frame` (the block's own
-    /// interior is always drawn about `(0, 0)`).
-    fn svg_matrix(&self, frame: Frame) -> [f64; 6] {
+    /// CAD-y-up to SVG-y-down flip on both sides: a point written in the
+    /// child's frame, `(u, v) = (x - child.ox, -(y - child.oy))`, maps to the
+    /// same point written in the parent's, `(X - parent.ox, -(Y - parent.oy))`.
+    ///
+    /// The linear part is the placement's with y negated on both sides; the
+    /// translation is wherever this placement puts the child frame's own
+    /// origin, expressed in the parent's frame. It is therefore zero exactly
+    /// when the child frame is the pullback of the parent's -- which is what
+    /// [`render_block_ref`] chooses whenever a render origin is engaged.
+    fn svg_matrix(&self, parent: Frame, child: Frame) -> [f64; 6] {
+        let (ex, ey) = self.apply(child.ox, child.oy);
         [
             clean(self.a),
             neg(self.b),
             neg(self.c),
             clean(self.d),
-            frame.x(self.e),
-            frame.y(self.f),
+            parent.x(ex),
+            parent.y(ey),
         ]
     }
 }
@@ -465,13 +489,37 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
     out
 }
 
+/// Whether every one of these values is a real number.
+///
+/// The entity-level screen for coordinates, radii and sizes: an arm that
+/// returns `None` here leaves the entity undrawn, which is the honest
+/// reading of a coordinate that is not a number. A corrupt or half-decoded
+/// entity used to reach the document as `x1="NaN"` or `r="inf"`, neither of
+/// which is in SVG's `<number>` grammar. [`format::clean`] is the backstop
+/// underneath for anything not screened here; this is what keeps a bogus
+/// entity from being *drawn* at the fallback value.
+fn finite<const N: usize>(vals: [f64; N]) -> bool {
+    vals.iter().all(|v| v.is_finite())
+}
+
+/// The points of `pts` that can be drawn at all. One corrupt vertex does not
+/// justify dropping a whole polyline, so the rest is still drawn; fewer than
+/// two survivors leave nothing to draw.
+fn drawable_points(pts: &[Point2D]) -> Vec<Point2D> {
+    pts.iter().filter(|p| finite([p.x, p.y])).copied().collect()
+}
+
 /// A `<polyline>`, or a `<polygon>` when `closed` -- the shape every polyline
 /// entity renders to.
 fn polyline_element(pts: &[Point2D], closed: bool, color: &str, frame: Frame) -> String {
+    let pts = drawable_points(pts);
+    if pts.len() < 2 {
+        return String::new();
+    }
     let tag = if closed { "polygon" } else { "polyline" };
     format!(
         "<{tag} points=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
-        frame.points(pts)
+        frame.points(&pts)
     )
 }
 
@@ -522,9 +570,13 @@ fn bulged_polyline_element(
 /// A dashed outline, used for the shapes this renderer draws as an indication
 /// rather than as real geometry (VIEWPORT frames, WIPEOUT boundaries).
 fn dashed_outline(pts: &[Point2D], color: &str, dash: &str, frame: Frame) -> String {
+    let pts = drawable_points(pts);
+    if pts.len() < 2 {
+        return String::new();
+    }
     format!(
         "<polygon points=\"{}\" fill=\"none\" stroke-dasharray=\"{dash}\" stroke=\"{color}\"/>",
-        frame.points(pts)
+        frame.points(&pts)
     )
 }
 
@@ -535,9 +587,9 @@ fn font_size(height: f64) -> f64 {
 }
 
 /// How far the baseline sits above a text's bottom, in text heights (cap
-/// heights): the assumed descender of the em, scaled to the em the text is
-/// drawn at.
-const DESCENDER_DROP: f64 = crate::png::BUNDLED_DESCENDER / crate::png::BUNDLED_CAP_HEIGHT;
+/// heights). Shared with [`crate::text`], so the estimated box of a
+/// bottom-anchored text and the drawn one are placed by the same offset.
+const DESCENDER_DROP: f64 = crate::text::DESCENDER_DROP;
 
 /// Where a single-line text is anchored and how: the SVG `text-anchor`, the
 /// world-space anchor point, and how far (in text heights) the baseline sits
@@ -775,6 +827,19 @@ fn render_block_ref(
     };
 
     let child_transform = Transform::placement(insertion_point, x_scale, y_scale, rotation);
+    // A placement built from a non-finite insertion point, scale or rotation
+    // has no SVG matrix at all (`matrix(NaN NaN NaN NaN ...)`), and nothing
+    // drawn under it would land anywhere: the whole reference is left out.
+    if !finite([
+        child_transform.a,
+        child_transform.b,
+        child_transform.c,
+        child_transform.d,
+        child_transform.e,
+        child_transform.f,
+    ]) {
+        return String::new();
+    }
     // Compose: local (within the block) -> world, via this block's own
     // transform evaluated in the parent's already-established space. The
     // parent's own state is restored afterwards.
@@ -784,13 +849,47 @@ fn render_block_ref(
     let parent_inherited = std::mem::replace(&mut ctx.inherited_color, color.to_string());
     let child_prefix = format!("{}{owner_handle}/", ctx.id_prefix);
     let parent_prefix = std::mem::replace(&mut ctx.id_prefix, child_prefix);
-    // The block's interior is drawn in its own coordinates; the parent's
-    // origin goes into this block's matrix translation instead.
-    let parent_frame = std::mem::take(&mut ctx.frame);
+    // Which point of the block's own space the interior is written about.
+    //
+    // For a drawing near the origin (`parent_frame` still the default, the
+    // overwhelming majority) it is `(0, 0)`: the block's interior is drawn
+    // in its own coordinates, which are small, and the placement goes into
+    // this group's matrix translation. That is what every block reference
+    // did unconditionally -- and it is wrong as soon as a render origin is
+    // engaged (a drawing past `ORIGIN_SHIFT_THRESHOLD`, see
+    // `choose_origin`), because the interior is then written at whatever
+    // magnitude the *block* uses while only the top level is shifted. A
+    // DIMENSION's cached geometry block made that visible: it is placed
+    // through an identity transform precisely because its children already
+    // hold world coordinates, so with the frame reset every line and the
+    // label came out at full world magnitude inside the group and the
+    // rasterizer's `f32` (a 16-unit step at 2.5e8) quantised them away --
+    // silently, and only for dimensions.
+    //
+    // So when an origin is engaged the interior is written about the point
+    // that this placement sends *to* that origin. Then a child's emitted
+    // coordinate is its world offset from the render origin (divided by the
+    // block's scale, which the group multiplies straight back), the group's
+    // own translation is exactly zero, and no number anywhere is far from
+    // zero. It covers the identity placement of a dimension and equally a
+    // block definition whose geometry sits far from its own base point.
+    let parent_frame = ctx.frame;
+    let child_frame = if parent_frame == Frame::default() {
+        Frame::default()
+    } else {
+        match child_transform.invert_point(parent_frame.ox, parent_frame.oy) {
+            Some((ox, oy)) => Frame { ox, oy },
+            // A singular placement (a zero scale) collapses the block to a
+            // point whatever the frame, so there is nothing to pull back:
+            // the interior keeps its own coordinates.
+            None => Frame::default(),
+        }
+    };
+    ctx.frame = child_frame;
     // The `<g transform>` this call emits, needed before the children are
     // rendered: one of them may be an infinite line, which is clipped in
     // the document's frame and so must know what gets it there.
-    let group_matrix = child_transform.svg_matrix(parent_frame);
+    let group_matrix = child_transform.svg_matrix(parent_frame, child_frame);
     let parent_svg_matrix = ctx.svg_matrix;
 
     ctx.transform = compose(&parent_transform, &child_transform);
@@ -884,6 +983,14 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
     let frame = ctx.frame;
     match e {
         Entity::Line(l) => {
+            if !finite([
+                l.start_point.x,
+                l.start_point.y,
+                l.end_point.x,
+                l.end_point.y,
+            ]) {
+                return None;
+            }
             ctx.consider(l.start_point.x, l.start_point.y);
             ctx.consider(l.end_point.x, l.end_point.y);
             Some(format!(
@@ -895,6 +1002,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Circle(c) => {
+            if !finite([c.center.x, c.center.y, c.radius]) {
+                return None;
+            }
             // All four corners of the local box: `consider` transforms each
             // point, and two diagonal corners of a box do not bound it
             // once a block rotation is applied (at 45 degrees they land on
@@ -913,6 +1023,16 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Arc(a) => {
+            // A stored angle of 1e20 (or the 1.4e247 a fuzzed DWG produced)
+            // names no direction: the sweep it would describe is noise, and
+            // it used to hang `BulgeArc::bounds` outright. Nothing sensible
+            // can be drawn from it, so nothing is.
+            if !finite([a.center.x, a.center.y, a.radius])
+                || !crate::geom::is_sane_angle(a.start_angle)
+                || !crate::geom::is_sane_angle(a.end_angle)
+            {
+                return None;
+            }
             let (x, y, r) = (a.center.x, a.center.y, a.radius);
             let (x1, y1) = (x + r * a.start_angle.cos(), y + r * a.start_angle.sin());
             let (x2, y2) = (x + r * a.end_angle.cos(), y + r * a.end_angle.sin());
@@ -941,13 +1061,39 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Ellipse(el) => {
-            let rx = el.major_axis_endpoint.x.hypot(el.major_axis_endpoint.y);
-            ctx.consider_rect(&Rect::new(
-                el.center.x - rx,
-                el.center.y - rx,
-                el.center.x + rx,
-                el.center.y + rx,
-            ));
+            if !finite([
+                el.center.x,
+                el.center.y,
+                el.major_axis_endpoint.x,
+                el.major_axis_endpoint.y,
+                el.axis_ratio,
+            ]) || !crate::geom::is_sane_angle(el.start_angle)
+                || !crate::geom::is_sane_angle(el.end_angle)
+            {
+                return None;
+            }
+            // DXF 41/42 are parameters on the major axis, not angles -- see
+            // [`crate::geom::EllipseArc`]. An ellipse with no stored sweep
+            // is the closed one AutoCAD writes as 0 .. 2*pi.
+            let arc = crate::geom::EllipseArc {
+                center: Point2D {
+                    x: el.center.x,
+                    y: el.center.y,
+                },
+                major: Point2D {
+                    x: el.major_axis_endpoint.x,
+                    y: el.major_axis_endpoint.y,
+                },
+                ratio: el.axis_ratio,
+                start_param: el.start_angle,
+                end_param: el.end_angle,
+            };
+            let (min_x, min_y, max_x, max_y) = arc.bounds();
+            if !finite([min_x, min_y, max_x, max_y]) {
+                return None;
+            }
+            ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
+            let rx = arc.major_radius();
             let ry = rx * el.axis_ratio;
             let rot = el
                 .major_axis_endpoint
@@ -955,9 +1101,35 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 .atan2(el.major_axis_endpoint.x)
                 .to_degrees();
             let (cx, cy) = (frame.x(el.center.x), frame.y(el.center.y));
+            if arc.is_full() {
+                // A closed ellipse: an SVG elliptical arc whose two ends
+                // coincide is defined to draw nothing, so the closed form
+                // stays its own element.
+                return Some(format!(
+                    "<ellipse cx=\"{cx}\" cy=\"{cy}\" rx=\"{}\" ry=\"{}\" transform=\"rotate({} {cx} {cy})\" fill=\"none\" stroke=\"{color}\"/>",
+                    clean(rx),
+                    clean(ry.abs()),
+                    neg(rot)
+                ));
+            }
+            let sweep = arc.sweep();
+            let start = arc.point_at_param(arc.start_param);
+            let end = arc.point_at_param(arc.start_param + sweep);
+            let large = u8::from(sweep > std::f64::consts::PI);
+            // The canvas is the world with y negated, so a sweep that turns
+            // counter-clockwise in the drawing turns clockwise here: sweep
+            // flag 0, like the ARC branch. A negative axis ratio mirrors the
+            // parameter frame and so reverses that.
+            let sweep_flag = u8::from(el.axis_ratio < 0.0);
             Some(format!(
-                "<ellipse cx=\"{cx}\" cy=\"{cy}\" rx=\"{rx}\" ry=\"{ry}\" transform=\"rotate({} {cx} {cy})\" fill=\"none\" stroke=\"{color}\"/>",
-                neg(rot)
+                "<path d=\"M {} {} A {} {} {} {large} {sweep_flag} {} {}\" fill=\"none\" stroke=\"{color}\"/>",
+                frame.x(start.x),
+                frame.y(start.y),
+                clean(rx),
+                clean(ry.abs()),
+                neg(rot),
+                frame.x(end.x),
+                frame.y(end.y),
             ))
         }
         Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
@@ -987,6 +1159,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 t.horizontal_alignment,
                 t.vertical_alignment,
             );
+            if !finite([anchor.at.x, anchor.at.y]) {
+                return None;
+            }
             ctx.consider(anchor.at.x, anchor.at.y);
             ctx.consider_rect(&crate::text::estimate_text_box(
                 anchor.at,
@@ -1014,6 +1189,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 a.horizontal_alignment,
                 a.vertical_alignment,
             );
+            if !finite([anchor.at.x, anchor.at.y]) {
+                return None;
+            }
             ctx.consider(anchor.at.x, anchor.at.y);
             if a.text.is_empty() || a.invisible {
                 return Some(String::new());
@@ -1038,6 +1216,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Tolerance(t) => {
+            if !finite([t.insertion_point.x, t.insertion_point.y]) {
+                return None;
+            }
             ctx.consider(t.insertion_point.x, t.insertion_point.y);
             if t.text_value.is_empty() {
                 return Some(String::new());
@@ -1061,6 +1242,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::MText(m) => {
+            if !finite([m.insertion_point.x, m.insertion_point.y]) {
+                return None;
+            }
             ctx.consider(m.insertion_point.x, m.insertion_point.y);
             ctx.consider_rect(&crate::text::estimate_mtext_box(
                 Point2D {
@@ -1074,8 +1258,18 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 m.extents_width,
                 m.extents_height,
             ));
-            let lines: Vec<&str> = m.text_plain.lines().filter(|l| !l.is_empty()).collect();
-            if lines.is_empty() {
+            // Split on '\n' rather than `lines()`: an empty line is a real
+            // line (`\P\P` is how a note spaces its paragraphs) and must
+            // take up its line height, and a trailing `\P` leaves a
+            // trailing empty line -- exactly the lines
+            // `estimate_mtext_box` counts, so the drawn block and the
+            // estimated one are the same height.
+            let lines: Vec<&str> = m
+                .text_plain
+                .split('\n')
+                .map(|l| l.strip_suffix('\r').unwrap_or(l))
+                .collect();
+            if lines.iter().all(|l| l.is_empty()) {
                 return Some(String::new());
             }
             // A stored 0 means "unset" at render time (the parsed value is
@@ -1092,9 +1286,24 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             // The attachment point is a corner or edge of the text block
             // (DXF 71, 1 = top-left ... 9 = bottom-right): columns pick the
             // SVG anchor, rows where the first baseline sits relative to the
-            // insertion point. The text height is the cap height, so the
-            // first baseline is one height below the block's top and the
-            // block ends at the last baseline (descenders hang below it).
+            // insertion point.
+            //
+            // The three rows, derived once (SVG y grows downward, and the
+            // text height *is* the cap height -- see `font_size`):
+            //   top     the anchor is the cap top of the first line, so the
+            //           first baseline is one cap height below it;
+            //   middle  the cap band (cap top of the first line down to the
+            //           last baseline, `block_height` tall) is centred on
+            //           the anchor;
+            //   bottom  the anchor is the bottom of the text, i.e. the
+            //           descender line of the last line, so the last
+            //           baseline sits a descender *above* it -- the same
+            //           rule `text_anchor` applies to a single-line TEXT
+            //           with vertical alignment 1 (`-DESCENDER_DROP`), and
+            //           the sign this had wrong, which drew the block a
+            //           third of a line low.
+            // `estimate_mtext_box` places the same cap band from the same
+            // anchor.
             let column = (m.attachment.clamp(1, 9) - 1) % 3;
             let row = (m.attachment.clamp(1, 9) - 1) / 3;
             let anchor_attr = match column {
@@ -1103,24 +1312,37 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 _ => "",
             };
             let block_height = line_height * (lines.len() as f64 - 1.0) + text_height;
-            let first_baseline_drop = match row {
-                0 => text_height,
-                1 => text_height - block_height / 2.0,
-                _ => text_height - block_height + DESCENDER_DROP * text_height,
+            let last_baseline_drop = match row {
+                0 => block_height,
+                1 => block_height / 2.0,
+                _ => -DESCENDER_DROP * text_height,
             };
+            let first_baseline_drop = last_baseline_drop - line_height * (lines.len() as f64 - 1.0);
             let (x, y) = (frame.x(m.insertion_point.x), frame.y(m.insertion_point.y));
             let mut tspans = String::new();
+            // An empty line carries no glyphs, so no `<tspan>` of its own:
+            // SVG applies a `dy` to the characters that follow it, and an
+            // empty element has none, so the shift would simply be lost.
+            // Its line height is added to the next drawn line's `dy`
+            // instead, which puts every following line exactly where a
+            // blank paragraph leaves it.
+            let mut pending = 0.0;
             for (i, line) in lines.iter().enumerate() {
-                let dy = if i == 0 {
+                pending += if i == 0 {
                     first_baseline_drop
                 } else {
                     line_height
                 };
+                if line.is_empty() {
+                    continue;
+                }
                 let _ = write!(
                     tspans,
-                    "<tspan x=\"{x}\" dy=\"{dy}\">{}</tspan>",
+                    "<tspan x=\"{x}\" dy=\"{}\">{}</tspan>",
+                    clean(pending),
                     escape_xml(line)
                 );
+                pending = 0.0;
             }
             Some(format!(
                 "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
@@ -1131,6 +1353,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Point(p) => {
+            if !finite([p.position.x, p.position.y]) {
+                return None;
+            }
             ctx.consider(p.position.x, p.position.y);
             Some(format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"0.5\" fill=\"{color}\" stroke=\"none\"/>",
@@ -1141,6 +1366,10 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         Entity::Solid(s) => {
             // Classic AutoCAD SOLID vertex order is 1-2-4-3, not 1-2-3-4.
             let pts = [s.corner1, s.corner2, s.corner4, s.corner3];
+            // A filled quadrilateral is all four corners or none.
+            if drawable_points(&pts).len() < pts.len() {
+                return None;
+            }
             ctx.consider_all(&pts);
             Some(format!(
                 "<polygon points=\"{}\" fill=\"{color}\" fill-opacity=\"0.6\" stroke=\"none\"/>",
@@ -1222,8 +1451,10 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx,
         )),
         Entity::Dimension(d) => {
-            // The cached geometry block is already in final world coordinates,
-            // so it is drawn with an identity transform.
+            // The cached geometry block is already in final world
+            // coordinates, so it is drawn with an identity transform --
+            // which is also what tells `render_block_ref` that its interior
+            // belongs in the render's own frame, not in a block-local one.
             let svg = render_block_ref(
                 &d.common.handle,
                 &d.block_name,
@@ -2472,13 +2703,371 @@ mod tests {
         // And the emitted matrix is the placement with y negated on both
         // sides: matrix(a -b -c d e -f).
         let t = Transform::placement(Point2D { x: 5.0, y: 6.0 }, 2.0, 3.0, quarter);
-        let [a, b, c, d, e, f] = t.svg_matrix(Frame::default());
+        let [a, b, c, d, e, f] = t.svg_matrix(Frame::default(), Frame::default());
         close(a, 0.0);
         close(b, -2.0);
         close(c, 3.0);
         close(d, 0.0);
         close(e, 5.0);
         close(f, -6.0);
+    }
+
+    /// One entity rendered on its own, with no block nesting and no origin
+    /// shift: the fragment the document would carry.
+    fn render_one(e: &Entity) -> String {
+        let tables = Tables::default();
+        let mut ctx = Ctx::new(&tables);
+        render_entity(e, &mut ctx).unwrap_or_default()
+    }
+
+    fn mtext(text_plain: &str, attachment: u16) -> Entity {
+        Entity::MText(crate::model::MTextEntity {
+            common: EntityCommon {
+                handle: "M".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            insertion_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            text: text_plain.into(),
+            text_plain: text_plain.into(),
+            text_height: 10.0,
+            rotation: 0.0,
+            line_spacing_factor: 1.0,
+            attachment,
+            rect_width: 0.0,
+            extents_width: 0.0,
+            extents_height: 0.0,
+            x_axis_dir: Point3D {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            style: String::new(),
+        })
+    }
+
+    /// Every `dy="..."` in `svg`, in order.
+    fn dys(svg: &str) -> Vec<f64> {
+        svg.match_indices("dy=\"")
+            .map(|(at, _)| {
+                let after = &svg[at + 4..];
+                after[..after.find('"').unwrap()].parse().unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_mtext_attachment_row_places_the_cap_band_the_estimate_predicts() {
+        // Height 10, single spacing: baselines 10 * 5/3 = 16.6667 apart, and
+        // the cap band (first line's cap top down to the last baseline) is
+        // 10 tall for one line, 2 * 16.6667 + 10 = 43.3333 for three. SVG y
+        // grows downward, so a positive dy is below the anchor.
+        //
+        // row 0 (top):    the anchor is the cap top, so the first baseline
+        //                 is one cap height below it: +10.
+        // row 1 (middle): the band is centred, so its top is half a band
+        //                 above the anchor and the first baseline is
+        //                 10 - 43.3333/2 = -11.6667 (one line: 10 - 5 = 5).
+        // row 2 (bottom): the anchor is the bottom of the text, so the LAST
+        //                 baseline is one descender above it,
+        //                 -0.2/0.733 * 10 = -2.72851, and the first is
+        //                 2 * 16.6667 above that: -36.0618 (one line:
+        //                 -2.72851 itself).
+        let descender = 0.2 / 0.733 * 10.0;
+        let line_height = 10.0 * 5.0 / 3.0;
+        for (attachment, one_line, first_of_three) in [
+            (1, 10.0, 10.0),
+            (4, 5.0, 10.0 - (2.0 * line_height + 10.0) / 2.0),
+            (7, -descender, -descender - 2.0 * line_height),
+        ] {
+            let svg = render_one(&mtext("Hxg", attachment));
+            close(dys(&svg)[0], one_line);
+            let svg = render_one(&mtext("Hxg\nsecond\nthird", attachment));
+            close(dys(&svg)[0], first_of_three);
+        }
+
+        // ... and `estimate_mtext_box`, which is what the crop and the
+        // entity's extent are built from, places the same band from the
+        // same anchor: bottom attachment puts its lower edge one descender
+        // above the anchor, where the last baseline now is.
+        let anchor = Point2D { x: 0.0, y: 0.0 };
+        let total = 10.0 + 2.0 * line_height;
+        let bottom =
+            crate::text::estimate_mtext_box(anchor, 10.0, 0.0, "Hxg\nsecond\nthird", 7, 0.0, 0.0);
+        close(bottom.min_y, descender);
+        close(bottom.max_y, descender + total);
+        let top =
+            crate::text::estimate_mtext_box(anchor, 10.0, 0.0, "Hxg\nsecond\nthird", 1, 0.0, 0.0);
+        close(top.max_y, 0.0);
+        close(top.min_y, -total);
+    }
+
+    #[test]
+    fn an_mtext_blank_line_keeps_its_line_height() {
+        // `ALPHA\P\PBRAVO` is three lines, the middle one empty, so BRAVO's
+        // baseline is two line heights (2 * 16.6667 = 33.3333) below
+        // ALPHA's -- not one, which is where dropping the blank line put
+        // it. An empty line carries no glyphs, so it gets no `<tspan>` of
+        // its own (SVG applies a `dy` to the characters that follow it, and
+        // an empty element has none): its height is added to the next
+        // drawn line instead.
+        let svg = render_one(&mtext("ALPHA\n\nBRAVO", 1));
+        assert_eq!(svg.matches("<tspan").count(), 2, "{svg}");
+        let dy = dys(&svg);
+        close(dy[0], 10.0);
+        close(dy[1], 2.0 * 10.0 * 5.0 / 3.0);
+        // The control: the same text with a line of Xs where the blank was.
+        let control = render_one(&mtext("ALPHA\nXXXXX\nBRAVO", 1));
+        assert_eq!(control.matches("<tspan").count(), 3, "{control}");
+        let control_dy = dys(&control);
+        close(control_dy[1] + control_dy[2], dy[1]);
+        // A blank line is a line for the block height too, so the bottom
+        // attachment lands both texts' last baseline in the same place.
+        let blank = dys(&render_one(&mtext("ALPHA\n\nBRAVO", 7)));
+        let filled = dys(&render_one(&mtext("ALPHA\nXXXXX\nBRAVO", 7)));
+        close(blank[0], filled[0]);
+        // Text that is nothing but blank lines draws nothing at all.
+        assert_eq!(render_one(&mtext("\n\n", 1)), "");
+    }
+
+    fn ellipse(major: (f64, f64), ratio: f64, start: f64, end: f64) -> Entity {
+        Entity::Ellipse(crate::model::EllipseEntity {
+            common: EntityCommon {
+                handle: "E".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            center: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            major_axis_endpoint: Point3D {
+                x: major.0,
+                y: major.1,
+                z: 0.0,
+            },
+            axis_ratio: ratio,
+            start_angle: start,
+            end_angle: end,
+        })
+    }
+
+    #[test]
+    fn an_ellipse_draws_only_its_stored_parameter_range() {
+        let pi = std::f64::consts::PI;
+        // Major axis (20, 0), ratio 0.5: the point at parameter t is
+        // (20 cos t, 10 sin t). Parameters 0 .. pi is the upper half, from
+        // (20, 0) to (-20, 0) -- SVG y down, so (20, 0) to (-20, 0) with
+        // the arc bulging to negative y, which is sweep flag 0.
+        let svg = render_one(&ellipse((20.0, 0.0), 0.5, 0.0, pi));
+        assert_eq!(
+            svg,
+            "<path d=\"M 20 0 A 20 10 0 0 0 -20 0\" fill=\"none\" stroke=\"#000000\"/>"
+        );
+        // pi .. 2*pi is the lower half: (-20, 0) back to (20, 0).
+        let svg = render_one(&ellipse((20.0, 0.0), 0.5, pi, 2.0 * pi));
+        assert!(svg.contains("M -20 0 A 20 10 0 0 0 20 0"), "{svg}");
+        // Over half a turn sets the large-arc flag: 0 .. 3*pi/2 ends at
+        // (0, -10), i.e. SVG (0, 10).
+        let svg = render_one(&ellipse((20.0, 0.0), 0.5, 0.0, 3.0 * pi / 2.0));
+        assert!(svg.contains("M 20 0 A 20 10 0 1 0 0 10"), "{svg}");
+        // 0 .. 2*pi is AutoCAD's closed ellipse, and an SVG arc whose ends
+        // coincide draws nothing, so that one keeps the <ellipse> element.
+        let svg = render_one(&ellipse((20.0, 0.0), 0.5, 0.0, 2.0 * pi));
+        assert!(
+            svg.starts_with("<ellipse cx=\"0\" cy=\"0\" rx=\"20\" ry=\"10\""),
+            "{svg}"
+        );
+        // A major axis along +y turns the whole frame: the x-axis rotation
+        // is 90 degrees counter-clockwise in the drawing, so -90 on the
+        // y-down canvas, and 0 .. pi runs from (0, 20) to (0, -20).
+        let svg = render_one(&ellipse((0.0, 20.0), 0.5, 0.0, pi));
+        assert!(svg.contains("M 0 -20 A 20 10 -90 0 0 0 20"), "{svg}");
+    }
+
+    #[test]
+    fn an_ellipse_arcs_extent_is_the_arcs_own() {
+        // The upper half of the same ellipse reaches y 0..10, not -10..10,
+        // and the crop must not be stretched to the half that is not drawn.
+        let tables = Tables::default();
+        let mut ctx = Ctx::new(&tables);
+        render_entity(
+            &ellipse((20.0, 0.0), 0.5, 0.0, std::f64::consts::PI),
+            &mut ctx,
+        );
+        let b = ctx.entity_box().expect("the arc was measured");
+        close(b.min_x, -20.0);
+        close(b.max_x, 20.0);
+        close(b.min_y, 0.0);
+        close(b.max_y, 10.0);
+    }
+
+    fn arc(start_angle: f64, end_angle: f64, radius: f64) -> Entity {
+        Entity::Arc(crate::model::ArcEntity {
+            common: EntityCommon {
+                handle: "A".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            center: Point3D {
+                x: 5.0,
+                y: 5.0,
+                z: 0.0,
+            },
+            radius,
+            start_angle,
+            end_angle,
+            extrusion: crate::geom::WORLD_Z,
+        })
+    }
+
+    fn line_entity(handle: &str, from: (f64, f64), to: (f64, f64)) -> Entity {
+        Entity::Line(crate::model::LineEntity {
+            common: EntityCommon {
+                handle: handle.into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: from.0,
+                y: from.1,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: to.0,
+                y: to.1,
+                z: 0.0,
+            },
+        })
+    }
+
+    fn drawing(entities: Vec<Entity>) -> CadDatabase {
+        let mut tables = Tables::default();
+        tables.block_records.insert(
+            "*Model_Space".into(),
+            crate::tables::BlockRecord {
+                name: "*Model_Space".into(),
+                entities: entities.clone(),
+            },
+        );
+        CadDatabase::new(entities, tables)
+    }
+
+    #[test]
+    fn an_arc_with_a_garbage_angle_is_left_undrawn_and_the_render_finishes() {
+        // 1e20 is the hand-written repro's DXF group 50; 1.4052120271735542e247
+        // with radius 0 is what a fuzzed `entities-2d.dwg` stored. Both used
+        // to spin `BulgeArc::bounds` forever, so `to_svg` (and `to_png`, and
+        // `export_package` through it) never returned. This test hangs
+        // rather than fails without the fix.
+        let db = drawing(vec![
+            line_entity("L", (0.0, 0.0), (10.0, 10.0)),
+            arc(1.0e20, 1.0, 2.0),
+            arc(1.4052120271735542e247, 1.0, 0.0),
+            arc(f64::NAN, f64::INFINITY, 2.0),
+        ]);
+        let result = to_svg(&db, ToSvgOptions::default());
+        // The LINE is still drawn; the three unreadable arcs are not.
+        assert!(result.svg.contains("<line "), "{}", result.svg);
+        assert!(!result.svg.contains("<path"), "{}", result.svg);
+        assert!(
+            crate::png::to_png(&db, crate::png::ToPngOptions::default()).is_ok(),
+            "to_png must finish too"
+        );
+        // A real arc of the same shape is unaffected: 0 .. pi/2 about
+        // (5,5) r 2 runs from (7,5) to (5,7), i.e. SVG (7,-5) to (5,-7).
+        let db = drawing(vec![arc(0.0, std::f64::consts::FRAC_PI_2, 2.0)]);
+        let svg = to_svg(&db, ToSvgOptions::default()).svg;
+        assert!(svg.contains("M 7 -5 A 2 2 0 0 0 5 -7"), "{svg}");
+    }
+
+    #[test]
+    fn a_non_finite_coordinate_never_reaches_an_svg_attribute() {
+        // Rust's Display writes these as `NaN` and `inf`, neither of which
+        // is in SVG's <number> grammar, so the attribute -- and for a
+        // conforming consumer the element -- is in error.
+        let nan = f64::NAN;
+        let inf = f64::INFINITY;
+        let mut tables = Tables::default();
+        tables.block_records.insert(
+            "B".into(),
+            crate::tables::BlockRecord {
+                name: "B".into(),
+                entities: vec![line_entity("BL", (0.0, 0.0), (10.0, 10.0))],
+            },
+        );
+        let entities = vec![
+            line_entity("L0", (0.0, 0.0), (10.0, 10.0)),
+            line_entity("L1", (nan, nan), (10.0, 10.0)),
+            line_entity("L2", (0.0, 0.0), (inf, -inf)),
+            Entity::Circle(crate::model::CircleEntity {
+                common: EntityCommon {
+                    handle: "C".into(),
+                    layer: "0".into(),
+                    ..EntityCommon::default()
+                },
+                center: Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                radius: inf,
+                extrusion: crate::geom::WORLD_Z,
+            }),
+            ellipse((nan, 0.0), 0.5, 0.0, 1.0),
+            Entity::Insert(crate::model::InsertEntity {
+                common: EntityCommon {
+                    handle: "I".into(),
+                    layer: "0".into(),
+                    ..EntityCommon::default()
+                },
+                block_name: "B".into(),
+                insertion_point: Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                scale: Point3D {
+                    x: nan,
+                    y: inf,
+                    z: 1.0,
+                },
+                rotation: 0.0,
+                extrusion: crate::geom::WORLD_Z,
+                attribs: Vec::new(),
+            }),
+        ];
+        tables.block_records.insert(
+            "*Model_Space".into(),
+            crate::tables::BlockRecord {
+                name: "*Model_Space".into(),
+                entities: entities.clone(),
+            },
+        );
+        let db = CadDatabase::new(entities, tables);
+        let svg = to_svg(
+            &db,
+            ToSvgOptions {
+                crop: CropMode::Raw,
+                ..Default::default()
+            },
+        )
+        .svg;
+        assert!(!svg.contains("NaN"), "{svg}");
+        assert!(!svg.contains("inf"), "{svg}");
+        // Only the one sound LINE survives.
+        assert_eq!(svg.matches("<line ").count(), 1, "{svg}");
+        assert!(!svg.contains("<circle"), "{svg}");
+        assert!(!svg.contains("<ellipse"), "{svg}");
+        assert!(!svg.contains("<g "), "{svg}");
+        // A scale of 1e-300 is finite but prints as 300 characters of
+        // leading zeros, which is what `clean` exists to prevent.
+        assert!(svg.len() < 600, "{svg}");
     }
 
     #[test]

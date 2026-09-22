@@ -287,6 +287,14 @@ pub const CHAR_ADVANCE: f64 = 0.6 / crate::png::BUNDLED_CAP_HEIGHT;
 /// 5/3 of the text height from one baseline to the next.
 pub const LINE_SPACING: f64 = 5.0 / 3.0;
 
+/// How far a text's bottom sits below its last baseline, in text heights
+/// (cap heights): the bundled face's descender, scaled from the em to the
+/// em the renderer draws a CAD height at (see `svg::font_size`). A
+/// bottom-anchored text -- single-line TEXT with vertical alignment 1, or
+/// MTEXT with a bottom attachment -- has its *bottom* on the anchor, so its
+/// last baseline is this far above it.
+pub const DESCENDER_DROP: f64 = crate::png::BUNDLED_DESCENDER / crate::png::BUNDLED_CAP_HEIGHT;
+
 /// Estimated world box of a TEXT/ATTRIB: [`CHAR_ADVANCE`] heights per
 /// character (the renderer's own guess; glyph metrics refine it later),
 /// one text height tall per line (the cap height; descenders are not
@@ -360,10 +368,18 @@ pub fn estimate_mtext_box(
         2 => (-width, 0.0),
         _ => (0.0, width),
     };
+    // The box is the cap band -- the cap top of the first line down to the
+    // last baseline -- placed by the attachment row exactly as the renderer
+    // places it: top row hangs it below the anchor, middle centres it,
+    // bottom puts the text's *bottom* on the anchor, which leaves the last
+    // baseline (and so the band) a descender above it.
     let (y0, y1) = match row {
         0 => (-total_height, 0.0),
         1 => (-total_height / 2.0, total_height / 2.0),
-        _ => (0.0, total_height),
+        _ => (
+            DESCENDER_DROP * height,
+            DESCENDER_DROP * height + total_height,
+        ),
     };
     rotated_box(anchor, rotation, x0, y0, x1, y1)
 }
