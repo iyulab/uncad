@@ -320,8 +320,12 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// Records a world-axis-aligned rectangle's four corners (in local
-    /// coordinates, like [`consider`](Self::consider)).
+    /// Records a local-axis-aligned rectangle through all four corners (in
+    /// local coordinates, like [`consider`](Self::consider)), so the world
+    /// box still contains it under a rotated or mirrored block transform.
+    /// Two diagonal corners are enough only for rotations by multiples of
+    /// 90 degrees; the four-corner box is conservative (up to sqrt 2 larger
+    /// at 45 degrees) but never loses geometry.
     fn consider_rect(&mut self, rect: &Rect) {
         for (x, y) in [
             (rect.min_x, rect.min_y),
@@ -751,8 +755,16 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Circle(c) => {
-            ctx.consider(c.center.x - c.radius, c.center.y - c.radius);
-            ctx.consider(c.center.x + c.radius, c.center.y + c.radius);
+            // All four corners of the local box: `consider` transforms each
+            // point, and two diagonal corners of a box do not bound it
+            // once a block rotation is applied (at 45 degrees they land on
+            // a vertical line).
+            ctx.consider_rect(&Rect::new(
+                c.center.x - c.radius,
+                c.center.y - c.radius,
+                c.center.x + c.radius,
+                c.center.y + c.radius,
+            ));
             Some(format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
                 c.center.x,
@@ -778,8 +790,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 sweep,
             };
             let (min_x, min_y, max_x, max_y) = arc.bounds();
-            ctx.consider(min_x, min_y);
-            ctx.consider(max_x, max_y);
+            ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
             let large = if sweep > std::f64::consts::PI { 1 } else { 0 };
             Some(format!(
                 "<path d=\"M {x1} {} A {r} {r} 0 {large} 0 {x2} {}\" fill=\"none\" stroke=\"{color}\"/>",
@@ -788,8 +799,12 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::Ellipse(el) => {
             let rx = el.major_axis_endpoint.x.hypot(el.major_axis_endpoint.y);
-            ctx.consider(el.center.x - rx, el.center.y - rx);
-            ctx.consider(el.center.x + rx, el.center.y + rx);
+            ctx.consider_rect(&Rect::new(
+                el.center.x - rx,
+                el.center.y - rx,
+                el.center.x + rx,
+                el.center.y + rx,
+            ));
             let ry = rx * el.axis_ratio;
             let rot = el
                 .major_axis_endpoint
@@ -810,8 +825,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 if let Some((min_x, min_y, max_x, max_y)) =
                     crate::geom::polyline_bounds(&p.vertices, &p.bulges, p.closed)
                 {
-                    ctx.consider(min_x, min_y);
-                    ctx.consider(max_x, max_y);
+                    ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
                 }
                 Some(bulged_polyline_element(p, &color))
             }

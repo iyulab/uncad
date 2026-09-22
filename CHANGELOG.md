@@ -179,6 +179,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
   vertices, since the reflection reverses each arc's turn; `bulges` are documented as
   world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- The extent of a CIRCLE, ARC, ELLIPSE or bulged polyline inside a block reference
+  rotated by other than a multiple of 90 degrees was measured from two corners of its
+  box, so a circle in a block inserted at 45 degrees had a zero-width extent and a
+  door swing lost its far half: `--crop raw` cut it off, `blocks.json` boxes were short
+  and the tiles the swing crossed were rendered blank. All four corners are measured
+  now (conservative by up to sqrt 2 at 45 degrees, never short).
 - A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
   `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
   MTEXT already was.
