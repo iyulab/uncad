@@ -10,6 +10,21 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- PNG sizing in pixels: `ToPngOptions { size: PngSize, background: Background,
+  stroke_px, max_edge }`. `PngSize::FitLongEdge(px)` (the default, 1568 px -- the
+  largest a Claude standard-tier image keeps unresized), `PxPerUnit(f64)` and
+  `Scale(f64)` (0.2.0's units-times-factor rule). `Background::White` (the default,
+  written as 8-bit RGB) or `Transparent` (8-bit RGBA). `stroke_px` (default 1.25)
+  sizes every stroke in output pixels. `max_edge` (default 8000) refuses larger images
+  with `PngError::TooLarge` instead of allocating them; `PngError::InvalidSize` rejects
+  a non-finite or non-positive size. `ToPngResult` gains `width`, `height`,
+  `view_box` and `px_per_unit`, and `ToSvgResult` gains `view_box`
+  (`uncad::ViewBox`, with `world_bounds`, `world_to_px` and `px_to_world`), so a
+  consumer can map a pixel back to drawing coordinates. CLI: `--fit <px>`,
+  `--ppu <n>`, `--bg white|transparent`, `--stroke <px>`, `--max-edge <px>`.
+- `uncad::color::contrast_on_white`: the renderer darkens colours whose luminance
+  exceeds 0.45 (ACI yellow `#ffff00` draws as `#828200`, cyan as `#00a4a4`) so they read
+  on the white page; the model and JSON keep the file's colours.
 - `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
   (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
   `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
@@ -58,6 +73,15 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Changed (breaking)
 
+- `to_png`'s defaults: the image's long edge is 1568 px (was: one pixel per drawing
+  unit, so a 12.7 MB drawing rendered at 69 x 70 px and a LibreDWG corpus file tried
+  to allocate 36 TB), the background is opaque white (was: transparent, which showed
+  nothing when composited on black), strokes are 1.25 px (was: 1/6000th of the viewBox
+  diagonal, a sub-pixel hairline at most sizes), and the output is RGB (was: RGBA).
+  `ToPngOptions { scale }` is gone: use `size: PngSize::Scale(s)`. The CLI's
+  `--scale` keeps its meaning; without a flag the CLI now fits to 1568 px.
+- `ToSvgResult::unsupported_types` is sorted (was: `HashSet` order, different per run).
+- The system font database is loaded once per process instead of on every `to_png`.
 - `CadDatabase` has a third field, `header`; a struct literal without it no longer
   compiles (use `CadDatabase::new` or add `header: Header::default()`).
 

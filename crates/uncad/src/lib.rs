@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
 pub use model::Entity;
-pub use png::{PngError, ToPngOptions, ToPngResult};
-pub use svg::{Space, ToSvgOptions, ToSvgResult};
+pub use png::{Background, PngError, PngSize, ToPngOptions, ToPngResult};
+pub use svg::{Space, ToSvgOptions, ToSvgResult, ViewBox};
 pub use tables::Tables;
 
 /// LibreDWG's C code has non-reentrant global state (the `loglevel` global
@@ -94,9 +94,10 @@ impl CadDatabase {
         svg::to_svg(self, options)
     }
 
-    /// Renders this parsed drawing straight to PNG bytes, via
-    /// [`to_svg`](Self::to_svg) internally -- the intermediate SVG text never
-    /// touches disk.
+    /// Renders this parsed drawing straight to PNG bytes -- the intermediate
+    /// SVG text never touches disk. By default the image's long edge is 1568
+    /// px, the background opaque white and strokes 1.25 px wide; see
+    /// [`ToPngOptions`].
     pub fn to_png(&self, options: ToPngOptions) -> Result<ToPngResult, PngError> {
         png::to_png(self, options)
     }

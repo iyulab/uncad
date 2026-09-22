@@ -429,12 +429,16 @@ dominates parse time.
 
 Effort in person-days is the review panel's estimate.
 
-Implementation status (2026-09-21, see `CHANGELOG.md` "Unreleased"): **P-1 done**
+Implementation status (2026-09-22, see `CHANGELOG.md` "Unreleased"): **P-1 done**
 except the AutoCAD-written Korean DWG fixture (LibreDWG's own writer mangles
 CP949 text, so `tests/fixtures/` ships DXF fixtures only); **P0 done**
-(`CadDatabase::header`); the LWPOLYLINE closed-bit fix from **P4** and the
-`dwg_resolve_handle` binding P3 needs are in. Everything else below is still
-open.
+(`CadDatabase::header`); **P1 mostly done** (`PngSize` fit-to-pixels with the
+8000 px cap, white RGB background, pixel strokes, contrast-normalized palette,
+fonts loaded once, `ViewBox` + `px_per_unit` in every result) -- still open in
+P1: the bundled Latin + Hangul font, `font-family` on text, RAY/XLINE clipping,
+and pixel-sized symbols (POINT, arrowheads, dashes); the LWPOLYLINE closed-bit
+fix from **P4** and the `dwg_resolve_handle` binding P3 needs are in.
+Everything else below is still open.
 
 | Release | Phase | Files |
 |---|---|---|

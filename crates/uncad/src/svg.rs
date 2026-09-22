@@ -20,13 +20,14 @@ mod bounds;
 mod format;
 mod hatch;
 
-use crate::color::{resolve_color, DEFAULT_COLOR};
+use crate::color::{contrast_on_white, resolve_color, DEFAULT_COLOR};
 use crate::dynapi::{Point2D, Point3D};
 use crate::model::{Entity, EntityCommon, MLineVertex};
 use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
 use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
@@ -64,8 +65,48 @@ impl Default for ToSvgOptions {
 
 pub struct ToSvgResult {
     pub svg: String,
-    /// DXF names of entity types this renderer had nothing to draw for.
+    /// The `viewBox` the document was given: what the image shows, padding
+    /// included, and the key to mapping its pixels back to the drawing.
+    pub view_box: ViewBox,
+    /// DXF names of entity types this renderer had nothing to draw for,
+    /// sorted.
     pub unsupported_types: Vec<String>,
+}
+
+/// An SVG `viewBox`, in SVG coordinates: `x`/`y` are the top-left corner and
+/// y runs downward, so a world point `(wx, wy)` sits at SVG `(wx, -wy)`. The
+/// world bounds are therefore `x..x + width` horizontally and
+/// `-(y + height)..-y` vertically. Padding is already included.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ViewBox {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ViewBox {
+    /// The world-space rectangle this viewBox shows, as
+    /// `(min_x, min_y, max_x, max_y)`.
+    pub fn world_bounds(&self) -> (f64, f64, f64, f64) {
+        (
+            self.x,
+            -(self.y + self.height),
+            self.x + self.width,
+            -self.y,
+        )
+    }
+
+    /// Where the world point `(x, y)` lands in an image rendered at
+    /// `px_per_unit` (row 0 at the top), as fractional pixels.
+    pub fn world_to_px(&self, x: f64, y: f64, px_per_unit: f64) -> (f64, f64) {
+        ((x - self.x) * px_per_unit, (-y - self.y) * px_per_unit)
+    }
+
+    /// The inverse of [`world_to_px`](Self::world_to_px).
+    pub fn px_to_world(&self, px: f64, py: f64, px_per_unit: f64) -> (f64, f64) {
+        (self.x + px / px_per_unit, -(self.y + py / px_per_unit))
+    }
 }
 
 // --- block transform ---------------------------------------------------
@@ -383,14 +424,16 @@ fn mline_offset_points(vertices: &[MLineVertex], offset: f64) -> Vec<Point2D> {
         .collect()
 }
 
+/// The entity's colour as drawn: AutoCAD's precedence rules, then darkened
+/// if it would not read on the white page (`contrast_on_white`).
 fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
-    resolve_color(
+    contrast_on_white(&resolve_color(
         common.color_index,
         common.true_color,
         &common.layer,
         ctx.tables,
         &ctx.inherited_color,
-    )
+    ))
 }
 
 // --- entity rendering --------------------------------------------------
@@ -903,16 +946,35 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
 
 // --- top level ---------------------------------------------------------
 
-/// Renders a parsed [`CadDatabase`] to an SVG string.
+/// Everything [`to_svg`] computes before the stroke width is known: the
+/// rendered elements with their stroke placeholders still in place, the
+/// `<defs>` entries HATCH patterns need, the viewBox, and the types nothing
+/// was drawn for. [`assemble`] turns it into a document; `png.rs` uses the
+/// split to pick a stroke width in output pixels once it knows the scale.
+pub(crate) struct Rendered {
+    body: String,
+    defs: Vec<String>,
+    pub(crate) view_box: ViewBox,
+    unsupported: HashSet<String>,
+}
+
+impl Rendered {
+    /// The unsupported type names, sorted so the result is the same on
+    /// every run (they come out of a `HashSet`).
+    pub(crate) fn unsupported_types(&self) -> Vec<String> {
+        let mut types: Vec<String> = self.unsupported.iter().cloned().collect();
+        types.sort();
+        types
+    }
+}
+
+/// Renders every selected entity and computes the viewBox, leaving the
+/// stroke width unresolved.
 ///
 /// `outlier_trim` (default `true`) computes the viewBox from the dominant
 /// spatially-connected cluster of entities instead of the raw min/max -- see
 /// [`bounds`] for why.
-///
-/// `stroke_width` defaults to ~1/6000th of the computed viewBox diagonal
-/// rather than a fixed value; see [`stroke_width_placeholder`] for how nested
-/// block references keep a constant visual weight.
-pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
+pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     let mut entity_boxes: Vec<Box2D> = Vec::new();
     let mut body: Vec<String> = Vec::new();
 
@@ -948,33 +1010,64 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
         raw_bounds()
     };
 
-    let x = bounds.min_x - options.padding;
-    let y = -bounds.max_y - options.padding;
     let width = (bounds.max_x - bounds.min_x) + options.padding * 2.0;
     let height = (bounds.max_y - bounds.min_y) + options.padding * 2.0;
-    let effective_stroke_width = options
-        .stroke_width
-        .unwrap_or_else(|| (width.hypot(height) / 6000.0).max(0.01));
-
-    let resolved_body = resolve_stroke_widths(&body.join("\n  "), effective_stroke_width);
-    // HATCH pattern defs carry stroke-width placeholders too. Kept separate
-    // from the body only so an empty defs list emits no <defs> block at all.
-    let defs_block = if ctx.defs.is_empty() {
-        String::new()
-    } else {
-        let resolved_defs = resolve_stroke_widths(&ctx.defs.join("\n  "), effective_stroke_width);
-        format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
+    let view_box = ViewBox {
+        x: bounds.min_x - options.padding,
+        y: -bounds.max_y - options.padding,
+        // A degenerate (single-point) drawing still gets a 1x1 canvas.
+        width: if width != 0.0 { width } else { 1.0 },
+        height: if height != 0.0 { height } else { 1.0 },
     };
 
-    let svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{x} {y} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
-        if width != 0.0 { width } else { 1.0 },
-        if height != 0.0 { height } else { 1.0 }
-    );
+    Rendered {
+        body: body.join("\n  "),
+        defs: ctx.defs,
+        view_box,
+        unsupported: ctx.unsupported,
+    }
+}
 
+/// The stroke width [`to_svg`] uses when none is given: ~1/6000th of the
+/// viewBox diagonal in drawing units, floored at 0.01. A hairline at most
+/// output sizes -- `png.rs` overrides it with a width in pixels.
+pub(crate) fn auto_stroke_width(view_box: &ViewBox) -> f64 {
+    (view_box.width.hypot(view_box.height) / 6000.0).max(0.01)
+}
+
+/// Resolves the stroke placeholders at `effective_stroke_width` (drawing
+/// units; see [`stroke_width_placeholder`] for how nested block references
+/// keep a constant visual weight) and wraps everything in the `<svg>`
+/// element.
+pub(crate) fn assemble(rendered: &Rendered, effective_stroke_width: f64) -> String {
+    let resolved_body = resolve_stroke_widths(&rendered.body, effective_stroke_width);
+    // HATCH pattern defs carry stroke-width placeholders too. Kept separate
+    // from the body only so an empty defs list emits no <defs> block at all.
+    let defs_block = if rendered.defs.is_empty() {
+        String::new()
+    } else {
+        let resolved_defs =
+            resolve_stroke_widths(&rendered.defs.join("\n  "), effective_stroke_width);
+        format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
+    };
+    let vb = rendered.view_box;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
+        vb.x, vb.y, vb.width, vb.height
+    )
+}
+
+/// Renders a parsed [`CadDatabase`] to an SVG string: [`render`], then
+/// [`assemble`] with the explicit `stroke_width` or [`auto_stroke_width`].
+pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
+    let rendered = render(db, options);
+    let stroke_width = options
+        .stroke_width
+        .unwrap_or_else(|| auto_stroke_width(&rendered.view_box));
     ToSvgResult {
-        svg,
-        unsupported_types: ctx.unsupported.into_iter().collect(),
+        svg: assemble(&rendered, stroke_width),
+        view_box: rendered.view_box,
+        unsupported_types: rendered.unsupported_types(),
     }
 }
 

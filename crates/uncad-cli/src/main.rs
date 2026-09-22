@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
-use uncad::{CadDatabase, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
+use uncad::{Background, CadDatabase, PngSize, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
 
 const USAGE: &str = "\
 uncad - parse DWG/DXF drawings
@@ -30,14 +30,22 @@ SVG/PNG options:
                                 of trimming to the drawing's main cluster
 
 PNG options:
-  --scale <factor>            multiplies the SVG viewBox size (default: 1.0,
-                                e.g. 2.0 for twice the resolution)
+  --fit <px>                  longest side of the image in pixels (default: 1568,
+                                the largest a Claude standard-tier image keeps)
+  --ppu <n>                   pixels per drawing unit, instead of --fit
+  --scale <factor>            viewBox units times this factor, instead of --fit
+                                (0.2.0's sizing; 1 = one pixel per drawing unit)
+  --bg <white|transparent>    background (default: white, written as RGB)
+  --stroke <px>               stroke width in pixels (default: 1.25)
+  --max-edge <px>             refuse images wider or taller than this
+                                (default: 8000)
 
 Examples:
   uncad drawing.dwg
   uncad drawing.dwg -o drawing.json --pretty
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
+  uncad drawing.dwg -o drawing.png --fit 4000
   uncad drawing.dwg -o drawing.png --scale 2";
 
 struct Args {
@@ -45,7 +53,12 @@ struct Args {
     output: Option<String>,
     space: String,
     outlier_trim: bool,
-    scale: String,
+    fit: Option<String>,
+    ppu: Option<String>,
+    scale: Option<String>,
+    bg: String,
+    stroke: Option<String>,
+    max_edge: Option<String>,
     pretty: bool,
     help: bool,
 }
@@ -56,7 +69,12 @@ fn parse_args(argv: &[String]) -> Args {
         output: None,
         space: "model".to_string(),
         outlier_trim: true,
-        scale: "1".to_string(),
+        fit: None,
+        ppu: None,
+        scale: None,
+        bg: "white".to_string(),
+        stroke: None,
+        max_edge: None,
         pretty: false,
         help: false,
     };
@@ -74,11 +92,31 @@ fn parse_args(argv: &[String]) -> Args {
                 }
             }
             "--no-trim" => args.outlier_trim = false,
+            "--fit" => {
+                i += 1;
+                args.fit = argv.get(i).cloned();
+            }
+            "--ppu" => {
+                i += 1;
+                args.ppu = argv.get(i).cloned();
+            }
             "--scale" => {
                 i += 1;
+                args.scale = argv.get(i).cloned();
+            }
+            "--bg" => {
+                i += 1;
                 if let Some(v) = argv.get(i) {
-                    args.scale = v.clone();
+                    args.bg = v.clone();
                 }
+            }
+            "--stroke" => {
+                i += 1;
+                args.stroke = argv.get(i).cloned();
+            }
+            "--max-edge" => {
+                i += 1;
+                args.max_edge = argv.get(i).cloned();
             }
             "--pretty" => args.pretty = true,
             "-h" | "--help" => args.help = true,
@@ -145,12 +183,7 @@ fn run(args: &Args) -> Result<(), String> {
             result.unsupported_types
         }
         "png" => {
-            let result = db
-                .to_png(ToPngOptions {
-                    svg: svg_options(args)?,
-                    scale: parse_scale(&args.scale)?,
-                })
-                .map_err(|e| e.to_string())?;
+            let result = db.to_png(png_options(args)?).map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
             result.unsupported_types
         }
@@ -210,11 +243,56 @@ fn parse_space(value: &str) -> Result<Space, String> {
     }
 }
 
-fn parse_scale(value: &str) -> Result<f32, String> {
-    match value.parse::<f32>() {
-        Ok(scale) if scale > 0.0 && scale.is_finite() => Ok(scale),
+fn png_options(args: &Args) -> Result<ToPngOptions, String> {
+    let defaults = ToPngOptions::default();
+    // One sizing rule at a time: an explicit --scale or --ppu replaces the
+    // default fit; --fit changes the fit's pixel count.
+    let size = match (&args.scale, &args.ppu, &args.fit) {
+        (Some(scale), _, _) => PngSize::Scale(parse_positive("--scale", scale)?),
+        (None, Some(ppu), _) => PngSize::PxPerUnit(parse_positive("--ppu", ppu)?),
+        (None, None, Some(fit)) => PngSize::FitLongEdge(parse_pixels("--fit", fit)?),
+        (None, None, None) => defaults.size,
+    };
+    let background = match args.bg.as_str() {
+        "white" => Background::White,
+        "transparent" => Background::Transparent,
+        other => {
+            return Err(format!(
+                "unsupported --bg value '{other}' (one of white, transparent)"
+            ))
+        }
+    };
+    let stroke_px = match &args.stroke {
+        Some(stroke) => Some(parse_positive("--stroke", stroke)?),
+        None => defaults.stroke_px,
+    };
+    let max_edge = match &args.max_edge {
+        Some(max_edge) => parse_pixels("--max-edge", max_edge)?,
+        None => defaults.max_edge,
+    };
+    Ok(ToPngOptions {
+        svg: svg_options(args)?,
+        size,
+        background,
+        stroke_px,
+        max_edge,
+    })
+}
+
+fn parse_positive(flag: &str, value: &str) -> Result<f64, String> {
+    match value.parse::<f64>() {
+        Ok(number) if number > 0.0 && number.is_finite() => Ok(number),
         _ => Err(format!(
-            "--scale must be a finite number greater than 0 (got '{value}')"
+            "{flag} must be a finite number greater than 0 (got '{value}')"
+        )),
+    }
+}
+
+fn parse_pixels(flag: &str, value: &str) -> Result<u32, String> {
+    match value.parse::<u32>() {
+        Ok(pixels) if pixels > 0 => Ok(pixels),
+        _ => Err(format!(
+            "{flag} must be a whole number of pixels greater than 0 (got '{value}')"
         )),
     }
 }

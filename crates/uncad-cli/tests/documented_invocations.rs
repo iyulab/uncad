@@ -127,7 +127,11 @@ fn scale_actually_scales_the_raster() {
     let one = TempFile::new("scale1.png");
     let two = TempFile::new("scale2.png");
 
-    assert!(run(&[CORPUS_DXF, "-o", one.arg()]).status.success());
+    // Both runs pass --scale: the default sizing is a pixel fit, not a
+    // unit multiplier, so "no flag" would not be the 1x baseline.
+    assert!(run(&[CORPUS_DXF, "-o", one.arg(), "--scale", "1"])
+        .status
+        .success());
     assert!(run(&[CORPUS_DXF, "-o", two.arg(), "--scale", "2"])
         .status
         .success());

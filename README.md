@@ -25,8 +25,8 @@ std::fs::write("drawing.json", json)?;
 let result = db.to_svg(uncad::ToSvgOptions::default());
 std::fs::write("drawing.svg", result.svg)?;
 
-let png = db.to_png(uncad::ToPngOptions::default())?;   // via to_svg(); no SVG touches disk
-std::fs::write("drawing.png", png.png)?;
+let png = db.to_png(uncad::ToPngOptions::default())?;   // 1568 px long edge, white, 1.25 px strokes
+std::fs::write("drawing.png", png.png)?;                 // png.view_box + png.px_per_unit map pixels back
 ```
 
 ## CLI
@@ -35,8 +35,9 @@ std::fs::write("drawing.png", png.png)?;
 cargo run -p uncad-cli -- drawing.dwg                            # summary: version, units, entity count per type
 cargo run -p uncad-cli -- drawing.dwg -o drawing.json --pretty   # export the parsed model
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg             # render to SVG (model space)
-cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG (via SVG)
-cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # rasterize at twice the size
+cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG, long edge 1568 px
+cargo run -p uncad-cli -- drawing.dwg -o drawing.png --fit 4000  # long edge 4000 px
+cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # two pixels per drawing unit instead
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim   # keep outlying coordinates
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document

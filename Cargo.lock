@@ -701,6 +701,7 @@ version = "0.2.0"
 dependencies = [
  "libc",
  "libredwg-sys",
+ "png",
  "regex",
  "resvg",
  "serde",

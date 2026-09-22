@@ -110,6 +110,39 @@ pub fn resolve_color(
     }
 }
 
+/// Darkens a colour that would be hard to see on a white page, for the
+/// rendered image: a hex colour whose luminance (`0.299 R + 0.587 G +
+/// 0.114 B`, on 0..1) exceeds [`MAX_LUMINANCE_ON_WHITE`] has its channels
+/// scaled down together until it meets it, so hue is kept. ACI 2 yellow
+/// (`#ffff00`, luminance 0.89, contrast about 1.07:1 against white) becomes
+/// `#828200`; cyan `#00a4a4`; pure white was already black (see
+/// [`aci_to_hex`]). Colours below the threshold are returned unchanged.
+///
+/// Applied by the renderer only: [`resolve_color`] and the JSON keep the
+/// file's own colours.
+pub fn contrast_on_white(hex: &str) -> String {
+    let Ok(packed) = u32::from_str_radix(hex.trim_start_matches('#'), 16) else {
+        return hex.to_string();
+    };
+    let (r, g, b) = (
+        f64::from((packed >> 16) & 0xff),
+        f64::from((packed >> 8) & 0xff),
+        f64::from(packed & 0xff),
+    );
+    let luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+    if luminance <= MAX_LUMINANCE_ON_WHITE {
+        return hex.to_string();
+    }
+    let factor = MAX_LUMINANCE_ON_WHITE / luminance;
+    let scale = |c: f64| -> u32 { (c * factor).round().clamp(0.0, 255.0) as u32 };
+    format!("#{:02x}{:02x}{:02x}", scale(r), scale(g), scale(b))
+}
+
+/// The brightest a rendered colour may be on the white background, as
+/// luminance on 0..1. 0.45 keeps ACI yellow/cyan/green readable while leaving
+/// every mid and dark colour untouched.
+pub const MAX_LUMINANCE_ON_WHITE: f64 = 0.45;
+
 /// Blends a hex color toward white by `tint` (0.0 = unchanged, 1.0 = white),
 /// clamped to `[0, 1]`. Approximates a single-color HATCH gradient's second
 /// stop -- unverified, like the rest of [`crate::model::HatchGradient`].
@@ -196,6 +229,30 @@ mod tests {
             negative, "#ffff00",
             "sign marks 'layer off', not a different color"
         );
+    }
+
+    #[test]
+    fn contrast_on_white_darkens_yellow_and_cyan_but_not_red_or_black() {
+        assert_eq!(contrast_on_white("#ffff00"), "#828200");
+        assert_eq!(contrast_on_white("#00ffff"), "#00a4a4");
+        assert_eq!(
+            contrast_on_white("#ff0000"),
+            "#ff0000",
+            "red is 0.30: unchanged"
+        );
+        assert_eq!(contrast_on_white("#000000"), "#000000");
+        assert_eq!(contrast_on_white("#123456"), "#123456");
+    }
+
+    #[test]
+    fn contrast_on_white_keeps_hue_and_tolerates_garbage() {
+        // Light grey darkens to the threshold, staying grey.
+        let grey = contrast_on_white("#e0e0e0");
+        let packed = u32::from_str_radix(&grey[1..], 16).unwrap();
+        let (r, g, b) = ((packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff);
+        assert_eq!((r, g), (g, b));
+        assert!(r < 0xe0);
+        assert_eq!(contrast_on_white("not-a-colour"), "not-a-colour");
     }
 
     #[test]
