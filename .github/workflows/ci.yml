@@ -1,9 +1,18 @@
 name: CI
 
+# Every push, not just main: docs/CAVEATS.md promises that "whether the tree
+# is clean is tracked automatically", and a release branch that sits dozens of
+# commits ahead of main with no PR open is exactly where a Linux-only bindgen
+# or formatting regression hides. The concurrency group below keeps the extra
+# trigger cheap -- a branch's push run is superseded as soon as its PR run (or
+# the next push) starts.
 on:
   push:
-    branches: [main]
   pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
