@@ -16,6 +16,13 @@ LIGHT. Details worth knowing:
   `Dwg_HATCH_DefLine` and tiling an SVG `<pattern>` (see "HATCH pattern fill" below);
   solid fills are painted as a translucent color; gradient fills are approximated with
   SVG's `linearGradient`/`radialGradient` (unverified, see "HATCH gradient fill").
+- **ELLIPSE** draws the arc its stored sweep describes, as an SVG elliptical arc path
+  (since 0.3.0 -- before it, every elliptical arc was closed into a full oval). DXF 41/42
+  are *parameters*, not angles: the point is `center + major cos t + minor sin t`, so on a
+  flattened ellipse the parameter runs ahead of the polar angle everywhere but on the
+  axes. The extent is the arc's own, not the whole ellipse's. The model does not keep
+  ELLIPSE's extrusion, so an ellipse whose plane normal points away from +Z has its arc
+  drawn mirrored about the major axis (the closed ones are unaffected).
 - **LEADER** draws only the polyline through its vertices plus an optional arrowhead at
   the first one. Spline paths and text-box size are not in the model, because nothing
   renders them.
@@ -27,16 +34,24 @@ LIGHT. Details worth knowing:
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
-**Not supported: ACAD_PROXY_ENTITY, and nothing else.** It is the proxy representation of
-a custom entity from another program, so it has no fixed geometry to render at all: just
+**Permanently not supported: ACAD_PROXY_ENTITY.** It is the proxy representation of a
+custom entity from another program, so it has no fixed geometry to render at all: just
 `proxy_id`, `class_id` and serialized entity bytes, with no coordinates or shape. Leaving
 it as `Unknown` *is* the accurate representation, and "supporting" it would change nothing
 in practice -- `Unknown` preserves the real DXF name, so a CLI summary already counts it
-correctly as `ACAD_PROXY_ENTITY`. At the `parse()` stage an unsupported type becomes
-`Entity::Unknown` (never dropped silently); at `to_svg()` it is reported through
-`unsupported_types`.
+correctly as `ACAD_PROXY_ENTITY`.
 
-Net: every parseable entity type that has geometry at all is handled.
+**Not converted yet, although they do carry geometry:** MINSERT (a block reference
+repeated on a row/column grid), TRACE (a filled quadrilateral, the same shape as SOLID),
+POLYLINE_MESH with its VERTEX_MESH vertices, SHAPE, BODY and OLEFRAME/OLE2FRAME. They are
+read and counted, but nothing is drawn for them, so a drawing whose grid of columns is one
+MINSERT loses that grid from the picture. They are scheduled for a later release (see the
+roadmap in `docs/VLM_EXPORT_DESIGN.md`).
+
+Nothing is dropped silently either way: at the `parse()` stage such a type becomes
+`Entity::Unknown` carrying its real DXF name, at `to_svg()` it is listed in
+`unsupported_types`, the CLI prints it ("left out of the image, unsupported entity types:
+..."), and `export` records it in `report.json`.
 
 ### Eight types are experimental
 
@@ -173,7 +188,14 @@ its 0.3.0 form. Known gaps:
   precision, so the renderer writes its SVG relative to the drawing's own
   origin (the rounded median of its entities, `ToSvgResult::origin`,
   `ToPngResult::origin`) whenever the coordinates exceed 32768 units: a
-  plan at projected coordinates renders like one at the origin. What is
+  plan at projected coordinates renders like one at the origin. A block
+  reference's interior follows, written about the point its own placement
+  sends to that origin, so a DIMENSION's cached geometry block -- which is
+  placed through an identity transform because it already holds world
+  coordinates -- is shifted like everything else. (Until 0.3.0 the interior
+  of every block reference was written unshifted, which quantised every
+  dimension out of the picture at 2.5e8 while the plain lines beside it
+  drew perfectly.) What is
   left is the drawing's own span -- a box a million units from that origin
   (a drawing a million units across) is only exact to about 1/16 unit.
   A character the bundled subset lacks is drawn as a box: the record says
@@ -321,6 +343,28 @@ them reading left to right from the same anchor. A tilted normal (anything
 but (0,0,+-1)) transforms points correctly, but an INSERT with one is drawn
 as if it were upright.
 
+## A corrupt coordinate, size or angle leaves that entity undrawn (since 0.3.0)
+
+LibreDWG hands a decoded field through as it found it, so a corrupt or fuzzed file can
+produce a `NaN` or infinite coordinate, a radius of `inf`, or an angle of 1e20 (a
+fuzzed DWG in the test set stores 1.4e247). Neither `NaN` nor `inf` is in SVG's
+`<number>` grammar, and an angle that large names no direction at all -- an `f64` step
+past ~1e6 rad is already coarser than 1e-10 rad.
+
+The renderer screens both at the entity level (`svg::finite`, `geom::is_sane_angle`, the
+way `crop::Rect::is_sane` screens rectangles) and draws nothing for the entity whose
+values fail; a polyline keeps the vertices that are real numbers and is dropped only when
+fewer than two remain. Underneath that, every number written into an attribute goes
+through `svg::format::clean`, which maps a non-finite value -- and anything below 1e-12,
+which Rust's `f64 Display` would otherwise spell out with 300 leading zeros -- to `0`, so
+the document is well-formed whatever the input. Such an entity is *not* listed in
+`unsupported_types`: the type is supported, this instance's values are not.
+
+Before 0.3.0 these reached the file as `x1="NaN"` and `r="inf"`, and an ARC with a huge
+angle made the arc-bounds walk (`geom::BulgeArc::bounds`, one step per quarter turn)
+spin forever -- `to_svg`, `to_png` and `export_package` never returned. That walk is now
+bounded at four quarter crossings by construction, which is all any arc can have.
+
 ## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
@@ -336,6 +380,17 @@ not from AutoCAD's SHX fonts, so the extent of a string is approximate even thou
 anchor is exact. MTEXT baselines are 5/3 of the text height apart (AutoCAD's single
 spacing) times the line spacing factor. MTEXT word-wrapping at `rect_width` is not
 performed: a paragraph is one line until `\P`.
+
+An MTEXT attachment row places the *cap band* -- the cap top of the first line down to
+the last baseline -- the same way in the renderer and in `text::estimate_mtext_box`, which
+is what the crop and the entity extent are built from: the top row hangs it below the
+anchor, the middle row centres it, and the bottom row puts the text's bottom on the
+anchor, so the last baseline sits a descender (0.2 em) above it, exactly as vertical
+alignment 1 does for a single-line TEXT. Until 0.3.0 the bottom row had that descender's
+sign the other way, drawing the block about a third of a line low. An empty line is a real
+line and keeps its line height (`\P\P` is how a note spaces its paragraphs); until 0.3.0
+blank lines were dropped, which moved every line after a paragraph break up by one line
+height.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 

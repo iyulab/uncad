@@ -227,6 +227,45 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Every DIMENSION vanished from a drawing far from the origin. Above 32768 units the
+  renderer writes its SVG relative to the drawing's own origin, because usvg and
+  tiny-skia keep path points and transforms in `f32`; the interior of a block reference
+  was exempt from that shift, and a DIMENSION's cached geometry block is placed through
+  an identity transform precisely because its children already hold *world* coordinates.
+  So at 2.5e8, where the `f32` step is 16 units, every dimension line, extension line and
+  label was quantised away while the plain LINEs of the same drawing drew perfectly --
+  silently, with `dimensions.json` still listing the dimension and no warning anywhere.
+  A block reference's interior is now written about the point its own placement sends to
+  the render origin, which covers the dimension case and equally a block whose geometry
+  sits far from its own base point.
+- An ARC whose stored angle was garbage (1e20 from a hand-written DXF, 1.4e247 from a
+  corrupt one) made `to_svg`, `to_png` and `export_package` spin forever: the arc-bounds
+  walk stepped one quarter turn at a time from one angle to the other, and past 2^53 the
+  step stopped advancing at all. The walk is now bounded at the four quarter crossings
+  any arc can have, and an angle that is not finite or exceeds 1e6 radians -- where an
+  `f64` no longer resolves a radian -- leaves that entity undrawn.
+- `NaN` and `inf` reached SVG attributes (`x1="NaN"`, `r="inf"`), neither of which is in
+  SVG's number grammar, and a block reference scaled by 1e-300 printed a 300-digit
+  decimal in its `transform`. An entity whose coordinates, radius or scale are not real
+  numbers is now left undrawn (a polyline keeps the vertices that are), and every number
+  written into the document goes through a filter that maps a non-finite or negligible
+  value to `0`.
+- An ELLIPSE's stored start and end parameters were ignored, so every elliptical arc was
+  closed into a full oval -- a half-round slot end came out as a complete ring. The arc
+  is now drawn over its own parameter range as an SVG elliptical-arc path, and its
+  extent is the arc's own rather than the whole ellipse's.
+- MTEXT dropped empty lines, so every line after a paragraph break (`\P\P`) was drawn one
+  line height too high while `text_plain` and the extent estimate still counted it. A
+  blank line now keeps its line height.
+- Bottom-attached MTEXT (DXF 71 = 7/8/9) was drawn about a third of a line too low: the
+  descender term had the wrong sign, and disagreed both with single-line TEXT's bottom
+  alignment and with the box `estimate_mtext_box` reports. The attachment row now places
+  the same cap band in the renderer and in the estimate, with the bottom row putting the
+  text's bottom -- descender included -- on the anchor.
+- `docs/CAVEATS.md` claimed "Not supported: ACAD_PROXY_ENTITY, and nothing else". MINSERT,
+  TRACE, POLYLINE_MESH, SHAPE, BODY and OLE2FRAME are not converted either, and draw
+  nothing; they are reported through `unsupported_types` like any other unsupported type.
+  The documentation now says so.
 - Every tile rectangle of a small drawing was the same rectangle. The world boxes in
   `tiles.json`, the sidecars and the records were rounded to `$LUPREC` decimals (3 at
   the least), which says how precisely the drawing's units are *displayed* and nothing
