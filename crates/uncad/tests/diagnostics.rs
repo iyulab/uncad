@@ -2,16 +2,10 @@
 //! the signals that now say so. Each test pairs an input that must produce
 //! the signal with one that must not -- a check that only looked for the
 //! signal could not tell "reported when it should be" from "reported always".
+//! (The rendering-side signal, a block reference that draws nothing, is
+//! tested in the renderer crate.)
 
-use std::collections::BTreeMap;
-
-use uncad::model::{
-    Confidence, EntityCommon, EntityId, InsertEntity, LineEntity, Origin, Point3D, Ref,
-};
-use uncad::tables::{BlockRecord, Tables};
-use uncad::{
-    read_diagnostics_from_libredwg_bits, CadDatabase, Entity, ReadDiagnostics, Space, ToSvgOptions,
-};
+use uncad::{read_diagnostics_from_libredwg_bits, CadDatabase, ReadDiagnostics};
 
 const CORPUS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -77,85 +71,4 @@ fn diagnostics_survive_the_json_round_trip_and_default_when_absent() {
     )
     .expect("old shape");
     assert_eq!(old.read_diagnostics, ReadDiagnostics::default());
-}
-
-// --- A block reference that draws nothing is reported --------------------
-
-fn common(handle: &str) -> EntityCommon {
-    EntityCommon {
-        id: EntityId::new(u64::from_str_radix(handle, 16).unwrap()),
-        origin: Origin::Vector,
-        confidence: Confidence::High,
-        source_handle: Ref::Resolved(handle.to_string()),
-        layer: Ref::Resolved("0".to_string()),
-        color_index: 256,
-        true_color: None,
-    }
-}
-
-fn p3(x: f64, y: f64, z: f64) -> Point3D {
-    Point3D { x, y, z }
-}
-
-fn insert(handle: &str, block_name: &str) -> Entity {
-    Entity::Insert(InsertEntity {
-        common: common(handle),
-        block_name: Ref::Resolved(block_name.to_string()),
-        insertion_point: p3(0.0, 0.0, 0.0),
-        scale: p3(1.0, 1.0, 1.0),
-        rotation: 0.0,
-        attribs: Vec::new(),
-    })
-}
-
-fn block(name: &str, entities: Vec<Entity>) -> (String, BlockRecord) {
-    (
-        name.to_string(),
-        BlockRecord {
-            name: name.to_string(),
-            entities,
-        },
-    )
-}
-
-#[test]
-fn a_block_reference_that_draws_nothing_is_named_and_one_that_draws_is_not() {
-    let line = Entity::Line(LineEntity {
-        common: common("10"),
-        start_point: p3(0.0, 0.0, 0.0),
-        end_point: p3(10.0, 0.0, 0.0),
-    });
-    let mut block_records = BTreeMap::new();
-    block_records.extend([
-        block("EMPTY", Vec::new()),
-        block("FULL", vec![line.clone()]),
-    ]);
-    let db = CadDatabase {
-        entities: vec![
-            insert("20", "EMPTY"),
-            insert("21", "EMPTY"), // referenced twice: reported once
-            insert("22", "FULL"),
-            line,
-        ],
-        tables: Tables {
-            block_records,
-            ..Tables::default()
-        },
-        read_diagnostics: ReadDiagnostics::default(),
-    };
-
-    // Space::All: this synthetic model has no *Model_Space record to select by.
-    let result = uncad::to_svg(
-        &db,
-        ToSvgOptions {
-            space: Space::All,
-            ..ToSvgOptions::default()
-        },
-    );
-    assert_eq!(result.empty_blocks, vec!["EMPTY".to_string()]);
-    assert!(
-        result.svg.contains("<line") || result.svg.contains("<path"),
-        "the FULL block must still draw: {}",
-        result.svg
-    );
 }

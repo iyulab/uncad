@@ -11,8 +11,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use iron_render_cad::ToSvgOptions;
 use uncad::model::Ref;
-use uncad::{Entity, ParseError, ToSvgOptions};
+use uncad::{Entity, ParseError};
 
 const CORPUS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -163,7 +164,7 @@ fn sweep() -> Sweep {
             }
         }
 
-        let svg = uncad::to_svg(&db, ToSvgOptions::default());
+        let svg = iron_render_cad::to_svg(&db, ToSvgOptions::default());
         if !svg.empty_blocks.is_empty() {
             s.files_with_empty_blocks += 1;
             s.empty_blocks

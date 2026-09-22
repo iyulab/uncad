@@ -83,6 +83,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Rendering moved to the `iron-render-cad` crate.** `to_svg`, `to_png`, `svg_to_png`,
+  `Space`, the options and results, and the color resolution behind them are now
+  [`iron-render-cad`](https://github.com/iyulab/iron-render-cad) (MIT); `uncad-cli` depends
+  on it for `-o *.svg` / `-o *.png`, and this crate's tests take it as a dev-dependency.
+  `uncad` itself no longer depends on `resvg` or `regex`. What stays here is the parser's
+  own color need: the two hex stops of a HATCH gradient, which the model carries.
 - **Every entity carries a reference ID, its origin and its confidence.** `EntityCommon`
   gains `id` (an `EntityId`, the name consumers point at an entity by -- minted by this
   backend as the file handle's value, or from the object's position in the file for an

@@ -4,10 +4,11 @@
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output.
 
+use iron_render_cad::{to_png, to_svg, Space, ToPngOptions, ToSvgOptions};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
-use uncad::{CadDatabase, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
+use uncad::{CadDatabase, ToJsonOptions};
 
 const USAGE: &str = "\
 uncad - parse DWG/DXF drawings
@@ -147,12 +148,12 @@ fn run(args: &Args) -> Result<(), String> {
             (Vec::new(), Vec::new())
         }
         "svg" => {
-            let result = uncad::to_svg(&db, svg_options(args)?);
+            let result = to_svg(&db, svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
             (result.unsupported_types, result.empty_blocks)
         }
         "png" => {
-            let result = uncad::to_png(
+            let result = to_png(
                 &db,
                 ToPngOptions {
                     svg: svg_options(args)?,

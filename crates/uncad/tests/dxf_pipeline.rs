@@ -77,7 +77,7 @@ fn parses_a_dxf_and_projects_it_into_the_model() {
 #[test]
 fn renders_a_parsed_dxf_to_svg() {
     let db = uncad::parse(CORPUS_DXF).expect("a corpus DXF should parse");
-    let result = uncad::to_svg(&db, uncad::ToSvgOptions::default());
+    let result = iron_render_cad::to_svg(&db, iron_render_cad::ToSvgOptions::default());
 
     // Deliberately not asserted: which entity types come back unsupported.
     // Pinning that set would turn every future *widening* of renderer support

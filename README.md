@@ -22,11 +22,9 @@ println!("{} entities", db.entities.len());
 let json = db.to_json(uncad::ToJsonOptions { pretty: true })?;   // the model, serialized as-is
 std::fs::write("drawing.json", json)?;
 
-let result = uncad::to_svg(&db, uncad::ToSvgOptions::default());
+// Rendering is the iron-render-cad crate's (uncad-cli uses it):
+let result = iron_render_cad::to_svg(&db, iron_render_cad::ToSvgOptions::default());
 std::fs::write("drawing.svg", result.svg)?;
-
-let png = uncad::to_png(&db, uncad::ToPngOptions::default())?;   // via to_svg(); no SVG touches disk
-std::fs::write("drawing.png", png.png)?;
 ```
 
 ## CLI
@@ -53,9 +51,10 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
    LibreDWG's own DXF importer is documented as working "for most objects", so
    it is less complete than its DWG reading ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
 3. **Output** — the parsed model as JSON (`CadDatabase::to_json`, from
-   `uncad-model`), SVG (`to_svg`) or PNG (`to_png`). Writing DWG/DXF is not
-   offered; the write API that existed in 0.1.0 was removed (see
-   [`CHANGELOG.md`](./CHANGELOG.md)).
+   `uncad-model`). SVG and PNG come from the
+   [`iron-render-cad`](https://github.com/iyulab/iron-render-cad) crate (MIT), which
+   `uncad-cli` uses. Writing DWG/DXF is not offered; the write API that existed in
+   0.1.0 was removed (see [`CHANGELOG.md`](./CHANGELOG.md)).
 
 The model itself -- `CadDatabase`, `Entity`, `Tables` and their JSON form -- is
 the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT), re-exported
@@ -96,7 +95,7 @@ crates/
                          subset of C sources actually compiled (for publishing to
                          crates.io); shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
-  uncad/                 the safe API: parse() -> uncad_model::CadDatabase -> to_svg()/to_png()
+  uncad/                 the safe API: parse() -> uncad_model::CadDatabase
   uncad-cli/             the CLI binary (uncad)
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
                          manual-check tools, and #[cfg(test)] blocks inside src/*.rs are

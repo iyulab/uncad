@@ -394,33 +394,11 @@ dynapi's `void*`. The fix is the same as before: blocklist and hand-write the st
 leaving `parent` as `*mut c_void` so `_dwg_entity_HATCH` is never pulled in, with a
 compile-time assertion against clang's real `sizeof()` (64 bytes).
 
-**Rendering**: one SVG `<pattern>` element per defline, accumulated into `<defs>` and
-emitted once by `to_svg`, with the HATCH boundary path filled via `fill="url(#...)"`.
-Clipping is delegated to SVG's own fill mechanism rather than hand-rolled polygon
-clipping, so a boundary with several loops or islands keeps working through the existing
-`fill-rule="evenodd"` path. Two deliberate simplifications (see
-`render_pattern_line` in `crates/uncad/src/svg/hatch.rs`): the component of `offset`
-parallel to the line direction, used for brick-style staggering, is ignored and only the
-perpendicular spacing is honored; and the line is drawn at the center of its tile rather
-than exactly on `base_point`, so `<pattern>`'s default tile-edge clipping cannot cut it in
-half. Being half a tile out of phase is immaterial for an infinitely repeating pattern.
-
-**A real bug found and fixed here**: the first implementation followed standard DXF
-pattern-fill documentation, which describes group 52 (`angle`) and 41 (`scale_spacing`) as
-applying on top of the group 78 definition-line data, and multiplied `pattern_angle`/
-`pattern_scale` back into each `HatchPatternLine`. Rendering a real file showed no pattern
-at all -- hatches inside small door and furniture symbols came out empty. Investigation:
-a HATCH whose `pattern_angle` was exactly 90 degrees had a defline whose own `angle` was
-also exactly 90, which is only possible if LibreDWG's parsed defline data already has
-52/41 applied (a 0-degree source pattern plus 90 would have given 180). The numbers agreed:
-multiplying a `pattern_scale` of 60 into a defline's ~6.5-unit spacing gives ~390 units,
-while the shape being filled was only ~90 units across, so not a single line fell inside
-one tile. Removing the reapplication entirely, and using the defline's
-`angle`/`base_point`/`offset`/`dash_pattern` as final values, made dense crosshatch and
-tile patterns appear correctly on the same file. The now-unused `pattern_angle`/
-`pattern_scale` fields were dropped from `HatchEntity`. The lesson generalizes: **do not
-take the DXF spec document at face value -- check what LibreDWG actually parses, against a
-real file.**
+**Rendering** of pattern fills, and the bug the first implementation had (reapplying
+group 52/41 on top of defline data that already has them applied), are documented in the
+renderer crate, `iron-render-cad` (`docs/CAVEATS.md` there). What this crate does: it hands
+the defline `angle`/`base_point`/`offset`/`dash_pattern` over as final values -- the parsed
+data already has the pattern angle and scale applied, so nothing is multiplied back in.
 
 **Still unverified** beyond the two deliberate simplifications above: whether
 `pattern_type` (0 = user-defined, 1 = predefined, 2 = custom) actually changes how defline
@@ -439,17 +417,11 @@ rendering -- the same risk level as the other experimental types.
 the same `parent: struct _dwg_entity_HATCH *` cascade as `Dwg_HATCH_DefLine`, and is
 handled the same way (blocklist, hand-write, assert clang's `sizeof()` of 64 bytes).
 
-**Rendering**: `gradient_name` (`SPHERICAL`/`HEMISPHERICAL`/`CURVED`/`LINEAR`/`CYLINDER`)
-collapses to a binary choice -- the two spherical names become an SVG `radialGradient`
-(close to AutoCAD's center-out look), everything else including unrecognized names becomes
-a `linearGradient`. `CURVED` and `CYLINDER` are directional but not radial in AutoCAD too,
-so a linear approximation misses the curvature but is still closer than a radial one. For
-the two stops: with `single_color_gradient` off, `colors[]` is sorted by `shift_value` and
-the ends are used; with it on (only one color is stored), the second stop is that color
-blended toward white by `gradient_tint` (`color::tint_toward_white`, a plain per-channel
-linear blend -- whether AutoCAD uses the same formula is unverified). `gradient_shift`
-(DXF 461, the "Centered" option) is not applied, the same kind of deliberate
-simplification as ignoring `HatchPatternLine.offset`'s parallel component.
+**What this crate produces**: the two stops as hex colors (with `single_color_gradient` on,
+the second stop is the first blended toward white by `gradient_tint`, a plain per-channel
+linear blend whose agreement with AutoCAD is unverified) and the gradient name collapsed to
+`is_radial`. How that is drawn is the renderer crate's business (`iron-render-cad`,
+`docs/CAVEATS.md` there).
 
 ## MLINESTYLE parsing (unverified)
 

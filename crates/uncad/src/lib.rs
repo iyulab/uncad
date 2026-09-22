@@ -1,17 +1,16 @@
 //! Safe DWG/DXF parsing on top of `libredwg-sys`, into the shared
-//! [`uncad_model`] entity model, plus SVG/PNG rendering of that model.
+//! [`uncad_model`] entity model.
 //!
-//! Reading only -- this crate does not write DWG or DXF. The shape is
-//! `DWG/DXF -> CadDatabase (entities + tables) -> CadDatabase::to_json() |
-//! to_svg(&db, ..) | to_png(&db, ..)`. The model and its JSON form are
-//! `uncad-model`'s; this crate is one backend that fills it.
+//! Reading only -- this crate does not write DWG or DXF, and it does not
+//! render: the shape is `DWG/DXF -> CadDatabase (entities + tables)`, and
+//! from there `CadDatabase::to_json()` is the model's own, while SVG/PNG
+//! rendering is the `iron-render-cad` crate's. This crate is one backend
+//! that fills the model.
 
 mod acis;
-pub mod color;
 mod convert;
 mod dynapi;
-pub mod png;
-pub mod svg;
+mod hatch_color;
 mod table_convert;
 
 use std::ffi::CString;
@@ -23,9 +22,6 @@ use std::sync::Mutex;
 // so `uncad::model::...` / `uncad::tables::...` keep naming the same types.
 pub use uncad_model::{json, model, tables};
 pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, ToJsonOptions};
-
-pub use png::{to_png, PngError, ToPngOptions, ToPngResult};
-pub use svg::{to_svg, Space, ToSvgOptions, ToSvgResult};
 
 /// LibreDWG's C code has non-reentrant global state (the `loglevel` global
 /// read and written throughout `decode.c`/`bits.c`, and likely more).

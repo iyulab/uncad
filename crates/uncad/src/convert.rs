@@ -1147,9 +1147,9 @@ fn convert_hatch_defline(defline: &libredwg_sys::Dwg_HATCH_DefLine) -> HatchPatt
 fn hatch_stop_color(c: &libredwg_sys::Dwg_HATCH_Color) -> String {
     let true_color = (c.color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
         .then_some(c.color.rgb & 0xff_ffff);
-    crate::color::true_color_to_hex(true_color)
-        .or_else(|| crate::color::aci_to_hex(c.color.index.unsigned_abs()))
-        .unwrap_or_else(|| crate::color::DEFAULT_COLOR.to_string())
+    crate::hatch_color::true_color_to_hex(true_color)
+        .or_else(|| crate::hatch_color::aci_to_hex(c.color.index.unsigned_abs()))
+        .unwrap_or_else(|| crate::hatch_color::DEFAULT_COLOR.to_string())
 }
 
 /// Builds a [`HatchGradient`] from the raw `Dwg_Entity_HATCH` gradient fields.
@@ -1164,7 +1164,7 @@ fn convert_hatch_gradient(
 ) -> Option<HatchGradient> {
     let (color1, color2) = if single_color_gradient {
         let color1 = hatch_stop_color(colors.first()?);
-        let color2 = crate::color::tint_toward_white(&color1, gradient_tint);
+        let color2 = crate::hatch_color::tint_toward_white(&color1, gradient_tint);
         (color1, color2)
     } else if colors.len() >= 2 {
         // shift_value (0.0-1.0) orders the stops; `colors` is not guaranteed

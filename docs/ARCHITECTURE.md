@@ -20,11 +20,12 @@ crates/
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
-                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE) -> color.rs
-                         (BYLAYER/BYBLOCK resolution for rendering) -> svg.rs (to_svg)
-                         / png.rs (to_png), with acis.rs for 3DSOLID wireframes. The
-                         model and its JSON form are the uncad-model crate's.
-                         Read-only: there is no DWG/DXF write path.
+                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE), with acis.rs
+                         for 3DSOLID wireframes and hatch_color.rs for the gradient
+                         stop colors the model carries. The model and its JSON form
+                         are the uncad-model crate's; SVG/PNG rendering is the
+                         iron-render-cad crate's (uncad-cli and this crate's tests use
+                         it). Read-only: there is no DWG/DXF write path.
     tests/               integration tests against the public API (dxf_pipeline.rs,
                          acis_sab.rs)
     examples/            dump.rs / blocks.rs -- manual checks
@@ -84,10 +85,9 @@ it needs access to**.
 | `examples/*.rs` | standalone binaries | the public API only | manual tools and usage examples |
 
 **Unit tests** exist where they are precisely because they can call private helpers.
-Everything that needs no external file -- color resolution, SVG generation, SAT parsing,
-outlier-trim clustering -- lives here, and this is the bulk of what `cargo test` runs. One
-exception: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` reads a real DWG
-end-to-end but sits here because it needs the private `png_dimensions` helper.
+Everything that needs no external file -- SAT parsing, dynapi size checks, the hatch
+stop colors -- lives here. (SVG generation and outlier-trim clustering moved to the
+renderer crate together with the code.)
 
 **Integration tests** compile as separate crates and therefore see only the public API, so
 what they cover matches exactly what someone who installed the crate can do. Fixtures come
@@ -174,8 +174,8 @@ paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_di
 `dwg_read_file`/`dxf_read_file` is walked twice inside `parse()` (`convert_entities`, then
 `convert_tables`), freed with `dwg_free` immediately afterwards, and never reaches the
 return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
-crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`),
-`to_svg(&db, ..)` and `to_png(&db, ..)` (rasterized from the SVG, here).
+crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`) and,
+in the `iron-render-cad` crate, `to_svg(&db, ..)` and `to_png(&db, ..)`.
 
 Coordinates cross that boundary by conversion, not by sharing a type: `dynapi.rs` reads
 LibreDWG's point fields into its own `#[repr(C)]` `RawPoint2D`/`RawPoint3D` (whose layout
