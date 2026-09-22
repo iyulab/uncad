@@ -173,6 +173,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
+  points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
+  stream order, so `line2_end` held the arc point and the sector probe lay on the line
+  itself (`example_2000.dxf` 43B measured 42.3 degrees from its points instead of 108),
+  and the ordinate's X/Y type -- bit 64 of group 70 in a DXF, the stream-only `flag2`
+  in a DWG -- was never read, so every DXF ordinate was a Y datum. `definition_point`
+  is the arc point (DXF 16) for `ANGULAR_2LINE` from both readers now, and the model
+  docs say so.
 - `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
   package's `area` / `orientation`) applied the bulge stored on the last vertex of an
   *open* polyline to the straight segment that closes it for the area, which AutoCAD

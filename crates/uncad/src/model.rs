@@ -733,8 +733,10 @@ pub enum DimensionGeometry {
         xline1: Point3D,
         xline2: Point3D,
     },
-    /// The angle between two lines (13-14 and 15-16); the sector is the one
-    /// the definition point (10) lies in.
+    /// The angle between two lines, 13-14 and 15-10 (for this kind DXF 10
+    /// is the second line's end point); the sector is the one the arc
+    /// point (16) lies in, which is what
+    /// [`DimensionEntity::definition_point`] holds here.
     #[serde(rename = "ANGULAR_2LINE")]
     Angular2Line {
         line1_start: Point3D,
@@ -847,9 +849,13 @@ pub struct DimensionEntity {
     pub display_text_raw: String,
     #[serde(default)]
     pub display_source: DisplaySource,
-    /// DXF 10: the dimension line's definition point (for RADIUS the
+    /// The dimension line's definition point, DXF 10 (for RADIUS the
     /// centre, for DIAMETER one chord end, for ORDINATE the datum origin,
-    /// for angular kinds a point on the arc).
+    /// for ANGULAR_3POINT and ARC_LENGTH a point on the arc) -- except for
+    /// ANGULAR_2LINE, where it is the arc point, DXF 16 (group 10 is the
+    /// second line's end there, kept in
+    /// [`DimensionGeometry::Angular2Line::line2_end`]). The same for DWG
+    /// and DXF input.
     #[serde(default)]
     pub definition_point: Point3D,
     /// DXF 11: where the label sits.

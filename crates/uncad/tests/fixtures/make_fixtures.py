@@ -402,6 +402,67 @@ def hidden_layers():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# ---------------------------------------------------------------- fixture 7
+def angular_ordinate():
+    """The two dimension kinds whose definition points a DXF lays out
+    differently from a DWG (LibreDWG maps DXF groups by code, its DWG
+    decoder by stream order): a 2-line angular dimension and an ordinate
+    dimension of each type. Every value below is derived by hand.
+
+    The angular dimension (AcDb2LineAngularDimension, 70 = 2 | 32): line 1
+    from 13 = (0,0) to 14 = (10,0), line 2 from 15 = (0,0) to 10 = (5,
+    8.660254) -- for this kind group 10 is the second line's end point --
+    and the arc point 16 = (4.330127, 2.5), 30 degrees along a radius of
+    5, inside the 60-degree sector; 42 = pi/3. Read with 10 and 16 swapped
+    the probe would sit at 60 degrees between rays at 30 and 180 degrees,
+    i.e. 150.
+
+    The ordinates (AcDbOrdinateDimension) share the datum origin 10 =
+    (100, 200) and the feature 13 = (130, 250); 14 is the leader end. The
+    first has bit 64 of 70 set (70 = 6 | 32 | 64 = 102): an X ordinate,
+    130 - 100 = 30 (42 = 30.0). The second has 70 = 38: a Y ordinate,
+    250 - 200 = 50 (42 = 50.0). No cached *D blocks, so the labels are
+    formatted from the values: DIMADEC 0 and DIMDEC 2 from the header."""
+    hdr = header(INSUNITS=(70, 4), DIMDEC=(70, 2), DIMADEC=(70, 0), DIMLUNIT=(70, 2))
+    tbl = tables(dimstyle=True)
+    common = lambda block: [(100, "AcDbDimension"), (2, block)]  # noqa: E731
+    angular = entity(
+        "DIMENSION", b"0",
+        *common("*D1"),
+        (10, 5.0), (20, 8.660254037844386), (30, 0.0),
+        (11, 6.0), (21, 3.5), (31, 0.0),
+        (70, 34),
+        (1, b""),
+        (42, 1.0471975511965976),
+        (3, "STANDARD"),
+        (100, "AcDb2LineAngularDimension"),
+        (13, 0.0), (23, 0.0), (33, 0.0),
+        (14, 10.0), (24, 0.0), (34, 0.0),
+        (15, 0.0), (25, 0.0), (35, 0.0),
+        (16, 4.330127018922194), (26, 2.5), (36, 0.0),
+    )
+
+    def ordinate(block, flag, value, leader):
+        return entity(
+            "DIMENSION", b"0",
+            *common(block),
+            (10, 100.0), (20, 200.0), (30, 0.0),
+            (11, float(leader[0])), (21, float(leader[1])), (31, 0.0),
+            (70, flag),
+            (1, b""),
+            (42, float(value)),
+            (3, "STANDARD"),
+            (100, "AcDbOrdinateDimension"),
+            (13, 130.0), (23, 250.0), (33, 0.0),
+            (14, float(leader[0])), (24, float(leader[1])), (34, 0.0),
+        )
+
+    ents = (line(0, 0, 10, 0) + line(0, 0, 5, 8.660254037844386) + angular
+            + ordinate("*D2", 102, 30.0, (130, 270))
+            + ordinate("*D3", 38, 50.0, (150, 250)))
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -414,6 +475,8 @@ if __name__ == "__main__":
         write("twisted_viewport_r2000.dxf", twisted_viewport("full"))
     if which in ("all", "hidden"):
         write("hidden_layers_r2000.dxf", hidden_layers())
+    if which in ("all", "angular-ordinate"):
+        write("angular_ordinate_r2000.dxf", angular_ordinate())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

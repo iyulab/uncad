@@ -29,6 +29,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `dimlfac12_r2000.dxf` | 1304 | 12 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 2253 | 16 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
+| `angular_ordinate_r2000.dxf` | 1491 | 10 | A 2-line angular DIMENSION (60 degrees) and an X- and a Y-type ordinate DIMENSION (30 and 50): the two kinds whose definition points LibreDWG's DXF reader lays out differently from its DWG decoder |
 
 ## cp949_r2000.dxf
 
@@ -276,6 +277,35 @@ Why the file carries an OBJECTS section, and what the reader needs from it
   entities with those explicit handles arrive. Harmless so far (nothing
   refers to an ENDBLK), but new handles in this file must avoid 1, 2, 20-23
   as well as C, 1A, 1C, 1F, 24, 2A and 2B.
+
+## angular_ordinate_r2000.dxf
+
+HEADER: `$INSUNITS 4`, `$DIMDEC 2`, `$DIMADEC 0`, `$DIMLUNIT 2`. TABLES: a
+LAYER table and DIMSTYLE `STANDARD` (handle 30). ENTITIES: two LINEs
+(0,0) -> (10,0) and (0,0) -> (5, 8.660254), then three DIMENSIONs with no
+cached `*D` blocks (the labels are formatted from the values), every
+number derived by hand:
+
+| Handle | Subclass | 70 | 10 | 13 | 14 | 15 | 16 | 42 | Value |
+|---|---|---|---|---|---|---|---|---|---|
+| 33 | `AcDb2LineAngularDimension` | 34 | (5, 8.660254) = line 2's end | (0,0) | (10,0) | (0,0) | (4.330127, 2.5) = arc point, 30 degrees along r = 5 | pi/3 | 60 degrees |
+| 34 | `AcDbOrdinateDimension` | 102 (bit 64: X type) | (100, 200) datum | (130, 250) feature | (130, 270) leader | | | 30.0 | 130 - 100 = 30 |
+| 35 | `AcDbOrdinateDimension` | 38 (Y type) | (100, 200) | (130, 250) | (150, 250) | | | 50.0 | 250 - 200 = 50 |
+
+What the file pins (verified 2026-09-22 through `uncad <file> -o out.json`,
+10 objects read): LibreDWG's DXF reader maps groups by code (`def_pt` =
+10, `xline2end_pt` = 16), its DWG decoder by stream order (the leading
+`def_pt` 2RD is the arc point, `xline2end_pt` the last point = group 10),
+so `convert.rs` swaps the two for DXF input. Read with them swapped the
+angular probe sits at 60 degrees between rays at 30 and 180 degrees and
+the value comes out as 150; the ordinate's type is bit 64 of group 70 in a
+DXF (`flag`) and bit 1 of the stream-only `flag2` in a DWG, so without the
+branch both ordinates read as Y type and handle 34 gives 50.
+`tests/dimensions.rs` asserts 60 / 30 / 50 from the definition points,
+`x_datum` true / false, the arc point as `definition_point` and (5,
+8.660254) as `line2_end`; the corpus's `example_2000.dwg`/`.dxf` pair
+(same drawing, ten dimensions including one of each kind) is asserted to
+agree between the two readers.
 
 ## What did not work
 
