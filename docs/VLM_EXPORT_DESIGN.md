@@ -453,7 +453,15 @@ DIMENSION text point are still stored-frame); **P5** is in (`visibility.rs`
 with `hidden_reason` and the lineweight table, layer on/frozen/locked/plot/
 lineweight/linetype, entity invisible/lineweight/linetype/ltype_scale, the
 renderer skipping hidden entities with `include_hidden` fading them, hidden
-counts in the results and the CLI). Everything else below is still open.
+counts in the results and the CLI); **P6** is in its 0.3.0 form (`crop.rs`:
+scale/far outlier guard (largest-entities and median-centre rules -- the
+design's cluster-based wording did not survive contact with real files,
+whose corner-connected clusters are too fragmented for a majority rule),
+header candidate,
+`CropMode::{Auto, Raw, Header, Fixed}`, automatic padding, lattice snap with
+exact pixel/unit proportion, `CropReport` in both results, CLI `--crop`,
+`--padding`, `--lattice`; the text metrics pre-pass and the frame split are
+still open). Everything else below is still open.
 
 | Release | Phase | Files |
 |---|---|---|

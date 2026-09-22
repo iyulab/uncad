@@ -20,6 +20,7 @@
 //! crates. The `png` crate (already a dependency of tiny-skia) writes the
 //! 8-bit RGB output; tiny-skia's own encoder only writes RGBA.
 
+use crate::crop::{self, CropReport};
 use crate::svg::{self, ToSvgOptions, ViewBox};
 use crate::CadDatabase;
 use resvg::tiny_skia;
@@ -76,6 +77,11 @@ pub struct ToPngOptions {
     /// [`PngError::TooLarge`]. Default 8000 (the largest image the Claude
     /// API accepts; also keeps a runaway viewBox from allocating gigabytes).
     pub max_edge: u32,
+    /// Round the pixel size up to a multiple of this (the model's patch
+    /// size: 28 for Claude, 32 for OpenAI's gpt-5.x); the world rectangle
+    /// grows on the right and bottom to match, so pixels and units stay in
+    /// exact proportion. 0 turns it off. Default 28. Since 0.3.0.
+    pub lattice: u32,
 }
 
 impl Default for ToPngOptions {
@@ -86,6 +92,7 @@ impl Default for ToPngOptions {
             background: Background::default(),
             stroke_px: Some(1.25),
             max_edge: 8000,
+            lattice: 28,
         }
     }
 }
@@ -104,6 +111,9 @@ pub struct ToPngResult {
     pub unsupported_types: Vec<String>,
     /// Entities hidden by the drawing -- see [`crate::ToSvgResult::hidden`].
     pub hidden: usize,
+    /// How the image's rectangle was chosen and what it leaves out; its
+    /// `rect` is `view_box`'s world rectangle. Since 0.3.0.
+    pub crop: CropReport,
 }
 
 #[derive(Debug)]
@@ -159,17 +169,43 @@ impl std::error::Error for PngError {}
 /// treats an unresolved glyph as empty, not a parse failure.
 pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, PngError> {
     let rendered = svg::render(db, options.svg);
-    let view_box = rendered.view_box;
+    let content = rendered.choice.rect;
+    let longer = content.longer_side().max(1e-9);
 
-    let px_per_unit = match options.size {
-        PngSize::FitLongEdge(px) => f64::from(px) / view_box.width.max(view_box.height),
-        PngSize::PxPerUnit(ppu) => ppu,
-        PngSize::Scale(scale) => scale,
+    // The scale and the padding depend on each other (24 px of padding is
+    // more the smaller the scale), so the fit is solved in two steps: a
+    // seed scale assuming 2 % padding a side, the padding from that, then
+    // the scale that fits the padded crop into the snapped pixel count.
+    let (px_per_unit, padding_units) = match options.size {
+        PngSize::FitLongEdge(px) => {
+            let fit = match options.lattice {
+                0 => px,
+                lattice => px - px % lattice,
+            };
+            if fit == 0 {
+                return Err(PngError::InvalidSize);
+            }
+            let seed = f64::from(fit) / (1.04 * longer);
+            let pad = options
+                .svg
+                .padding
+                .unwrap_or_else(|| crop::auto_padding(&content, Some(seed)));
+            (f64::from(fit) / (longer + 2.0 * pad), pad)
+        }
+        PngSize::PxPerUnit(s) | PngSize::Scale(s) => {
+            let pad = options
+                .svg
+                .padding
+                .unwrap_or_else(|| crop::auto_padding(&content, Some(s)));
+            (s, pad)
+        }
     };
-    if !px_per_unit.is_finite() || px_per_unit <= 0.0 {
+    if !px_per_unit.is_finite() || px_per_unit <= 0.0 || !padding_units.is_finite() {
         return Err(PngError::InvalidSize);
     }
-    let (width, height) = pixel_size(&view_box, px_per_unit);
+    let (rect, width, height) =
+        crop::snap_to_lattice(&content.padded(padding_units), px_per_unit, options.lattice);
+    let view_box = ViewBox::from_world(&rect);
     if width == 0 || height == 0 {
         return Err(PngError::EmptyCanvas);
     }
@@ -188,7 +224,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         (None, Some(px)) => px / px_per_unit,
         (None, None) => svg::auto_stroke_width(&view_box),
     };
-    let svg_text = svg::assemble(&rendered, stroke_width);
+    let svg_text = svg::assemble(&rendered, &view_box, stroke_width);
 
     let png = rasterize(&svg_text, px_per_unit, width, height, options.background)?;
     Ok(ToPngResult {
@@ -199,6 +235,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         px_per_unit,
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
+        crop: rendered.choice.report(rect, padding_units),
     })
 }
 
@@ -224,18 +261,6 @@ pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, PngError> {
 }
 
 /// The pixel size a viewBox gets at `px_per_unit`, rounded to whole pixels.
-fn pixel_size(view_box: &ViewBox, px_per_unit: f64) -> (u32, u32) {
-    let to_px = |units: f64| -> u32 {
-        let px = (units * px_per_unit).round();
-        if px.is_finite() && px >= 0.0 {
-            px.min(f64::from(u32::MAX)) as u32
-        } else {
-            0
-        }
-    };
-    (to_px(view_box.width), to_px(view_box.height))
-}
-
 fn rasterize(
     svg_text: &str,
     px_per_unit: f64,
@@ -352,19 +377,6 @@ mod tests {
     fn svg_to_png_rejects_unparseable_svg() {
         let err = svg_to_png("not an svg document", 1.0).unwrap_err();
         assert!(matches!(err, PngError::InvalidSvg(_)));
-    }
-
-    #[test]
-    fn pixel_size_rounds_and_never_goes_negative() {
-        let vb = ViewBox {
-            x: 0.0,
-            y: 0.0,
-            width: 37.06,
-            height: 37.06,
-        };
-        assert_eq!(pixel_size(&vb, 1.0), (37, 37));
-        assert_eq!(pixel_size(&vb, 1568.0 / 37.06), (1568, 1568));
-        assert_eq!(pixel_size(&vb, 0.001), (0, 0));
     }
 
     /// Exercises the full `CadDatabase::to_png` -> `render` -> rasterize

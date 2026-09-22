@@ -38,7 +38,7 @@ cargo run -p uncad-cli -- drawing.dwg -o drawing.svg             # render to SVG
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG, long edge 1568 px
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --fit 4000  # long edge 4000 px
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # two pixels per drawing unit instead
-cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim   # keep outlying coordinates
+cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --crop raw  # keep outlying coordinates
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document
 ```

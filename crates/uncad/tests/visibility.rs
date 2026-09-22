@@ -87,7 +87,8 @@ fn the_fixture_entities_report_why_they_are_hidden() {
 fn the_renderer_skips_hidden_entities_unless_asked_to_fade_them_in() {
     let db = uncad::parse(HIDDEN).expect("fixture must parse");
     let shown = db.to_svg(uncad::ToSvgOptions {
-        outlier_trim: false,
+        crop: uncad::CropMode::Raw,
+        padding: Some(5.0),
         ..Default::default()
     });
     assert_eq!(shown.svg.matches("<line ").count(), 5, "{}", shown.svg);
@@ -104,7 +105,8 @@ fn the_renderer_skips_hidden_entities_unless_asked_to_fade_them_in() {
 
     let faded = db.to_svg(uncad::ToSvgOptions {
         include_hidden: true,
-        outlier_trim: false,
+        crop: uncad::CropMode::Raw,
+        padding: Some(5.0),
         ..Default::default()
     });
     assert_eq!(faded.svg.matches("<line ").count(), 9, "{}", faded.svg);

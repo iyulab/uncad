@@ -150,6 +150,37 @@ LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
 extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
+## The crop: what the picture shows (since 0.3.0)
+
+`uncad::crop` decides the viewBox (design section 4). The overview shows
+every visible entity except at most `max(3, 1 %)` *outliers*: the largest
+entities when even the smallest of them has a diagonal over 20x that of
+everything else put together (`scale_outlier` -- the 3256x INSERT in
+`example_2000.dwg`), and entities farther from the drawing's median centre
+than 100x its typical spread (`far_outlier` -- a stray point a million units
+out). More candidates than that limit means the drawing really is that big
+and nothing is excluded. Each exclusion is reported with its handle and
+reason; `--crop raw` keeps everything. 0.2.0's cluster trim (keep the
+dominant corner-connected cluster, absorb neighbours within 30 %) could
+silently drop a detail drawn beside the plan; it is gone.
+
+Two things to know:
+
+- **Text extents are estimates.** The renderer measures TEXT/MTEXT/ATTRIB
+  from their anchor and a 0.6-em-per-character guess, not from glyph
+  metrics, so a label at the edge of a drawing can be clipped by a few
+  characters. The design's metrics pre-pass (a usvg parse of the text at
+  world scale) is still to come.
+- **The header extents are a candidate, not the truth.** `$EXTMIN/$EXTMAX`
+  are used (in `Auto`) only when sane, no more than 4x the content area,
+  containing 90 % of the entities and covering more of them than the
+  computed content does; `--crop header` forces them when sane. AutoCAD's
+  own extents include outliers (`example_2018.dwg`'s 3256x INSERT), so they
+  are no rescue there.
+
+Excluded entities stay in the SVG, clipped by the viewBox; they are not
+removed from the document.
+
 ## Hidden entities are left out of the picture (since 0.3.0)
 
 A DWG carries entities nobody sees: layers switched off or frozen, layers

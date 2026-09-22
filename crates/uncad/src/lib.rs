@@ -8,6 +8,7 @@
 mod acis;
 pub mod color;
 mod convert;
+pub mod crop;
 pub mod dimension;
 mod dynapi;
 pub mod geom;
@@ -26,6 +27,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+pub use crop::{CropMode, CropReport, CropSource, Rect};
 pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
 pub use model::Entity;

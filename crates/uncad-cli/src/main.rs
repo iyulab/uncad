@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
-use uncad::{Background, CadDatabase, PngSize, Space, ToJsonOptions, ToPngOptions, ToSvgOptions};
+use uncad::{
+    Background, CadDatabase, CropMode, PngSize, Rect, Space, ToJsonOptions, ToPngOptions,
+    ToSvgOptions,
+};
 
 const USAGE: &str = "\
 uncad - parse DWG/DXF drawings
@@ -26,8 +29,16 @@ SVG/PNG options:
                                 model = the drawing itself
                                 paper = sheet borders and title blocks
                                 all   = everything, in one document
-  --no-trim                   keep outlying coordinates in the viewBox instead
-                                of trimming to the drawing's main cluster
+  --crop <mode>               what the image shows (default: auto)
+                                auto   = the drawing's extents minus scale
+                                         outliers (or the header extents when
+                                         those cover more)
+                                raw    = every visible entity, outliers included
+                                header = $EXTMIN/$EXTMAX as stored
+                                x0,y0,x1,y1 = this world rectangle
+  --padding <units>           padding on each side in drawing units (default:
+                                2 % of the longer side, at least 24 px in a PNG)
+  --no-trim                   same as --crop raw (0.2.0's name)
   --include-hidden            draw hidden entities (layers off, frozen or
                                 non-plotting, DEFPOINTS, invisible) at 50 %
 
@@ -41,6 +52,8 @@ PNG options:
   --stroke <px>               stroke width in pixels (default: 1.25)
   --max-edge <px>             refuse images wider or taller than this
                                 (default: 8000)
+  --lattice <px>              round the image size up to a multiple of this,
+                                the model's patch size (default: 28; 0 = off)
 
 Examples:
   uncad drawing.dwg
@@ -54,7 +67,9 @@ struct Args {
     input: Option<String>,
     output: Option<String>,
     space: String,
-    outlier_trim: bool,
+    crop: String,
+    padding: Option<String>,
+    lattice: Option<String>,
     include_hidden: bool,
     fit: Option<String>,
     ppu: Option<String>,
@@ -71,7 +86,9 @@ fn parse_args(argv: &[String]) -> Args {
         input: None,
         output: None,
         space: "model".to_string(),
-        outlier_trim: true,
+        crop: "auto".to_string(),
+        padding: None,
+        lattice: None,
         include_hidden: false,
         fit: None,
         ppu: None,
@@ -95,7 +112,21 @@ fn parse_args(argv: &[String]) -> Args {
                     args.space = v.clone();
                 }
             }
-            "--no-trim" => args.outlier_trim = false,
+            "--no-trim" => args.crop = "raw".to_string(),
+            "--crop" => {
+                i += 1;
+                if let Some(v) = argv.get(i) {
+                    args.crop = v.clone();
+                }
+            }
+            "--padding" => {
+                i += 1;
+                args.padding = argv.get(i).cloned();
+            }
+            "--lattice" => {
+                i += 1;
+                args.lattice = argv.get(i).cloned();
+            }
             "--include-hidden" => args.include_hidden = true,
             "--fit" => {
                 i += 1;
@@ -172,7 +203,7 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let (unsupported, hidden) = match extension.as_str() {
+    let (unsupported, hidden, crop) = match extension.as_str() {
         "json" => {
             let json = db
                 .to_json(ToJsonOptions {
@@ -180,17 +211,17 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, json.as_bytes())?;
-            (Vec::new(), 0)
+            (Vec::new(), 0, None)
         }
         "svg" => {
             let result = db.to_svg(svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
-            (result.unsupported_types, result.hidden)
+            (result.unsupported_types, result.hidden, Some(result.crop))
         }
         "png" => {
             let result = db.to_png(png_options(args)?).map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
-            (result.unsupported_types, result.hidden)
+            (result.unsupported_types, result.hidden, Some(result.crop))
         }
         other => {
             return Err(format!(
@@ -211,6 +242,27 @@ fn run(args: &Args) -> Result<(), String> {
             "note: {hidden} hidden entities left out (layers off, frozen or non-plotting, \
              DEFPOINTS, invisible); --include-hidden draws them at 50 %"
         );
+    }
+    if let Some(crop) = crop {
+        if !crop.excluded.is_empty() {
+            let mut reasons: Vec<&str> = crop.excluded.iter().map(|e| e.reason.as_str()).collect();
+            reasons.sort_unstable();
+            reasons.dedup();
+            let handles: Vec<&str> = crop
+                .excluded
+                .iter()
+                .take(5)
+                .map(|e| e.handle.as_str())
+                .collect();
+            eprintln!(
+                "note: crop {} leaves {} entities outside ({}; handles {}{}); --crop raw keeps everything",
+                crop.source.as_str(),
+                crop.excluded.len(),
+                reasons.join(", "),
+                handles.join(", "),
+                if crop.excluded.len() > 5 { ", ..." } else { "" }
+            );
+        }
     }
     Ok(())
 }
@@ -236,12 +288,50 @@ fn write_output(path: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
+    let padding = match &args.padding {
+        Some(value) => Some(parse_non_negative("--padding", value)?),
+        None => None,
+    };
     Ok(ToSvgOptions {
         space: parse_space(&args.space)?,
-        outlier_trim: args.outlier_trim,
+        crop: parse_crop(&args.crop)?,
+        padding,
         include_hidden: args.include_hidden,
         ..Default::default()
     })
+}
+
+fn parse_crop(value: &str) -> Result<CropMode, String> {
+    match value {
+        "auto" => return Ok(CropMode::Auto),
+        "raw" => return Ok(CropMode::Raw),
+        "header" => return Ok(CropMode::Header),
+        _ => {}
+    }
+    let numbers: Vec<f64> = value
+        .split(',')
+        .map(|part| part.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| {
+            format!("unsupported --crop value '{value}' (auto, raw, header or x0,y0,x1,y1)")
+        })?;
+    match numbers[..] {
+        [x0, y0, x1, y1] if x1 > x0 && y1 > y0 && numbers.iter().all(|n| n.is_finite()) => {
+            Ok(CropMode::Fixed(Rect::new(x0, y0, x1, y1)))
+        }
+        _ => Err(format!(
+            "--crop x0,y0,x1,y1 needs four finite numbers with x1 > x0 and y1 > y0 (got '{value}')"
+        )),
+    }
+}
+
+fn parse_non_negative(flag: &str, value: &str) -> Result<f64, String> {
+    match value.parse::<f64>() {
+        Ok(number) if number >= 0.0 && number.is_finite() => Ok(number),
+        _ => Err(format!(
+            "{flag} must be a finite number of 0 or more (got '{value}')"
+        )),
+    }
 }
 
 fn parse_space(value: &str) -> Result<Space, String> {
@@ -282,12 +372,19 @@ fn png_options(args: &Args) -> Result<ToPngOptions, String> {
         Some(max_edge) => parse_pixels("--max-edge", max_edge)?,
         None => defaults.max_edge,
     };
+    let lattice = match &args.lattice {
+        Some(lattice) => lattice
+            .parse::<u32>()
+            .map_err(|_| format!("--lattice must be a whole number of pixels (got '{lattice}')"))?,
+        None => defaults.lattice,
+    };
     Ok(ToPngOptions {
         svg: svg_options(args)?,
         size,
         background,
         stroke_px,
         max_edge,
+        lattice,
     })
 }
 

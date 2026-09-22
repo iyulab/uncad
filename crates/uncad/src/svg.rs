@@ -16,7 +16,7 @@
 //! string formatting), [`hatch`] (HATCH fills) and [`bounds`] (viewBox and
 //! outlier trim).
 
-mod bounds;
+pub(crate) mod bounds;
 mod format;
 mod hatch;
 
@@ -25,7 +25,9 @@ use crate::dynapi::{Point2D, Point3D};
 use crate::model::{Entity, EntityCommon, MLineVertex};
 use crate::tables::Tables;
 use crate::CadDatabase;
-use bounds::{dominant_cluster_box, Box2D};
+use bounds::Box2D;
+
+use crate::crop::{self, CropMode, CropReport, Extent, Rect};
 use format::{clean, escape_xml, neg, points_attr, rotate_transform_attr, xy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -45,11 +47,18 @@ pub enum Space {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ToSvgOptions {
-    pub padding: f64,
+    /// Padding around the crop, in drawing units. `None` (the default) is
+    /// automatic: 2 % of the crop's longer side here, and at least 24 px in
+    /// a PNG (see [`crate::crop::auto_padding`]). Since 0.3.0 an `Option`.
+    pub padding: Option<f64>,
     /// `None` = auto-scaled to the computed viewBox (see [`to_svg`]).
     pub stroke_width: Option<f64>,
     pub space: Space,
-    pub outlier_trim: bool,
+    /// What the viewBox shows -- see [`crate::crop`]. Default
+    /// [`CropMode::Auto`]: the visible entities' extents minus scale
+    /// outliers. Replaces 0.2.0's `outlier_trim`, whose cluster trim could
+    /// drop real geometry; `CropMode::Raw` is the old `outlier_trim: false`.
+    pub crop: CropMode,
     /// Draw the entities the drawing hides (layers off, frozen or
     /// non-plotting, DEFPOINTS, invisible entities -- see
     /// [`crate::visibility`]) at 50 % opacity instead of leaving them out.
@@ -60,10 +69,10 @@ pub struct ToSvgOptions {
 impl Default for ToSvgOptions {
     fn default() -> Self {
         ToSvgOptions {
-            padding: 5.0,
+            padding: None,
             stroke_width: None,
             space: Space::Model,
-            outlier_trim: true,
+            crop: CropMode::Auto,
             include_hidden: false,
         }
     }
@@ -81,6 +90,8 @@ pub struct ToSvgResult {
     /// [`ToSvgOptions::include_hidden`], left out otherwise), block contents
     /// included. Since 0.3.0.
     pub hidden: usize,
+    /// How the viewBox was chosen and what it leaves out. Since 0.3.0.
+    pub crop: CropReport,
 }
 
 /// An SVG `viewBox`, in SVG coordinates: `x`/`y` are the top-left corner and
@@ -96,6 +107,24 @@ pub struct ViewBox {
 }
 
 impl ViewBox {
+    /// The viewBox showing the world rectangle `rect`. A degenerate
+    /// (zero-size) rectangle still gets a 1 x 1 canvas.
+    pub fn from_world(rect: &Rect) -> ViewBox {
+        let (width, height) = (rect.width(), rect.height());
+        ViewBox {
+            x: rect.min_x,
+            y: -rect.max_y,
+            width: if width > 0.0 { width } else { 1.0 },
+            height: if height > 0.0 { height } else { 1.0 },
+        }
+    }
+
+    /// The world rectangle this viewBox shows.
+    pub fn world_rect(&self) -> Rect {
+        let (min_x, min_y, max_x, max_y) = self.world_bounds();
+        Rect::new(min_x, min_y, max_x, max_y)
+    }
+
     /// The world-space rectangle this viewBox shows, as
     /// `(min_x, min_y, max_x, max_y)`.
     pub fn world_bounds(&self) -> (f64, f64, f64, f64) {
@@ -188,8 +217,6 @@ const BLOCK_REF_BUDGET: u32 = 1_000_000;
 const MAX_BLOCK_REF_DEPTH: u32 = 20;
 
 struct Ctx<'a> {
-    xs: Vec<f64>,
-    ys: Vec<f64>,
     ent_min_x: f64,
     ent_max_x: f64,
     ent_min_y: f64,
@@ -220,8 +247,6 @@ struct Ctx<'a> {
 impl<'a> Ctx<'a> {
     fn new(tables: &'a Tables) -> Self {
         Ctx {
-            xs: Vec::new(),
-            ys: Vec::new(),
             ent_min_x: f64::INFINITY,
             ent_max_x: f64::NEG_INFINITY,
             ent_min_y: f64::INFINITY,
@@ -271,8 +296,6 @@ impl<'a> Ctx<'a> {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
-        self.xs.push(x);
-        self.ys.push(y);
         if x < self.ent_min_x {
             self.ent_min_x = x;
         }
@@ -1149,9 +1172,18 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
 pub(crate) struct Rendered {
     body: String,
     defs: Vec<String>,
+    /// The viewBox for an SVG document: the crop padded by the options'
+    /// padding or the automatic 2 %. `png.rs` computes its own.
     pub(crate) view_box: ViewBox,
     unsupported: HashSet<String>,
     pub(crate) hidden: usize,
+    /// The unpadded crop decision.
+    pub(crate) choice: crop::Choice,
+    /// The padding `view_box` carries, in drawing units.
+    pub(crate) padding_units: f64,
+    /// `view_box`'s world rectangle, exact (the viewBox round trip loses a
+    /// bit).
+    pub(crate) padded_rect: Rect,
 }
 
 impl Rendered {
@@ -1164,58 +1196,41 @@ impl Rendered {
     }
 }
 
-/// Renders every selected entity and computes the viewBox, leaving the
-/// stroke width unresolved.
-///
-/// `outlier_trim` (default `true`) computes the viewBox from the dominant
-/// spatially-connected cluster of entities instead of the raw min/max -- see
-/// [`bounds`] for why.
+/// Renders every selected entity, measures each visible one's extent and
+/// decides the crop ([`crate::crop`]), leaving the stroke width unresolved.
 pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
-    let mut entity_boxes: Vec<Box2D> = Vec::new();
+    let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<String> = Vec::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
     for e in select_entities_for_space(db, options.space) {
+        // A hidden entity never affects the crop, drawn faded or not.
+        let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
         ctx.reset_entity_bounds();
         if let Some(svg) = render_entity(e, &mut ctx) {
             if !svg.is_empty() {
                 body.push(svg);
             }
         }
+        if hidden {
+            continue;
+        }
         if let Some(b) = ctx.entity_box() {
-            entity_boxes.push(b);
+            extents.push(Extent {
+                handle: e.common().handle.clone(),
+                type_name: e.type_name().to_string(),
+                rect: Rect::from_box(&b),
+            });
         }
     }
 
-    let raw_bounds = || Box2D {
-        min_x: ctx.xs.iter().cloned().fold(f64::INFINITY, f64::min),
-        max_x: ctx.xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-        min_y: ctx.ys.iter().cloned().fold(f64::INFINITY, f64::min),
-        max_y: ctx.ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
-    };
-    let bounds = if ctx.xs.is_empty() {
-        Box2D {
-            min_x: 0.0,
-            max_x: 0.0,
-            min_y: 0.0,
-            max_y: 0.0,
-        }
-    } else if options.outlier_trim && entity_boxes.len() > 2 {
-        dominant_cluster_box(&entity_boxes).unwrap_or_else(raw_bounds)
-    } else {
-        raw_bounds()
-    };
-
-    let width = (bounds.max_x - bounds.min_x) + options.padding * 2.0;
-    let height = (bounds.max_y - bounds.min_y) + options.padding * 2.0;
-    let view_box = ViewBox {
-        x: bounds.min_x - options.padding,
-        y: -bounds.max_y - options.padding,
-        // A degenerate (single-point) drawing still gets a 1x1 canvas.
-        width: if width != 0.0 { width } else { 1.0 },
-        height: if height != 0.0 { height } else { 1.0 },
-    };
+    let choice = crop::choose(&extents, &db.header, options.crop);
+    let padding_units = options
+        .padding
+        .unwrap_or_else(|| crop::auto_padding(&choice.rect, None));
+    let padded_rect = choice.rect.padded(padding_units);
+    let view_box = ViewBox::from_world(&padded_rect);
 
     Rendered {
         body: body.join("\n  "),
@@ -1223,6 +1238,9 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
         view_box,
         unsupported: ctx.unsupported,
         hidden: ctx.hidden,
+        choice,
+        padding_units,
+        padded_rect,
     }
 }
 
@@ -1237,7 +1255,11 @@ pub(crate) fn auto_stroke_width(view_box: &ViewBox) -> f64 {
 /// units; see [`stroke_width_placeholder`] for how nested block references
 /// keep a constant visual weight) and wraps everything in the `<svg>`
 /// element.
-pub(crate) fn assemble(rendered: &Rendered, effective_stroke_width: f64) -> String {
+pub(crate) fn assemble(
+    rendered: &Rendered,
+    view_box: &ViewBox,
+    effective_stroke_width: f64,
+) -> String {
     let resolved_body = resolve_stroke_widths(&rendered.body, effective_stroke_width);
     // HATCH pattern defs carry stroke-width placeholders too. Kept separate
     // from the body only so an empty defs list emits no <defs> block at all.
@@ -1248,7 +1270,7 @@ pub(crate) fn assemble(rendered: &Rendered, effective_stroke_width: f64) -> Stri
             resolve_stroke_widths(&rendered.defs.join("\n  "), effective_stroke_width);
         format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
     };
-    let vb = rendered.view_box;
+    let vb = view_box;
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
         vb.x, vb.y, vb.width, vb.height
@@ -1263,10 +1285,13 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
         .stroke_width
         .unwrap_or_else(|| auto_stroke_width(&rendered.view_box));
     ToSvgResult {
-        svg: assemble(&rendered, stroke_width),
+        svg: assemble(&rendered, &rendered.view_box, stroke_width),
         view_box: rendered.view_box,
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
+        crop: rendered
+            .choice
+            .report(rendered.padded_rect, rendered.padding_units),
     }
 }
 

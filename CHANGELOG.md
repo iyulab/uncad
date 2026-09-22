@@ -10,6 +10,21 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
+  is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
+  most `max(3, 1 %)` entities: the largest when they dwarf everything else 20x, or
+  those farther from the drawing's median centre than 100x its spread), and uses the
+  header `$EXTMIN/$EXTMAX` instead when those are sane and cover more; `Raw`, `Header`
+  and `Fixed(rect)` are explicit. Padding is automatic (2 % of the longer side, at least
+  24 px in a PNG) unless `padding: Some(units)`. PNG sizes are rounded up to a multiple
+  of `ToPngOptions::lattice` (28 px, Claude's patch size; 0 = off) with the world
+  rectangle grown to match, so `view_box.width * px_per_unit == width` exactly and the
+  `ViewBox` affine round-trips. `ToSvgResult::crop` / `ToPngResult::crop` report the
+  source, the rectangle, the tight content bounds, the padding, the header extents and
+  every excluded entity with its reason (`scale_outlier`, `far_outlier`,
+  `outside_crop`). CLI: `--crop auto|raw|header|x0,y0,x1,y1`, `--padding`, `--lattice`;
+  `--no-trim` stays as `--crop raw`. The 3256x INSERT of `example_2000.dwg` /
+  `example_2018.dwg` is now a listed exclusion instead of a 3.4-million-unit viewBox.
 - Visibility (`uncad::visibility`): `hidden_reason(common, tables)` says why the drawing
   does not show an entity -- its own invisible flag, the `DEFPOINTS` layer, a layer that
   is off, frozen or non-plotting -- and `lineweight_mm` decodes the lineweight codes.
@@ -128,6 +143,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Changed (breaking)
 
+- `ToSvgOptions::outlier_trim` is replaced by `crop: CropMode` and `padding` is an
+  `Option<f64>` (`None` = automatic; 0.2.0's fixed 5 units is `Some(5.0)`). The overview
+  is never cluster-trimmed any more: 0.2.0's dominant-cluster trim could drop real
+  geometry (a detail drawn beside the plan), and now only scale/far outliers are left
+  out, each reported. `assemble`/`Rendered` are crate-private and changed shape.
 - Hidden entities are no longer drawn. 0.2.0 rendered every entity in the space,
   including those on layers switched off or frozen, dimension definition points on
   `DEFPOINTS` and entities with the invisible flag -- what AutoCAD's screen and plots

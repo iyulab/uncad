@@ -393,10 +393,11 @@ fn twisted_viewport_fixture_has_a_line_and_a_viewport() {
     assert_eq!(paper.len(), 1, "{paper:?}");
     assert!(matches!(paper[0], Entity::Viewport(_)), "{paper:?}");
     // And the paper-space render draws that frame alone: the viewBox is the
-    // 200 x 120 frame plus the default 5-unit padding on each side.
+    // 200 x 120 frame plus 5 units of padding on each side.
     let svg = db
         .to_svg(uncad::ToSvgOptions {
             space: uncad::Space::Paper,
+            padding: Some(5.0),
             ..Default::default()
         })
         .svg;
