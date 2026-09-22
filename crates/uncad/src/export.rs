@@ -871,7 +871,9 @@ pub fn export_package(
     // --- overview: the whole crop, sized to the profile ---------------------
     let stroke_px = 1.25;
     let fit = fit_overview(&content, &profile, None);
-    if fit.width.max(fit.height) < 200 {
+    // The short edge: `fit_overview` pins the long edge at the patch
+    // budget, so the aspect ratio can only squeeze the other one.
+    if fit.width.min(fit.height) < 200 {
         warnings.push(format!(
             "TinyOverview: the overview is only {} x {} px; the drawing's aspect leaves little of the patch budget",
             fit.width, fit.height

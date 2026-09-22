@@ -251,7 +251,7 @@ Model space, one crop per frame; every step is deterministic and reported.
   ph = min(56, floor(1568 / pw), ceil(pw / a)); image (pw x 28) x (ph x 28)
   after the lattice snap; ppu_0 = min(pw 28 / w, ph 28 / h). Sample 6
   (2886 x 1959 units): 48 x 32 patches = 1344 x 896 px, 1536 tokens, ppu 0.457.
-  Under 200 px raises `TinyOverview`.
+  A short edge under 200 px raises `TinyOverview`.
 - **Levels**: ppu_z = ppu_0 x 2^z; no canvas above 8000 px is ever
   materialised. Grid: cols = 1 if W_z <= T else ceil((W_z - T) / step) + 1,
   rows likewise; the last row and column are shifted inward (SAHI) so every

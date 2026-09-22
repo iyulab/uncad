@@ -607,3 +607,83 @@ fn text_boxes_are_measured_with_the_bundled_font_and_gaps_are_reported() {
     assert_eq!(t["unshaped_glyphs"], 2);
     assert_eq!(t["bbox_confidence"], "measured");
 }
+
+/// Two 1000-unit lines 2 units apart with a label between them: a 500:1
+/// drawing.
+fn very_wide() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let mut entities = Vec::new();
+    for (handle, y) in [("L0", 0.0), ("L1", 2.0)] {
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: handle.into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D { x: 0.0, y, z: 0.0 },
+            end_point: Point3D {
+                x: 1000.0,
+                y,
+                z: 0.0,
+            },
+        }));
+    }
+    entities.push(uncad::Entity::Text(TextEntity {
+        common: EntityCommon {
+            handle: "T".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point2D { x: 10.0, y: 0.5 },
+        text_height: 1.0,
+        text: "WIDE".into(),
+        text_plain: "WIDE".into(),
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    }));
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_very_wide_drawing_raises_the_tiny_overview_warning() {
+    let tmp = TempDir::new("wide");
+    let report = export_package(
+        &very_wide(),
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    // fit_overview for a 1000 x 2 content: pw = min(56, floor(sqrt(1568 *
+    // 500))) = 56 patches wide, ph = min(floor(1568 / 56), ceil(56 / 500))
+    // = 1 patch tall, so the image is one patch (28 px) tall whatever the
+    // padding does to the width (the CLI gives 700 x 28 px): far under 200
+    // on the short edge while the long edge is not. The old guard tested
+    // the long edge and could never fire.
+    let [w, h] = report.overview.px;
+    assert_eq!(h, 28, "{w}x{h}");
+    assert!(w >= 200, "{w}x{h}");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("TinyOverview")),
+        "{:?}",
+        report.warnings
+    );
+}
