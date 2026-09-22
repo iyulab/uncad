@@ -28,6 +28,10 @@ mod infinite;
 
 use crate::color::{contrast_on_white, resolve_color, DEFAULT_COLOR};
 use crate::dynapi::{Point2D, Point3D};
+use crate::limits::{
+    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
+    MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
+};
 use crate::model::{Entity, EntityCommon, MLineVertex};
 use crate::tables::Tables;
 use crate::CadDatabase;
@@ -289,10 +293,10 @@ fn compose(parent: &Transform, child: &Transform) -> Transform {
 
 // --- render context ----------------------------------------------------
 
-use crate::limits::{
-    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
-    MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
-};
+// The block-reference depth and expansion caps this module used to declare
+// itself now live in `crate::limits` with the rest of them (imported at the
+// top of the file), so every bound a malformed file runs into is named and
+// explained in one place.
 
 struct Ctx<'a> {
     ent_min_x: f64,
@@ -405,15 +409,16 @@ impl<'a> Ctx<'a> {
     /// Records one *local* coordinate pair, applying the current (possibly
     /// block-nested) transform first.
     ///
-    /// Results that are not finite, or larger than
+    /// A result that is not finite, or larger than
     /// [`MAX_WORLD_COORDINATE`] (from a malformed source file or a
-    /// degenerate transform), are dropped rather than recorded: letting
-    /// `Infinity` into the
-    /// running bounds can pin both the min and the max to `Infinity` (the
-    /// min-side update never fires because `Infinity < Infinity` is false),
-    /// and the box's diagonal then computes as `NaN`, which panics the
-    /// `partial_cmp(..).unwrap()` calls in [`bounds`] instead of just rendering
-    /// a degenerate point.
+    /// degenerate transform), is dropped rather than recorded. Letting
+    /// `Infinity` into the running bounds can pin both the min and the max
+    /// to `Infinity` (the min-side update never fires because
+    /// `Infinity < Infinity` is false), and the box's diagonal then computes
+    /// as `NaN`, which panics the `partial_cmp(..).unwrap()` calls in
+    /// [`bounds`] instead of just rendering a degenerate point; letting
+    /// 1e150 in takes the viewBox -- and every length derived from it -- up
+    /// with it.
     fn consider(&mut self, local_x: f64, local_y: f64) {
         let (x, y) = self.transform.apply(local_x, local_y);
         // The same screen `finite` applies to a coordinate as written, but
