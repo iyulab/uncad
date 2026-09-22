@@ -160,8 +160,13 @@ its 0.3.0 form. Known gaps:
   (`bbox_confidence: "measured"`, the tight box of the glyph outlines;
   rotated texts get the axis-aligned box of the rotated outlines). The
   crop and the frames still use the 0.6-em estimate, since the crop is
-  decided before anything is laid out. usvg works in single precision, so
-  a box a million units from the origin is only exact to about 1/16 unit.
+  decided before anything is laid out. usvg and tiny-skia work in single
+  precision, so the renderer writes its SVG relative to the drawing's own
+  origin (the rounded median of its entities, `ToSvgResult::origin`,
+  `ToPngResult::origin`) whenever the coordinates exceed 32768 units: a
+  plan at projected coordinates renders like one at the origin. What is
+  left is the drawing's own span -- a box a million units from that origin
+  (a drawing a million units across) is only exact to about 1/16 unit.
   A character the bundled subset lacks is drawn as a box: the record says
   `font_ok: false` with `unshaped_glyphs`, and the manifest warns.
 - **A tile rasterizes what touches it.** Each tile's SVG holds only the

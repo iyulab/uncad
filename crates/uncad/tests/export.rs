@@ -814,3 +814,177 @@ fn capitals_are_drawn_as_tall_as_the_cad_text_height() {
         "{m:?}"
     );
 }
+
+/// An 11 x 11 grid of 1000-unit lines with a 3-unit label in every cell
+/// (small enough to need two zoom levels), shifted by `offset` on both
+/// axes.
+fn labelled_grid(offset: f64) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let mut entities = Vec::new();
+    let mut handle = 0x100u32;
+    for i in 0..=10 {
+        let at = offset + f64::from(i) * 100.0;
+        for (start, end) in [
+            (
+                Point3D {
+                    x: offset,
+                    y: at,
+                    z: 0.0,
+                },
+                Point3D {
+                    x: offset + 1000.0,
+                    y: at,
+                    z: 0.0,
+                },
+            ),
+            (
+                Point3D {
+                    x: at,
+                    y: offset,
+                    z: 0.0,
+                },
+                Point3D {
+                    x: at,
+                    y: offset + 1000.0,
+                    z: 0.0,
+                },
+            ),
+        ] {
+            entities.push(uncad::Entity::Line(LineEntity {
+                common: EntityCommon {
+                    handle: format!("{handle:X}"),
+                    layer: "0".into(),
+                    ..EntityCommon::default()
+                },
+                start_point: start,
+                end_point: end,
+            }));
+            handle += 1;
+        }
+    }
+    for row in 0..10 {
+        for col in 0..10 {
+            let text = format!("R{row}{col}");
+            entities.push(uncad::Entity::Text(TextEntity {
+                common: EntityCommon {
+                    handle: format!("{handle:X}"),
+                    layer: "0".into(),
+                    ..EntityCommon::default()
+                },
+                start_point: Point2D {
+                    x: offset + f64::from(col) * 100.0 + 20.0,
+                    y: offset + f64::from(row) * 100.0 + 40.0,
+                },
+                text_height: 3.0,
+                text: text.clone(),
+                text_plain: text,
+                rotation: 0.0,
+                horizontal_alignment: 0,
+                vertical_alignment: 0,
+                alignment_point: None,
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                style: String::new(),
+            }));
+            handle += 1;
+        }
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+/// Dark (< 128) pixels of an 8-bit RGB PNG.
+fn dark_pixels(png: &[u8]) -> usize {
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().expect("a frame size")];
+    let info = reader.next_frame(&mut buf).unwrap();
+    buf[..info.buffer_size()]
+        .chunks_exact(3)
+        .filter(|p| p[0] < 128)
+        .count()
+}
+
+#[test]
+fn a_drawing_far_from_the_origin_rasterizes_like_one_at_the_origin() {
+    // usvg and tiny-skia keep path points in f32. At 1e7 the f32 step is
+    // 1 unit, at 2.5e8 it is 16: a 1.25 px stroke at ~1.5 px/unit
+    // collapses and every LINE vanished, the text became wedges. The
+    // renderer now writes its coordinates relative to the drawing's own
+    // (median, whole-unit) origin whenever that exceeds 32768, so the same
+    // grid gives the same picture wherever it sits: the dark pixel counts
+    // of the plain PNG and of each tile level agree within a few percent
+    // (the shift is a whole number of units, so the only difference is
+    // sub-pixel anti-aliasing of the same geometry).
+    let mut plain: Vec<usize> = Vec::new();
+    let mut levels: Vec<Vec<usize>> = Vec::new();
+    let mut origins: Vec<[f64; 2]> = Vec::new();
+    for (name, offset) in [("0", 0.0), ("1e7", 1.0e7), ("2.5e8", 2.5e8)] {
+        let db = labelled_grid(offset);
+        let png = db.to_png(uncad::ToPngOptions::default()).expect("renders");
+        origins.push(png.origin);
+        plain.push(dark_pixels(&png.png));
+
+        let tmp = TempDir::new(&format!("far_{name}"));
+        // A quarter-size overview (784 px) keeps the z2 canvas at ~3100 px
+        // and the tile count small; the tiles themselves are full size.
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 2,
+                profile: Profile {
+                    name: "claude-small",
+                    overview_edge: 784,
+                    overview_patches: 784,
+                    ..Profile::CLAUDE
+                },
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        assert_eq!(report.frames[0].levels.len(), 2, "{name}: two levels");
+        let tiles = read_json(&tmp.0.join("tiles.json"));
+        let mut per_level = vec![0usize; 3];
+        for tile in tiles["tiles"].as_array().unwrap() {
+            let Some(path) = tile["png"].as_str() else {
+                continue;
+            };
+            let z = tile["z"].as_u64().unwrap() as usize;
+            per_level[z] += dark_pixels(&std::fs::read(tmp.0.join(path)).unwrap());
+        }
+        levels.push(per_level);
+        assert!(report.warnings.is_empty(), "{name}: {:?}", report.warnings);
+    }
+    // The origin is chosen only when needed: [0, 0] at the origin, the
+    // rounded median of the entities' reference points otherwise (the
+    // grid's median line start / text anchor lies inside the grid).
+    assert_eq!(origins[0], [0.0, 0.0]);
+    for (o, offset) in origins[1..].iter().zip([1.0e7, 2.5e8]) {
+        assert!(
+            o[0] >= offset && o[0] <= offset + 1000.0 && o[1] >= offset && o[1] <= offset + 1000.0,
+            "{o:?} is inside the grid at {offset}"
+        );
+        assert_eq!(o[0].fract(), 0.0, "whole units");
+    }
+    let within = |a: usize, b: usize| (a as f64 - b as f64).abs() / a as f64 <= 0.03;
+    assert!(plain[0] > 20_000, "the grid and its labels: {plain:?}");
+    for i in 1..3 {
+        assert!(within(plain[0], plain[i]), "plain PNG: {plain:?}");
+        for z in 1..=2 {
+            assert!(
+                within(levels[0][z], levels[i][z]),
+                "z{z}: {:?} vs {:?}",
+                levels[0],
+                levels[i]
+            );
+        }
+    }
+}

@@ -2023,6 +2023,9 @@ fn measure_texts(
     let tree = png::parse_tree(&svg_text, fonts)?;
     let mut boxes: std::collections::HashMap<String, (Rect, usize)> =
         std::collections::HashMap::new();
+    // The document's coordinates are relative to `rendered.origin`, and so
+    // is its viewBox, so a canvas box (relative to the viewBox corner)
+    // plus the world viewBox corner is a world box: the origin cancels.
     collect_text_boxes(tree.root(), &view_box, &mut boxes);
     let mut measured = 0;
     for t in texts.iter_mut() {

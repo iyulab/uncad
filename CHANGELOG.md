@@ -179,6 +179,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
   vertices, since the reflection reverses each arc's turn; `bulges` are documented as
   world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- Drawings far from the origin lost their lines and got garbled text in every PNG, tile
+  and sheet, silently: the SVG carried absolute world coordinates and usvg/tiny-skia keep
+  path points in `f32`, so at 1e7 units the 1.25 px strokes collapsed and at 2.5e8 (a
+  millimetre plan at projected coordinates) the glyph outlines were quantized to 16 mm.
+  The renderer now writes every coordinate relative to the drawing's own origin -- the
+  rounded per-axis median of its entities' reference points, used only when it exceeds
+  32768 units, so every drawing near the origin keeps its SVG byte for byte -- and
+  reports it as `ToSvgResult::origin` / `ToPngResult::origin` (SVG user units = world
+  minus origin; `view_box` and every JSON record stay in world units). A composited
+  sheet folds the model's and the paper's origins into the viewport matrix.
 - On a composited sheet the paper's and the model's hatch pattern definitions shared ids
   (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
   legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's

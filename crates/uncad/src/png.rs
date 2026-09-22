@@ -107,10 +107,14 @@ pub struct ToPngResult {
     pub height: u32,
     /// The rendering's viewBox, i.e. what the image shows -- see
     /// [`ViewBox`] for the world-to-pixel mapping together with
-    /// [`px_per_unit`](Self::px_per_unit).
+    /// [`px_per_unit`](Self::px_per_unit). In world units.
     pub view_box: ViewBox,
     /// Pixels per drawing unit: `pixel = (world - viewBox origin) * this`.
     pub px_per_unit: f64,
+    /// The world point the intermediate SVG's coordinates were relative
+    /// to (see [`crate::ToSvgResult::origin`]); the pixel mapping above is
+    /// unaffected. Since 0.3.0.
+    pub origin: [f64; 2],
     pub unsupported_types: Vec<String>,
     /// Entities hidden by the drawing -- see [`crate::ToSvgResult::hidden`].
     pub hidden: usize,
@@ -246,6 +250,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         height,
         view_box,
         px_per_unit,
+        origin: rendered.origin,
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
         crop: rendered.choice.report(rect, padding_units),

@@ -25,12 +25,13 @@ pub(super) fn render_hatch(h: &HatchEntity, color: &str, ctx: &mut Ctx) -> Optio
             continue;
         }
         ctx.consider_all(&pts);
+        let frame = ctx.frame;
         let mut d = String::from("M ");
         for (i, p) in pts.iter().enumerate() {
             if i > 0 {
                 d.push_str(" L ");
             }
-            let _ = write!(d, "{} {}", clean(p.x), neg(p.y));
+            let _ = write!(d, "{} {}", frame.x(p.x), frame.y(p.y));
         }
         d.push_str(" Z");
         subpaths.push(d);
@@ -210,7 +211,9 @@ fn render_pattern_line(
     };
 
     let id = ctx.next_def_id("hp");
-    let (tx, ty) = (clean(pl.base_point.x), neg(pl.base_point.y));
+    // The pattern tiles the referencing element's user space, so its base
+    // point is written in the same frame as the boundary.
+    let (tx, ty) = (ctx.frame.x(pl.base_point.x), ctx.frame.y(pl.base_point.y));
     let deg = neg(pl.angle.to_degrees());
     let (w, h, half) = (clean(width), clean(spacing), clean(spacing / 2.0));
     ctx.defs.push(format!(

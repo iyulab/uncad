@@ -28,7 +28,7 @@ use crate::CadDatabase;
 use bounds::Box2D;
 
 use crate::crop::{self, CropMode, CropReport, Extent, Rect};
-use format::{clean, escape_xml, neg, points_attr, rotate_transform_attr, xy};
+use format::{clean, escape_xml, neg, rotate_transform_attr, xy, Frame};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -81,8 +81,17 @@ impl Default for ToSvgOptions {
 pub struct ToSvgResult {
     pub svg: String,
     /// The `viewBox` the document was given: what the image shows, padding
-    /// included, and the key to mapping its pixels back to the drawing.
+    /// included, and the key to mapping its pixels back to the drawing. In
+    /// world units; the document's own `viewBox` attribute is this minus
+    /// [`origin`](Self::origin).
     pub view_box: ViewBox,
+    /// The world point the SVG's coordinates are relative to: SVG user
+    /// units = world minus origin (before the y flip). `[0, 0]` for a
+    /// drawing near the origin, so its SVG reads in world units; a drawing
+    /// whose coordinates are large (over 32768 units) is shifted by the
+    /// rounded median of its entities' reference points, because the
+    /// rasterizer keeps path points in `f32`. Since 0.3.0.
+    pub origin: [f64; 2],
     /// DXF names of entity types this renderer had nothing to draw for,
     /// sorted.
     pub unsupported_types: Vec<String>,
@@ -116,6 +125,18 @@ impl ViewBox {
             y: -rect.max_y,
             width: if width > 0.0 { width } else { 1.0 },
             height: if height > 0.0 { height } else { 1.0 },
+        }
+    }
+
+    /// This viewBox expressed relative to `origin` (world minus origin, y
+    /// flipped): what a document whose coordinates were shifted by
+    /// `origin` writes in its `viewBox` attribute.
+    pub(crate) fn shifted(&self, origin: [f64; 2]) -> ViewBox {
+        ViewBox {
+            x: self.x - origin[0],
+            y: self.y + origin[1],
+            width: self.width,
+            height: self.height,
         }
     }
 
@@ -206,15 +227,17 @@ impl Transform {
 
     /// The SVG `matrix(a b c d e f)` equivalent, composed with the renderer's
     /// CAD-y-up to SVG-y-down flip on both sides: an SVG-local point
-    /// `(u, v) = (x, -y)` maps to the SVG-parent point `(X, -Y)`.
-    fn svg_matrix(&self) -> [f64; 6] {
+    /// `(u, v) = (x, -y)` maps to the SVG-parent point `(X, -Y)`. The
+    /// translation is written in the parent's `frame` (the block's own
+    /// interior is always drawn about `(0, 0)`).
+    fn svg_matrix(&self, frame: Frame) -> [f64; 6] {
         [
             clean(self.a),
             neg(self.b),
             neg(self.c),
             clean(self.d),
-            clean(self.e),
-            neg(self.f),
+            frame.x(self.e),
+            frame.y(self.f),
         ]
     }
 }
@@ -258,6 +281,10 @@ struct Ctx<'a> {
     /// text inside a block gets the id the export's records use.
     id_prefix: String,
     transform: Transform,
+    /// The origin the coordinates written now are relative to: the
+    /// render's origin at the top level, `(0, 0)` inside a block reference
+    /// (see [`Frame`]). `transform` and the bounds stay in world units.
+    frame: Frame,
     /// `<defs>` entries accumulated by HATCH rendering, emitted once into a
     /// top-level `<defs>` by [`to_svg`]. Persists across `render_block_ref`'s
     /// transform save/restore, since a HATCH can appear inside a block too.
@@ -293,6 +320,7 @@ impl<'a> Ctx<'a> {
             inherited_color: DEFAULT_COLOR.to_string(),
             id_prefix: String::new(),
             transform: Transform::identity(),
+            frame: Frame::default(),
             defs: Vec::new(),
             next_def_id: 0,
             def_prefix: String::new(),
@@ -429,11 +457,11 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
 
 /// A `<polyline>`, or a `<polygon>` when `closed` -- the shape every polyline
 /// entity renders to.
-fn polyline_element(pts: &[Point2D], closed: bool, color: &str) -> String {
+fn polyline_element(pts: &[Point2D], closed: bool, color: &str, frame: Frame) -> String {
     let tag = if closed { "polygon" } else { "polyline" };
     format!(
         "<{tag} points=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
-        points_attr(pts)
+        frame.points(pts)
     )
 }
 
@@ -444,19 +472,23 @@ fn polyline_element(pts: &[Point2D], closed: bool, color: &str) -> String {
 /// own y-down frame that is the negative-angle direction, sweep flag 0 --
 /// the same flag the ARC branch uses for its always-counter-clockwise arcs.
 /// A negative (clockwise) bulge gets sweep flag 1.
-fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> String {
+fn bulged_polyline_element(
+    p: &crate::model::LwPolylineEntity,
+    color: &str,
+    frame: Frame,
+) -> String {
     let segments = crate::geom::polyline_segments(&p.vertices, &p.bulges, p.closed);
     let Some(first) = segments.first() else {
-        return polyline_element(&p.vertices, p.closed, color);
+        return polyline_element(&p.vertices, p.closed, color, frame);
     };
     let start = match first {
         crate::geom::Segment::Line { from, .. } | crate::geom::Segment::Arc { from, .. } => *from,
     };
-    let mut d = format!("M {} {}", clean(start.x), neg(start.y));
+    let mut d = format!("M {} {}", frame.x(start.x), frame.y(start.y));
     for segment in &segments {
         match segment {
             crate::geom::Segment::Line { to, .. } => {
-                let _ = write!(d, " L {} {}", clean(to.x), neg(to.y));
+                let _ = write!(d, " L {} {}", frame.x(to.x), frame.y(to.y));
             }
             crate::geom::Segment::Arc { to, bulge, arc, .. } => {
                 let large = u8::from(bulge.abs() > 1.0);
@@ -464,8 +496,8 @@ fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> S
                 let _ = write!(
                     d,
                     " A {r} {r} 0 {large} {sweep} {} {}",
-                    clean(to.x),
-                    neg(to.y),
+                    frame.x(to.x),
+                    frame.y(to.y),
                     r = clean(arc.radius)
                 );
             }
@@ -479,10 +511,10 @@ fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> S
 
 /// A dashed outline, used for the shapes this renderer draws as an indication
 /// rather than as real geometry (VIEWPORT frames, WIPEOUT boundaries).
-fn dashed_outline(pts: &[Point2D], color: &str, dash: &str) -> String {
+fn dashed_outline(pts: &[Point2D], color: &str, dash: &str, frame: Frame) -> String {
     format!(
         "<polygon points=\"{}\" fill=\"none\" stroke-dasharray=\"{dash}\" stroke=\"{color}\"/>",
-        points_attr(pts)
+        frame.points(pts)
     )
 }
 
@@ -583,11 +615,12 @@ fn text_element(
     rotation: f64,
     color: &str,
     text: &str,
+    frame: Frame,
 ) -> String {
     let height = effective_text_height(height);
     let (x, y) = (
-        anchor.at.x,
-        neg(anchor.at.y) + anchor.baseline_drop * height,
+        frame.x(anchor.at.x),
+        frame.y(anchor.at.y) + anchor.baseline_drop * height,
     );
     let anchor_attr = if anchor.anchor == "start" {
         String::new()
@@ -606,7 +639,13 @@ fn text_element(
 
 /// A small filled triangle at `tip`, pointing away from `from` -- LEADER and
 /// MULTILEADER arrowheads.
-fn arrowhead_element(tip: &Point2D, from: &Point2D, size: f64, color: &str) -> String {
+fn arrowhead_element(
+    tip: &Point2D,
+    from: &Point2D,
+    size: f64,
+    color: &str,
+    frame: Frame,
+) -> String {
     let (dx, dy) = (tip.x - from.x, tip.y - from.y);
     let len = dx.hypot(dy);
     let len = if len == 0.0 { 1.0 } else { len };
@@ -616,11 +655,13 @@ fn arrowhead_element(tip: &Point2D, from: &Point2D, size: f64, color: &str) -> S
     let (p2x, p2y) = (back_x + px * size * 0.35, back_y + py * size * 0.35);
     let (p3x, p3y) = (back_x - px * size * 0.35, back_y - py * size * 0.35);
     format!(
-        "<polygon points=\"{},{} {p2x},{} {p3x},{}\" fill=\"{color}\" stroke=\"none\"/>",
-        tip.x,
-        neg(tip.y),
-        neg(p2y),
-        neg(p3y)
+        "<polygon points=\"{},{} {},{} {},{}\" fill=\"{color}\" stroke=\"none\"/>",
+        frame.x(tip.x),
+        frame.y(tip.y),
+        frame.x(p2x),
+        frame.y(p2y),
+        frame.x(p3x),
+        frame.y(p3y)
     )
 }
 
@@ -647,10 +688,13 @@ fn wireframe_element(edges: &[[Point3D; 2]], color: &str, ctx: &mut Ctx) -> Stri
             let (x2, y2) = project_isometric(b);
             ctx.consider(x1, y1);
             ctx.consider(x2, y2);
+            let frame = ctx.frame;
             format!(
-                "<line x1=\"{x1}\" y1=\"{}\" x2=\"{x2}\" y2=\"{}\" stroke=\"{color}\"/>",
-                neg(y1),
-                neg(y2)
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{color}\"/>",
+                frame.x(x1),
+                frame.y(y1),
+                frame.x(x2),
+                frame.y(y2)
             )
         })
         .collect::<Vec<_>>()
@@ -727,6 +771,9 @@ fn render_block_ref(
     let parent_inherited = std::mem::replace(&mut ctx.inherited_color, color.to_string());
     let child_prefix = format!("{}{owner_handle}/", ctx.id_prefix);
     let parent_prefix = std::mem::replace(&mut ctx.id_prefix, child_prefix);
+    // The block's interior is drawn in its own coordinates; the parent's
+    // origin goes into this block's matrix translation instead.
+    let parent_frame = std::mem::take(&mut ctx.frame);
 
     ctx.transform = compose(&parent_transform, &child_transform);
     ctx.depth = parent_depth + 1;
@@ -747,6 +794,7 @@ fn render_block_ref(
     ctx.scale = parent_scale;
     ctx.inherited_color = parent_inherited;
     ctx.id_prefix = parent_prefix;
+    ctx.frame = parent_frame;
 
     if body_parts.is_empty() {
         return String::new();
@@ -755,7 +803,7 @@ fn render_block_ref(
     // The parent transform is baked into ctx.transform for *bounds* purposes
     // (world-space consider()), but the emitted matrix is only this block's own
     // local transform -- nesting is expressed by nested <g> elements.
-    let [a, b, c, d, e, f] = child_transform.svg_matrix();
+    let [a, b, c, d, e, f] = child_transform.svg_matrix(parent_frame);
     format!(
         "<g transform=\"matrix({a} {b} {c} {d} {e} {f})\" stroke-width=\"{}\">\n  {}\n</g>",
         stroke_width_placeholder(cumulative_scale),
@@ -785,16 +833,17 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
 /// [`render_entity`] once visibility is settled.
 fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
     let color = resolve_entity_color(e.common(), ctx);
+    let frame = ctx.frame;
     match e {
         Entity::Line(l) => {
             ctx.consider(l.start_point.x, l.start_point.y);
             ctx.consider(l.end_point.x, l.end_point.y);
             Some(format!(
                 "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{color}\"/>",
-                l.start_point.x,
-                neg(l.start_point.y),
-                l.end_point.x,
-                neg(l.end_point.y)
+                frame.x(l.start_point.x),
+                frame.y(l.start_point.y),
+                frame.x(l.end_point.x),
+                frame.y(l.end_point.y)
             ))
         }
         Entity::Circle(c) => {
@@ -810,8 +859,8 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ));
             Some(format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
-                c.center.x,
-                neg(c.center.y),
+                frame.x(c.center.x),
+                frame.y(c.center.y),
                 c.radius
             ))
         }
@@ -836,8 +885,11 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
             let large = if sweep > std::f64::consts::PI { 1 } else { 0 };
             Some(format!(
-                "<path d=\"M {x1} {} A {r} {r} 0 {large} 0 {x2} {}\" fill=\"none\" stroke=\"{color}\"/>",
-                neg(y1), neg(y2)
+                "<path d=\"M {} {} A {r} {r} 0 {large} 0 {} {}\" fill=\"none\" stroke=\"{color}\"/>",
+                frame.x(x1),
+                frame.y(y1),
+                frame.x(x2),
+                frame.y(y2)
             ))
         }
         Entity::Ellipse(el) => {
@@ -854,7 +906,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 .y
                 .atan2(el.major_axis_endpoint.x)
                 .to_degrees();
-            let (cx, cy) = (el.center.x, neg(el.center.y));
+            let (cx, cy) = (frame.x(el.center.x), frame.y(el.center.y));
             Some(format!(
                 "<ellipse cx=\"{cx}\" cy=\"{cy}\" rx=\"{rx}\" ry=\"{ry}\" transform=\"rotate({} {cx} {cy})\" fill=\"none\" stroke=\"{color}\"/>",
                 neg(rot)
@@ -863,14 +915,14 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
             if p.bulges.is_empty() {
                 ctx.consider_all(&p.vertices);
-                Some(polyline_element(&p.vertices, p.closed, &color))
+                Some(polyline_element(&p.vertices, p.closed, &color, frame))
             } else {
                 if let Some((min_x, min_y, max_x, max_y)) =
                     crate::geom::polyline_bounds(&p.vertices, &p.bulges, p.closed)
                 {
                     ctx.consider_rect(&Rect::new(min_x, min_y, max_x, max_y));
                 }
-                Some(bulged_polyline_element(p, &color))
+                Some(bulged_polyline_element(p, &color, frame))
             }
         }
         Entity::Polyline3D(p) => {
@@ -878,7 +930,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 return None;
             }
             ctx.consider_all_3d(&p.vertices);
-            Some(polyline_element(&xy(&p.vertices), p.closed, &color))
+            Some(polyline_element(&xy(&p.vertices), p.closed, &color, frame))
         }
         Entity::Text(t) => {
             let anchor = text_anchor(
@@ -904,6 +956,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 t.rotation,
                 &color,
                 &t.text_plain,
+                frame,
             ))
         }
         Entity::Attrib(a) => {
@@ -933,6 +986,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 a.rotation,
                 &color,
                 &a.text_plain,
+                frame,
             ))
         }
         Entity::Tolerance(t) => {
@@ -955,6 +1009,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 0.0,
                 &color,
                 &t.text_plain,
+                frame,
             ))
         }
         Entity::MText(m) => {
@@ -1005,7 +1060,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 1 => text_height - block_height / 2.0,
                 _ => text_height - block_height + DESCENDER_DROP * text_height,
             };
-            let (x, y) = (m.insertion_point.x, neg(m.insertion_point.y));
+            let (x, y) = (frame.x(m.insertion_point.x), frame.y(m.insertion_point.y));
             let mut tspans = String::new();
             for (i, line) in lines.iter().enumerate() {
                 let dy = if i == 0 {
@@ -1031,8 +1086,8 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider(p.position.x, p.position.y);
             Some(format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"0.5\" fill=\"{color}\" stroke=\"none\"/>",
-                p.position.x,
-                neg(p.position.y)
+                frame.x(p.position.x),
+                frame.y(p.position.y)
             ))
         }
         Entity::Solid(s) => {
@@ -1041,7 +1096,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider_all(&pts);
             Some(format!(
                 "<polygon points=\"{}\" fill=\"{color}\" fill-opacity=\"0.6\" stroke=\"none\"/>",
-                points_attr(&pts)
+                frame.points(&pts)
             ))
         }
         Entity::Face3D(f) => {
@@ -1051,7 +1106,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider_all(&pts);
             Some(format!(
                 "<polygon points=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
-                points_attr(&pts)
+                frame.points(&pts)
             ))
         }
         Entity::Ray(r) | Entity::XLine(r) => {
@@ -1066,8 +1121,11 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             };
             let (x2, y2) = (r.point.x + dx, r.point.y + dy);
             Some(format!(
-                "<line x1=\"{x1}\" y1=\"{}\" x2=\"{x2}\" y2=\"{}\" stroke-dasharray=\"4,2\" stroke=\"{color}\"/>",
-                neg(y1), neg(y2)
+                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-dasharray=\"4,2\" stroke=\"{color}\"/>",
+                frame.x(x1),
+                frame.y(y1),
+                frame.x(x2),
+                frame.y(y2)
             ))
         }
         Entity::Insert(i) => {
@@ -1150,7 +1208,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 },
             ];
             ctx.consider_all(&corners);
-            Some(dashed_outline(&corners, &color, "2,2"))
+            Some(dashed_outline(&corners, &color, "2,2", frame))
         }
         Entity::Wipeout(w) => {
             // Outline only, not filled: a filled shape would mask whatever is
@@ -1163,7 +1221,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 return None;
             }
             ctx.consider_all(&w.boundary);
-            Some(dashed_outline(&w.boundary, &color, "2,2"))
+            Some(dashed_outline(&w.boundary, &color, "2,2", frame))
         }
         Entity::Spline(s) => {
             // Straight-line approximation through fit points (preferred, since
@@ -1178,7 +1236,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 return None;
             }
             ctx.consider_all_3d(pts);
-            Some(polyline_element(&xy(pts), false, &color))
+            Some(polyline_element(&xy(pts), false, &color, frame))
         }
         Entity::Solid3D(s) => render_wireframe_entity(&s.wireframe_edges, "3DSOLID", &color, ctx),
         Entity::Region(r) => render_wireframe_entity(&r.wireframe_edges, "REGION", &color, ctx),
@@ -1192,9 +1250,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             }
             ctx.consider_all_3d(&l.vertices);
             let pts = xy(&l.vertices);
-            let line = polyline_element(&pts, false, &color);
+            let line = polyline_element(&pts, false, &color, frame);
             let arrow = if l.has_arrowhead && pts.len() >= 2 {
-                arrowhead_element(&pts[0], &pts[1], ARROWHEAD_SIZE, &color)
+                arrowhead_element(&pts[0], &pts[1], ARROWHEAD_SIZE, &color, frame)
             } else {
                 String::new()
             };
@@ -1211,13 +1269,14 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 }
                 ctx.consider_all_3d(line);
                 let pts = xy(line);
-                parts.push(polyline_element(&pts, false, &color));
+                parts.push(polyline_element(&pts, false, &color, frame));
                 let n = pts.len();
                 parts.push(arrowhead_element(
                     &pts[n - 1],
                     &pts[n - 2],
                     ARROWHEAD_SIZE,
                     &color,
+                    frame,
                 ));
             }
             (!parts.is_empty()).then(|| parts.join("\n  "))
@@ -1238,7 +1297,12 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             let lines: Vec<String> = offsets
                 .iter()
                 .map(|&offset| {
-                    polyline_element(&mline_offset_points(&l.vertices, offset), l.closed, &color)
+                    polyline_element(
+                        &mline_offset_points(&l.vertices, offset),
+                        l.closed,
+                        &color,
+                        frame,
+                    )
                 })
                 .collect();
             Some(lines.join("\n  "))
@@ -1247,8 +1311,8 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider(l.position.x, l.position.y);
             let marker = format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"0.5\" fill=\"none\" stroke=\"{color}\"/>",
-                l.position.x,
-                neg(l.position.y)
+                frame.x(l.position.x),
+                frame.y(l.position.y)
             );
             if !l.has_target {
                 return Some(marker);
@@ -1256,7 +1320,10 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider(l.target.x, l.target.y);
             let line = format!(
                 "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-dasharray=\"1,1\" stroke=\"{color}\"/>",
-                l.position.x, neg(l.position.y), l.target.x, neg(l.target.y)
+                frame.x(l.position.x),
+                frame.y(l.position.y),
+                frame.x(l.target.x),
+                frame.y(l.target.y)
             );
             Some(format!("{marker}\n  {line}"))
         }
@@ -1347,6 +1414,10 @@ pub(crate) struct Rendered {
     pub(crate) padded_rect: Rect,
     /// Every visible top-level entity's measured extent, in drawing order.
     pub(crate) extents: Vec<Extent>,
+    /// The world point the parts' coordinates are relative to (see
+    /// [`ToSvgResult::origin`]); `[0, 0]` for a drawing near the origin.
+    /// `view_box`, `extents` and the crop stay in world units.
+    pub(crate) origin: [f64; 2],
 }
 
 impl Rendered {
@@ -1370,6 +1441,87 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     )
 }
 
+/// Coordinates this large (in drawing units) get the render shifted to a
+/// local origin: below it an `f32` still resolves better than 1/250 of a
+/// unit, far finer than any stroke, so every drawing near the origin keeps
+/// its world-unit SVG byte for byte.
+const ORIGIN_SHIFT_THRESHOLD: f64 = 32768.0;
+
+/// One cheap reference point per entity (an end, a centre, an insertion
+/// point, a text anchor), for [`choose_origin`]'s median.
+fn reference_point(e: &Entity) -> Option<Point2D> {
+    let p3 = |p: &Point3D| Point2D { x: p.x, y: p.y };
+    Some(match e {
+        Entity::Line(l) => p3(&l.start_point),
+        Entity::Circle(c) => p3(&c.center),
+        Entity::Arc(a) => p3(&a.center),
+        Entity::Ellipse(el) => p3(&el.center),
+        Entity::LwPolyline(p) | Entity::Polyline2D(p) => *p.vertices.first()?,
+        Entity::Polyline3D(p) => p3(p.vertices.first()?),
+        Entity::Text(t) => t.start_point,
+        Entity::Attrib(a) => a.start_point,
+        Entity::Attdef(a) => a.start_point,
+        Entity::Tolerance(t) => p3(&t.insertion_point),
+        Entity::MText(m) => p3(&m.insertion_point),
+        Entity::Point(p) => p3(&p.position),
+        Entity::Solid(s) => s.corner1,
+        Entity::Face3D(f) => p3(&f.corner1),
+        Entity::Ray(r) | Entity::XLine(r) => p3(&r.point),
+        Entity::Insert(i) => p3(&i.insertion_point),
+        Entity::AcadTable(a) => p3(&a.insertion_point),
+        Entity::Dimension(d) => p3(&d.definition_point),
+        Entity::Viewport(v) => p3(&v.center),
+        Entity::Wipeout(w) => *w.boundary.first()?,
+        Entity::Spline(s) => p3(s.fit_points.first().or(s.control_points.first())?),
+        Entity::Solid3D(s) => p3(&s.wireframe_edges.first()?[0]),
+        Entity::Region(r) => p3(&r.wireframe_edges.first()?[0]),
+        Entity::PolylinePFace(p) => p3(&p.wireframe_edges.first()?[0]),
+        Entity::Hatch(h) => match h.boundary_paths.first()? {
+            crate::model::HatchBoundaryPath::Polyline(v) => *v.first()?,
+            crate::model::HatchBoundaryPath::Edges(edges) => match edges.first()? {
+                crate::model::HatchEdge::Line { start } => *start,
+                crate::model::HatchEdge::Arc { center, .. }
+                | crate::model::HatchEdge::Ellipse { center, .. } => *center,
+                crate::model::HatchEdge::Spline { control_points } => *control_points.first()?,
+            },
+        },
+        Entity::Leader(l) => p3(l.vertices.first()?),
+        Entity::MultiLeader(m) => p3(m.lines.first()?.first()?),
+        Entity::MLine(l) => p3(&l.vertices.first()?.point),
+        Entity::Light(l) => p3(&l.position),
+        Entity::Unknown { .. } => return None,
+    })
+}
+
+/// The origin a render of `selected` is written relative to: the per-axis
+/// median of the entities' reference points, rounded to whole units, when
+/// its magnitude exceeds [`ORIGIN_SHIFT_THRESHOLD`] on either axis; `[0, 0]`
+/// otherwise. The median (not the crop's corner) so the shift is settled
+/// before anything is rendered and a far-away outlier does not move it.
+fn choose_origin(selected: &[&Entity]) -> [f64; 2] {
+    let mut xs: Vec<f64> = Vec::with_capacity(selected.len());
+    let mut ys: Vec<f64> = Vec::with_capacity(selected.len());
+    for p in selected.iter().filter_map(|e| reference_point(e)) {
+        if p.x.is_finite() && p.y.is_finite() {
+            xs.push(p.x);
+            ys.push(p.y);
+        }
+    }
+    if xs.is_empty() {
+        return [0.0, 0.0];
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(|a, b| a.total_cmp(b));
+        v[v.len() / 2].round()
+    };
+    let (mx, my) = (median(&mut xs), median(&mut ys));
+    if mx.abs().max(my.abs()) > ORIGIN_SHIFT_THRESHOLD {
+        [mx, my]
+    } else {
+        [0.0, 0.0]
+    }
+}
+
 /// [`render`] over an explicit entity list (a layout's paper-space block,
 /// say) instead of the options' space. `def_prefix` namespaces the
 /// `<defs>` ids (see [`Ctx::def_prefix`]): `""` for a render that stands
@@ -1387,6 +1539,11 @@ pub(crate) fn render_selected(
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
     ctx.def_prefix = def_prefix.to_string();
+    let origin = choose_origin(&selected);
+    ctx.frame = Frame {
+        ox: origin[0],
+        oy: origin[1],
+    };
     for e in selected {
         // A hidden entity never affects the crop, drawn faded or not.
         let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
@@ -1432,6 +1589,7 @@ pub(crate) fn render_selected(
         padding_units,
         padded_rect,
         extents,
+        origin,
     }
 }
 
@@ -1456,6 +1614,8 @@ pub(crate) fn assemble(
 
 /// [`assemble`] with only the parts `keep` accepts (by entity handle): what
 /// a tile needs, so rasterizing it does not pay for the whole drawing.
+/// `view_box` is in world units; the document gets it shifted by
+/// `rendered.origin`, like the parts.
 pub(crate) fn assemble_subset(
     rendered: &Rendered,
     view_box: &ViewBox,
@@ -1478,7 +1638,7 @@ pub(crate) fn assemble_subset(
             resolve_stroke_widths(&rendered.defs.join("\n  "), effective_stroke_width);
         format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
     };
-    let vb = view_box;
+    let vb = view_box.shifted(rendered.origin);
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
         vb.x, vb.y, vb.width, vb.height
@@ -1562,6 +1722,11 @@ fn suffix_def_id(def: &str, suffix: &str) -> String {
 /// viewport's matrix, so one shared def could not serve two viewports at
 /// different scales. usvg resolves a duplicated id to the last definition,
 /// which used to hand the paper's hatches the model's patterns.
+///
+/// Each render carries its own origin: the paper parts and the sheet's
+/// `view_box` are written relative to `paper.origin`, and the viewport
+/// matrix takes the model parts from their `model.origin`-relative
+/// coordinates to the paper's.
 pub(crate) fn assemble_sheet(
     paper: &Rendered,
     model: &Rendered,
@@ -1576,6 +1741,11 @@ pub(crate) fn assemble_sheet(
         body.push_str(svg);
         body.push_str("\n  ");
     }
+    let paper_frame = Frame {
+        ox: paper.origin[0],
+        oy: paper.origin[1],
+    };
+    let [mx, my] = model.origin;
     let mut defs: Vec<String> = paper.defs.clone();
     for vp in viewports {
         let Some(scale) = vp.scale() else { continue };
@@ -1610,6 +1780,10 @@ pub(crate) fn assemble_sheet(
         let d = scale * co;
         let e = cx - scale * (co * tx - si * ty) - scale * vx;
         let f = -cy + scale * (si * tx + co * ty) + scale * vy;
+        // The model parts are written as (x - mx, -(y - my)) and the sheet
+        // as (X - px, -(Y - py)): fold both origins into the translation.
+        let e = e + a * mx - c * my - paper_frame.ox;
+        let f = f + b * mx - d * my + paper_frame.oy;
         let handle = escape_xml(&vp.common.handle);
         defs.extend(
             model
@@ -1620,8 +1794,8 @@ pub(crate) fn assemble_sheet(
         let _ = write!(
             body,
             "<clipPath id=\"vp-{handle}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>\n  <g clip-path=\"url(#vp-{handle})\"><g transform=\"matrix({} {} {} {} {} {})\" stroke-width=\"{}\">\n  ",
-            clean(cx - vp.width / 2.0),
-            neg(cy + vp.height / 2.0),
+            paper_frame.x(cx - vp.width / 2.0),
+            paper_frame.y(cy + vp.height / 2.0),
             clean(vp.width),
             clean(vp.height),
             clean(a),
@@ -1659,9 +1833,10 @@ pub(crate) fn assemble_sheet(
         let resolved_defs = resolve_stroke_widths(&defs.join("\n  "), effective_stroke_width);
         format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
     };
+    let vb = view_box.shifted(paper.origin);
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
-        view_box.x, view_box.y, view_box.width, view_box.height
+        vb.x, vb.y, vb.width, vb.height
     )
 }
 
@@ -1675,6 +1850,7 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
     ToSvgResult {
         svg: assemble(&rendered, &rendered.view_box, stroke_width),
         view_box: rendered.view_box,
+        origin: rendered.origin,
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
         crop: rendered
@@ -1792,7 +1968,15 @@ mod tests {
             baseline_drop: 0.0,
         };
         for stored in [0.0, -2.0, f64::NAN, f64::INFINITY] {
-            let svg = text_element("T", &anchor, stored, 0.0, "#000000", "ZERO");
+            let svg = text_element(
+                "T",
+                &anchor,
+                stored,
+                0.0,
+                "#000000",
+                "ZERO",
+                Frame::default(),
+            );
             assert!(!svg.contains("font-size=\"0\""), "{svg}");
             assert!(
                 svg.contains(&format!("font-size=\"{}\"", font_size(1.0))),
@@ -1811,17 +1995,49 @@ mod tests {
         // one text height, below the anchor; middle half of that; bottom a
         // descender (0.2 em = 0.2729 heights) above it.
         let at = Point2D { x: 0.0, y: 10.0 };
-        let plain = text_element("T", &text_anchor(at, None, 0, 0), 2.0, 0.0, "#000", "A");
+        let plain = text_element(
+            "T",
+            &text_anchor(at, None, 0, 0),
+            2.0,
+            0.0,
+            "#000",
+            "A",
+            Frame::default(),
+        );
         assert!(
             plain.contains(&format!("font-size=\"{}\"", 2.0 / 0.733)),
             "{plain}"
         );
         assert!(plain.contains(" y=\"-10\""), "{plain}");
-        let top = text_element("T", &text_anchor(at, Some(at), 0, 3), 2.0, 0.0, "#000", "A");
+        let top = text_element(
+            "T",
+            &text_anchor(at, Some(at), 0, 3),
+            2.0,
+            0.0,
+            "#000",
+            "A",
+            Frame::default(),
+        );
         assert!(top.contains(" y=\"-8\""), "{top}");
-        let middle = text_element("T", &text_anchor(at, Some(at), 0, 2), 2.0, 0.0, "#000", "A");
+        let middle = text_element(
+            "T",
+            &text_anchor(at, Some(at), 0, 2),
+            2.0,
+            0.0,
+            "#000",
+            "A",
+            Frame::default(),
+        );
         assert!(middle.contains(" y=\"-9\""), "{middle}");
-        let bottom = text_element("T", &text_anchor(at, Some(at), 0, 1), 2.0, 0.0, "#000", "A");
+        let bottom = text_element(
+            "T",
+            &text_anchor(at, Some(at), 0, 1),
+            2.0,
+            0.0,
+            "#000",
+            "A",
+            Frame::default(),
+        );
         let expected_y = -10.0 - 2.0 * 0.2 / 0.733;
         assert!(
             bottom.contains(&format!(" y=\"{expected_y}\"")),
@@ -1921,6 +2137,123 @@ mod tests {
             svg.contains("stroke-width=\"0.25\">"),
             "the viewport group: {svg}"
         );
+    }
+
+    #[test]
+    fn a_far_away_model_is_composited_through_the_viewport_from_its_own_origin() {
+        use crate::model::{LineEntity, ViewportEntity};
+        use crate::tables::BlockRecord;
+        // Model: one LINE at 1e7, so the model render is written about
+        // its rounded median origin (the line's start, (10000010,
+        // 10000010)) as x1=0 y1=0 x2=80 y2=-40. Paper: a viewport of 200 x
+        // 120 at (150,100) showing 60 units of model height (scale 2) with
+        // no twist, centred on model (1e7+50, 1e7+25). By
+        // ViewportEntity::model_to_paper the line's ends land on paper at
+        // (70,70) and (230,150), i.e. SVG (70,-70) and (230,-150); the
+        // emitted matrix must take the shifted model coordinates there.
+        let far = 1.0e7;
+        let common = |handle: &str| EntityCommon {
+            handle: handle.into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        };
+        let line = Entity::Line(LineEntity {
+            common: common("L"),
+            start_point: Point3D {
+                x: far + 10.0,
+                y: far + 10.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: far + 90.0,
+                y: far + 50.0,
+                z: 0.0,
+            },
+        });
+        let viewport = ViewportEntity {
+            common: common("V"),
+            center: Point3D {
+                x: 150.0,
+                y: 100.0,
+                z: 0.0,
+            },
+            width: 200.0,
+            height: 120.0,
+            view_center: Point2D {
+                x: far + 50.0,
+                y: far + 25.0,
+            },
+            view_size: 60.0,
+            view_target: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            view_direction: crate::geom::WORLD_Z,
+            twist: 0.0,
+            lens_length: 50.0,
+            status_flag: 0,
+            on: true,
+            id: 2,
+            frozen_layers: Vec::new(),
+        };
+        let mut tables = Tables::default();
+        tables.block_records.insert(
+            "*Model_Space".into(),
+            BlockRecord {
+                name: "*Model_Space".into(),
+                entities: vec![line.clone()],
+            },
+        );
+        let db = CadDatabase::new(vec![line], tables);
+        let options = ToSvgOptions {
+            crop: CropMode::Raw,
+            padding: Some(0.0),
+            ..Default::default()
+        };
+        let model = render(&db, options);
+        assert_eq!(model.origin, [far + 10.0, far + 10.0]);
+        assert!(model.parts[0]
+            .1
+            .contains("x1=\"0\" y1=\"0\" x2=\"80\" y2=\"-40\""));
+        let paper = render_selected(&db, Vec::new(), options, "p");
+        assert_eq!(paper.origin, [0.0, 0.0]);
+        let extents = std::collections::HashMap::new();
+        let layers = std::collections::HashMap::new();
+        let view_box = ViewBox::from_world(&Rect::new(0.0, 0.0, 297.0, 210.0));
+        let svg = assemble_sheet(
+            &paper,
+            &model,
+            &[&viewport],
+            &extents,
+            &layers,
+            &view_box,
+            0.5,
+        );
+        let at = svg.find("matrix(").expect("the viewport group") + "matrix(".len();
+        let m: Vec<f64> = svg[at..at + svg[at..].find(')').unwrap()]
+            .split(' ')
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let apply = |x: f64, y: f64| (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]);
+        let expected = |x: f64, y: f64| {
+            let p = viewport.model_to_paper(Point2D { x, y }).unwrap();
+            (p.x, -p.y)
+        };
+        for ((x, y), (wx, wy)) in [
+            ((0.0, 0.0), (far + 10.0, far + 10.0)),
+            ((80.0, -40.0), (far + 90.0, far + 50.0)),
+        ] {
+            let (px, py) = apply(x, y);
+            let (ex, ey) = expected(wx, wy);
+            assert!(
+                (px - ex).abs() < 1e-6 && (py - ey).abs() < 1e-6,
+                "({px}, {py}) vs ({ex}, {ey})"
+            );
+        }
+        assert!((apply(0.0, 0.0).0 - 70.0).abs() < 1e-6 && (apply(0.0, 0.0).1 + 70.0).abs() < 1e-6);
+        // The matrix itself carries only sheet-sized numbers.
+        assert!(m.iter().all(|v| v.abs() < 1000.0), "{m:?}");
     }
 
     #[test]
@@ -2048,7 +2381,7 @@ mod tests {
         // And the emitted matrix is the placement with y negated on both
         // sides: matrix(a -b -c d e -f).
         let t = Transform::placement(Point2D { x: 5.0, y: 6.0 }, 2.0, 3.0, quarter);
-        let [a, b, c, d, e, f] = t.svg_matrix();
+        let [a, b, c, d, e, f] = t.svg_matrix(Frame::default());
         close(a, 0.0);
         close(b, -2.0);
         close(c, 3.0);
