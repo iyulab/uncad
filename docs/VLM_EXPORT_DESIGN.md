@@ -434,9 +434,10 @@ except the AutoCAD-written Korean DWG fixture (LibreDWG's own writer mangles
 CP949 text, so `tests/fixtures/` ships DXF fixtures only); **P0 done**
 (`CadDatabase::header`); **P1 mostly done** (`PngSize` fit-to-pixels with the
 8000 px cap, white RGB background, pixel strokes, contrast-normalized palette,
-fonts loaded once, `ViewBox` + `px_per_unit` in every result) -- still open in
-P1: the bundled Latin + Hangul font, `font-family` on text, RAY/XLINE clipping,
-and pixel-sized symbols (POINT, arrowheads, dashes); **P2 done** (`uncad::text`
+fonts loaded once, `ViewBox` + `px_per_unit` in every result, RAY/XLINE clipped
+to each document's viewBox instead of a fixed 1e6-unit segment) -- still open in
+P1: the bundled Latin + Hangul font, `font-family` on text, and pixel-sized
+symbols (POINT, arrowheads, dashes); **P2 done** (`uncad::text`
 decoder with all three stack separators and the `%%` codes, `text_plain` on
 every text type, TEXT/ATTRIB justification fields and ATTRIB `tag`, MTEXT
 attachment/width/extents/`x_axis_dir` with the rotation derived, renderer

@@ -1149,9 +1149,10 @@ pub fn export_package(
                 &ViewBox::from_world(&ov.world),
                 stroke_px / ov.ppu,
                 |handle| {
-                    extent_of_handle
-                        .get(handle)
-                        .is_none_or(|rect| rect.intersects(&window))
+                    rendered.unbounded.contains(handle)
+                        || extent_of_handle
+                            .get(handle)
+                            .is_none_or(|rect| rect.intersects(&window))
                 },
             );
             let bytes = png::render_region(
@@ -2531,7 +2532,12 @@ fn build_frame(
 /// Renders `tiles` on as many threads as the machine offers (at most one
 /// per tile), returning the PNG bytes in the tiles' order. Each tile gets
 /// its own SVG holding only the entities whose extent touches the tile
-/// grown by `margin` (entities without an extent are always included).
+/// grown by `margin` (entities without an extent, and the infinite lines
+/// whose extent is only a base point, are always included).
+///
+/// A tile thread that panics ends the export with
+/// [`PngError::RenderPanic`], not with the process: a rasterizer that
+/// asserts on one tile must not take the whole run down without a word.
 #[allow(clippy::too_many_arguments)]
 fn render_tiles_parallel(
     rendered: &svg::Rendered,
@@ -2558,9 +2564,10 @@ fn render_tiles_parallel(
             &ViewBox::from_world(&tile.world),
             stroke_px / ppu,
             |handle| {
-                extent_of_handle
-                    .get(handle)
-                    .is_none_or(|rect| rect.intersects(&window))
+                rendered.unbounded.contains(handle)
+                    || extent_of_handle
+                        .get(handle)
+                        .is_none_or(|rect| rect.intersects(&window))
             },
         );
         let tree = png::parse_tree(&svg_text, fonts)?;
@@ -2581,7 +2588,13 @@ fn render_tiles_parallel(
             .collect();
         handles
             .into_iter()
-            .map(|h| h.join().expect("a tile thread panicked"))
+            .map(|h| {
+                h.join().unwrap_or_else(|_| {
+                    Err(PngError::RenderPanic(
+                        "a tile rendering thread panicked".to_string(),
+                    ))
+                })
+            })
             .collect()
     });
     let mut out = Vec::with_capacity(tiles.len());

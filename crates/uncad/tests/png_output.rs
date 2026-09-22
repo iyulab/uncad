@@ -394,3 +394,33 @@ fn the_size_cap_names_the_size_it_refused() {
         .expect("at the cap it renders");
     assert_eq!(ok.width.max(ok.height), cap);
 }
+
+/// Before 0.3.0 the renderer drew a RAY or an XLINE as a segment 1e6
+/// drawing units long. At the scale of a drawing 0.002 units across that
+/// puts the path's ends 2e11 pixels off the canvas and trips tiny-skia's
+/// `edges[curr_idx].last_y >= curr_y` assertion -- a panic in the middle
+/// of a library call, and, for the export, inside a worker thread, which
+/// took the whole process down with no error anyone could catch.
+///
+/// A caller holding its own SVG can hand one in whatever the renderer
+/// does, so the rasterizer call is guarded. Whatever tiny-skia makes of
+/// this document, the call has to *return*.
+#[test]
+fn a_rasterizer_panic_comes_back_as_an_error_instead_of_killing_the_process() {
+    let svg = concat!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-0.00004 -0.00204 0.00208 0.00208\" ",
+        "stroke=\"black\" stroke-width=\"0.00001\">",
+        "<line x1=\"-999999.999\" y1=\"-0.001\" x2=\"1000000.001\" y2=\"-0.001\" stroke=\"#000000\"/>",
+        "</svg>"
+    );
+    match uncad::png::svg_to_png(svg, 240_000.0) {
+        Ok(bytes) => assert!(!bytes.is_empty(), "an image, if it managed one"),
+        Err(PngError::RenderPanic(message)) => {
+            assert!(
+                !message.is_empty(),
+                "the panic's own words are worth having"
+            )
+        }
+        Err(other) => panic!("unexpected error: {other}"),
+    }
+}

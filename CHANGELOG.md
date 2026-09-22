@@ -181,6 +181,27 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A panic inside the rasterizer took the process with it. tiny-skia's scan converter
+  asserts rather than returning an error when a path's coordinates overflow its
+  fixed-point edge list, and the export ran it on worker threads, where the panic came
+  back as an `expect` on the join. Every `resvg::render` call is now caught and reported
+  as `PngError::RenderPanic` with the panic's own message, and a tile thread that panics
+  ends the export with that error rather than aborting.
+- A RAY or an XLINE could kill the process. Both are infinite lines, and the renderer
+  drew them as a segment 1e6 drawing units long -- a length that is really a coordinate:
+  in a drawing a few thousandths of a unit across, or at a deep tile level, that endpoint
+  lands 1e12 pixels off the canvas, overflows tiny-skia's fixed-point scan converter and
+  panics inside the dependency (`assertion failed: edges[curr_idx].last_y >= curr_y`),
+  for the export inside a worker thread, which took the whole run down with it. An
+  infinite line is now drawn exactly as far as the image shows: the entity emits a
+  placeholder (like the stroke widths) carrying its base point, direction and the block
+  matrices above it, and every assembly path -- the SVG, a tile, a sheet's paper and the
+  model inside each viewport, where the viewport's own matrix is composed in -- clips it
+  to that document's viewBox grown by a small margin, dropping it entirely when the
+  window shows none of it. A RAY still starts at its base point and runs one way, an
+  XLINE both; the extent of either is still the base point alone, so neither enlarges the
+  crop, and both are now kept in a tile or a viewport whose window their extent misses
+  but their line crosses. New fixture `infinite_lines_r2000.dxf`.
 - The attribute values of a block reference nested inside another block -- a tag block
   inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
   `strings.json` listed only top-level attributes, so "which door is D-101" could not be

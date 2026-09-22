@@ -13,12 +13,14 @@
 //! Layout of this module: options and results, the block transform, the
 //! rendering context, per-entity rendering, then [`to_svg`] itself.
 //! Submodules hold the parts that stand on their own -- [`format`] (number and
-//! string formatting), [`hatch`] (HATCH fills) and [`bounds`] (viewBox and
-//! outlier trim).
+//! string formatting), [`hatch`] (HATCH fills), [`infinite`] (RAY and XLINE,
+//! which are clipped to the picture once the viewBox is known) and [`bounds`]
+//! (viewBox and outlier trim).
 
 pub(crate) mod bounds;
 mod format;
 mod hatch;
+mod infinite;
 
 use crate::color::{contrast_on_white, resolve_color, DEFAULT_COLOR};
 use crate::dynapi::{Point2D, Point3D};
@@ -285,6 +287,11 @@ struct Ctx<'a> {
     /// render's origin at the top level, `(0, 0)` inside a block reference
     /// (see [`Frame`]). `transform` and the bounds stay in world units.
     frame: Frame,
+    /// The enclosing `<g transform>` matrices composed: what takes a
+    /// coordinate written now to the document's own frame. Identity at the
+    /// top level. Only an entity whose element cannot be finished until the
+    /// viewBox is known needs it -- see [`infinite`].
+    svg_matrix: infinite::Matrix,
     /// `<defs>` entries accumulated by HATCH rendering, emitted once into a
     /// top-level `<defs>` by [`to_svg`]. Persists across `render_block_ref`'s
     /// transform save/restore, since a HATCH can appear inside a block too.
@@ -321,6 +328,7 @@ impl<'a> Ctx<'a> {
             id_prefix: String::new(),
             transform: Transform::identity(),
             frame: Frame::default(),
+            svg_matrix: infinite::IDENTITY,
             defs: Vec::new(),
             next_def_id: 0,
             def_prefix: String::new(),
@@ -777,8 +785,14 @@ fn render_block_ref(
     // The block's interior is drawn in its own coordinates; the parent's
     // origin goes into this block's matrix translation instead.
     let parent_frame = std::mem::take(&mut ctx.frame);
+    // The `<g transform>` this call emits, needed before the children are
+    // rendered: one of them may be an infinite line, which is clipped in
+    // the document's frame and so must know what gets it there.
+    let group_matrix = child_transform.svg_matrix(parent_frame);
+    let parent_svg_matrix = ctx.svg_matrix;
 
     ctx.transform = compose(&parent_transform, &child_transform);
+    ctx.svg_matrix = infinite::compose(parent_svg_matrix, group_matrix);
     ctx.depth = parent_depth + 1;
     ctx.scale = cumulative_scale;
 
@@ -821,6 +835,7 @@ fn render_block_ref(
     }
 
     ctx.transform = parent_transform;
+    ctx.svg_matrix = parent_svg_matrix;
     ctx.depth = parent_depth;
     ctx.scale = parent_scale;
     ctx.inherited_color = parent_inherited;
@@ -834,7 +849,7 @@ fn render_block_ref(
     // The parent transform is baked into ctx.transform for *bounds* purposes
     // (world-space consider()), but the emitted matrix is only this block's own
     // local transform -- nesting is expressed by nested <g> elements.
-    let [a, b, c, d, e, f] = child_transform.svg_matrix(parent_frame);
+    let [a, b, c, d, e, f] = group_matrix;
     format!(
         "<g transform=\"matrix({a} {b} {c} {d} {e} {f})\" stroke-width=\"{}\">\n  {}\n</g>",
         stroke_width_placeholder(cumulative_scale),
@@ -1141,22 +1156,30 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Ray(r) | Entity::XLine(r) => {
-            let is_xline = matches!(e, Entity::XLine(_));
+            // A construction line has no end, so only its base point counts
+            // towards the bounds: a crop that had to contain the line itself
+            // would show nothing else. Where the line *stops* is the edge of
+            // the picture, which is not known until every entity has been
+            // walked, so the element is emitted as a placeholder and cut to
+            // the viewBox at assembly time (see [`infinite`]).
             ctx.consider(r.point.x, r.point.y);
-            let len = 1e6;
-            let (dx, dy) = (r.vector.x * len, r.vector.y * len);
-            let (x1, y1) = if is_xline {
-                (r.point.x - dx, r.point.y - dy)
-            } else {
-                (r.point.x, r.point.y)
-            };
-            let (x2, y2) = (r.point.x + dx, r.point.y + dy);
-            Some(format!(
-                "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke-dasharray=\"4,2\" stroke=\"{color}\"/>",
-                frame.x(x1),
-                frame.y(y1),
-                frame.x(x2),
-                frame.y(y2)
+            // The element's own frame: y already flipped, like every
+            // coordinate written here.
+            let (dx, dy) = (r.vector.x, -r.vector.y);
+            let len = dx.hypot(dy);
+            if !(len.is_finite() && len > 0.0) {
+                // No direction: nothing to draw, and nothing to report as
+                // unsupported either -- the type is handled.
+                return None;
+            }
+            Some(infinite::placeholder(
+                &infinite::InfiniteLine {
+                    matrix: ctx.svg_matrix,
+                    base: (frame.x(r.point.x), frame.y(r.point.y)),
+                    dir: (dx / len, dy / len),
+                    both_ways: matches!(e, Entity::XLine(_)),
+                },
+                &color,
             ))
         }
         Entity::Insert(i) => {
@@ -1449,6 +1472,12 @@ pub(crate) struct Rendered {
     /// [`ToSvgResult::origin`]); `[0, 0]` for a drawing near the origin.
     /// `view_box`, `extents` and the crop stay in world units.
     pub(crate) origin: [f64; 2],
+    /// The handles whose part draws an infinite line (RAY, XLINE). Their
+    /// extent is the base point alone, but what they draw reaches every
+    /// corner of the picture, so a window that keeps parts by their extent
+    /// (a tile, a viewport) must keep these whatever their extent says --
+    /// [`infinite::resolve`] cuts them to that window anyway.
+    pub(crate) unbounded: HashSet<String>,
 }
 
 impl Rendered {
@@ -1566,6 +1595,7 @@ pub(crate) fn render_selected(
 ) -> Rendered {
     let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<(String, String)> = Vec::new();
+    let mut unbounded: HashSet<String> = HashSet::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
@@ -1581,6 +1611,9 @@ pub(crate) fn render_selected(
         ctx.reset_entity_bounds();
         if let Some(svg) = render_entity(e, &mut ctx) {
             if !svg.is_empty() {
+                if svg.contains(infinite::MARKER) {
+                    unbounded.insert(e.common().handle.clone());
+                }
                 body.push((e.common().handle.clone(), svg));
             }
         }
@@ -1621,6 +1654,7 @@ pub(crate) fn render_selected(
         padded_rect,
         extents,
         origin,
+        unbounded,
     }
 }
 
@@ -1647,6 +1681,10 @@ pub(crate) fn assemble(
 /// a tile needs, so rasterizing it does not pay for the whole drawing.
 /// `view_box` is in world units; the document gets it shifted by
 /// `rendered.origin`, like the parts.
+///
+/// This is also where an infinite line learns where to stop
+/// ([`infinite::resolve`]): `view_box` is the first thing that says how far
+/// the picture reaches.
 pub(crate) fn assemble_subset(
     rendered: &Rendered,
     view_box: &ViewBox,
@@ -1659,7 +1697,11 @@ pub(crate) fn assemble_subset(
         .filter(|(handle, _)| keep(handle))
         .map(|(_, svg)| svg.as_str())
         .collect();
-    let resolved_body = resolve_stroke_widths(&body.join("\n  "), effective_stroke_width);
+    let vb = view_box.shifted(rendered.origin);
+    let resolved_body = infinite::resolve(
+        resolve_stroke_widths(&body.join("\n  "), effective_stroke_width),
+        infinite::window(&vb, effective_stroke_width),
+    );
     // HATCH pattern defs carry stroke-width placeholders too. Kept separate
     // from the body only so an empty defs list emits no <defs> block at all.
     let defs_block = if rendered.defs.is_empty() {
@@ -1669,7 +1711,6 @@ pub(crate) fn assemble_subset(
             resolve_stroke_widths(&rendered.defs.join("\n  "), effective_stroke_width);
         format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
     };
-    let vb = view_box.shifted(rendered.origin);
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
         vb.x, vb.y, vb.width, vb.height
@@ -1758,6 +1799,11 @@ fn suffix_def_id(def: &str, suffix: &str) -> String {
 /// `view_box` are written relative to `paper.origin`, and the viewport
 /// matrix takes the model parts from their `model.origin`-relative
 /// coordinates to the paper's.
+///
+/// An infinite line (RAY, XLINE) inside a viewport carries that same
+/// matrix into its placeholder, so the one clip at the end cuts the
+/// sheet's own construction lines and the model's alike, in the sheet's
+/// frame -- see [`infinite`].
 pub(crate) fn assemble_sheet(
     paper: &Rendered,
     model: &Rendered,
@@ -1843,28 +1889,40 @@ pub(crate) fn assemble_sheet(
                     continue;
                 }
             }
-            if model_extents
-                .get(h.as_str())
-                .is_some_and(|r| !r.intersects(&window_rect))
+            // An infinite line's extent is its base point, which says
+            // nothing about where it is seen; it stays in and is clipped
+            // to the sheet below.
+            if !model.unbounded.contains(h.as_str())
+                && model_extents
+                    .get(h.as_str())
+                    .is_some_and(|r| !r.intersects(&window_rect))
             {
                 continue;
             }
-            body.push_str(&suffix_url_refs(
-                &scale_stroke_placeholders(svg, scale),
-                &handle,
+            // This viewport's matrix is one more frame between the model
+            // fragment and the document, so an infinite line inside it
+            // carries it too: the clip below happens in the sheet's frame.
+            body.push_str(&infinite::transform(
+                suffix_url_refs(&scale_stroke_placeholders(svg, scale), &handle),
+                [a, b, c, d, e, f],
             ));
             body.push_str("\n  ");
         }
         body.push_str("</g></g>\n  ");
     }
-    let resolved_body = resolve_stroke_widths(&body, effective_stroke_width);
+    let vb = view_box.shifted(paper.origin);
+    // Both the sheet's own fragments and the ones inside a viewport are now
+    // written in the sheet's frame, so one clip to the sheet serves both.
+    let resolved_body = infinite::resolve(
+        resolve_stroke_widths(&body, effective_stroke_width),
+        infinite::window(&vb, effective_stroke_width),
+    );
     let defs_block = if defs.is_empty() {
         String::new()
     } else {
         let resolved_defs = resolve_stroke_widths(&defs.join("\n  "), effective_stroke_width);
         format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
     };
-    let vb = view_box.shifted(paper.origin);
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
         vb.x, vb.y, vb.width, vb.height

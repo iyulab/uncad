@@ -74,10 +74,15 @@ const RADIAL: &str = concat!(
     "/tests/fixtures/radial_r2000.dxf"
 );
 
+const INFINITE_LINES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/infinite_lines_r2000.dxf"
+);
+
 /// Every shipped fixture, so the checks that must hold for all of them
 /// (parsing, the JSON round trip) cover each new file from the day it
 /// lands.
-const ALL: [&str; 12] = [
+const ALL: [&str; 13] = [
     CP949,
     MIRRORED,
     DIMLFAC12,
@@ -90,6 +95,7 @@ const ALL: [&str; 12] = [
     ANGULAR_ORDINATE,
     VIEWPORT_STATES,
     RADIAL,
+    INFINITE_LINES,
 ];
 
 fn parse(path: &str) -> uncad::CadDatabase {
@@ -457,4 +463,262 @@ fn twisted_viewport_fixture_has_a_line_and_a_viewport() {
         })
         .svg;
     assert!(svg.contains("viewBox=\"45 -165 210 130\""), "{svg}");
+}
+
+// ------------------------------------------------------- infinite lines
+
+/// Decoded PNG pixels, enough to ask whether a drawing point was inked.
+struct Image {
+    width: u32,
+    height: u32,
+    samples: usize,
+    data: Vec<u8>,
+}
+
+impl Image {
+    fn decode(bytes: &[u8]) -> Image {
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let mut reader = decoder.read_info().expect("valid PNG");
+        let info = reader.info().clone();
+        let mut data = vec![0u8; (info.width * info.height * 4) as usize];
+        let frame = reader.next_frame(&mut data).expect("decodable frame");
+        data.truncate(frame.buffer_size());
+        Image {
+            width: frame.width,
+            height: frame.height,
+            samples: frame.color_type.samples(),
+            data,
+        }
+    }
+
+    /// The red channel at `(x, y)`, or 255 (white) outside the image.
+    fn value(&self, x: i64, y: i64) -> u8 {
+        if x < 0 || y < 0 || x >= i64::from(self.width) || y >= i64::from(self.height) {
+            return 255;
+        }
+        self.data[(y as usize * self.width as usize + x as usize) * self.samples]
+    }
+
+    /// The darkest pixel within two of `(px, py)`: a 1.25 px stroke lands
+    /// wherever rounding puts it, and antialiasing splits it over two
+    /// pixels, so the exact pixel is not the thing to ask about.
+    fn darkest_near(&self, (px, py): (f64, f64)) -> u8 {
+        let (x0, y0) = (px.round() as i64, py.round() as i64);
+        let mut darkest = 255;
+        for dy in -2..=2 {
+            for dx in -2..=2 {
+                darkest = darkest.min(self.value(x0 + dx, y0 + dy));
+            }
+        }
+        darkest
+    }
+
+    /// How much of the row `py` is ink, as a fraction of the width.
+    fn inked_fraction_of_row(&self, py: f64) -> f64 {
+        let y = py.round() as i64;
+        let inked = (0..i64::from(self.width))
+            .filter(|&x| (-1..=1).any(|dy| self.value(x, y + dy) < INK))
+            .count();
+        inked as f64 / f64::from(self.width)
+    }
+
+    /// Whether some row, and whether some column, is inked nearly end to
+    /// end -- a line crossing the whole image. One pass over the pixels:
+    /// asking row by row is the same answer and a hundred times the work
+    /// on a tile pyramid.
+    fn crossed_end_to_end(&self) -> (bool, bool) {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut rows = vec![0usize; h];
+        let mut cols = vec![0usize; w];
+        for (y, row) in rows.iter_mut().enumerate() {
+            for (x, column) in cols.iter_mut().enumerate() {
+                if self.data[(y * w + x) * self.samples] < INK {
+                    *row += 1;
+                    *column += 1;
+                }
+            }
+        }
+        (
+            rows.iter().any(|&n| n as f64 > 0.9 * w as f64),
+            cols.iter().any(|&n| n as f64 > 0.9 * h as f64),
+        )
+    }
+}
+
+const INK: u8 = 200;
+
+/// The fixture's construction lines: the XLINE first, then the RAY.
+fn construction_lines(
+    db: &uncad::CadDatabase,
+) -> (&uncad::model::RayEntity, &uncad::model::RayEntity) {
+    let mut xline = None;
+    let mut ray = None;
+    for e in &db.entities {
+        match e {
+            Entity::XLine(x) => xline = Some(x),
+            Entity::Ray(r) => ray = Some(r),
+            _ => {}
+        }
+    }
+    (xline.expect("XLINE"), ray.expect("RAY"))
+}
+
+#[test]
+fn infinite_lines_fixture_has_a_line_a_text_an_xline_and_a_ray() {
+    let db = parse(INFINITE_LINES);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("LINE", 1), ("TEXT", 1), ("XLINE", 1), ("RAY", 1)])
+    );
+    let (xline, ray) = construction_lines(&db);
+    assert_eq!(xline.common.handle, "32");
+    assert_eq!((xline.point.x, xline.point.y), (0.001, 0.001));
+    assert_eq!((xline.vector.x, xline.vector.y), (1.0, 0.0));
+    assert_eq!(ray.common.handle, "33");
+    assert_eq!((ray.point.x, ray.point.y), (0.001, 0.001));
+    assert_eq!((ray.vector.x, ray.vector.y), (0.0, 1.0));
+}
+
+#[test]
+fn an_infinite_line_never_enlarges_the_crop() {
+    let db = parse(INFINITE_LINES);
+    let mut finite = parse(INFINITE_LINES);
+    finite
+        .entities
+        .retain(|e| !matches!(e, Entity::Ray(_) | Entity::XLine(_)));
+    assert_eq!(finite.entities.len(), 2, "the LINE and the TEXT are left");
+
+    let with = db.to_svg(uncad::ToSvgOptions::default());
+    let without = finite.to_svg(uncad::ToSvgOptions::default());
+    // A RAY and an XLINE reach every corner of the world, so only their
+    // base point may count towards the crop -- and that one sits inside
+    // the LINE's box, which leaves the picture exactly as it was.
+    assert_eq!(
+        with.view_box, without.view_box,
+        "the construction lines moved the crop"
+    );
+    // They are still drawn -- two dashed elements -- and every coordinate
+    // in them is within a few pictures of the picture, not at the 1e6-unit
+    // endpoint the renderer used to give them (which is what overflowed
+    // the rasterizer at this scale).
+    let dashed: Vec<&str> = with
+        .svg
+        .lines()
+        .filter(|l| l.contains("stroke-dasharray"))
+        .collect();
+    assert_eq!(dashed.len(), 2, "{}", with.svg);
+    let (x0, _, x1, _) = with.view_box.world_bounds();
+    let reach = with.view_box.width.max(with.view_box.height) * 4.0;
+    for element in dashed {
+        for coordinate in element.split('"').filter_map(|t| t.parse::<f64>().ok()) {
+            assert!(
+                coordinate.abs() <= reach,
+                "{coordinate} is far outside a {} unit picture: {element}",
+                x1 - x0
+            );
+        }
+    }
+}
+
+#[test]
+fn the_construction_lines_are_cut_to_the_image_at_every_size() {
+    let db = parse(INFINITE_LINES);
+    // Every size the old 1e6-unit segment either panicked tiny-skia at
+    // (256, 8000) or survived by luck. The base point is (0.001, 0.001):
+    // the XLINE runs left and right through it, the RAY only upwards.
+    for fit in [256u32, 420, 512, 1024, 1568] {
+        let result = db
+            .to_png(uncad::ToPngOptions {
+                size: uncad::PngSize::FitLongEdge(fit),
+                ..Default::default()
+            })
+            .unwrap_or_else(|e| panic!("{fit} px: {e}"));
+        let image = Image::decode(&result.png);
+        let at = |x: f64, y: f64| result.view_box.world_to_px(x, y, result.px_per_unit);
+        for (point, what) in [
+            ((0.0004, 0.001), "the XLINE to the left of its base point"),
+            ((0.0016, 0.001), "the XLINE to the right of its base point"),
+            ((0.001, 0.0016), "the RAY above its base point"),
+        ] {
+            assert!(
+                image.darkest_near(at(point.0, point.1)) < INK,
+                "{fit} px: {what} is missing"
+            );
+        }
+        assert_eq!(
+            image.darkest_near(at(0.001, 0.0004)),
+            255,
+            "{fit} px: the RAY was drawn backwards, below its base point"
+        );
+        assert!(
+            image.inked_fraction_of_row(at(0.001, 0.001).1) > 0.9,
+            "{fit} px: the XLINE does not cross the whole image"
+        );
+    }
+}
+
+#[test]
+fn a_deep_tile_pyramid_keeps_the_construction_lines_and_does_not_panic() {
+    use uncad::export::{export_package, ExportOptions};
+
+    let db = parse(INFINITE_LINES);
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("infinite_lines_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // The drawing is 0.002 units across, so its one text already stands a
+    // thousand pixels tall in the overview and the pyramid would stop at
+    // one level; an absurd legibility target asks for the deep one the
+    // panic needed. Level 3 is ~4.2 million pixels per drawing unit, where
+    // the segment the renderer used to draw would have reached 4e12 px.
+    let options = ExportOptions {
+        target_text_px: 50_000.0,
+        max_levels: 3,
+        max_tiles: 200,
+        ..Default::default()
+    };
+    let report = export_package(&db, &dir, &options).expect("the package must be written");
+    let frame = report.frames.first().expect("one frame");
+    assert_eq!(frame.levels.len(), 3, "{:?}", frame.levels);
+    let deepest = frame.levels.last().expect("a deepest level");
+    assert!(deepest.ppu > 4e6, "{}", deepest.ppu);
+
+    // The XLINE crosses a whole row of the deepest level's tiles and the
+    // RAY a whole column, although the extent of both is one base point in
+    // a single tile: a window that keeps entities by their extent has to
+    // make an exception for the lines that have none.
+    //
+    // (The world rectangles in `tiles.json` are rounded to the drawing's
+    // own `$LUPREC` precision, 3 decimals, which says nothing at this
+    // scale -- so the tiles are read as images, not as coordinates.)
+    let tiles: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("tiles.json")).expect("tiles.json"))
+            .expect("tiles.json is JSON");
+    let mut crossed_by_the_xline = 0;
+    let mut crossed_by_the_ray = 0;
+    let mut deepest_tiles = 0;
+    for tile in tiles["tiles"].as_array().expect("tiles") {
+        if tile["z"].as_u64() != Some(u64::from(deepest.z)) {
+            continue;
+        }
+        deepest_tiles += 1;
+        let png =
+            std::fs::read(dir.join(tile["png"].as_str().expect("a path"))).expect("the tile image");
+        let (row, column) = Image::decode(&png).crossed_end_to_end();
+        crossed_by_the_xline += usize::from(row);
+        crossed_by_the_ray += usize::from(column);
+    }
+    assert!(
+        deepest_tiles >= 9,
+        "{deepest_tiles} tiles at the deepest level"
+    );
+    assert!(
+        crossed_by_the_xline >= 5,
+        "only {crossed_by_the_xline} of {deepest_tiles} deep tiles show the XLINE across them"
+    );
+    assert!(
+        crossed_by_the_ray >= 2,
+        "only {crossed_by_the_ray} of {deepest_tiles} deep tiles show the RAY down them"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

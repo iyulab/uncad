@@ -9,8 +9,9 @@ they land.
 
 Every file was written from scratch by `make_fixtures.py` in this directory
 on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin, the
-angular/ordinate, the hatched-viewport, the viewport-states and the radial
-fixtures on 2026-09-22) -- no third-party drawing was copied, so they are
+angular/ordinate, the hatched-viewport, the viewport-states, the radial and
+the infinite-lines fixtures on 2026-09-22) -- no third-party drawing was
+copied, so they are
 redistributable under the repository's GPL-3. All are
 R2000 (`$ACADVER AC1015`) text DXF with CRLF line endings, at most 2.5 KB
 each, and above the 256-byte minimum LibreDWG's `dwg_read_dxf` enforces.
@@ -37,6 +38,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `radial_r2000.dxf` | 1425 | 6 entities, 1 DIMSTYLE | A RADIUS, a DIAMETER and a 3-point angular DIMENSION -- the three kinds no corpus DXF carries -- each with its circle or arc, no cached `*D` block |
 | `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
 | `nested_attrib_r2000.dxf` | 2174 | 3 model-space entities, 2 blocks (6 entities) | A block with an ATTDEF inserted inside another block, its ATTRIB value owned by the block record: the attribute of a *nested* block reference, which the export used to drop |
+| `infinite_lines_r2000.dxf` | 673 | 4 | An XLINE and a RAY through the middle of a drawing 0.002 units across: the two entities with no end, at a scale where drawing them a fixed 1e6 units long panicked the rasterizer |
 
 ## cp949_r2000.dxf
 
@@ -502,6 +504,40 @@ definition point (the centre) makes the value 0 and fails the test. Since no
 `60°` -- the `R` and diameter-sign prefixes are DIMPOST, which
 the formatter does not apply yet (`docs/VLM_EXPORT_DESIGN.md`, "what stays
 out").
+
+## infinite_lines_r2000.dxf
+
+The two entities that have no end, at a scale that makes the difference
+between "long" and "as far as the picture goes" fatal. Written by
+`make_fixtures.py`'s `infinite_lines()` on 2026-09-22 for the RAY/XLINE
+clipping fix. HEADER: `$INSUNITS 4`. TABLES: a LAYER table with `0` only.
+ENTITIES, all in model space:
+
+| Handle | Entity | Groups | uncad |
+|---|---|---|---|
+| `30` | LINE | `10` (0,0), `11` (0.002, 0.002) | the diagonal; the only entity with a size, so the crop is its box |
+| `31` | TEXT | `10` (0.0013, 0.0002), `40` 0.0006, `1` `X` | one text class, which is what lets the export build a tile pyramid at all (`depth_for` returns one level for a drawing with no text) |
+| `32` | XLINE (`AcDbXline`) | `10` (0.001, 0.001), `11` (1, 0) | a horizontal line across the whole image, through the middle |
+| `33` | RAY (`AcDbRay`) | `10` (0.001, 0.001), `11` (0, 1) | a vertical line from the middle to the top edge -- and nothing below it |
+
+What the fixture pins (`tests/fixtures.rs`):
+
+| Item | uncad |
+|---|---|
+| crop / viewBox | `[0, 0, 0.002, 0.002]` -> `viewBox="-0.00004 -0.00204 0.00208 0.00208"`, the same with the XLINE and the RAY removed: their extent is the base point alone |
+| `drawing.svg` | two `stroke-dasharray="4,2"` lines, every coordinate within a few pictures of the picture (before 0.3.0 they ran to +/-1000000.001) |
+| PNG at 256, 420, 512, 1024 and 1568 px | ink at (0.0004, 0.001) and (0.0016, 0.001) -- the XLINE both ways -- and at (0.001, 0.0016); white at (0.001, 0.0004), where a RAY must not be drawn |
+| `export_package` with `target_text_px` 50000, 3 levels | 3 levels, deepest 4.2e6 px/unit, and the XLINE crosses a row of deep tiles whose own extent it never touches |
+
+Before 0.3.0 both were drawn as a segment 1e6 units long. A 1568 px image of
+this drawing is about 750 thousand pixels per drawing unit, so that endpoint
+sat 7e11 px off the canvas: usvg passes it through, tiny-skia's scan
+converter builds its 24.8 fixed-point edge list out of it, and the
+assertion `edges[curr_idx].last_y >= curr_y as i32` fails (`--fit 256` and
+`--fit 8000` panicked; 512, 1024 and 1568 happened to survive the same
+document, which is how the bug stayed hidden). The corpus's
+`2000/ConstructionLine.dwg` holds one XLINE and survives only because its
+crop is around 1 unit wide.
 
 ## What did not work
 

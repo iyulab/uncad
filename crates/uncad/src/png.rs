@@ -144,6 +144,14 @@ pub enum PngError {
     /// underlying error type so the encoder crate stays out of this crate's
     /// public API.
     Encode(String),
+    /// The rasterizer panicked. tiny-skia's scan converter asserts instead
+    /// of returning an error when a path's coordinates overflow its
+    /// fixed-point edge list (`edges[curr_idx].last_y >= curr_y`), which a
+    /// bug in this crate's SVG -- or a drawing nobody has thought of yet --
+    /// can still provoke; [`draw`] catches it so a caller, and the export's
+    /// tile threads, get an error rather than a dead process. Carries the
+    /// panic's own message when it had one. Since 0.3.0.
+    RenderPanic(String),
 }
 
 impl std::fmt::Display for PngError {
@@ -161,10 +169,35 @@ impl std::fmt::Display for PngError {
                 "render size {width}x{height} exceeds the {max_edge} px limit (raise max_edge, or use a smaller --fit/--scale)"
             ),
             PngError::Encode(e) => write!(f, "PNG encoding failed: {e}"),
+            PngError::RenderPanic(e) => write!(f, "the rasterizer panicked: {e}"),
         }
     }
 }
 impl std::error::Error for PngError {}
+
+/// [`resvg::render`] with a panic turned into a [`PngError::RenderPanic`].
+///
+/// resvg hands the path straight to tiny-skia, whose scan converter asserts
+/// on coordinates its 24.8 fixed-point edge list cannot hold. Nothing is
+/// read back out of `pixmap` after a panic -- the error is returned
+/// instead -- so asserting unwind safety over it is sound.
+fn draw(
+    tree: &usvg::Tree,
+    transform: tiny_skia::Transform,
+    pixmap: &mut tiny_skia::Pixmap,
+) -> Result<(), PngError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resvg::render(tree, transform, &mut pixmap.as_mut());
+    }))
+    .map_err(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "no message".to_string());
+        PngError::RenderPanic(message)
+    })
+}
 
 /// Renders `db` straight to PNG bytes -- the intermediate SVG text never
 /// touches disk.
@@ -268,11 +301,11 @@ pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, PngError> {
     let width = (size.width() * scale).round() as u32;
     let height = (size.height() * scale).round() as u32;
     let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(PngError::EmptyCanvas)?;
-    resvg::render(
+    draw(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
+        &mut pixmap,
+    )?;
     pixmap
         .encode_png()
         .map_err(|e| PngError::Encode(e.to_string()))
@@ -293,11 +326,11 @@ fn rasterize(
         pixmap.fill(tiny_skia::Color::WHITE);
     }
     let scale = px_per_unit as f32;
-    resvg::render(
+    draw(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
+        &mut pixmap,
+    )?;
     match background {
         Background::White => encode_rgb8(&pixmap),
         Background::Transparent => pixmap
@@ -322,7 +355,7 @@ pub(crate) fn render_region(
     let scale = px_per_unit as f32;
     let transform = tiny_skia::Transform::from_scale(scale, scale)
         .post_translate(-(origin_px.0 as f32), -(origin_px.1 as f32));
-    resvg::render(tree, transform, &mut pixmap.as_mut());
+    draw(tree, transform, &mut pixmap)?;
     encode_rgb8(&pixmap)
 }
 
