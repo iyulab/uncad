@@ -1,0 +1,238 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  9
+$DIMDEC
+ 70
+2
+  9
+$DIMADEC
+ 70
+0
+  9
+$DIMLUNIT
+ 70
+2
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+ENDTAB
+  0
+TABLE
+  2
+DIMSTYLE
+ 70
+1
+  0
+DIMSTYLE
+105
+30
+  2
+STANDARD
+ 70
+0
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+CIRCLE
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+5.0
+  0
+CIRCLE
+  8
+0
+ 10
+20.0
+ 20
+5.0
+ 30
+0.0
+ 40
+5.0
+  0
+ARC
+  8
+0
+ 10
+40.0
+ 20
+0.0
+ 30
+0.0
+ 40
+10.0
+ 50
+0.0
+ 51
+60.0
+  0
+DIMENSION
+  8
+0
+100
+AcDbDimension
+  2
+*D1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+1.5
+ 21
+2.0
+ 31
+0.0
+ 70
+36
+  1
+
+ 42
+5.0
+  3
+STANDARD
+100
+AcDbRadialDimension
+ 15
+3.0
+ 25
+4.0
+ 35
+0.0
+ 40
+0.0
+  0
+DIMENSION
+  8
+0
+100
+AcDbDimension
+  2
+*D2
+ 10
+20.0
+ 20
+0.0
+ 30
+0.0
+ 11
+20.0
+ 21
+5.0
+ 31
+0.0
+ 70
+35
+  1
+
+ 42
+10.0
+  3
+STANDARD
+100
+AcDbDiametricDimension
+ 15
+20.0
+ 25
+10.0
+ 35
+0.0
+ 40
+0.0
+  0
+DIMENSION
+  8
+0
+100
+AcDbDimension
+  2
+*D3
+ 10
+44.33012701892219
+ 20
+2.5
+ 30
+0.0
+ 11
+46.0
+ 21
+3.0
+ 31
+0.0
+ 70
+37
+  1
+
+ 42
+1.0471975511965976
+  3
+STANDARD
+100
+AcDb3PointAngularDimension
+ 13
+50.0
+ 23
+0.0
+ 33
+0.0
+ 14
+45.0
+ 24
+8.660254037844386
+ 34
+0.0
+ 15
+40.0
+ 25
+0.0
+ 35
+0.0
+  0
+ENDSEC
+  0
+EOF
