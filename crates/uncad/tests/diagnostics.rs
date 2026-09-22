@@ -67,7 +67,7 @@ fn diagnostics_survive_the_json_round_trip_and_default_when_absent() {
 
     // JSON written before the field existed still loads, as a clean read.
     let old: CadDatabase = serde_json::from_str(
-        r#"{"entities":[],"tables":{"layers":{},"block_records":{},"mlinestyles":{}}}"#,
+        r#"{"entities":[],"tables":{"layers":{},"dim_styles":{},"block_records":{},"mlinestyles":{}}}"#,
     )
     .expect("old shape");
     assert_eq!(old.read_diagnostics, ReadDiagnostics::default());

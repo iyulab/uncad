@@ -336,6 +336,16 @@ The rule is worth only what the DXF path costs. The binary format always stores 
 once this crate's DXF reading no longer goes through this importer the rule buys nothing and
 only loses genuine zeros: remove it then, together with the deviation in `tests/golden.rs`.
 
+**Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
+rather than carries, and the format writes a style variable only when it differs from the value
+the application starts from. This library holds a style as a struct with no "the file did not
+write this group", so a variable the file omitted is indistinguishable here from one it wrote:
+the model gets `Some(value)` for all of them. For a DWG that is exactly right -- the binary
+format stores every variable -- and for a DXF this reader reports the value the library started
+from rather than "not stated". The other reader of DXF, which sees the groups themselves,
+reports the difference. Like the zero-measurement rule above, this one ends when this crate's
+DXF reading no longer goes through this importer.
+
 **Group 10 of a two-line angular dimension.** For that one subtype the library does not store
 group 10: its own `def_pt` holds group 16 instead. Reporting `def_pt` as group 10 would mean
 the field held one point for most drawings and another for these, so it is reported as "not

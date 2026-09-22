@@ -7,7 +7,7 @@ use crate::dynapi::{get_array_field, get_field};
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use uncad_model::tables::{BlockRecord, LayerRecord, Tables};
+use uncad_model::tables::{BlockRecord, DimStyleRecord, LayerRecord, Tables};
 
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
@@ -25,6 +25,7 @@ pub(crate) unsafe fn convert_tables(
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
+    let mut dim_styles = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -51,6 +52,13 @@ pub(crate) unsafe fn convert_tables(
                     block_records.insert(name.clone(), BlockRecord { name, entities });
                 }
             }
+        } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMSTYLE {
+            let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
+            if !object_ptr.is_null() {
+                if let Some(record) = convert_dim_style(text, object_ptr) {
+                    dim_styles.insert(record.name.clone(), record);
+                }
+            }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINESTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
@@ -63,9 +71,36 @@ pub(crate) unsafe fn convert_tables(
 
     Tables {
         layers,
+        dim_styles,
         block_records,
         mlinestyles,
     }
+}
+
+/// Reads a DIMSTYLE table entry -- the settings a dimension names rather than
+/// carries (see [`DimStyleRecord`]).
+///
+/// Every value comes back `Some`. This library holds a style as a struct with
+/// no "the file did not write this group", so which of these the file stated
+/// and which are the values it starts from cannot be told apart here; the
+/// other reader of this format, which sees the groups themselves, can.
+fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimStyleRecord> {
+    let name = text.field(object_ptr, "DIMSTYLE", "name")?;
+    let number = |field: &str| get_field::<f64>(object_ptr, "DIMSTYLE", field);
+    Some(DimStyleRecord {
+        name,
+        post: text.field(object_ptr, "DIMSTYLE", "DIMPOST"),
+        scale: number("DIMSCALE"),
+        length_factor: number("DIMLFAC"),
+        tolerances: get_field::<u8>(object_ptr, "DIMSTYLE", "DIMTOL").map(|v| v != 0),
+        limits: get_field::<u8>(object_ptr, "DIMSTYLE", "DIMLIM").map(|v| v != 0),
+        tolerance_upper: number("DIMTP"),
+        tolerance_lower: number("DIMTM"),
+        decimal_places: get_field::<i16>(object_ptr, "DIMSTYLE", "DIMDEC").map(i32::from),
+        tolerance_decimal_places: get_field::<i16>(object_ptr, "DIMSTYLE", "DIMTDEC")
+            .map(i32::from),
+        text_height: number("DIMTXT"),
+    })
 }
 
 /// Resolves a block's real name.
