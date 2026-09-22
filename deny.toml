@@ -26,8 +26,8 @@
 # setting this takes the gathered graph from 92 crates to 134, and the
 # test-only crate does appear in the dependency trees the tool prints -- yet
 # its license is not evaluated. Adding that license to `allow` below reports
-# it as "not encountered", and deleting the matching `exceptions` entry does
-# not make the check fail. No reason for the omission is reported, so the
+# it as "not encountered", and a per-crate `exceptions` entry for it makes no
+# difference either way. No reason for the omission is reported, so the
 # cause is unknown; only the behaviour is established.
 #
 # Until it is understood, the license grade of a development dependency is
@@ -73,11 +73,10 @@ exceptions = [
     { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
-    # Weak, file-scope copyleft, consumed unmodified and only by this
-    # workspace's tests. Granted to this crate by name: a second MPL crate
-    # arriving later must be argued on its own, which is the whole reason
-    # the license is not in the `allow` list above.
 ]
+# No entry for the test-only MPL-2.0 dependency: this gate does not evaluate
+# development dependencies (see `[graph]`), so an entry would claim a check
+# that does not happen.
 
 [bans]
 # A second copy of a crate is a build-size and correctness smell, but not a
