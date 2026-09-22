@@ -917,8 +917,8 @@ layout" covers where a new test belongs. The counts below are what
 `cargo test --workspace -- --list` reports at 0.3.0; regenerate them from that command
 rather than editing them by hand.
 
-`cargo test --workspace` runs 326 tests (325 of them by default; `corpus_sweep` is
-listed but `#[ignore]`d). 142 of them are `uncad` unit tests, by module:
+`cargo test --workspace` runs 340 tests (339 of them by default; `corpus_sweep` is
+listed but `#[ignore]`d). 145 of them are `uncad` unit tests, by module:
 `svg*.rs` 50 -- `svg.rs` 21 (HATCH edge approximation, stroke-width substitution,
 block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation,
 non-finite coordinate defense, block-reference recursion blowup), `svg/infinite.rs` 16
@@ -935,18 +935,19 @@ gradient color resolution, stop ordering, `gradient_name` classification), `expo
 `json.rs` 6, `acis.rs` 6 (SAT record
 parsing, pointer resolution, wireframe extraction), `png.rs` 5 (SVG -> PNG size, scaling,
 errors, the bundled face's cap height, plus the `circle.dwg` pipeline),
-`tables.rs` 4 (the LAYER TRUECOLOR 256-sentinel fallback), `visibility.rs` 3 and
+`tables.rs` 4 (the LAYER TRUECOLOR 256-sentinel fallback), `limits.rs` 3 (the
+bounds a corrupt file is held to, and how they are reported), `visibility.rs` 3 and
 `header.rs` 3. Most are pure-function tests verifiable with synthetic data, which makes
 them genuinely useful regression guards: whether `crop::outliers` sets aside the 3256x
 INSERT and nothing else, or whether `parse_sat_records` really stops at the
 `End-of-ACIS-data` marker, is decidable without a DWG file at all.
 
-**Real-file tests**: 139 across the 22 integration files in `crates/uncad/tests/`, plus
+**Real-file tests**: 149 across the 23 integration files in `crates/uncad/tests/`, plus
 45 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
 `parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
 (`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
 unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
-precondition). 18 of the 22 integration files read that same corpus:
+precondition). 19 of the 23 integration files read that same corpus:
 `export.rs` (27: every file the design lists, the overview budget, the tile grid per
 level, sidecar affines that round-trip, the 32 KB sidecar cap, records pointing only at
 written tiles, byte-identical output on a second run, a re-export clearing the previous
@@ -962,8 +963,13 @@ with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic
 garbage input), `visibility.rs` (5), `text_fields.rs` (5), `polyline_closed.rs` (3),
 `r2007_dxf_handles.rs` (3: an R2018 DXF resolving the same layers, block names and hidden
 entities as its DWG twin, and no R2007+ corpus DXF leaving an entity without a layer),
-`corrupt_dwg.rs` (2: a one-byte corruption of a header date and a truncated file return
-an error instead of killing the process),
+`corrupt_dwg.rs` (3: a one-byte corruption of a header date, a truncated file and an
+attribute chain that points back at its own INSERT return an error or a bounded walk
+instead of killing the process), `limits.rs` (10: the one-byte corruption that used to
+ask for 12 GB, a block that references itself, a block chain past the depth cap, the
+whole-document and per-entity SVG budgets, a polyline past the point cap, a hatch whose
+pattern tile dwarfs its shape, an entity at 1e150 and an arc of absurd radius -- each
+asserting a bound or a screened entity, never a crash),
 `acceptance.rs` (1: five agent questions answered from an exported package alone, see
 `docs/EVAL.md`), `acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
 `entities` and in `tables.block_records`) and `corpus_sweep.rs` (1, `#[ignore]`d: parses

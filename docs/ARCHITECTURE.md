@@ -69,7 +69,7 @@ deletes and recopies the directory, so both patches have to be re-applied after 
 re-vendor. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
 tests read fixtures from `lib/libredwg/test/test-data/` -- `png.rs`'s own end-to-end
-test, 18 of the 22 integration files in `uncad` (all but `fixtures.rs`,
+test, 19 of the 23 integration files in `uncad` (all but `fixtures.rs`,
 `block_transforms.rs`, `control_chars.rs` and `sheets_compositing.rs`, which use this
 project's own DXF fixtures) and `tests/documented_invocations.rs` in `uncad-cli`. In
 short, the submodule is a precondition of `cargo test`, not of `cargo build`.
@@ -104,7 +104,7 @@ it needs access to**.
 
 **Unit tests** exist where they are precisely because they can call private helpers.
 Everything that needs no external file -- color resolution, SVG generation, SAT parsing,
-the crop rules, polyline geometry -- lives here: 142 of the 326 tests
+the crop rules, polyline geometry -- lives here: 145 of the 340 tests
 (`docs/CAVEATS.md` owns that count; it is repeated here only to size the layer). One
 exception: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` reads a real DWG
 end-to-end but sits here because it needs the private `png_dimensions` helper.
