@@ -29,18 +29,55 @@
 //! Excluded entities are not drawn; the report lists them so an export
 //! can leave them out of its records too.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::header::Header;
 use crate::svg::bounds::Box2D;
 
 /// An axis-aligned rectangle in world (drawing) units.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// JSON form: the `[x0, y0, x1, y1]` array the package documents for every
+/// box (`docs/VLM_EXPORT_DESIGN.md`, section 3), so a rectangle reads the
+/// same in `manifest.json`, `sheets.json`, `report.json` and the records.
+/// Reading accepts the `{min_x, min_y, max_x, max_y}` object 0.3.0's
+/// derived `Serialize` used to write as well.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
     pub min_x: f64,
     pub min_y: f64,
     pub max_x: f64,
     pub max_y: f64,
+}
+
+impl Serialize for Rect {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        [self.min_x, self.min_y, self.max_x, self.max_y].serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Rect {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Rect, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Form {
+            Array([f64; 4]),
+            Object {
+                min_x: f64,
+                min_y: f64,
+                max_x: f64,
+                max_y: f64,
+            },
+        }
+        Ok(match Form::deserialize(deserializer)? {
+            Form::Array([min_x, min_y, max_x, max_y]) => Rect::new(min_x, min_y, max_x, max_y),
+            Form::Object {
+                min_x,
+                min_y,
+                max_x,
+                max_y,
+            } => Rect::new(min_x, min_y, max_x, max_y),
+        })
+    }
 }
 
 impl Rect {
@@ -895,6 +932,46 @@ mod tests {
         // fifth entity the guard flagged (a large but touching one is never
         // flagged, so build the case with a forced seed): skip -- covered by
         // the corpus test in tests/crop.rs.
+    }
+
+    #[test]
+    fn a_rect_is_the_documented_array_and_reads_both_forms() {
+        // The package documents every box as `[x0, y0, x1, y1]`
+        // (docs/VLM_EXPORT_DESIGN.md section 3), which is what the record
+        // bboxes and tiles.json have always written; the derive wrote an
+        // object, so the same rectangle had two shapes in one package.
+        let rect = Rect::new(-6.35, -6.35, 273.05, 209.55);
+        assert_eq!(
+            serde_json::to_string(&rect).unwrap(),
+            "[-6.35,-6.35,273.05,209.55]"
+        );
+        assert_eq!(
+            serde_json::from_str::<Rect>("[-6.35,-6.35,273.05,209.55]").unwrap(),
+            rect
+        );
+        // The object form 0.3.0 wrote still reads back.
+        let object = r#"{"min_x":-6.35,"min_y":-6.35,"max_x":273.05,"max_y":209.55}"#;
+        assert_eq!(serde_json::from_str::<Rect>(object).unwrap(), rect);
+        // And so does every struct that holds one.
+        let report = CropReport {
+            source: CropSource::Content,
+            rect,
+            content: Some(rect),
+            padding_units: 0.5,
+            header_extents: None,
+            excluded: vec![Excluded {
+                handle: "5".into(),
+                type_name: "LINE".into(),
+                rect,
+                reason: ExcludeReason::ScaleOutlier,
+            }],
+        };
+        let text = serde_json::to_string(&report).unwrap();
+        assert!(
+            text.contains(r#""rect":[-6.35,-6.35,273.05,209.55]"#),
+            "{text}"
+        );
+        assert_eq!(serde_json::from_str::<CropReport>(&text).unwrap(), report);
     }
 
     #[test]

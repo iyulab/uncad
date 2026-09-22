@@ -142,6 +142,95 @@ fn the_package_has_every_file_and_a_profile_sized_overview() {
 }
 
 #[test]
+fn every_world_box_in_the_package_is_the_documented_array() {
+    // docs/VLM_EXPORT_DESIGN.md section 3: "boxes are [x0, y0, x1, y1] in
+    // world units". The record bboxes, tiles.json and manifest.sheets[].rect
+    // always were; the manifest's overview/frames/crop and sheets.json went
+    // through serde's derive on `Rect` and came out as
+    // {"min_x": .., "min_y": .., "max_x": .., "max_y": ..}, so the same
+    // rectangle had two shapes in one package (a reader indexing
+    // manifest.overview.world[2] hit a KeyError).
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("boxes");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let sheets = read_json(&tmp.0.join("sheets.json"));
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let report_json = read_json(&tmp.0.join("report.json"));
+
+    // Every box, wherever it comes from, is four numbers.
+    let box_of = |value: &Value, what: &str| -> [f64; 4] {
+        let array = value
+            .as_array()
+            .unwrap_or_else(|| panic!("{what} is an array, got {value}"));
+        assert_eq!(array.len(), 4, "{what}: {value}");
+        let mut out = [0.0; 4];
+        for (slot, v) in out.iter_mut().zip(array) {
+            *slot = v.as_f64().unwrap_or_else(|| panic!("{what}: {value}"));
+        }
+        out
+    };
+    let overview = box_of(&manifest["overview"]["world"], "manifest.overview.world");
+    assert!(overview[2] > overview[0] && overview[3] > overview[1]);
+    // The array holds the same numbers the report's struct does.
+    let world = report.overview.world;
+    for (got, want) in overview
+        .iter()
+        .zip([world.min_x, world.min_y, world.max_x, world.max_y])
+    {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    }
+    box_of(&manifest["crop"]["rect"], "manifest.crop.rect");
+    box_of(&manifest["crop"]["content"], "manifest.crop.content");
+    box_of(
+        &manifest["crop"]["header_extents"],
+        "manifest.crop.header_extents",
+    );
+    for excluded in manifest["crop"]["excluded"].as_array().unwrap() {
+        box_of(&excluded["rect"], "manifest.crop.excluded[].rect");
+    }
+    for excluded in report_json["excluded"].as_array().unwrap() {
+        box_of(&excluded["rect"], "report.excluded[].rect");
+    }
+    for frame in manifest["frames"].as_array().unwrap() {
+        box_of(&frame["content"], "manifest.frames[].content");
+        box_of(
+            &frame["overview"]["world"],
+            "manifest.frames[].overview.world",
+        );
+    }
+    // The same frame content in tiles.json has always been an array: the two
+    // now agree to the rounding tiles.json applies.
+    let content = box_of(&manifest["frames"][0]["content"], "frames[0].content");
+    let rounded = box_of(&tiles["frames"][0]["content"], "tiles.frames[0].content");
+    for (a, b) in content.iter().zip(rounded) {
+        assert!((a - b).abs() < 1e-3, "{a} vs {b}");
+    }
+    for sheet in sheets["sheets"].as_array().unwrap() {
+        box_of(&sheet["rect"], "sheets.json rect");
+        box_of(&sheet["overview"]["world"], "sheets.json overview.world");
+        for viewport in sheet["viewports"].as_array().unwrap() {
+            box_of(&viewport["frame"], "sheets.json viewports[].frame");
+        }
+    }
+    // manifest.sheets[].rect (rounded, always an array) and sheets.json's
+    // rect are the same rectangle.
+    let from_manifest = box_of(&manifest["sheets"][0]["rect"], "manifest.sheets[0].rect");
+    let from_sheets = box_of(&sheets["sheets"][0]["rect"], "sheets.json sheets[0].rect");
+    for (a, b) in from_manifest.iter().zip(from_sheets) {
+        assert!((a - b).abs() < 1e-3, "{a} vs {b}");
+    }
+}
+
+#[test]
 fn tiles_cover_the_levels_and_their_sidecars_round_trip() {
     let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
     let tmp = TempDir::new("tiles");

@@ -173,6 +173,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- The package wrote world rectangles in two shapes: `manifest.json`'s `overview.world`,
+  `frames[].content`, `crop.*` and everything in `sheets.json` came out of serde's derive
+  as `{"min_x": .., "min_y": .., "max_x": .., "max_y": ..}`, while tiles.json, every
+  sidecar `world`, every record `bbox` and `manifest.sheets[].rect` used the
+  `[x0, y0, x1, y1]` array the design documents -- the same layout's rectangle read one
+  way in the manifest and the other in `sheets.json`. `crop::Rect` serializes as that
+  array now, and reads both forms back, so an 0.3.0 document still loads.
 - Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
   points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
   stream order, so `line2_end` held the arc point and the sector probe lay on the line
