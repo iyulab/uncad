@@ -18,7 +18,7 @@ linked against `libredwg-sys`, reading `Dwg_Data.header.codepage` and every
 entity field through `dwg_dynapi_*`) and through the CLI
 (`uncad <file> -o out.json --pretty`). "0.2.0" columns show what the code
 produced before the 0.3.0 work; the code-page conversion (P-1), the header
-(P0) and the LWPOLYLINE closed bit (P4, first part) have landed since, and
+(P0) and P4's closed bit, bulges and OCS transform have landed since, and
 `tests/fixtures.rs` asserts the decoded values.
 
 | File | Bytes | Objects read | Purpose |
@@ -79,7 +79,7 @@ HEADER: `$INSUNITS 4` only, so `header.codepage` is LibreDWG's DXF default
 30 (`ANSI_1252`) and `$DWGCODEPAGE` reads `"ANSI_1252"`. No TABLES section:
 every entity's `layer` handle is unresolved and uncad reports `layer: ""`.
 
-| Handle | Entity | DXF groups | LibreDWG in-memory (probe) | uncad 0.2.0 | Expected after P4 (OCS + bulges; bit 512 already reads) |
+| Handle | Entity | DXF groups | LibreDWG in-memory (probe) | uncad 0.2.0 | uncad 0.3.0 (asserted in `tests/fixtures.rs`) |
 |---|---|---|---|---|---|
 | 20 | LWPOLYLINE | `70 = 1`, 4 vertices (0,0) (100,0) (100,50) (0,50), `210/220/230 = 0,0,-1` | `flag = 513` (512 closed + 1 has-extrusion), `num_bulges = 0`, `extrusion = (0,0,-1)` | `closed: true`, 4 vertices, no extrusion | `closed: true` (now read from bit 512), `extrusion (0,0,-1)`, WCS x in [-100, 0] |
 | 21 | LWPOLYLINE | `70 = 0`, same vertices, `42 = 0.41421356` after the second vertex, `210/220/230 = 0,0,1` | `flag = 16`, `num_bulges = 4`, `bulges = [0, 0.41421356, 0, 0]`, `extrusion = (0,0,1)` | `closed: false`, 4 vertices, bulges dropped | `bulges [0, 0.41421356, 0, 0]`: a 90-degree arc from (100,0) to (100,50) |

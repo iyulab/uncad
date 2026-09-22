@@ -445,8 +445,12 @@ anchoring) except MTEXT word-wrapping at `rect_width`; **P3 done** in its
 measurements, `user_text`/cached-label/formatted display text with its
 source, DIMSTYLE table and effective DIMLFAC, basic formatter; the full
 DIMSTYLE formatter with DIMPOST/DIMRND/DIMDSEP and XDATA overrides stays in
-1.0); the LWPOLYLINE closed-bit fix from **P4** is in. Everything else below
-is still open.
+1.0); **P4** is in (bit 512, bulges and widths, the VERTEX_2D walk, `geom.rs`
+with OCS -> WCS, segments, length, signed area, arc-aware bounds and a
+self-intersection check; the OCS applied to CIRCLE, ARC, LWPOLYLINE,
+POLYLINE_2D, TEXT, ATTRIB, INSERT and SOLID -- HATCH boundaries and the
+DIMENSION text point are still stored-frame). Everything else below is
+still open.
 
 | Release | Phase | Files |
 |---|---|---|

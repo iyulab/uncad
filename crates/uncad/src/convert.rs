@@ -223,6 +223,33 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     edges
 }
 
+/// An entity's stored OCS normal (`extrusion`, DXF 210), normalized; the
+/// world z axis when absent, zero or unreadable.
+fn read_extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
+    get_field::<Point3D>(entity_ptr, dxfname, "extrusion")
+        .map(crate::geom::normalize_extrusion)
+        .unwrap_or(crate::geom::WORLD_Z)
+}
+
+/// The bulge of every VERTEX_2D a POLYLINE_2D owns, in order.
+///
+/// # Safety
+/// `obj` must be a valid, non-null `POLYLINE_2D` `Dwg_Object`.
+unsafe fn polyline_2d_bulges(obj: *mut libredwg_sys::Dwg_Object) -> Vec<f64> {
+    let mut bulges = Vec::new();
+    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+    while !sub.is_null() {
+        let sub_fixedtype =
+            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
+        if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D {
+            let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
+            bulges.push(get_field::<f64>(sub_entity_ptr, "VERTEX_2D", "bulge").unwrap_or(0.0));
+        }
+        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
+    }
+    bulges
+}
+
 /// The justification and style fields TEXT and ATTRIB share (same dynapi
 /// names on both types).
 struct TextLayout {
@@ -232,6 +259,29 @@ struct TextLayout {
     width_factor: f64,
     oblique_angle: f64,
     style: String,
+}
+
+/// Moves a TEXT/ATTRIB's anchor points from its OCS (at `elevation`) to
+/// world coordinates.
+///
+/// # Safety
+/// `entity_ptr` must be a `dxfname` entity's type-specific struct pointer.
+unsafe fn text_to_wcs(
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+    start_point: Point2D,
+    mut layout: TextLayout,
+) -> (Point2D, TextLayout) {
+    let extrusion = read_extrusion(entity_ptr, dxfname);
+    if crate::geom::is_world_z(extrusion) {
+        return (start_point, layout);
+    }
+    let elevation = get_field::<f64>(entity_ptr, dxfname, "elevation").unwrap_or(0.0);
+    let start_point = crate::geom::ocs_to_wcs_2d(start_point, elevation, extrusion);
+    layout.alignment_point = layout
+        .alignment_point
+        .map(|p| crate::geom::ocs_to_wcs_2d(p, elevation, extrusion));
+    (start_point, layout)
 }
 
 /// # Safety
@@ -396,10 +446,12 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_CIRCLE => {
             let center = get_field::<Point3D>(entity_ptr, "CIRCLE", "center")?;
             let radius = get_field::<f64>(entity_ptr, "CIRCLE", "radius")?;
+            let extrusion = read_extrusion(entity_ptr, "CIRCLE");
             Entity::Circle(CircleEntity {
                 common,
-                center,
+                center: crate::geom::ocs_to_wcs(center, extrusion),
                 radius,
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
@@ -408,6 +460,8 @@ unsafe fn convert_entity(
             let text = get_utf8_field(entity_ptr, "TEXT", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
             let layout = unsafe { text_layout(dwg, entity_ptr, "TEXT") };
+            let (start_point, layout) =
+                unsafe { text_to_wcs(entity_ptr, "TEXT", start_point, layout) };
             Entity::Text(TextEntity {
                 common,
                 start_point,
@@ -424,13 +478,39 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
-            let vertices: Vec<Point2D> =
+            let stored: Vec<Point2D> =
                 get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_points", "points");
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
+            // LibreDWG decodes the extrusion only when flag bit 1 says one is
+            // stored; otherwise the field stays (0,0,0), which means world z.
+            let extrusion = if flag & 1 != 0 {
+                read_extrusion(entity_ptr, "LWPOLYLINE")
+            } else {
+                crate::geom::WORLD_Z
+            };
+            let elevation = get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0);
+            let mut bulges: Vec<f64> =
+                get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_bulges", "bulges");
+            if bulges.iter().all(|b| *b == 0.0) {
+                bulges.clear();
+            }
+            let widths: Vec<[f64; 2]> =
+                get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_widths", "widths");
+            let const_width =
+                get_field::<f64>(entity_ptr, "LWPOLYLINE", "const_width").unwrap_or(0.0);
+            let vertices = stored
+                .iter()
+                .map(|v| crate::geom::ocs_to_wcs_2d(*v, elevation, extrusion))
+                .collect();
             Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
+                bulges,
+                widths,
+                const_width,
+                elevation,
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -438,12 +518,25 @@ unsafe fn convert_entity(
             let radius = get_field::<f64>(entity_ptr, "ARC", "radius")?;
             let start_angle = get_field::<f64>(entity_ptr, "ARC", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ARC", "end_angle")?;
+            let extrusion = read_extrusion(entity_ptr, "ARC");
+            // Mirrored about the y axis (normal (0,0,-1)): an angle a becomes
+            // pi - a, and a counter-clockwise sweep becomes clockwise, so the
+            // ends swap to keep the arc counter-clockwise in world terms.
+            let (start_angle, end_angle) = if extrusion.z < 0.0 {
+                (
+                    std::f64::consts::PI - end_angle,
+                    std::f64::consts::PI - start_angle,
+                )
+            } else {
+                (start_angle, end_angle)
+            };
             Entity::Arc(ArcEntity {
                 common,
-                center,
+                center: crate::geom::ocs_to_wcs(center, extrusion),
                 radius,
                 start_angle,
                 end_angle,
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ELLIPSE => {
@@ -477,12 +570,16 @@ unsafe fn convert_entity(
             let corner2 = get_field::<Point2D>(entity_ptr, "SOLID", "corner2")?;
             let corner3 = get_field::<Point2D>(entity_ptr, "SOLID", "corner3")?;
             let corner4 = get_field::<Point2D>(entity_ptr, "SOLID", "corner4")?;
+            let extrusion = read_extrusion(entity_ptr, "SOLID");
+            let elevation = get_field::<f64>(entity_ptr, "SOLID", "elevation").unwrap_or(0.0);
+            let to_wcs = |p: Point2D| crate::geom::ocs_to_wcs_2d(p, elevation, extrusion);
             Entity::Solid(SolidEntity {
                 common,
-                corner1,
-                corner2,
-                corner3,
-                corner4,
+                corner1: to_wcs(corner1),
+                corner2: to_wcs(corner2),
+                corner3: to_wcs(corner3),
+                corner4: to_wcs(corner4),
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
@@ -515,6 +612,8 @@ unsafe fn convert_entity(
             // DXF 70: 1 invisible, 2 constant, 4 verification required, 8 preset.
             let flags = get_field::<u8>(entity_ptr, "ATTRIB", "flags").unwrap_or(0);
             let layout = unsafe { text_layout(dwg, entity_ptr, "ATTRIB") };
+            let (start_point, layout) =
+                unsafe { text_to_wcs(entity_ptr, "ATTRIB", start_point, layout) };
             Entity::Attrib(AttribEntity {
                 common,
                 start_point,
@@ -541,6 +640,8 @@ unsafe fn convert_entity(
             .and_then(crate::tables::resolve_block_name)
             .unwrap_or_default();
             let insertion_point = get_field::<Point3D>(entity_ptr, "INSERT", "ins_pt")?;
+            let extrusion = read_extrusion(entity_ptr, "INSERT");
+            let insertion_point = crate::geom::ocs_to_wcs(insertion_point, extrusion);
             let scale = get_field::<Point3D>(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
                 x: 1.0,
                 y: 1.0,
@@ -567,6 +668,7 @@ unsafe fn convert_entity(
                 insertion_point,
                 scale,
                 rotation,
+                extrusion,
                 attribs,
             })
         }
@@ -706,10 +808,28 @@ unsafe fn convert_entity(
                 )
             };
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
+            let extrusion = read_extrusion(entity_ptr, "POLYLINE_2D");
+            let elevation = get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0);
+            // Bulges live on the owned VERTEX_2D subentities, which the
+            // point accessor above flattens away.
+            let mut bulges: Vec<f64> = unsafe { polyline_2d_bulges(obj) };
+            if bulges.len() != vertices.len() || bulges.iter().all(|b| *b == 0.0) {
+                bulges.clear();
+            }
+            let vertices = vertices
+                .iter()
+                .map(|v| crate::geom::ocs_to_wcs_2d(*v, elevation, extrusion))
+                .collect();
             Entity::Polyline2D(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & u16::from(POLYLINE_CLOSED_FLAG) != 0,
+                bulges,
+                widths: Vec::new(),
+                const_width: get_field::<f64>(entity_ptr, "POLYLINE_2D", "start_width")
+                    .unwrap_or(0.0),
+                elevation,
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE

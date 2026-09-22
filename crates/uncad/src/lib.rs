@@ -10,6 +10,7 @@ pub mod color;
 mod convert;
 pub mod dimension;
 mod dynapi;
+pub mod geom;
 pub mod header;
 pub mod json;
 pub mod model;

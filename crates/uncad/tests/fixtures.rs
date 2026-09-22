@@ -207,7 +207,7 @@ fn mirrored_ocs_fixture_has_the_expected_entity_mix() {
 }
 
 #[test]
-fn mirrored_ocs_polylines_keep_vertices_and_closed_flags() {
+fn mirrored_ocs_polylines_come_out_in_world_coordinates_with_their_bulges() {
     let db = parse(MIRRORED);
     let polylines: Vec<&uncad::model::LwPolylineEntity> = db
         .entities
@@ -220,28 +220,53 @@ fn mirrored_ocs_polylines_keep_vertices_and_closed_flags() {
     assert_eq!(polylines.len(), 2);
     assert_eq!(polylines[0].common.handle, "20");
     assert_eq!(polylines[1].common.handle, "21");
-
-    let rect = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
-    for p in &polylines {
-        let got: Vec<(f64, f64)> = p.vertices.iter().map(|v| (v.x, v.y)).collect();
-        assert_eq!(got, rect, "handle {}", p.common.handle);
-    }
+    let xy = |p: &uncad::model::LwPolylineEntity| -> Vec<(f64, f64)> {
+        p.vertices.iter().map(|v| (v.x, v.y)).collect()
+    };
 
     // Handle 20: DXF 70 = 1 with extrusion (0,0,-1); LibreDWG stores
-    // flag = 513 (512 closed | 1 has-extrusion), and `closed` reads bit 512.
-    assert!(polylines[0].closed);
+    // flag = 513 (512 closed | 1 has-extrusion) and `closed` reads bit 512.
+    // The OCS vertices (0,0) (100,0) (100,50) (0,50) are mirrored about the
+    // y axis in world terms.
+    let mirrored = polylines[0];
+    assert!(mirrored.closed);
+    let e = mirrored.extrusion;
+    assert_eq!((e.x, e.y, e.z), (0.0, 0.0, -1.0));
+    assert_eq!(
+        xy(mirrored),
+        [(0.0, 0.0), (-100.0, 0.0), (-100.0, 50.0), (0.0, 50.0)]
+    );
+    assert!(mirrored.bulges.is_empty(), "{:?}", mirrored.bulges);
+    assert_eq!(mirrored.length(), 300.0);
+    assert_eq!(mirrored.area(), Some(5000.0));
+
     // Handle 21: DXF 70 = 0 with a bulge; LibreDWG stores flag = 16, so
-    // neither bit is set and it is open under either reading. P4 adds
-    // bulges == [0.0, 0.41421356, 0.0, 0.0] (a 90-degree arc from (100,0)
-    // to (100,50)); today they are dropped.
-    assert!(!polylines[1].closed);
-    // P4: handle 20 gains extrusion (0,0,-1) and lies at WCS x in [-100, 0];
-    // today the model carries no extrusion and the vertices are reported as
-    // OCS coordinates labelled as world.
+    // neither bit is set and it is open. Its bulge after the second vertex
+    // is a 90-degree arc from (100,0) to (100,50) (radius 25 sqrt 2), which
+    // adds to the length and to the area (an open outline is closed by a
+    // straight segment for the area).
+    let bulged = polylines[1];
+    assert!(!bulged.closed);
+    assert_eq!(bulged.extrusion.z, 1.0);
+    assert_eq!(
+        xy(bulged),
+        [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)]
+    );
+    assert_eq!(bulged.bulges, [0.0, 0.41421356, 0.0, 0.0]);
+    assert!(
+        (bulged.length() - 255.536037).abs() < 1e-5,
+        "{}",
+        bulged.length()
+    );
+    let area = bulged.area().expect("four vertices");
+    assert!((area - 5356.7477).abs() < 1e-3, "{area}");
+    assert_eq!(bulged.elevation, 0.0);
+    assert_eq!(bulged.const_width, 0.0);
+    assert!(bulged.widths.is_empty());
 }
 
 #[test]
-fn mirrored_ocs_circle_arc_text_and_anchor_line_read_their_ocs_values() {
+fn mirrored_ocs_circle_arc_and_text_move_to_world_coordinates_and_the_line_stays() {
     let db = parse(MIRRORED);
     let mut circle = None;
     let mut arc = None;
@@ -256,30 +281,36 @@ fn mirrored_ocs_circle_arc_text_and_anchor_line_read_their_ocs_values() {
             _ => {}
         }
     }
-    // Every value below is the OCS value from the file. CIRCLE, ARC and TEXT
-    // carry extrusion (0,0,-1), which today is never read: after P4 the
-    // circle's WCS centre is (-10,10), the text's WCS x is -10 and the arc
-    // is mirrored about x = 0. The LINE has no extrusion and never moves.
+    // CIRCLE, ARC and TEXT carry extrusion (0,0,-1): the file's OCS values
+    // (centre (10,10), arc 0..90 degrees, text at (10,10)) are mirrored
+    // about the y axis in world terms. The LINE has no extrusion and never
+    // moves.
     let circle = circle.expect("CIRCLE");
-    assert_eq!(
-        (circle.center.x, circle.center.y, circle.center.z),
-        (10.0, 10.0, 0.0)
-    );
+    assert_eq!((circle.center.x, circle.center.y), (-10.0, 10.0));
+    assert_eq!(circle.center.z, 0.0);
     assert_eq!(circle.radius, 5.0);
+    assert_eq!(circle.extrusion.z, -1.0);
 
     let arc = arc.expect("ARC");
     assert_eq!((arc.center.x, arc.center.y, arc.center.z), (0.0, 0.0, 0.0));
     assert_eq!(arc.radius, 20.0);
-    assert_eq!(arc.start_angle, 0.0);
+    assert_eq!(arc.extrusion.z, -1.0);
+    // The first-quadrant arc becomes the second-quadrant one, still
+    // counter-clockwise: 90 to 180 degrees (DXF 51 = 90 arrives in radians).
     assert!(
-        (arc.end_angle - FRAC_PI_2).abs() < 1e-12,
-        "DXF 51 = 90 degrees arrives in radians: {}",
+        (arc.start_angle - FRAC_PI_2).abs() < 1e-12,
+        "start {}",
+        arc.start_angle
+    );
+    assert!(
+        (arc.end_angle - std::f64::consts::PI).abs() < 1e-12,
+        "end {}",
         arc.end_angle
     );
 
     let text = text.expect("TEXT");
     assert_eq!(text.text, "MIRROR");
-    assert_eq!((text.start_point.x, text.start_point.y), (10.0, 10.0));
+    assert_eq!((text.start_point.x, text.start_point.y), (-10.0, 10.0));
     assert_eq!(text.text_height, 2.5);
 
     let line = line.expect("LINE");

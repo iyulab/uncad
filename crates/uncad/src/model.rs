@@ -52,8 +52,18 @@ pub struct LineEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CircleEntity {
     pub common: EntityCommon,
+    /// World coordinates: the stored OCS centre transformed by `extrusion`.
     pub center: Point3D,
     pub radius: f64,
+    /// DXF 210, the OCS normal the file stored; `(0,0,1)` for the usual
+    /// plan-view entity, `(0,0,-1)` for one mirrored about the y axis. The
+    /// coordinates above are already world.
+    #[serde(default = "world_z")]
+    pub extrusion: Point3D,
+}
+
+fn world_z() -> Point3D {
+    crate::geom::WORLD_Z
 }
 
 /// Fields shared by the single-line text types (TEXT, ATTRIB): where the
@@ -103,6 +113,10 @@ fn one() -> f64 {
     1.0
 }
 
+/// LWPOLYLINE, and POLYLINE_2D (which shares the shape). `vertices` are
+/// world x/y (the stored OCS vertices at `elevation`, transformed by
+/// `extrusion`); `bulges` describe the arc segments -- see [`crate::geom`]
+/// for the convention and for length/area/bounds with the arcs included.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LwPolylineEntity {
     pub common: EntityCommon,
@@ -112,17 +126,54 @@ pub struct LwPolylineEntity {
     /// and `docs/CAVEATS.md`, "The polyline closed flag". POLYLINE_2D, which
     /// shares this struct, uses its own bit 1.
     pub closed: bool,
+    /// One bulge per vertex (`tan(theta/4)` of the arc leaving it, 0 for a
+    /// straight segment); empty when the file stores none.
+    #[serde(default)]
+    pub bulges: Vec<f64>,
+    /// `[start, end]` width per vertex; empty when unset.
+    #[serde(default)]
+    pub widths: Vec<[f64; 2]>,
+    /// DXF 43, the width used when `widths` is empty; 0 draws a line.
+    #[serde(default)]
+    pub const_width: f64,
+    /// DXF 38, the OCS z of every vertex.
+    #[serde(default)]
+    pub elevation: f64,
+    /// DXF 210 as stored (see [`CircleEntity::extrusion`]).
+    #[serde(default = "world_z")]
+    pub extrusion: Point3D,
+}
+
+impl LwPolylineEntity {
+    /// The length of the polyline (its perimeter when closed), arcs
+    /// included.
+    pub fn length(&self) -> f64 {
+        crate::geom::polyline_length(&self.vertices, &self.bulges, self.closed)
+    }
+
+    /// The area the polyline encloses (an open one is closed by a straight
+    /// segment), arcs included; `None` unless it has three or more vertices.
+    pub fn area(&self) -> Option<f64> {
+        (self.vertices.len() >= 3).then(|| crate::geom::polyline_area(&self.vertices, &self.bulges))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArcEntity {
     pub common: EntityCommon,
+    /// World coordinates (see [`CircleEntity::center`]).
     pub center: Point3D,
     pub radius: f64,
-    /// Radians.
+    /// Radians, counter-clockwise in world coordinates. For an arc stored
+    /// in a mirrored OCS (`extrusion` z < 0) the stored angles are
+    /// mirrored and swapped so the arc still runs counter-clockwise from
+    /// `start_angle` to `end_angle`.
     pub start_angle: f64,
     /// Radians.
     pub end_angle: f64,
+    /// DXF 210 as stored (see [`CircleEntity::extrusion`]).
+    #[serde(default = "world_z")]
+    pub extrusion: Point3D,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -146,13 +197,18 @@ pub struct PointEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolidEntity {
     pub common: EntityCommon,
-    /// Raw DXF corner order (1-2-3-4). AutoCAD's classic 1-2-4-3
-    /// triangle-strip reordering for filled rendering is a rendering
-    /// concern (see `svg.rs`), not part of the parsed data.
+    /// Raw DXF corner order (1-2-3-4), in world x/y (the stored OCS
+    /// corners at the solid's elevation, transformed by `extrusion`).
+    /// AutoCAD's classic 1-2-4-3 triangle-strip reordering for filled
+    /// rendering is a rendering concern (see `svg.rs`), not part of the
+    /// parsed data.
     pub corner1: Point2D,
     pub corner2: Point2D,
     pub corner3: Point2D,
     pub corner4: Point2D,
+    /// DXF 210 as stored (see [`CircleEntity::extrusion`]).
+    #[serde(default = "world_z")]
+    pub extrusion: Point3D,
 }
 
 /// Shared by RAY and XLINE -- LibreDWG itself uses one C struct
@@ -209,11 +265,18 @@ pub struct InsertEntity {
     /// [`crate::tables::Tables::block_records`] to render the block's own
     /// entities (see `render_block_ref` in `svg.rs`).
     pub block_name: String,
+    /// World coordinates: the stored OCS point transformed by `extrusion`.
     pub insertion_point: Point3D,
     /// Per-axis scale factors (DXF 41/42/43); (1,1,1) if never set.
     pub scale: Point3D,
-    /// Radians.
+    /// Radians, as stored (about the OCS normal).
     pub rotation: f64,
+    /// DXF 210 as stored (see [`CircleEntity::extrusion`]). A mirrored
+    /// block reference (`z < 0`) keeps its stored `rotation` and `scale`;
+    /// in world terms it is the block drawn at `insertion_point` with the x
+    /// scale and the rotation negated, which is how the renderer draws it.
+    #[serde(default = "world_z")]
+    pub extrusion: Point3D,
     /// Attribute values attached to this INSERT (the ATTRIB records between
     /// the INSERT and its SEQEND). Also present as top-level
     /// [`Entity::Attrib`] entries in `CadDatabase::entities` -- that is what

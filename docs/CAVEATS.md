@@ -150,6 +150,36 @@ LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
 extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
+## Coordinates are world; the OCS is applied on read (since 0.3.0)
+
+DXF stores several 2D entity types in their own object coordinate system
+(OCS, group 210 "extrusion"): CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT,
+ATTRIB, INSERT, SOLID, plus HATCH boundaries and a few point fields of other
+types. In practice the only OCS that shows up is the mirrored one, normal
+(0,0,-1), which AutoCAD's MIRROR command produces: the entity's x is
+negated in world terms. 0.2.0 reported the stored OCS values as if they
+were world coordinates, so every mirrored circle, arc, polyline, text and
+block reference sat on the wrong side of the y axis.
+
+`convert.rs` now applies the arbitrary-axis algorithm (`geom::ocs_to_wcs`)
+to CIRCLE/ARC centres, LWPOLYLINE/POLYLINE_2D vertices (at their
+`elevation`), TEXT/ATTRIB anchors, INSERT insertion points and SOLID
+corners, and each of those entities carries its `extrusion` so a consumer
+can tell a mirrored one apart. A mirrored ARC's angles are mirrored and
+swapped so the arc still runs counter-clockwise from `start_angle` to
+`end_angle`. A mirrored INSERT keeps its stored `rotation` and `scale`; the
+renderer draws it with the x scale and the rotation negated, which is the
+same transform. `tests/fixtures.rs` checks all of this against
+`mirrored_ocs_r2000.dxf`.
+
+Not applied: HATCH boundary paths (stored in the hatch's OCS, so a mirrored
+hatch still draws on the wrong side), DIMENSION's `text_midpoint` (an OCS
+point in DXF terms, left as stored) and the glyphs of mirrored TEXT/ATTRIB,
+which AutoCAD draws back to front from the anchor while this renderer draws
+them reading left to right from the same anchor. A tilted normal (anything
+but (0,0,+-1)) transforms points correctly, but an INSERT with one is drawn
+as if it were upright.
+
 ## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF

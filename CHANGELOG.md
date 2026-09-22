@@ -10,6 +10,17 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- Polyline geometry (`uncad::geom`): `ocs_to_wcs` (the DXF arbitrary-axis algorithm),
+  `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
+  `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
+  `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
+  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()` and
+  `area()`; POLYLINE_2D bulges are collected from its VERTEX_2D subentities. The renderer
+  draws bulges as SVG arcs instead of chords (the 25-arc revision cloud in
+  `example_2000.dwg` was a 25-gon). The design document's worked example -- a 100 x 50
+  outline with one 90-degree arc -- measures 305.536 around and 5356.748 in area.
+- `extrusion` on CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, INSERT and SOLID (serde default
+  `(0,0,1)`), so a consumer can tell a mirrored entity apart.
 - Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
   LINEAR, ALIGNED, ANGULAR_3POINT, ANGULAR_2LINE, RADIUS, DIAMETER, ORDINATE, ARC_LENGTH
   -- with its definition points), `measurement` (the stored `act_measurement`: drawing
@@ -107,6 +118,15 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Changed (breaking)
 
+- Coordinates are world coordinates. Entities DXF stores in their own OCS -- CIRCLE and
+  ARC centres, LWPOLYLINE/POLYLINE_2D vertices, TEXT/ATTRIB anchors, INSERT insertion
+  points, SOLID corners -- are transformed on read; 0.2.0 reported the stored OCS values
+  as if they were world, which put every mirrored entity (extrusion `(0,0,-1)`, what
+  AutoCAD's MIRROR produces) on the wrong side of the y axis in both JSON and PNG. A
+  mirrored ARC's angles are mirrored and swapped so it still runs counter-clockwise; a
+  mirrored INSERT is drawn with its x scale and rotation negated. HATCH boundaries and
+  DIMENSION `text_midpoint` are still as stored (`docs/CAVEATS.md`, "Coordinates are
+  world").
 - `to_png`'s defaults: the image's long edge is 1568 px (was: one pixel per drawing
   unit, so a 12.7 MB drawing rendered at 69 x 70 px and a LibreDWG corpus file tried
   to allocate 36 TB), the background is opaque white (was: transparent, which showed

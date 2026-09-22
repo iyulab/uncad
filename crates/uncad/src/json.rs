@@ -31,6 +31,14 @@
 //!   real DXF name in its `type_name` field.
 //! - Points are objects (`{"x":..,"y":..}` / `{"x":..,"y":..,"z":..}`); angles
 //!   are radians, as in the model.
+//! - Coordinates are world coordinates. Entities DXF stores in an object
+//!   coordinate system (CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB,
+//!   INSERT, SOLID) are transformed on read and carry their `extrusion`
+//!   (default `(0,0,1)`) so a mirrored one can be told apart. LWPOLYLINE and
+//!   POLYLINE_2D carry `bulges` (one per vertex, `tan(theta/4)` of the arc
+//!   leaving it; empty when every segment is straight), `widths`,
+//!   `const_width` and `elevation`; [`crate::geom`] computes length, area
+//!   and bounds with the arcs included. Since 0.3.0.
 //! - HATCH: each item of `boundary_paths` is `{"type":"POLYLINE","data":
 //!   [pt,..]}` or `{"type":"EDGES","data":[edge,..]}`, and each edge is
 //!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own fields
@@ -157,6 +165,11 @@ mod tests {
             common: c.clone(),
             vertices: vec![p2(0.0, 0.0), p2(1.0, 0.0), p2(1.0, 1.0)],
             closed: true,
+            bulges: vec![0.0, 0.41421356, 0.0, 0.0],
+            widths: vec![],
+            const_width: 0.0,
+            elevation: 0.0,
+            extrusion: p3(0.0, 0.0, 1.0),
         };
         let solid3d = Solid3DEntity {
             common: c.clone(),
@@ -172,6 +185,7 @@ mod tests {
                 common: c.clone(),
                 center: p3(0.0, 0.0, 0.0),
                 radius: 1.0,
+                extrusion: p3(0.0, 0.0, 1.0),
             }),
             Entity::Text(TextEntity {
                 common: c.clone(),
@@ -194,6 +208,7 @@ mod tests {
                 radius: 1.0,
                 start_angle: 0.0,
                 end_angle: 1.0,
+                extrusion: p3(0.0, 0.0, -1.0),
             }),
             Entity::Ellipse(EllipseEntity {
                 common: c.clone(),
@@ -213,6 +228,7 @@ mod tests {
                 corner2: p2(1.0, 0.0),
                 corner3: p2(1.0, 1.0),
                 corner4: p2(0.0, 1.0),
+                extrusion: p3(0.0, 0.0, 1.0),
             }),
             Entity::Ray(ray.clone()),
             Entity::XLine(ray),
@@ -222,6 +238,7 @@ mod tests {
                 insertion_point: p3(0.0, 0.0, 0.0),
                 scale: p3(1.0, 1.0, 1.0),
                 rotation: 0.25,
+                extrusion: p3(0.0, 0.0, -1.0),
                 attribs: vec![attrib.clone()],
             }),
             Entity::Attrib(attrib),
@@ -479,6 +496,7 @@ mod tests {
             common: common("2B"),
             center: p3(0.0, 0.0, 0.0),
             radius: f64::NAN,
+            extrusion: p3(0.0, 0.0, 1.0),
         });
         let text =
             serde_json::to_string(&e).expect("serde_json writes null for NaN, it does not fail");

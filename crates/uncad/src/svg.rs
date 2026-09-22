@@ -26,7 +26,7 @@ use crate::model::{Entity, EntityCommon, MLineVertex};
 use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
-use format::{escape_xml, neg, points_attr, rotate_transform_attr, xy};
+use format::{clean, escape_xml, neg, points_attr, rotate_transform_attr, xy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -335,6 +335,43 @@ fn polyline_element(pts: &[Point2D], closed: bool, color: &str) -> String {
         "<{tag} points=\"{}\" fill=\"none\" stroke=\"{color}\"/>",
         points_attr(pts)
     )
+}
+
+/// A `<path>` for a polyline with arc segments: `A` commands for the bulges,
+/// `L` for the straight runs. SVG's sweep flag 1 runs clockwise on a y-down
+/// canvas, which is what a counter-clockwise (positive-bulge) world arc looks
+/// like once y is flipped.
+fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> String {
+    let segments = crate::geom::polyline_segments(&p.vertices, &p.bulges, p.closed);
+    let Some(first) = segments.first() else {
+        return polyline_element(&p.vertices, p.closed, color);
+    };
+    let start = match first {
+        crate::geom::Segment::Line { from, .. } | crate::geom::Segment::Arc { from, .. } => *from,
+    };
+    let mut d = format!("M {} {}", clean(start.x), neg(start.y));
+    for segment in &segments {
+        match segment {
+            crate::geom::Segment::Line { to, .. } => {
+                let _ = write!(d, " L {} {}", clean(to.x), neg(to.y));
+            }
+            crate::geom::Segment::Arc { to, bulge, arc, .. } => {
+                let large = u8::from(bulge.abs() > 1.0);
+                let sweep = u8::from(*bulge > 0.0);
+                let _ = write!(
+                    d,
+                    " A {r} {r} 0 {large} {sweep} {} {}",
+                    clean(to.x),
+                    neg(to.y),
+                    r = clean(arc.radius)
+                );
+            }
+        }
+    }
+    if p.closed {
+        d.push_str(" Z");
+    }
+    format!("<path d=\"{d}\" fill=\"none\" stroke=\"{color}\"/>")
 }
 
 /// A dashed outline, used for the shapes this renderer draws as an indication
@@ -653,8 +690,18 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
-            ctx.consider_all(&p.vertices);
-            Some(polyline_element(&p.vertices, p.closed, &color))
+            if p.bulges.is_empty() {
+                ctx.consider_all(&p.vertices);
+                Some(polyline_element(&p.vertices, p.closed, &color))
+            } else {
+                if let Some((min_x, min_y, max_x, max_y)) =
+                    crate::geom::polyline_bounds(&p.vertices, &p.bulges, p.closed)
+                {
+                    ctx.consider(min_x, min_y);
+                    ctx.consider(max_x, max_y);
+                }
+                Some(bulged_polyline_element(p, &color))
+            }
         }
         Entity::Polyline3D(p) => {
             if p.vertices.is_empty() {
@@ -817,18 +864,29 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 neg(y1), neg(y2)
             ))
         }
-        Entity::Insert(i) => Some(render_block_ref(
-            &i.block_name,
-            Point2D {
-                x: i.insertion_point.x,
-                y: i.insertion_point.y,
-            },
-            i.scale.x,
-            i.scale.y,
-            i.rotation,
-            &color,
-            ctx,
-        )),
+        Entity::Insert(i) => {
+            // A block reference in a mirrored OCS (normal (0,0,-1)) is the
+            // block drawn at its world insertion point with the x scale and
+            // the rotation negated: mirror . rotate(a) . scale(sx, sy) =
+            // rotate(-a) . scale(-sx, sy).
+            let (x_scale, rotation) = if i.extrusion.z < 0.0 {
+                (-i.scale.x, -i.rotation)
+            } else {
+                (i.scale.x, i.rotation)
+            };
+            Some(render_block_ref(
+                &i.block_name,
+                Point2D {
+                    x: i.insertion_point.x,
+                    y: i.insertion_point.y,
+                },
+                x_scale,
+                i.scale.y,
+                rotation,
+                &color,
+                ctx,
+            ))
+        }
         Entity::AcadTable(a) => Some(render_block_ref(
             &a.block_name,
             Point2D {
@@ -1209,6 +1267,7 @@ mod tests {
                 Entity::Insert(InsertEntity {
                     common: common.clone(),
                     block_name: "R".to_string(),
+                    extrusion: crate::geom::WORLD_Z,
                     insertion_point: Point3D {
                         x: i as f64,
                         y: 0.0,
