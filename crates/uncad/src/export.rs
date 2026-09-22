@@ -425,23 +425,45 @@ struct PlacedText {
     tag: Option<String>,
 }
 
-/// A 2D affine: `p' = origin + rot * scale * p`, with the mirror folded in
-/// as a negative x scale and a negated rotation, as the renderer does.
-#[derive(Clone, Copy)]
+/// A 2D affine `p' = (a x + c y + e, b x + d y + f)`: one INSERT's
+/// placement (`origin + R(rotation) diag(sx, sy)`, with a mirrored OCS
+/// folded in as a negative x scale and a negated rotation, as the renderer
+/// does) or the composition of nested ones. A full matrix, because the
+/// origin + rotation + scale form cannot represent a rotated child under a
+/// mirrored or non-uniformly scaled parent (`diag(-1, 1) R(t) = R(-t)
+/// diag(-1, 1)`): the sum-of-rotations composition reflected such a
+/// child's texts about the parent's insertion point.
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Affine {
-    origin: Point2D,
-    x_scale: f64,
-    y_scale: f64,
-    rotation: f64,
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    e: f64,
+    f: f64,
 }
 
 impl Affine {
     const IDENTITY: Affine = Affine {
-        origin: Point2D { x: 0.0, y: 0.0 },
-        x_scale: 1.0,
-        y_scale: 1.0,
-        rotation: 0.0,
+        a: 1.0,
+        b: 0.0,
+        c: 0.0,
+        d: 1.0,
+        e: 0.0,
+        f: 0.0,
     };
+
+    fn placement(origin: Point2D, x_scale: f64, y_scale: f64, rotation: f64) -> Affine {
+        let (c, s) = (rotation.cos(), rotation.sin());
+        Affine {
+            a: x_scale * c,
+            b: x_scale * s,
+            c: -y_scale * s,
+            d: y_scale * c,
+            e: origin.x,
+            f: origin.y,
+        }
+    }
 
     fn for_insert(i: &InsertEntity) -> Affine {
         let (x_scale, rotation) = if i.extrusion.z < 0.0 {
@@ -449,39 +471,88 @@ impl Affine {
         } else {
             (i.scale.x, i.rotation)
         };
-        Affine {
-            origin: Point2D {
-                x: i.insertion_point.x,
-                y: i.insertion_point.y,
-            },
-            x_scale,
-            y_scale: i.scale.y,
-            rotation,
-        }
+        Affine::placement(p2(i.insertion_point), x_scale, i.scale.y, rotation)
     }
 
     fn apply(&self, p: Point2D) -> Point2D {
-        let (c, s) = (self.rotation.cos(), self.rotation.sin());
-        let (x, y) = (p.x * self.x_scale, p.y * self.y_scale);
         Point2D {
-            x: self.origin.x + c * x - s * y,
-            y: self.origin.y + s * x + c * y,
+            x: self.a * p.x + self.c * p.y + self.e,
+            y: self.b * p.x + self.d * p.y + self.f,
         }
+    }
+
+    /// The axis-aligned box of `r`'s four transformed corners.
+    fn apply_rect(&self, r: &Rect) -> Rect {
+        let corners = [
+            self.apply(Point2D {
+                x: r.min_x,
+                y: r.min_y,
+            }),
+            self.apply(Point2D {
+                x: r.max_x,
+                y: r.min_y,
+            }),
+            self.apply(Point2D {
+                x: r.max_x,
+                y: r.max_y,
+            }),
+            self.apply(Point2D {
+                x: r.min_x,
+                y: r.max_y,
+            }),
+        ];
+        let mut out = Rect::new(
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for p in corners {
+            out.min_x = out.min_x.min(p.x);
+            out.min_y = out.min_y.min(p.y);
+            out.max_x = out.max_x.max(p.x);
+            out.max_y = out.max_y.max(p.y);
+        }
+        out
     }
 
     /// `self` then `outer`: the transform of a child placed by `self`
-    /// inside a block that `outer` places.
+    /// inside a block that `outer` places (the matrix product `outer *
+    /// self`).
     fn then(&self, outer: &Affine) -> Affine {
         Affine {
-            origin: outer.apply(self.origin),
-            x_scale: self.x_scale * outer.x_scale,
-            y_scale: self.y_scale * outer.y_scale,
-            rotation: self.rotation + outer.rotation,
+            a: outer.a * self.a + outer.c * self.b,
+            b: outer.b * self.a + outer.d * self.b,
+            c: outer.a * self.c + outer.c * self.d,
+            d: outer.b * self.c + outer.d * self.d,
+            e: outer.a * self.e + outer.c * self.f + outer.e,
+            f: outer.b * self.e + outer.d * self.f + outer.f,
         }
     }
 
+    /// The determinant of the linear part: negative for a mirrored frame.
+    fn det(&self) -> f64 {
+        self.a * self.d - self.b * self.c
+    }
+
+    /// The length scale of the frame, `sqrt(|det|)` -- exact for a uniform
+    /// scale, the geometric mean of the axis scales otherwise.
     fn length_scale(&self) -> f64 {
-        (self.x_scale.abs() * self.y_scale.abs()).sqrt()
+        self.det().abs().sqrt()
+    }
+
+    /// The world rotation of a text drawn with `rotation` in this frame:
+    /// the angle of its transformed *up* axis less 90 degrees, i.e. how
+    /// the glyphs are oriented on the page. Through the up axis rather
+    /// than the baseline so that a frame mirrored about the vertical axis
+    /// (the usual MIRROR of a block) reports an upright, mirror-written
+    /// text as 0 rather than 180, as the records did before for a
+    /// top-level mirror; in a mirrored frame the string advances the other
+    /// way along that orientation.
+    fn text_rotation(&self, rotation: f64) -> f64 {
+        let (ux, uy) = (-rotation.sin(), rotation.cos());
+        let (wx, wy) = (self.a * ux + self.c * uy, self.b * ux + self.d * uy);
+        wy.atan2(wx) - std::f64::consts::FRAC_PI_2
     }
 }
 
@@ -533,7 +604,19 @@ fn collect_texts(
             };
             let anchor = affine.apply(base);
             let height = t.text_height * scale;
-            let rotation = t.rotation + affine.rotation;
+            let rotation = affine.text_rotation(t.rotation);
+            // The estimate in the block's own frame, then through the
+            // frame: right under a mirror or a non-uniform scale, where a
+            // world-space estimate from the anchor and rotation is not.
+            let bbox = affine.apply_rect(&estimate_text_box(
+                base,
+                t.text_height,
+                t.rotation,
+                &t.text_plain,
+                t.width_factor,
+                t.horizontal_alignment,
+                t.vertical_alignment,
+            ));
             out.push(PlacedText {
                 id: id(&t.common.handle),
                 kind: "TEXT",
@@ -543,15 +626,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: estimate_text_box(
-                    anchor,
-                    height,
-                    rotation,
-                    &t.text_plain,
-                    t.width_factor,
-                    t.horizontal_alignment,
-                    t.vertical_alignment,
-                ),
+                bbox,
                 bbox_confidence: "estimated",
                 unshaped: 0,
                 style: t.style.clone(),
@@ -569,7 +644,16 @@ fn collect_texts(
             };
             let anchor = affine.apply(base);
             let height = a.text_height * scale;
-            let rotation = a.rotation + affine.rotation;
+            let rotation = affine.text_rotation(a.rotation);
+            let bbox = affine.apply_rect(&estimate_text_box(
+                base,
+                a.text_height,
+                a.rotation,
+                &a.text_plain,
+                a.width_factor,
+                a.horizontal_alignment,
+                a.vertical_alignment,
+            ));
             out.push(PlacedText {
                 id: id(&a.common.handle),
                 kind: "ATTRIB",
@@ -579,15 +663,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: estimate_text_box(
-                    anchor,
-                    height,
-                    rotation,
-                    &a.text_plain,
-                    a.width_factor,
-                    a.horizontal_alignment,
-                    a.vertical_alignment,
-                ),
+                bbox,
                 bbox_confidence: "estimated",
                 unshaped: 0,
                 style: a.style.clone(),
@@ -600,7 +676,16 @@ fn collect_texts(
             }
             let anchor = affine.apply(p2(m.insertion_point));
             let height = m.text_height * scale;
-            let rotation = m.rotation + affine.rotation;
+            let rotation = affine.text_rotation(m.rotation);
+            let bbox = affine.apply_rect(&estimate_mtext_box(
+                p2(m.insertion_point),
+                m.text_height,
+                m.rotation,
+                &m.text_plain,
+                m.attachment,
+                m.extents_width,
+                m.extents_height,
+            ));
             out.push(PlacedText {
                 id: id(&m.common.handle),
                 kind: "MTEXT",
@@ -610,15 +695,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: estimate_mtext_box(
-                    anchor,
-                    height,
-                    rotation,
-                    &m.text_plain,
-                    m.attachment,
-                    m.extents_width * scale,
-                    m.extents_height * scale,
-                ),
+                bbox,
                 bbox_confidence: "estimated",
                 unshaped: 0,
                 style: m.style.clone(),
@@ -2657,18 +2734,9 @@ mod tests {
 
     #[test]
     fn insert_affines_compose_and_mirror() {
-        let inner = Affine {
-            origin: Point2D { x: 1.0, y: 0.0 },
-            x_scale: 2.0,
-            y_scale: 2.0,
-            rotation: 0.0,
-        };
-        let outer = Affine {
-            origin: Point2D { x: 0.0, y: 10.0 },
-            x_scale: 1.0,
-            y_scale: 1.0,
-            rotation: std::f64::consts::FRAC_PI_2,
-        };
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let inner = Affine::placement(Point2D { x: 1.0, y: 0.0 }, 2.0, 2.0, 0.0);
+        let outer = Affine::placement(Point2D { x: 0.0, y: 10.0 }, 1.0, 1.0, quarter);
         let both = inner.then(&outer);
         // inner: (1,1) -> (3,2); outer rotates 90 degrees about the origin and lifts by 10: (-2, 13).
         let p = both.apply(Point2D { x: 1.0, y: 1.0 });
@@ -2677,6 +2745,57 @@ mod tests {
             "{p:?}"
         );
         assert!((both.length_scale() - 2.0).abs() < 1e-12);
+        assert!((both.text_rotation(0.0) - quarter).abs() < 1e-12);
+
+        // A 90-degree child under a parent mirrored about the vertical
+        // axis (x scale -1) at (100,100): the child sends (10,0) to (0,10),
+        // the mirror leaves y alone, so the point is at (100,110) -- where
+        // the nested <g> groups draw it. Summing rotations gave (100,90).
+        let child = Affine::placement(Point2D { x: 0.0, y: 0.0 }, 1.0, 1.0, quarter);
+        let mirror = Affine::placement(Point2D { x: 100.0, y: 100.0 }, -1.0, 1.0, 0.0);
+        let both = child.then(&mirror);
+        let p = both.apply(Point2D { x: 10.0, y: 0.0 });
+        assert!(
+            (p.x - 100.0).abs() < 1e-9 && (p.y - 110.0).abs() < 1e-9,
+            "{p:?}"
+        );
+        assert!(both.det() < 0.0, "a mirrored frame");
+        assert!((both.length_scale() - 1.0).abs() < 1e-12);
+        // A text drawn along the child's x axis has its baseline running
+        // up the page ((1,0) -> (0,1)) and, after the mirror, the tops of
+        // its glyphs pointing to +x ((0,1) -> (-1,0) -> (1,0)): the glyphs
+        // are oriented like a text turned -90 degrees (mirror writing
+        // advancing the other way), which is what the rotation reports.
+        assert!((both.text_rotation(0.0) + quarter).abs() < 1e-12);
+        // The top-level mirror alone keeps a horizontal text at 0 (the
+        // glyphs are mirrored, not turned), as the records always said.
+        assert!(mirror.text_rotation(0.0).abs() < 1e-12);
+        // The estimate box of a 4-character height-2 text at the child's
+        // (10,0) goes through the same frame: locally x 10..16.548, y
+        // 0..2; the child turns it to x -2..0, y 10..16.548; the mirror at
+        // (100,100) to x 100..102, y 110..116.548.
+        let local = estimate_text_box(Point2D { x: 10.0, y: 0.0 }, 2.0, 0.0, "ABCD", 1.0, 0, 0);
+        let world = both.apply_rect(&local);
+        let width = 4.0 * 0.6 * 2.0 / 0.733;
+        assert!(
+            (world.min_x - 100.0).abs() < 1e-9
+                && (world.max_x - 102.0).abs() < 1e-9
+                && (world.min_y - 110.0).abs() < 1e-9
+                && (world.max_y - (110.0 + width)).abs() < 1e-9,
+            "{world:?}"
+        );
+
+        // A non-uniform parent (2,1) over the same child: (10,0) -> (0,10)
+        // -> (100,110) and (0,2) -> (-2,0) -> (96,100); length scale
+        // sqrt 2.
+        let stretch = Affine::placement(Point2D { x: 100.0, y: 100.0 }, 2.0, 1.0, 0.0);
+        let both = child.then(&stretch);
+        let p = both.apply(Point2D { x: 0.0, y: 2.0 });
+        assert!(
+            (p.x - 96.0).abs() < 1e-9 && (p.y - 100.0).abs() < 1e-9,
+            "{p:?}"
+        );
+        assert!((both.length_scale() - 2f64.sqrt()).abs() < 1e-12);
     }
 
     #[test]

@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use uncad::model::{ArcEntity, CircleEntity, EntityCommon, InsertEntity, LineEntity, Point3D};
+use uncad::model::{
+    ArcEntity, CircleEntity, EntityCommon, InsertEntity, LineEntity, Point2D, Point3D, TextEntity,
+};
 use uncad::tables::BlockRecord;
 use uncad::{CropMode, Entity, Rect, ToSvgOptions};
 
@@ -277,4 +279,137 @@ impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+fn text(handle: &str, x: f64, y: f64, height: f64, value: &str) -> Entity {
+    Entity::Text(TextEntity {
+        common: common(handle),
+        start_point: Point2D { x, y },
+        text_height: height,
+        text: value.into(),
+        text_plain: value.into(),
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    })
+}
+
+/// Block B = LINE (0,0)-(10,0) + LINE (10,0)-(10,2) + TEXT "T" at (10,0);
+/// block A = INSERT of B rotated 90 degrees; the model = INSERT of A at
+/// (100,100) with the given scale and extrusion.
+fn nested(sx: f64, sy: f64, extrusion_z: f64) -> uncad::CadDatabase {
+    let mut top = insert("A1", "A", 100.0, 100.0, sx, sy, 0.0);
+    if let Entity::Insert(i) = &mut top {
+        i.extrusion = Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: extrusion_z,
+        };
+    }
+    drawing(
+        vec![top],
+        vec![
+            (
+                "B",
+                vec![
+                    line("BL1", 0.0, 0.0, 10.0, 0.0),
+                    line("BL2", 10.0, 0.0, 10.0, 2.0),
+                    text("BT", 10.0, 0.0, 0.5, "T"),
+                ],
+            ),
+            ("A", vec![insert("AB", "B", 0.0, 0.0, 1.0, 1.0, 90.0)]),
+        ],
+    )
+}
+
+#[test]
+fn a_rotated_block_inside_a_mirrored_one_is_measured_where_it_is_drawn() {
+    // A's 90-degree turn sends B's (10,0) to (0,10) and (10,2) to (-2,10);
+    // the outer x scale -1 then sends those to (100,110) and (102,110):
+    // the picture (matrix(-1 0 0 1 100 -100) around matrix(0 -1 1 0 0 0))
+    // has the lines at x 100..102, y 100..110 and the text's anchor at
+    // (100,110). The old rotation-sum composition put everything at y
+    // 90..100 and the anchor at (100,90), outside the drawn geometry, so
+    // `--crop raw` showed a blank image.
+    for (name, db) in [
+        ("x scale -1", nested(-1.0, 1.0, 1.0)),
+        ("extrusion (0,0,-1)", nested(1.0, 1.0, -1.0)),
+    ] {
+        let r = content(&db);
+        assert!(
+            r.min_x >= 100.0 - 1e-9 && r.min_y >= 100.0 - 1e-9,
+            "{name}: {r:?}"
+        );
+        // The lines end at (102,110); the text's estimate (0.5 high, one
+        // 0.41-unit character running up the page from (100,110)) adds a
+        // little on top.
+        assert!(
+            r.max_y >= 110.0 - 1e-9 && r.max_y <= 111.0 && r.max_x >= 102.0 - 1e-9,
+            "{name}: {r:?}"
+        );
+        assert!(
+            r.max_x < 104.0,
+            "{name}: only the 2-unit stub and a 0.5 text: {r:?}"
+        );
+
+        let tmp = TempDir::new("mirrot");
+        uncad::export::export_package(
+            &db,
+            &tmp.0,
+            &uncad::export::ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let texts: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tmp.0.join("texts.json")).unwrap())
+                .unwrap();
+        let t = texts["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == "A1/AB/BT")
+            .expect("the nested text");
+        let anchor = t["anchor"].as_array().unwrap();
+        assert!(
+            (anchor[0].as_f64().unwrap() - 100.0).abs() < 1e-6
+                && (anchor[1].as_f64().unwrap() - 110.0).abs() < 1e-6,
+            "{name}: {anchor:?}"
+        );
+        // The measured glyph box sits at the anchor, not 20 units away.
+        let b = t["bbox"].as_array().unwrap();
+        assert_eq!(t["bbox_confidence"], "measured");
+        assert!(
+            (b[1].as_f64().unwrap() - 110.0).abs() < 0.5 && b[0].as_f64().unwrap() >= 99.5,
+            "{name}: {b:?}"
+        );
+        assert!(
+            !t["tiles"].as_array().unwrap().is_empty(),
+            "{name}: on a tile"
+        );
+        // The instance's box is the drawn one.
+        let blocks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(tmp.0.join("blocks.json")).unwrap())
+                .unwrap();
+        let bbox = blocks["instances"][0]["bbox"].as_array().unwrap();
+        assert!(
+            bbox[1].as_f64().unwrap() >= 100.0 - 1e-6 && bbox[3].as_f64().unwrap() >= 110.0 - 1e-6,
+            "{name}: {bbox:?}"
+        );
+    }
+
+    // A non-uniform outer scale (2, 1): (0,10) -> (100,110), (-2,10) ->
+    // (96,110): content x 96..100, y 100..110 (plus the text). No
+    // origin + rotation + scale composition can express this frame.
+    let r = content(&nested(2.0, 1.0, 1.0));
+    assert!(
+        r.min_x <= 96.0 + 1e-9 && r.min_x >= 95.0 && r.max_y >= 110.0 - 1e-9 && r.max_y <= 111.0,
+        "{r:?}"
+    );
+    assert!(r.min_y >= 100.0 - 1e-9 && r.max_x <= 101.0, "{r:?}");
 }

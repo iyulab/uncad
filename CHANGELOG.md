@@ -179,6 +179,15 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
   vertices, since the reflection reverses each arc's turn; `bulges` are documented as
   world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- A rotated block nested inside a mirrored (negative x scale or extrusion `(0,0,-1)`)
+  or non-uniformly scaled block reference had its bounds, crop, tile membership,
+  `blocks.json` box and `texts.json` anchors reflected about the parent's insertion
+  point, although the picture (nested `<g transform>` groups) was right: the composed
+  transform added rotations and multiplied scales, which is only valid for a uniform
+  scale. Both the renderer's transform and the export's affine are full 2 x 3 matrices
+  composed by multiplication now. A nested text's estimated box goes through the same
+  matrix, and its `rotation_deg` is the orientation of its glyphs (the transformed up
+  axis), so an upright mirror-written label stays 0.
 - The extent of a CIRCLE, ARC, ELLIPSE or bulged polyline inside a block reference
   rotated by other than a multiple of 90 degrees was measured from two corners of its
   box, so a circle in a block inserted at 45 degrees had a zero-width extent and a

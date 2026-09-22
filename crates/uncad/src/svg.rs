@@ -150,58 +150,86 @@ impl ViewBox {
 
 // --- block transform ---------------------------------------------------
 
-/// An INSERT-style placement, composed across nested block references.
-#[derive(Debug, Clone, Copy)]
+/// An INSERT-style placement, composed across nested block references, as
+/// the general 2 x 3 matrix `world = (a x + c y + e, b x + d y + f)`.
+///
+/// A full matrix rather than origin + rotation + per-axis scale: that form
+/// cannot represent the composition of a mirrored or non-uniformly scaled
+/// parent with a rotated child (`diag(-1, 1) R(t) = R(-t) diag(-1, 1)`, so
+/// adding rotations and multiplying scales reflected the child about the
+/// parent's insertion point), while matrices compose by multiplication for
+/// any combination. The picture is emitted as nested `<g transform>`
+/// groups and was always right; this is what the bounds go through.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct Transform {
-    insertion_point: Point2D,
-    x_scale: f64,
-    y_scale: f64,
-    rotation: f64,
+    a: f64,
+    b: f64,
+    c: f64,
+    d: f64,
+    e: f64,
+    f: f64,
 }
 
 impl Transform {
     fn identity() -> Self {
         Transform {
-            insertion_point: Point2D { x: 0.0, y: 0.0 },
-            x_scale: 1.0,
-            y_scale: 1.0,
-            rotation: 0.0,
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: 0.0,
+            f: 0.0,
+        }
+    }
+
+    /// One INSERT's placement: `insertion_point + R(rotation) diag(x_scale,
+    /// y_scale) p`.
+    fn placement(insertion_point: Point2D, x_scale: f64, y_scale: f64, rotation: f64) -> Self {
+        let (cos, sin) = (rotation.cos(), rotation.sin());
+        Transform {
+            a: x_scale * cos,
+            b: x_scale * sin,
+            c: -y_scale * sin,
+            d: y_scale * cos,
+            e: insertion_point.x,
+            f: insertion_point.y,
         }
     }
 
     /// Local (x, y) -> world (x, y) through this transform.
     fn apply(&self, x: f64, y: f64) -> (f64, f64) {
-        let (cos, sin) = (self.rotation.cos(), self.rotation.sin());
         (
-            self.insertion_point.x + self.x_scale * cos * x - self.y_scale * sin * y,
-            self.insertion_point.y + self.x_scale * sin * x + self.y_scale * cos * y,
+            self.a * x + self.c * y + self.e,
+            self.b * x + self.d * y + self.f,
         )
     }
 
     /// The SVG `matrix(a b c d e f)` equivalent, composed with the renderer's
-    /// CAD-y-up to SVG-y-down flip.
+    /// CAD-y-up to SVG-y-down flip on both sides: an SVG-local point
+    /// `(u, v) = (x, -y)` maps to the SVG-parent point `(X, -Y)`.
     fn svg_matrix(&self) -> [f64; 6] {
-        let (cos, sin) = (self.rotation.cos(), self.rotation.sin());
         [
-            self.x_scale * cos,
-            neg(self.x_scale * sin),
-            self.y_scale * sin,
-            self.y_scale * cos,
-            self.insertion_point.x,
-            neg(self.insertion_point.y),
+            clean(self.a),
+            neg(self.b),
+            neg(self.c),
+            clean(self.d),
+            clean(self.e),
+            neg(self.f),
         ]
     }
 }
 
 /// Composes a parent world-transform with a child's local transform: applying
-/// the result to a point equals applying `child` then `parent`.
+/// the result to a point equals applying `child` then `parent` (the matrix
+/// product `parent * child`).
 fn compose(parent: &Transform, child: &Transform) -> Transform {
-    let (px, py) = parent.apply(child.insertion_point.x, child.insertion_point.y);
     Transform {
-        insertion_point: Point2D { x: px, y: py },
-        x_scale: parent.x_scale * child.x_scale,
-        y_scale: parent.y_scale * child.y_scale,
-        rotation: parent.rotation + child.rotation,
+        a: parent.a * child.a + parent.c * child.b,
+        b: parent.b * child.a + parent.d * child.b,
+        c: parent.a * child.c + parent.c * child.d,
+        d: parent.b * child.c + parent.d * child.d,
+        e: parent.a * child.e + parent.c * child.f + parent.e,
+        f: parent.b * child.e + parent.d * child.f + parent.f,
     }
 }
 
@@ -683,12 +711,7 @@ fn render_block_ref(
         ctx.scale
     };
 
-    let child_transform = Transform {
-        insertion_point,
-        x_scale,
-        y_scale,
-        rotation,
-    };
+    let child_transform = Transform::placement(insertion_point, x_scale, y_scale, rotation);
     // Compose: local (within the block) -> world, via this block's own
     // transform evaluated in the parent's already-established space. The
     // parent's own state is restored afterwards.
@@ -1756,36 +1779,98 @@ mod tests {
 
     #[test]
     fn transform_apply_scales_rotates_then_translates() {
-        let t = Transform {
-            insertion_point: Point2D { x: 10.0, y: 20.0 },
-            x_scale: 2.0,
-            y_scale: 2.0,
-            rotation: 0.0,
-        };
+        let t = Transform::placement(Point2D { x: 10.0, y: 20.0 }, 2.0, 2.0, 0.0);
         let (x, y) = t.apply(1.0, 1.0);
         close(x, 12.0);
         close(y, 22.0);
+        // Rotation first, then the translation: (1,0) scaled by 3 and
+        // turned 90 degrees is (0,3), landing at (10,23).
+        let t = Transform::placement(
+            Point2D { x: 10.0, y: 20.0 },
+            3.0,
+            3.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        let (x, y) = t.apply(1.0, 0.0);
+        close(x, 10.0);
+        close(y, 23.0);
     }
 
     #[test]
     fn compose_applies_child_transform_within_parents_space() {
-        let parent = Transform {
-            insertion_point: Point2D { x: 10.0, y: 0.0 },
-            x_scale: 1.0,
-            y_scale: 1.0,
-            rotation: 0.0,
-        };
-        let child = Transform {
-            insertion_point: Point2D { x: 1.0, y: 1.0 },
-            x_scale: 2.0,
-            y_scale: 2.0,
-            rotation: 0.0,
-        };
+        let parent = Transform::placement(Point2D { x: 10.0, y: 0.0 }, 1.0, 1.0, 0.0);
+        let child = Transform::placement(Point2D { x: 1.0, y: 1.0 }, 2.0, 2.0, 0.0);
         let composed = compose(&parent, &child);
-        close(composed.insertion_point.x, 11.0);
-        close(composed.insertion_point.y, 1.0);
-        close(composed.x_scale, 2.0);
-        close(composed.y_scale, 2.0);
+        let (x, y) = composed.apply(0.0, 0.0);
+        close(x, 11.0);
+        close(y, 1.0);
+        let (x, y) = composed.apply(1.0, 1.0);
+        close(x, 13.0);
+        close(y, 3.0);
+    }
+
+    #[test]
+    fn compose_matches_the_nested_picture_under_mirrored_and_non_uniform_parents() {
+        let quarter = std::f64::consts::FRAC_PI_2;
+        // A child rotated 90 degrees inside a parent mirrored about the
+        // vertical axis at (100,100): the child sends (10,0) to (0,10), the
+        // parent then sends (0,10) to (100 - 0, 100 + 10) = (100,110). The
+        // old rotation-sum form gave the parent's rotation 0 + 90 with x
+        // scale -1: (100 - 0, 100 - 10) = (100,90), the reflection of the
+        // drawn point about the insertion point.
+        let parent = Transform::placement(Point2D { x: 100.0, y: 100.0 }, -1.0, 1.0, 0.0);
+        let child = Transform::placement(Point2D { x: 0.0, y: 0.0 }, 1.0, 1.0, quarter);
+        let composed = compose(&parent, &child);
+        let (x, y) = composed.apply(10.0, 0.0);
+        close(x, 100.0);
+        close(y, 110.0);
+        let (x, y) = composed.apply(10.0, 2.0);
+        close(x, 100.0 + 2.0);
+        close(y, 110.0);
+
+        // A non-uniform parent (2, 1) over the same child: (10,0) -> child
+        // (0,10) -> parent (100 + 0, 100 + 10); (0,2) -> child (-2,0) ->
+        // parent (100 - 4, 100). No origin + rotation + scale form can
+        // express this frame (its axes are not perpendicular after
+        // scaling), only the matrix.
+        let parent = Transform::placement(Point2D { x: 100.0, y: 100.0 }, 2.0, 1.0, 0.0);
+        let composed = compose(&parent, &child);
+        let (x, y) = composed.apply(10.0, 0.0);
+        close(x, 100.0);
+        close(y, 110.0);
+        let (x, y) = composed.apply(0.0, 2.0);
+        close(x, 96.0);
+        close(y, 100.0);
+
+        // In general: compose(p, c).apply(q) == p.apply(c.apply(q)), which
+        // is exactly what the nested <g transform> groups draw.
+        let frames = [
+            Transform::placement(Point2D { x: 3.0, y: -7.0 }, -2.0, 0.5, 0.3),
+            Transform::placement(Point2D { x: -1.0, y: 4.0 }, 1.5, -1.5, -1.1),
+            Transform::placement(Point2D { x: 0.0, y: 0.0 }, 1.0, 3.0, 2.0),
+        ];
+        for p in &frames {
+            for c in &frames {
+                let composed = compose(p, c);
+                for (qx, qy) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (-3.5, 2.25)] {
+                    let (cx, cy) = c.apply(qx, qy);
+                    let (wx, wy) = p.apply(cx, cy);
+                    let (x, y) = composed.apply(qx, qy);
+                    close(x, wx);
+                    close(y, wy);
+                }
+            }
+        }
+        // And the emitted matrix is the placement with y negated on both
+        // sides: matrix(a -b -c d e -f).
+        let t = Transform::placement(Point2D { x: 5.0, y: 6.0 }, 2.0, 3.0, quarter);
+        let [a, b, c, d, e, f] = t.svg_matrix();
+        close(a, 0.0);
+        close(b, -2.0);
+        close(c, 3.0);
+        close(d, 0.0);
+        close(e, 5.0);
+        close(f, -6.0);
     }
 
     #[test]
