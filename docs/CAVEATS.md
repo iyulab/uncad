@@ -159,17 +159,15 @@ its 0.3.0 form. Known gaps:
   `bbox_confidence: "estimated"` on every text record); a tile's sidecar may
   therefore list a label a few pixels off, or one whose last characters lie
   on the neighbouring tile. Glyph-metric boxes are 0.4.0 work.
-- **Every tile renders the whole drawing.** There is no per-tile culling of
-  the SVG tree, so a level costs `tiles x (full render)`, spread over the
-  machine's threads. In a release build that is 1-4 s for the sample
-  drawings (`docs/EVAL.md`), but a debug build is 20-40x slower and a
-  20 000-entity drawing at z3 would be slow. `--max-tiles` (400) and
-  `--max-levels` (5) bound it.
+- **A tile rasterizes what touches it.** Each tile's SVG holds only the
+  entities whose extent meets the tile grown by 16 px, so cost follows the
+  content on the tile; a dense drawing whose every entity touches every
+  tile still costs `tiles x content`. Tiles of a level render in parallel;
+  `--max-tiles` (400) and `--max-levels` (5) bound the total.
 - **One frame, model space only.** Detached clusters do not get their own
   tile pyramid and paper layouts are not exported (design section 4, steps
   5 and 10).
-- `strings.json` normalises with trim, case fold and whitespace collapse,
-  not NFKC; text is rendered with the host's fonts (no bundled face).
+- Text is rendered with the host's fonts (no bundled face).
 - Records for entities inside block references are limited to texts;
   geometry inside blocks is drawn but not listed (INSERT instances are).
 
@@ -181,7 +179,7 @@ sets aside the largest entities and the farthest from the median centre
 (at most a quarter of the drawing) and measures them against the rest: a
 diagonal over 20x the rest's is a `scale_outlier` (the 3256x INSERT in
 `example_2000.dwg`), a gap of more than 20 rest diagonals a `far_outlier`
-(the attribute that INSERT drags a million units out) -- never more than a
+(a stray point a million units out) -- never more than a
 fifth of the drawing, so a notes block one drawing-width away stays. More
 candidates than that means the drawing really is that big and nothing is
 excluded. Each exclusion is reported with its handle and

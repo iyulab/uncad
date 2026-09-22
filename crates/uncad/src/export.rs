@@ -46,6 +46,7 @@ use crate::crop::{self, CropMode, CropReport, Extent, Rect};
 use crate::model::{Entity, InsertEntity, Point2D, Point3D};
 use crate::png::{self, PngError};
 use crate::svg::{self, Space, ToSvgOptions, ViewBox};
+use crate::text::{estimate_mtext_box, estimate_text_box};
 use crate::visibility::hidden_reason;
 use crate::{CadDatabase, ToJsonOptions};
 
@@ -384,101 +385,6 @@ impl Affine {
 const MAX_BLOCK_DEPTH: u32 = 8;
 const MAX_PLACED_TEXTS: usize = 200_000;
 
-/// Estimated world box of a text: 0.6 em per character (the renderer's
-/// own guess), placed by its alignment and rotated about its anchor.
-fn text_box(
-    anchor: Point2D,
-    height: f64,
-    rotation: f64,
-    text: &str,
-    width_factor: f64,
-    h_align: u16,
-    v_align: u16,
-) -> Rect {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let chars = lines
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0)
-        .max(1) as f64;
-    let width = 0.6 * height * width_factor.abs().max(0.1) * chars;
-    let total_height = height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0);
-    let (x0, x1) = match h_align {
-        1 | 3 | 4 | 5 => (-width / 2.0, width / 2.0),
-        2 => (-width, 0.0),
-        _ => (0.0, width),
-    };
-    let (y0, y1) = match (h_align, v_align) {
-        (4, _) | (_, 2) => (-total_height / 2.0, total_height / 2.0),
-        (_, 3) => (-total_height, 0.0),
-        _ => (0.0, total_height),
-    };
-    rotated_box(anchor, rotation, x0, y0, x1, y1)
-}
-
-/// MTEXT: attachment 1-9 (top/middle/bottom rows, left/center/right
-/// columns) with the stored extents when the file has them.
-fn mtext_box(
-    anchor: Point2D,
-    height: f64,
-    rotation: f64,
-    text: &str,
-    attachment: u16,
-    extents_width: f64,
-    extents_height: f64,
-) -> Rect {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let chars = lines
-        .iter()
-        .map(|l| l.chars().count())
-        .max()
-        .unwrap_or(0)
-        .max(1) as f64;
-    let width = if extents_width > 0.0 {
-        extents_width
-    } else {
-        0.6 * height * chars
-    };
-    let total_height = if extents_height > 0.0 {
-        extents_height
-    } else {
-        height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0)
-    };
-    let column = (attachment.clamp(1, 9) - 1) % 3;
-    let row = (attachment.clamp(1, 9) - 1) / 3;
-    let (x0, x1) = match column {
-        1 => (-width / 2.0, width / 2.0),
-        2 => (-width, 0.0),
-        _ => (0.0, width),
-    };
-    let (y0, y1) = match row {
-        0 => (-total_height, 0.0),
-        1 => (-total_height / 2.0, total_height / 2.0),
-        _ => (0.0, total_height),
-    };
-    rotated_box(anchor, rotation, x0, y0, x1, y1)
-}
-
-fn rotated_box(anchor: Point2D, rotation: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
-    let (c, s) = (rotation.cos(), rotation.sin());
-    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
-    let mut rect = Rect::new(
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    );
-    for (x, y) in corners {
-        let (wx, wy) = (anchor.x + c * x - s * y, anchor.y + s * x + c * y);
-        rect.min_x = rect.min_x.min(wx);
-        rect.min_y = rect.min_y.min(wy);
-        rect.max_x = rect.max_x.max(wx);
-        rect.max_y = rect.max_y.max(wy);
-    }
-    rect
-}
-
 fn p2(p: Point3D) -> Point2D {
     Point2D { x: p.x, y: p.y }
 }
@@ -534,7 +440,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: text_box(
+                bbox: estimate_text_box(
                     anchor,
                     height,
                     rotation,
@@ -568,7 +474,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: text_box(
+                bbox: estimate_text_box(
                     anchor,
                     height,
                     rotation,
@@ -597,7 +503,7 @@ fn collect_texts(
                 height,
                 rotation,
                 anchor,
-                bbox: mtext_box(
+                bbox: estimate_mtext_box(
                     anchor,
                     height,
                     rotation,
@@ -685,13 +591,23 @@ fn id_key(id: &str) -> (u64, String) {
     )
 }
 
-/// The normalisation `strings.json` keys use: trimmed, case-folded,
-/// whitespace collapsed.
+/// The normalisation `strings.json` keys use: Unicode NFKC (so `㎡` is
+/// `m2`, `²` is `2`, full-width digits are ASCII), the fraction slash
+/// U+2044 as `/`, case folded, whitespace collapsed to single spaces.
 pub fn normalize_string(s: &str) -> String {
-    s.split_whitespace()
+    use unicode_normalization::UnicodeNormalization;
+    let folded: String = s.nfkc().collect::<String>().replace('\u{2044}', "/");
+    folded
+        .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
+}
+
+/// [`normalize_string`] with every space removed as well, the second key
+/// each string is indexed under (so `32.5 m2` and `32.5m2` meet).
+pub fn compact_string(s: &str) -> String {
+    normalize_string(s).replace(' ', "")
 }
 
 // ----------------------------------------------------------- the package
@@ -928,18 +844,27 @@ pub fn export_package(
     };
     writer.write_bytes("overview.png", &overview_png, "image")?;
     let mut tile_images: Vec<ImageInfo> = Vec::new();
+    // Each tile rasterizes only the entities whose extent touches it (plus
+    // a margin for strokes and text overhang): parsing and rendering cost
+    // what is on the tile, not the whole drawing.
+    let extent_of_handle: std::collections::HashMap<&str, Rect> = extents
+        .iter()
+        .map(|e| (e.handle.as_str(), e.rect))
+        .collect();
     for level in &levels {
-        let level_view_box = overview_view_box;
-        let level_svg = svg::assemble(&rendered, &level_view_box, stroke_px / level.ppu);
-        let tree = png::parse_tree(&level_svg)?;
         let level_tiles: Vec<&Tile> = tiles
             .iter()
             .filter(|t| t.z == level.z && !t.empty)
             .collect();
-        // Tiles of a level render in parallel (each one rasterizes the whole
-        // tree through its own transform); files are written afterwards in
-        // tile order so the listing is deterministic.
-        let rendered_tiles = render_tiles_parallel(&tree, level.ppu, &level_tiles)?;
+        let margin = 16.0 / level.ppu;
+        let rendered_tiles = render_tiles_parallel(
+            &rendered,
+            &extent_of_handle,
+            level.ppu,
+            stroke_px,
+            margin,
+            &level_tiles,
+        )?;
         for (tile, bytes) in level_tiles.iter().zip(rendered_tiles) {
             let png_path = format!(
                 "frames/f0/tiles/z{}/r{:02}_c{:02}.png",
@@ -1396,37 +1321,34 @@ pub fn export_package(
 
     // --- strings ----------------------------------------------------------
     let mut strings: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut index = |text: &str, id: &str| {
+        let key = normalize_string(text);
+        if key.is_empty() {
+            return;
+        }
+        let compact = compact_string(text);
+        if compact != key {
+            strings.entry(compact).or_default().insert(id.to_string());
+        }
+        strings.entry(key).or_default().insert(id.to_string());
+    };
     for t in &texts {
-        strings
-            .entry(normalize_string(&t.text))
-            .or_default()
-            .insert(t.id.clone());
+        index(&t.text, &t.id);
     }
     for r in &dim_records {
         if let Some(Value::String(d)) = r.value.get("display") {
-            if !d.is_empty() {
-                strings
-                    .entry(normalize_string(d))
-                    .or_default()
-                    .insert(r.id.clone());
-            }
+            index(d, &r.id);
         }
     }
     for r in &block_records {
         if let Some(Value::Object(attribs)) = r.value.get("attribs") {
             for value in attribs.values() {
                 if let Value::String(s) = value {
-                    if !s.trim().is_empty() {
-                        strings
-                            .entry(normalize_string(s))
-                            .or_default()
-                            .insert(r.id.clone());
-                    }
+                    index(s, &r.id);
                 }
             }
         }
     }
-    strings.remove("");
 
     // --- write the JSON files ----------------------------------------------
     writer.write_records("texts", "text", &text_records)?;
@@ -1442,7 +1364,7 @@ pub fn export_package(
     writer.write_json("blocks.json", &blocks_value, "blocks")?;
     let strings_value = json!({
         "$schema": SCHEMA,
-        "normalization": "trim, case fold, whitespace collapse",
+        "normalization": "NFKC, fraction slash to '/', case fold, whitespace collapsed; each string also under its key with spaces removed",
         "strings": strings,
     });
     writer.write_json("strings.json", &strings_value, "strings")?;
@@ -1660,11 +1582,16 @@ pub fn export_package(
     })
 }
 
-/// Renders `tiles` from `tree` on as many threads as the machine offers
-/// (at most one per tile), returning the PNG bytes in the tiles' order.
+/// Renders `tiles` on as many threads as the machine offers (at most one
+/// per tile), returning the PNG bytes in the tiles' order. Each tile gets
+/// its own SVG holding only the entities whose extent touches the tile
+/// grown by `margin` (entities without an extent are always included).
 fn render_tiles_parallel(
-    tree: &resvg::usvg::Tree,
+    rendered: &svg::Rendered,
+    extent_of_handle: &std::collections::HashMap<&str, Rect>,
     ppu: f64,
+    stroke_px: f64,
+    margin: f64,
     tiles: &[&Tile],
 ) -> Result<Vec<Vec<u8>>, ExportError> {
     if tiles.is_empty() {
@@ -1676,22 +1603,30 @@ fn render_tiles_parallel(
         .clamp(1, 16)
         .min(tiles.len());
     let chunk = tiles.len().div_ceil(threads);
+    let render_one = |tile: &Tile| -> Result<Vec<u8>, PngError> {
+        let window = tile.world.padded(margin);
+        let svg_text = svg::assemble_subset(
+            rendered,
+            &ViewBox::from_world(&tile.world),
+            stroke_px / ppu,
+            |handle| {
+                extent_of_handle
+                    .get(handle)
+                    .is_none_or(|rect| rect.intersects(&window))
+            },
+        );
+        let tree = png::parse_tree(&svg_text)?;
+        png::render_region(&tree, ppu, (0.0, 0.0), tile.width, tile.height)
+    };
     let results: Vec<Result<Vec<Vec<u8>>, PngError>> = std::thread::scope(|scope| {
         let handles: Vec<_> = tiles
             .chunks(chunk)
             .map(|group| {
+                let render_one = &render_one;
                 scope.spawn(move || {
                     group
                         .iter()
-                        .map(|tile| {
-                            png::render_region(
-                                tree,
-                                ppu,
-                                (f64::from(tile.origin_px.0), f64::from(tile.origin_px.1)),
-                                tile.width,
-                                tile.height,
-                            )
-                        })
+                        .map(|tile| render_one(tile))
                         .collect::<Result<Vec<_>, _>>()
                 })
             })
@@ -1957,6 +1892,7 @@ fn sidecar(
             "row": tile.row,
             "col": tile.col,
             "px": img.px,
+            "canvas_origin_px": [tile.origin_px.0, tile.origin_px.1],
             "world": rounder.rect(&img.world),
             "ppu": img.ppu,
             "world_to_px": img.world_to_px,
@@ -2100,31 +2036,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn text_boxes_follow_alignment_and_rotation() {
-        let anchor = Point2D { x: 10.0, y: 20.0 };
-        // Left/baseline: from the anchor to the right and up.
-        let b = text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 0, 0);
-        assert_eq!(
-            (b.min_x, b.min_y, b.max_x, b.max_y),
-            (10.0, 20.0, 14.8, 22.0)
-        );
-        // Middle-centre.
-        let b = text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 4, 0);
-        assert!((b.min_x - 7.6).abs() < 1e-9 && (b.max_x - 12.4).abs() < 1e-9);
-        assert!((b.min_y - 19.0).abs() < 1e-9 && (b.max_y - 21.0).abs() < 1e-9);
-        // Rotated 90 degrees: the width goes up.
-        let b = text_box(anchor, 2.0, std::f64::consts::FRAC_PI_2, "ABCD", 1.0, 0, 0);
-        assert!(
-            (b.max_y - 24.8).abs() < 1e-9 && (b.min_x - 8.0).abs() < 1e-9,
-            "{b:?}"
-        );
-        // MTEXT top-left attachment hangs below the anchor.
-        let b = mtext_box(anchor, 2.0, 0.0, "AB\nCD", 1, 0.0, 0.0);
-        assert!((b.max_y - 20.0).abs() < 1e-9 && b.min_y < 16.0, "{b:?}");
-        assert!((b.max_x - 12.4).abs() < 1e-9);
-    }
-
-    #[test]
     fn insert_affines_compose_and_mirror() {
         let inner = Affine {
             origin: Point2D { x: 1.0, y: 0.0 },
@@ -2201,6 +2112,10 @@ mod tests {
         assert!(id_key("1F") < id_key("20"));
         assert!(id_key("A") < id_key("A/3"));
         assert_eq!(normalize_string("  Room   101 \n"), "room 101");
+        assert_eq!(normalize_string("32.5㎡"), "32.5m2");
+        assert_eq!(normalize_string("½\" Ø"), "1/2\" ø");
+        assert_eq!(normalize_string("Ａ１"), "a1");
+        assert_eq!(compact_string(" 32.5 m 2 "), "32.5m2");
         assert_eq!(area_unit("mm"), "mm2");
         assert_eq!(area_unit("du"), "du2");
         let sq = [

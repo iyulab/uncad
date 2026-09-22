@@ -249,9 +249,141 @@ fn push_stack(out: &mut DecodedText, plain: &mut String, body: &str) {
     });
 }
 
+// --- text boxes ---------------------------------------------------------
+
+/// Estimated world box of a TEXT/ATTRIB: 0.6 em per character (the
+/// renderer's own guess; glyph metrics refine it later), placed by its
+/// alignment (DXF 72 / 73) and rotated about its anchor. The renderer's
+/// extents and the export's records both use this.
+pub fn estimate_text_box(
+    anchor: crate::model::Point2D,
+    height: f64,
+    rotation: f64,
+    text: &str,
+    width_factor: f64,
+    h_align: u16,
+    v_align: u16,
+) -> crate::crop::Rect {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let chars = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let width = 0.6 * height * width_factor.abs().max(0.1) * chars;
+    let total_height = height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0);
+    let (x0, x1) = match h_align {
+        1 | 3 | 4 | 5 => (-width / 2.0, width / 2.0),
+        2 => (-width, 0.0),
+        _ => (0.0, width),
+    };
+    let (y0, y1) = match (h_align, v_align) {
+        (4, _) | (_, 2) => (-total_height / 2.0, total_height / 2.0),
+        (_, 3) => (-total_height, 0.0),
+        _ => (0.0, total_height),
+    };
+    rotated_box(anchor, rotation, x0, y0, x1, y1)
+}
+
+/// MTEXT: attachment 1-9 (top/middle/bottom rows, left/center/right
+/// columns) with the stored extents when the file has them.
+pub fn estimate_mtext_box(
+    anchor: crate::model::Point2D,
+    height: f64,
+    rotation: f64,
+    text: &str,
+    attachment: u16,
+    extents_width: f64,
+    extents_height: f64,
+) -> crate::crop::Rect {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let chars = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(1) as f64;
+    let width = if extents_width > 0.0 {
+        extents_width
+    } else {
+        0.6 * height * chars
+    };
+    let total_height = if extents_height > 0.0 {
+        extents_height
+    } else {
+        height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0)
+    };
+    let column = (attachment.clamp(1, 9) - 1) % 3;
+    let row = (attachment.clamp(1, 9) - 1) / 3;
+    let (x0, x1) = match column {
+        1 => (-width / 2.0, width / 2.0),
+        2 => (-width, 0.0),
+        _ => (0.0, width),
+    };
+    let (y0, y1) = match row {
+        0 => (-total_height, 0.0),
+        1 => (-total_height / 2.0, total_height / 2.0),
+        _ => (0.0, total_height),
+    };
+    rotated_box(anchor, rotation, x0, y0, x1, y1)
+}
+
+pub(crate) fn rotated_box(
+    anchor: crate::model::Point2D,
+    rotation: f64,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> crate::crop::Rect {
+    let (c, s) = (rotation.cos(), rotation.sin());
+    let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+    let mut rect = crate::crop::Rect::new(
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for (x, y) in corners {
+        let (wx, wy) = (anchor.x + c * x - s * y, anchor.y + s * x + c * y);
+        rect.min_x = rect.min_x.min(wx);
+        rect.min_y = rect.min_y.min(wy);
+        rect.max_x = rect.max_x.max(wx);
+        rect.max_y = rect.max_y.max(wy);
+    }
+    rect
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Point2D;
+
+    #[test]
+    fn text_boxes_follow_alignment_and_rotation() {
+        let anchor = Point2D { x: 10.0, y: 20.0 };
+        // Left/baseline: from the anchor to the right and up.
+        let b = estimate_text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 0, 0);
+        assert_eq!(
+            (b.min_x, b.min_y, b.max_x, b.max_y),
+            (10.0, 20.0, 14.8, 22.0)
+        );
+        // Middle-centre.
+        let b = estimate_text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 4, 0);
+        assert!((b.min_x - 7.6).abs() < 1e-9 && (b.max_x - 12.4).abs() < 1e-9);
+        assert!((b.min_y - 19.0).abs() < 1e-9 && (b.max_y - 21.0).abs() < 1e-9);
+        // Rotated 90 degrees: the width goes up.
+        let b = estimate_text_box(anchor, 2.0, std::f64::consts::FRAC_PI_2, "ABCD", 1.0, 0, 0);
+        assert!(
+            (b.max_y - 24.8).abs() < 1e-9 && (b.min_x - 8.0).abs() < 1e-9,
+            "{b:?}"
+        );
+        // MTEXT top-left attachment hangs below the anchor.
+        let b = estimate_mtext_box(anchor, 2.0, 0.0, "AB\nCD", 1, 0.0, 0.0);
+        assert!((b.max_y - 20.0).abs() < 1e-9 && b.min_y < 16.0, "{b:?}");
+        assert!((b.max_x - 12.4).abs() < 1e-9);
+    }
 
     fn plain_mtext(raw: &str) -> String {
         decode_mtext(raw).plain

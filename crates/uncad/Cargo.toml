@@ -22,3 +22,5 @@ resvg = "0.48"
 png = "0.18"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# NFKC for the package's string index (㎡ -> m2, full-width digits, ...).
+unicode-normalization = "0.1"

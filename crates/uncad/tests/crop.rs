@@ -106,7 +106,8 @@ fn pixels_and_units_stay_in_exact_proportion() {
     assert!(header.intersects(&content), "{header:?} vs {content:?}");
     assert!(header.area() > 4.0 * content.area());
     assert_eq!(png.crop.source, CropSource::Content);
-    // The INSERT by its size, and the ATTRIB it drags along by distance.
+    // The INSERT by its size, and the ATTRIB it drags along -- scaled 3256x
+    // too, so its estimated text box is a giant as well.
     let mut excluded: Vec<(&str, &str, ExcludeReason)> = png
         .crop
         .excluded
@@ -117,7 +118,7 @@ fn pixels_and_units_stay_in_exact_proportion() {
     assert_eq!(
         excluded,
         [
-            ("ATTRIB", "757", ExcludeReason::FarOutlier),
+            ("ATTRIB", "757", ExcludeReason::ScaleOutlier),
             ("INSERT", "756", ExcludeReason::ScaleOutlier),
         ]
     );

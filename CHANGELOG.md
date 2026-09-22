@@ -29,7 +29,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   reasons), `tiles.json`, `README.txt`. `--svg` / `--full` add `drawing.svg` /
   `entities.json`; record files above `--shard-kb` (96) are sharded and indexed in the
   manifest; profiles `claude`, `claude-hires`, `openai-patch`. Output is deterministic
-  except for the timings in `report.json`.
+  except for the timings in `report.json`. Each tile rasterizes only the entities whose
+  extent touches it, in parallel per level; `strings.json` keys are NFKC-normalised
+  (`㎡` -> `m2`, full-width digits, fraction slash) and every string is also indexed
+  without spaces. The renderer's text extents (and so the crop) use the same 0.6-em
+  estimate as `texts.json` (`uncad::text::estimate_text_box`) instead of the anchor
+  point alone.
 - The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
   is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
   most `max(3, 1 %)` entities: the largest when they dwarf the rest of the drawing 20x,

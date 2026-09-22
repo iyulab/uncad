@@ -310,6 +310,19 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// Records a world-axis-aligned rectangle's four corners (in local
+    /// coordinates, like [`consider`](Self::consider)).
+    fn consider_rect(&mut self, rect: &Rect) {
+        for (x, y) in [
+            (rect.min_x, rect.min_y),
+            (rect.max_x, rect.min_y),
+            (rect.max_x, rect.max_y),
+            (rect.min_x, rect.max_y),
+        ] {
+            self.consider(x, y);
+        }
+    }
+
     fn consider_all(&mut self, points: &[Point2D]) {
         for p in points {
             self.consider(p.x, p.y);
@@ -769,6 +782,15 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 t.vertical_alignment,
             );
             ctx.consider(anchor.at.x, anchor.at.y);
+            ctx.consider_rect(&crate::text::estimate_text_box(
+                anchor.at,
+                t.text_height,
+                t.rotation,
+                &t.text_plain,
+                t.width_factor,
+                t.horizontal_alignment,
+                t.vertical_alignment,
+            ));
             Some(text_element(
                 &anchor,
                 t.text_height,
@@ -788,6 +810,15 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             if a.text.is_empty() || a.invisible {
                 return Some(String::new());
             }
+            ctx.consider_rect(&crate::text::estimate_text_box(
+                anchor.at,
+                a.text_height,
+                a.rotation,
+                &a.text_plain,
+                a.width_factor,
+                a.horizontal_alignment,
+                a.vertical_alignment,
+            ));
             Some(text_element(
                 &anchor,
                 a.text_height,
@@ -819,6 +850,18 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         }
         Entity::MText(m) => {
             ctx.consider(m.insertion_point.x, m.insertion_point.y);
+            ctx.consider_rect(&crate::text::estimate_mtext_box(
+                Point2D {
+                    x: m.insertion_point.x,
+                    y: m.insertion_point.y,
+                },
+                m.text_height,
+                m.rotation,
+                &m.text_plain,
+                m.attachment,
+                m.extents_width,
+                m.extents_height,
+            ));
             let lines: Vec<&str> = m.text_plain.lines().filter(|l| !l.is_empty()).collect();
             if lines.is_empty() {
                 return Some(String::new());
@@ -1170,7 +1213,10 @@ pub(crate) fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&
 /// was drawn for. [`assemble`] turns it into a document; `png.rs` uses the
 /// split to pick a stroke width in output pixels once it knows the scale.
 pub(crate) struct Rendered {
-    body: String,
+    /// One SVG fragment per drawn top-level entity, `(handle, svg)`, in
+    /// drawing order; [`assemble`] joins them and the export picks the ones
+    /// a tile needs.
+    pub(crate) parts: Vec<(String, String)>,
     defs: Vec<String>,
     /// The viewBox for an SVG document: the crop padded by the options'
     /// padding or the automatic 2 %. `png.rs` computes its own.
@@ -1231,10 +1277,9 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     // What the crop leaves out is not drawn either: a 3256x INSERT clipped
     // by the viewBox would still cross the whole picture.
     let excluded: HashSet<&str> = choice.excluded.iter().map(|x| x.handle.as_str()).collect();
-    let body: Vec<String> = body
+    let body: Vec<(String, String)> = body
         .into_iter()
         .filter(|(handle, _)| !excluded.contains(handle.as_str()))
-        .map(|(_, svg)| svg)
         .collect();
     let padding_units = options
         .padding
@@ -1243,7 +1288,7 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     let view_box = ViewBox::from_world(&padded_rect);
 
     Rendered {
-        body: body.join("\n  "),
+        parts: body,
         defs: ctx.defs,
         view_box,
         unsupported: ctx.unsupported,
@@ -1271,7 +1316,24 @@ pub(crate) fn assemble(
     view_box: &ViewBox,
     effective_stroke_width: f64,
 ) -> String {
-    let resolved_body = resolve_stroke_widths(&rendered.body, effective_stroke_width);
+    assemble_subset(rendered, view_box, effective_stroke_width, |_| true)
+}
+
+/// [`assemble`] with only the parts `keep` accepts (by entity handle): what
+/// a tile needs, so rasterizing it does not pay for the whole drawing.
+pub(crate) fn assemble_subset(
+    rendered: &Rendered,
+    view_box: &ViewBox,
+    effective_stroke_width: f64,
+    keep: impl Fn(&str) -> bool,
+) -> String {
+    let body: Vec<&str> = rendered
+        .parts
+        .iter()
+        .filter(|(handle, _)| keep(handle))
+        .map(|(_, svg)| svg.as_str())
+        .collect();
+    let resolved_body = resolve_stroke_widths(&body.join("\n  "), effective_stroke_width);
     // HATCH pattern defs carry stroke-width placeholders too. Kept separate
     // from the body only so an empty defs list emits no <defs> block at all.
     let defs_block = if rendered.defs.is_empty() {

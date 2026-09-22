@@ -10,8 +10,8 @@
 //!    and measures them against the *rest*: a candidate whose diagonal is
 //!    over 20x the rest's is a `scale_outlier` (the 3256x-scaled INSERT of
 //!    `example_2000.dwg` and `example_2018.dwg`); one more than 20 rest
-//!    diagonals away is a `far_outlier` (the attribute that INSERT drags a
-//!    million units out, a stray point) -- but never more than a fifth of
+//!    diagonals away is a `far_outlier` (a stray point a million units
+//!    out) -- but never more than a fifth of
 //!    the drawing, so a notes block a drawing-width away stays. Passes
 //!    repeat until nothing changes. Nothing else is ever trimmed: the
 //!    overview shows every entity that is not one of those.
