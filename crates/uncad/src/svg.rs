@@ -503,12 +503,25 @@ fn text_anchor(
     }
 }
 
+/// The height a text is drawn at: the stored one, or 1 when the file
+/// stores 0 (a legitimately stored "use the style's height" that no
+/// renderer-side default fills in) or nonsense. `font-size="0"` would make
+/// usvg drop the text without a trace.
+fn effective_text_height(stored: f64) -> f64 {
+    if stored.is_finite() && stored > 0.0 {
+        stored
+    } else {
+        1.0
+    }
+}
+
 /// A single-line `<text>` -- TEXT, ATTRIB and TOLERANCE all render to this.
 /// `anchor` positions it (world space); `rotation` is about the anchor.
 /// `id` is the entity's package id (`handle`, or `insert/handle` inside a
 /// block reference): the export's metrics pre-pass finds the shaped text
 /// by it, and every `<text>` names the bundled family so an SVG consumer
-/// with the font gets the same glyphs.
+/// with the font gets the same glyphs. `height` is the stored text height;
+/// a stored 0 is drawn at [`effective_text_height`]'s fallback.
 fn text_element(
     id: &str,
     anchor: &TextAnchor,
@@ -517,6 +530,7 @@ fn text_element(
     color: &str,
     text: &str,
 ) -> String {
+    let height = effective_text_height(height);
     let (x, y) = (
         anchor.at.x,
         neg(anchor.at.y) + anchor.baseline_drop * height,
@@ -816,7 +830,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ctx.consider(anchor.at.x, anchor.at.y);
             ctx.consider_rect(&crate::text::estimate_text_box(
                 anchor.at,
-                t.text_height,
+                effective_text_height(t.text_height),
                 t.rotation,
                 &t.text_plain,
                 t.width_factor,
@@ -845,7 +859,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             }
             ctx.consider_rect(&crate::text::estimate_text_box(
                 anchor.at,
-                a.text_height,
+                effective_text_height(a.text_height),
                 a.rotation,
                 &a.text_plain,
                 a.width_factor,
@@ -890,7 +904,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                     x: m.insertion_point.x,
                     y: m.insertion_point.y,
                 },
-                m.text_height,
+                effective_text_height(m.text_height),
                 m.rotation,
                 &m.text_plain,
                 m.attachment,
@@ -903,11 +917,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             }
             // A stored 0 means "unset" at render time (the parsed value is
             // legitimately 0 in real files), not at parse time.
-            let text_height = if m.text_height == 0.0 {
-                1.0
-            } else {
-                m.text_height
-            };
+            let text_height = effective_text_height(m.text_height);
             let line_spacing_factor = if m.line_spacing_factor == 0.0 {
                 1.0
             } else {
@@ -1639,6 +1649,28 @@ mod tests {
         close(b.min_y, 2.0);
         close(b.max_y, 2.0);
         assert!(diag(&b).is_finite());
+    }
+
+    #[test]
+    fn a_stored_text_height_of_zero_is_never_emitted_as_font_size_zero() {
+        // usvg drops a `font-size="0"` text without a trace, which is how a
+        // TEXT whose file stores height 0 (meaning "the style's height")
+        // vanished from every image. The fallback is the MTEXT branch's 1.
+        let anchor = TextAnchor {
+            at: Point2D { x: 3.0, y: 4.0 },
+            anchor: "start",
+            baseline_drop: 0.0,
+        };
+        for stored in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+            let svg = text_element("T", &anchor, stored, 0.0, "#000000", "ZERO");
+            assert!(!svg.contains("font-size=\"0\""), "{svg}");
+            assert!(
+                svg.contains(&format!("font-size=\"{}\"", effective_text_height(1.0))),
+                "{svg}"
+            );
+        }
+        assert_eq!(effective_text_height(2.5), 2.5);
+        assert_eq!(effective_text_height(0.0), 1.0);
     }
 
     #[test]
