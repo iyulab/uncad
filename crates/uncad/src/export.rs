@@ -961,13 +961,12 @@ pub fn export_package(
     let visible: &[&Entity] = &shown;
     // Extents of what is drawn: the crop's exclusions are not, and would
     // otherwise make frames and tiles of their own.
-    let drawn_extents: Vec<Extent> = rendered
+    let mut drawn_extents: Vec<Extent> = rendered
         .extents
         .iter()
         .filter(|e| !excluded_handles.contains(e.handle.as_str()))
         .cloned()
         .collect();
-    let extents: &[Extent] = &drawn_extents;
 
     // --- overview: the whole crop, sized to the profile ---------------------
     let stroke_px = 1.25;
@@ -1016,6 +1015,19 @@ pub fn export_package(
             "UnshapedGlyphs: {unshaped_texts} texts hold characters the bundled font lacks (drawn as boxes); Fonts::BundledAndSystem / --fonts bundled+system uses the host's fonts for them"
         ));
     }
+    // The extents the renderer measured hold the 0.6-em-per-character
+    // estimate for every text; the metrics pass above has the real glyph
+    // boxes. A Hangul syllable advances about a full em and `W` 0.92, so a
+    // 40-character Korean note is half again as wide as its estimate --
+    // and the frames, the frame overviews and the tiles are all culled by
+    // these extents, while `texts.json` lists the tiles from the measured
+    // box. The tile the records named then showed no text at all. Widening
+    // each drawn part by the boxes of the texts it draws (the part is the
+    // top-level entity or INSERT, i.e. the first segment of a text's id)
+    // keeps the two in step, and costs nothing for an estimate that was
+    // already generous.
+    widen_extents_with_texts(&mut drawn_extents, &texts);
+    let extents: &[Extent] = &drawn_extents;
 
     // --- frames: the primary group and each detached group -----------------
     // Each tile rasterizes only the entities whose extent touches it (plus
@@ -2118,6 +2130,30 @@ fn remove_empty_dirs(dir: &Path) {
     }
     // Fails, harmlessly, when anything is left in it.
     let _ = std::fs::remove_dir(dir);
+}
+
+/// Grows every extent by the measured boxes of the texts its part draws.
+/// A text's id is `<handle>` at the top level and `<insert>/<child>`
+/// inside a block reference, and the renderer emits one part per top-level
+/// entity, so the first segment of the id names the extent to grow.
+/// Estimated boxes are left alone: they are what the extent already holds.
+fn widen_extents_with_texts(extents: &mut [Extent], texts: &[PlacedText]) {
+    let mut measured: std::collections::HashMap<&str, Rect> = std::collections::HashMap::new();
+    for t in texts {
+        if t.bbox_confidence != "measured" {
+            continue;
+        }
+        let handle = t.id.split('/').next().unwrap_or(t.id.as_str());
+        measured
+            .entry(handle)
+            .and_modify(|r| *r = r.union(&t.bbox))
+            .or_insert(t.bbox);
+    }
+    for e in extents.iter_mut() {
+        if let Some(box_of_texts) = measured.get(e.handle.as_str()) {
+            e.rect = e.rect.union(box_of_texts);
+        }
+    }
 }
 
 /// The metrics pre-pass: lays the text-bearing entities out once through

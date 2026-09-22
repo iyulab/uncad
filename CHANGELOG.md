@@ -173,6 +173,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A long Hangul (or wide-glyph) text vanished from tiles it reaches: frames, frame
+  overviews and tiles are culled by the renderer's extents, which hold the 0.6-em
+  estimate, while `texts.json` lists a text's tiles from its measured glyph box -- so a
+  record said the text is on a tile the picture drew without it, and a detached group's
+  own frame could cut the string. The measured boxes now widen the drawn extents (per
+  top-level entity or INSERT) before the frames and the tile culling are computed.
 - A drawing whose whole content is one point -- a single POINT, coincident entities, or
   only RAY/XLINE entities, which contribute just their base point -- was rendered into a
   window 5e-11 units wide at 2.4e13 px/unit: every image blank, `crop.padding_units`

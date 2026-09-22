@@ -1505,3 +1505,169 @@ fn a_drawing_that_is_one_point_gets_a_window_it_can_be_seen_in() {
         assert!(checked >= 1, "{name}: no tile was written");
     }
 }
+
+/// A 3000 x 1000 frame with a centre line and one long Hangul note at
+/// (40, 510), height 20: 100 syllables, each advancing about 0.92 of the
+/// text height where the renderer's estimate allows 0.8186 (`CHAR_ADVANCE`
+/// = 0.6 em over the bundled font's 0.733 cap height), so the string runs
+/// some 200 units past the box the crop and the tile cull use.
+fn long_hangul_note() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let mut entities = Vec::new();
+    let corners = [
+        (0.0, 0.0, 3000.0, 0.0),
+        (3000.0, 0.0, 3000.0, 1000.0),
+        (3000.0, 1000.0, 0.0, 1000.0),
+        (0.0, 1000.0, 0.0, 0.0),
+        (0.0, 500.0, 3000.0, 500.0),
+    ];
+    for (n, (x0, y0, x1, y1)) in corners.into_iter().enumerate() {
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("L{n}"),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: x0,
+                y: y0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+        }));
+    }
+    let note = "\u{ac00}\u{b098}\u{b2e4}\u{b77c}".repeat(25);
+    entities.push(uncad::Entity::Text(TextEntity {
+        common: EntityCommon {
+            handle: "T".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point2D { x: 40.0, y: 510.0 },
+        text_height: 20.0,
+        text: note.clone(),
+        text_plain: note,
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    }));
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+/// Dark (< 128) pixels of an 8-bit RGB PNG inside `[x0, y0, x1, y1]`.
+fn dark_pixels_in(png: &[u8], area: [i64; 4]) -> usize {
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().expect("a frame size")];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let (w, h) = (info.width as i64, info.height as i64);
+    let mut count = 0;
+    for y in area[1].max(0)..area[3].min(h) {
+        for x in area[0].max(0)..area[2].min(w) {
+            if buf[((y * w + x) * 3) as usize] < 128 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn a_tile_keeps_the_half_of_a_long_hangul_text_that_reaches_it() {
+    // Tile culling kept only the parts whose *extent* touched the tile, and
+    // the extents carry the renderer's 0.6-em-per-character estimate, while
+    // `texts.json` lists a text's tiles from its measured glyph box. A
+    // 40-syllable Korean note is ~50 % wider than the estimate, so the
+    // tile the record pointed at was drawn without it: the record said the
+    // text is there, the picture showed only the line.
+    let db = long_hangul_note();
+    let tmp = TempDir::new("hangul_tile");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            frame_gap: 1.0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let texts = records(&tmp.0, "texts");
+    let note = texts.iter().find(|t| t["id"] == "T").expect("the note");
+    assert_eq!(note["bbox_confidence"], "measured");
+    let b: Vec<f64> = note["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    // The renderer's estimate ends at 40 + 100 x (0.6 / 0.733) x 20 =
+    // 1677.2 (uncad::text::CHAR_ADVANCE heights per character); the shaped
+    // Hangul runs past it.
+    let estimate_end = 40.0 + 100.0 * (0.6 / 0.733) * 20.0;
+    assert!(
+        b[2] > estimate_end + 100.0,
+        "the measured box should be wider than {estimate_end}: {b:?}"
+    );
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let listed: BTreeSet<&str> = note["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    // A tile that starts past where the estimate ended but still inside the
+    // measured box: that is the one the cull used to empty.
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let world: Vec<f64> = entry["world"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let beyond_the_estimate = world[0] > estimate_end + 20.0;
+        let inside_the_text = world[0] < b[2] && world[1] < b[3] && world[3] > b[1];
+        if !(beyond_the_estimate && inside_the_text) {
+            continue;
+        }
+        let id = entry["id"].as_str().unwrap();
+        assert!(listed.contains(id), "texts.json lists {id}: {listed:?}");
+        let png_path = entry["png"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id} empty"));
+        let png = std::fs::read(tmp.0.join(png_path)).unwrap();
+        // The text's band on this tile, from the record's own pixel box.
+        let area: Vec<i64> = note["px"][id]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id} is not in the record's px map: {note}"))
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect();
+        let ink = dark_pixels_in(&png, [area[0], area[1], area[2], area[3]]);
+        assert!(ink > 200, "{id}: {ink} dark pixels in the text band");
+        checked += 1;
+    }
+    assert!(
+        checked >= 1,
+        "no tile starts past the estimate's end: the case is not exercised"
+    );
+}
