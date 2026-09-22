@@ -172,6 +172,19 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Polyline arcs were drawn as their mirror image across the chord: the renderer emitted
+  SVG sweep flag 1 for a positive (counter-clockwise) bulge, so every fillet, slot,
+  rounded corner and revision-cloud scallop bent the wrong way -- away from the space
+  the crop reserved for it (the ARC entity was right all along). A polyline in a
+  mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
+  vertices, since the reflection reverses each arc's turn; `bulges` are documented as
+  world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
+  `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
+  MTEXT already was.
+- The `TinyOverview` warning tested the overview's long edge, which the profile always
+  keeps at several hundred pixels, so it never fired; it now tests the short edge (a
+  500:1 drawing's 700 x 28 px overview is reported).
 - Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
   offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
   anchored at its left-baseline point, i.e. displaced by up to its own width (541 of

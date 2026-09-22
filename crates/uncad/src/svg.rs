@@ -400,9 +400,12 @@ fn polyline_element(pts: &[Point2D], closed: bool, color: &str) -> String {
 }
 
 /// A `<path>` for a polyline with arc segments: `A` commands for the bulges,
-/// `L` for the straight runs. SVG's sweep flag 1 runs clockwise on a y-down
-/// canvas, which is what a counter-clockwise (positive-bulge) world arc looks
-/// like once y is flipped.
+/// `L` for the straight runs. The canvas is the world with y negated, so the
+/// picture on screen *is* the world picture and a counter-clockwise
+/// (positive-bulge) arc still turns counter-clockwise on screen; in SVG's
+/// own y-down frame that is the negative-angle direction, sweep flag 0 --
+/// the same flag the ARC branch uses for its always-counter-clockwise arcs.
+/// A negative (clockwise) bulge gets sweep flag 1.
 fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> String {
     let segments = crate::geom::polyline_segments(&p.vertices, &p.bulges, p.closed);
     let Some(first) = segments.first() else {
@@ -419,7 +422,7 @@ fn bulged_polyline_element(p: &crate::model::LwPolylineEntity, color: &str) -> S
             }
             crate::geom::Segment::Arc { to, bulge, arc, .. } => {
                 let large = u8::from(bulge.abs() > 1.0);
-                let sweep = u8::from(*bulge > 0.0);
+                let sweep = u8::from(*bulge < 0.0);
                 let _ = write!(
                     d,
                     " A {r} {r} 0 {large} {sweep} {} {}",

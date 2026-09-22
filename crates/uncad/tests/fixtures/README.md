@@ -26,6 +26,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 |---|---|---|---|
 | `cp949_r2000.dxf` | 855 | 9 | CP949 (`ANSI_949`) strings in TEXT, MTEXT and a LAYER name |
 | `mirrored_ocs_r2000.dxf` | 925 | 7 | Closed LWPOLYLINE with extrusion (0,0,-1), an open one with a bulge, mirrored CIRCLE/ARC/TEXT |
+| `mirrored_bulge_r2000.dxf` | 470 | 3 | The bulged outline of the mirrored fixture in an OCS with extrusion (0,0,-1), next to an ARC tracing the same arc: the bulge sign flips with the reflection |
 | `dimlfac12_r2000.dxf` | 1304 | 12 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 2253 | 16 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
@@ -97,6 +98,23 @@ right answer came out for the wrong reason; `closed` now reads bit 512
 group 70 on 11 polylines). Handle 21 (`flag = 16`) is the one that proves
 bit 1 is not "closed". A closed polyline *without* an extrusion (in-memory
 `flag = 512` exactly) is not in this file; the corpus test covers that case.
+
+## mirrored_bulge_r2000.dxf
+
+HEADER: `$INSUNITS 4` only; no TABLES section (`layer: ""` as in the
+mirrored fixture). Added 2026-09-22 for the bulge-sign fix: the OCS-to-world
+map of extrusion (0,0,-1) is the reflection `x -> -x`, which reverses every
+arc's turning direction, so a polyline's bulges must change sign together
+with its vertices (`convert.rs`, `mirror_bulges`). The ARC next to it is the
+same arc through the ARC branch, which already negated its angles.
+
+| Handle | Entity | DXF groups | uncad (asserted in `tests/polyline_geometry.rs`) |
+|---|---|---|---|
+| 20 | LWPOLYLINE | `70 = 0`, vertices (0,0) (100,0) (100,50) (0,50), `42 = 0.41421356` after the second vertex, `210/220/230 = 0,0,-1` | WCS vertices (0,0) (-100,0) (-100,50) (0,50), `bulges [0, -0.41421356, 0, 0]`: a clockwise 90-degree arc from (-100,0) to (-100,50), centre (-75,25), apex (-110.355,25), `polyline_bounds` min x -110.355; SVG sweep flag 1 |
+| 21 | ARC | centre (75,25) r 35.35533906, 315 to 45 degrees, `210/220/230 = 0,0,-1` | WCS centre (-75,25), angles 135 and -135 degrees (the reader swaps and negates them for a mirrored OCS): the same arc, drawn with sweep flag 0 |
+
+Both curves rasterize with ink at (-110.355,25) and none at (-89.645,25),
+the apex's mirror image inside the rectangle.
 
 ## hidden_layers_r2000.dxf
 
@@ -310,7 +328,7 @@ Why the file carries an OBJECTS section, and what the reader needs from it
 ## Regenerating
 
 ```
-python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files
+python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (`mirrored-bulge` writes only that one)
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
 ```

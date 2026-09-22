@@ -262,6 +262,22 @@ def mirrored():
     return hdr + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# ---------------------------------------------------------------- fixture 2b
+def mirrored_bulge():
+    """The bulged outline of the mirrored fixture (handle 21 there) drawn in
+    a mirrored OCS, next to an ARC tracing the same arc in the same OCS: the
+    90-degree arc from OCS (100,0) to (100,50) has its centre at (75,25) and
+    its apex at (110.355,25), so in the world both curves run from (-100,0)
+    to (-100,50) around (-75,25) with the apex at (-110.355,25)."""
+    hdr = header(INSUNITS=(70, 4))
+    rect = [(0, 0), (100, 0), (100, 50), (0, 50)]
+    ents = b"".join([
+        lwpolyline(rect, closed=False, extrusion=(0, 0, -1), bulges={1: 0.41421356}),
+        arc(75, 25, 35.35533906, 315, 45, extrusion=(0, 0, -1)),
+    ])
+    return hdr + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 # ---------------------------------------------------------------- fixture 3
 def dimlfac12(variant="full"):
     hdr = header(
@@ -408,6 +424,8 @@ if __name__ == "__main__":
         write("cp949_r2000.dxf", cp949())
     if which in ("all", "mirrored"):
         write("mirrored_ocs_r2000.dxf", mirrored())
+    if which in ("all", "mirrored-bulge"):
+        write("mirrored_bulge_r2000.dxf", mirrored_bulge())
     if which in ("all", "dimlfac"):
         write("dimlfac12_r2000.dxf", dimlfac12("full"))
     if which in ("all", "viewport"):
