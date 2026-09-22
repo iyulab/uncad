@@ -1,0 +1,8 @@
+leaders compared 15 {"2000": 2, "2004": 1, "2007": 1, "2010": 2, "2013": 7, "2018": 1, "r14": 1}
+2013/gh44-error.dwg 875B arrowhead: ours Some(false), theirs Some(true)
+2013/gh44-error.dwg 8760 arrowhead: ours Some(false), theirs Some(true)
+2013/gh44-error.dwg 8765 arrowhead: ours Some(false), theirs Some(true)
+2013/gh44-error.dwg 876A arrowhead: ours Some(false), theirs Some(true)
+2013/gh44-error.dwg 876F arrowhead: ours Some(false), theirs Some(true)
+2013/gh44-error.dwg 8774 arrowhead: ours Some(false), theirs Some(true)
+2010/Leader.dwg 9DD arrowhead: ours Some(false), theirs Some(true)

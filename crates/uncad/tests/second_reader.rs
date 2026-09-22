@@ -5,10 +5,9 @@
 //! These tests read the same corpus files through an unrelated Rust
 //! implementation and compare what the two agree on.
 //!
-//! The comparison is deliberately coarse for now -- it establishes that the
-//! second reader opens the same files and reports entities in the same
-//! order of magnitude. What the two disagree about, field by field, is the
-//! measurement this file grows into.
+//! The comparison runs from coarse to fine: which drawings both open, which
+//! entity types each finds, and -- for leaders so far -- every field both
+//! models carry, entity by entity.
 //!
 //! The second reader is a development dependency: nothing a consumer builds
 //! reaches it.
@@ -453,5 +452,147 @@ fn what_each_reader_finds_per_entity_type_is_what_it_was_when_last_measured() {
         report.trim(),
         pinned.trim(),
         "\nthe two readers' per-type disagreement moved; measured now:\n{report}"
+    );
+}
+
+/// The same leaders, field by field.
+///
+/// Leaders are matched by handle -- the one identity both readers take
+/// straight from the file -- and every field both models carry is compared:
+/// the vertices, whether an arrowhead is drawn, the path type, what the
+/// leader annotates, and the entity it names. The annotation reference is
+/// compared in all three of this crate's states: resolved, it must name the
+/// entity whose handle the second reader holds; unresolved, it must carry
+/// that handle; absent, the second reader's handle must be null.
+#[test]
+fn the_two_readers_agree_on_every_leader_field_in_the_corpus() {
+    use acadrust::entities::{LeaderCreationType, LeaderPathType};
+    use std::collections::BTreeMap;
+    use uncad::model::{LeaderAnnotation, LeaderPath, Ref};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+    let mut unmatched = 0usize;
+    let mut per_version: BTreeMap<&str, usize> = BTreeMap::new();
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::entities::Leader> = document
+                .entities()
+                .filter_map(|e| match e {
+                    acadrust::EntityType::Leader(l) => Some((l.common.handle.value(), l)),
+                    _ => None,
+                })
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = std::collections::BTreeSet::new();
+            for entity in ours.all_entities() {
+                let uncad::Entity::Leader(l) = entity else {
+                    continue;
+                };
+                if !seen.insert(entity.common().id) {
+                    continue;
+                }
+                let Some(theirs) = theirs.get(&entity.common().id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                *per_version.entry(*version).or_default() += 1;
+                let mut say = |field: &str, o: String, t: String| {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {field}: ours {o}, theirs {t}",
+                            entity.common().id.value()
+                        ));
+                    }
+                };
+                let their_vertices: Vec<(f64, f64, f64)> =
+                    theirs.vertices.iter().map(|v| (v.x, v.y, v.z)).collect();
+                let our_vertices: Vec<(f64, f64, f64)> =
+                    l.vertices.iter().map(|v| (v.x, v.y, v.z)).collect();
+                say(
+                    "vertices",
+                    format!("{our_vertices:?}"),
+                    format!("{their_vertices:?}"),
+                );
+                say(
+                    "arrowhead",
+                    format!("{:?}", l.has_arrowhead),
+                    format!("{:?}", Some(theirs.arrow_enabled)),
+                );
+                let their_path = match theirs.path_type {
+                    LeaderPathType::StraightLine => LeaderPath::Straight,
+                    LeaderPathType::Spline => LeaderPath::Spline,
+                };
+                say(
+                    "path type",
+                    format!("{:?}", l.path_type),
+                    format!("{:?}", Some(their_path)),
+                );
+                let their_annotation = match theirs.creation_type {
+                    LeaderCreationType::WithText => LeaderAnnotation::MText,
+                    LeaderCreationType::WithTolerance => LeaderAnnotation::Tolerance,
+                    LeaderCreationType::WithBlock => LeaderAnnotation::Insert,
+                    LeaderCreationType::NoAnnotation => LeaderAnnotation::Nothing,
+                };
+                say(
+                    "annotation",
+                    format!("{:?}", l.annotation),
+                    format!("{their_annotation:?}"),
+                );
+                let their_handle = theirs.annotation_handle.value();
+                let ours_as_handle = match &l.annotation_id {
+                    Ref::Resolved(id) => format!("resolved {:X}", id.value()),
+                    Ref::Unresolved(h) => format!("unresolved {h}"),
+                    Ref::Absent => "absent".to_string(),
+                };
+                let agrees = match &l.annotation_id {
+                    Ref::Resolved(id) => id.value() == their_handle,
+                    Ref::Unresolved(h) => u64::from_str_radix(h, 16).ok() == Some(their_handle),
+                    Ref::Absent => their_handle == 0,
+                };
+                if !agrees {
+                    disagreements.push(format!(
+                        "{version}/{name} annotation reference: ours {ours_as_handle}, theirs {their_handle:X}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(compared > 0, "no leader was read by both");
+    assert_eq!(unmatched, 0, "a leader one reader has and the other lacks");
+    // What the pinned file holds, and why: every other field agrees on every
+    // leader, and every line left is the arrowhead flag, with this crate
+    // reading "no arrowhead" and the second reader reading "arrowhead".
+    //
+    // Which is right is not established. Where a text twin states the flag
+    // (group 71), both readers match it in every version. The lines here are
+    // leaders whose twin omits the flag or that have no twin. The two
+    // readers' layouts of this record differ from R2010 on (which of an
+    // offset vector and a text-box size comes before the flag), which could
+    // put either one on the wrong bit; the values each reads there do not
+    // settle it one way. Recorded, not resolved.
+    let report = format!(
+        "leaders compared {compared} {per_version:?}\n{}",
+        disagreements.join("\n")
+    );
+    let pinned = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/second-reader-leaders.txt"
+    ))
+    .unwrap_or_default();
+    assert_eq!(
+        report.trim(),
+        pinned.trim(),
+        "\nthe two readers' leader agreement moved; measured now:\n{report}"
     );
 }
