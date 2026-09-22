@@ -8,10 +8,11 @@ and mirrored OCS, `DIMLFAC` versus `act_measurement`, and a twisted VIEWPORT.
 they land.
 
 Every file was written from scratch by `make_fixtures.py` in this directory
-on 2026-09-21 -- no third-party drawing was copied, so they are
-redistributable under the repository's GPL-3. All are R2000 (`$ACADVER
-AC1015`) text DXF with CRLF line endings, under 1 KB each, and above the
-256-byte minimum LibreDWG's `dwg_read_dxf` enforces.
+on 2026-09-21 (the viewport fixture's LAYOUT on 2026-09-22) -- no
+third-party drawing was copied, so they are redistributable under the
+repository's GPL-3. All are R2000 (`$ACADVER AC1015`) text DXF with CRLF
+line endings, at most 2.3 KB each, and above the 256-byte minimum
+LibreDWG's `dwg_read_dxf` enforces.
 
 Ground truth below was read back through LibreDWG itself (a throw-away probe
 linked against `libredwg-sys`, reading `Dwg_Data.header.codepage` and every
@@ -26,7 +27,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `cp949_r2000.dxf` | 855 | 9 | CP949 (`ANSI_949`) strings in TEXT, MTEXT and a LAYER name |
 | `mirrored_ocs_r2000.dxf` | 925 | 7 | Closed LWPOLYLINE with extrusion (0,0,-1), an open one with a bulge, mirrored CIRCLE/ARC/TEXT |
 | `dimlfac12_r2000.dxf` | 1304 | 9 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
-| `twisted_viewport_r2000.dxf` | 1359 | 11 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field |
+| `twisted_viewport_r2000.dxf` | 2253 | 16 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
 
 ## cp949_r2000.dxf
@@ -161,14 +162,37 @@ codes, and the probe confirms the binding (`block_texts=["TEXT:120"]`).
 ## twisted_viewport_r2000.dxf
 
 HEADER: `$INSUNITS 4`. TABLES: a BLOCK_RECORD table with `*Model_Space`
-(`1F`) and `*Paper_Space` (`1C`). BLOCKS: both blocks, empty. ENTITIES: a
-LINE (0,0)-(100,50) owned by `*Model_Space` and a VIEWPORT owned by
-`*Paper_Space` (`330 = 1C`) with
+(`1F`) and `*Paper_Space` (`1C`, with `340 = 2B` naming its LAYOUT).
+BLOCKS: both blocks, empty. ENTITIES: a LINE (0,0)-(100,50) owned by
+`*Model_Space` and a VIEWPORT owned by `*Paper_Space` (`330 = 1C`) with
 handle `5 = 2A`, `67 = 1`, `100 AcDbViewport`, `10 = (150,100,0)`,
 `40 = 200`, `41 = 120`, `68 = 1`, `69 = 2`, `12 = (50,25)`, `13 = (0,0)`,
 `14 = (10,10)`, `15 = (10,10)`, `16 = (0,0,1)`, `17 = (0,0,0)`, `42 = 50`,
 `43 = 0`, `44 = 0`, `45 = 60`, `50 = 0`, `51 = 30.0`, `72 = 100`,
-`90 = 32864`. No OBJECTS section (so no LAYOUT object).
+`90 = 32864`. OBJECTS: the named object dictionary (`5 = C`, `330 = 0`,
+`281 = 1`, one entry `3 ACAD_LAYOUT` / `350 1A`), the `ACAD_LAYOUT`
+dictionary (`5 = 1A`, `330 = C`, entry `3 Layout1` / `350 2B`) and one
+LAYOUT (`5 = 2B`, `330 = 1A`):
+
+- `100 AcDbPlotSettings`: `1` empty (page setup name), `2 none_device`
+  (printer), `4 ISO_A4_(210.00_x_297.00_MM)` (canonical media name),
+  `40`-`43 = 6.35` (margins, mm), `44 = 210.0`, `45 = 297.0` (the unrotated
+  sheet, mm), `46`-`49`, `140`, `141 = 0.0` (plot origin and window),
+  `142 = 1.0`, `143 = 1.0` (paper : drawing units), `70 = 688` (plot
+  flags), `72 = 1` (mm), `73 = 1` (rotated 90 degrees counter-clockwise:
+  landscape), `74 = 5` (plot the layout), `7` empty (style sheet),
+  `75 = 16` (1:1), `147 = 1.0`, `148`, `149 = 0.0` (paper image origin).
+- `100 AcDbLayout`: `1 Layout1`, `70 = 1`, `71 = 1` (tab order),
+  `10 = (-6.35,-6.35)`, `11 = (290.65,203.65)` (LIMMIN/LIMMAX: the printable
+  area of the rotated sheet), `12 = (0,0,0)`, `14 = (1e20,1e20,1e20)`,
+  `15 = (-1e20,-1e20,-1e20)` (the "never computed" extents sentinels
+  AutoCAD writes for a layout that has not been plotted or zoomed),
+  `146 = 0.0`, `13 = (0,0,0)`, `16 = (1,0,0)`, `17 = (0,1,0)`, `76 = 0`,
+  `330 = 1C` (block record), `331 = 2A` (active viewport).
+
+Deliberately absent: a `Model` LAYOUT, a plot view (`6`), reactors and
+extension dictionaries, `345`/`346` UCS handles, the R2004+ shade-plot
+groups.
 
 | Field | LibreDWG in-memory (probe) | uncad 0.2.0 | Now / expected after P7 |
 |---|---|---|---|
@@ -188,8 +212,70 @@ paper space. `dxf_entities_read` assigns `entmode 1` only when the entity's
 only set after a BLOCKS section defines `*Paper_Space`. The earlier
 ENTITIES-only draft (`make_fixtures.py . viewport-minimal`) therefore put the
 VIEWPORT in model space. The shipped file has the blocks and owners, and the
-probe confirms `entmode 1`. There is still no LAYOUT object, so the
-paper-size/plot-settings path is not exercised by this fixture.
+probe confirms `entmode 1`.
+
+The LAYOUT as LibreDWG hands it back (2026-09-22; the AcDbLayout fields
+through `dwg_dynapi_entity_value(obj, "LAYOUT", ...)`, the embedded plot
+settings at `dwg_dynapi_entity_field("LAYOUT", "plotsettings")->offset`
+through `dwg_dynapi_entity_value(sub, "PLOTSETTINGS", ...)` or
+`dwg_dynapi_subclass_value(sub, "Dwg_Object_PLOTSETTINGS", ...)` --
+`dwg_dynapi_subclass_value(sub, "PLOTSETTINGS", ...)` returns false):
+
+| Field (DXF group) | LibreDWG in-memory (probe) | uncad 0.3.0 today | After P7 |
+|---|---|---|---|
+| object | `LAYOUT`, handle `2B`, `ownerhandle` `1A` (the `ACAD_LAYOUT` DICTIONARY) | ignored: no layouts in the model, `entities` and `block_records` unchanged | `layouts["Layout1"]` |
+| `layout_name` (1) / `tab_order` (71) / `layout_flags` (70) | `"Layout1"` / 1 / 1 | | |
+| `block_header` (330) | `1C` -> BLOCK_RECORD `*Paper_Space`; and `BLOCK_HEADER 1C.layout` -> `2B` from the table's `340` | | the layout's block |
+| `active_viewport` (331) | `2A` -> VIEWPORT | | |
+| `LIMMIN` / `LIMMAX` (10/11) | (-6.35,-6.35) / (290.65,203.65) | | sheet extents in paper units |
+| `EXTMIN` / `EXTMAX` (14/15) | (1e20,1e20,1e20) / (-1e20,-1e20,-1e20), the sentinels exactly as written | | "unset" |
+| `INSBASE` (12) / `UCSORG` (13) / `UCSXDIR` (16) / `UCSYDIR` (17) / `ucs_elevation` (146) / `UCSORTHOVIEW` (76) | (0,0,0) / (0,0,0) / (1,0,0) / (0,1,0) / 0.0 / 0 | | |
+| `num_viewports` / `viewports` | 0 / empty: a DWG-only (R2004+) list, DXF has no group for it | | |
+| `plotsettings.printer_cfg_file` (1) / `paper_size` (2) / `canonical_media_name` (4) | `""` (set, not NULL) / `"none_device"` / **`"ISO_A4_(210.00_x_297.00_MM)"`** | | paper name |
+| `plotsettings.plotview_name` (6) / `plotview` / `stylesheet` (7) | NULL (no `6` written) / null ref / `""` | | |
+| `left/bottom/right/top_margin` (40-43) | 6.35 each | | |
+| `paper_width` / `paper_height` (44/45) | **210.0 / 297.0** (mm, unrotated) | | 297 x 210 sheet once `plot_rotation_mode` is applied |
+| `plot_origin` (46) / `plot_window_ll` (48) / `plot_window_ur` (140) / `paper_image_origin` (148) | (0,0) each | | |
+| `plot_paper_unit` (72) / `plot_rotation_mode` (73) / `plot_type` (74) | 1 (mm) / **1** (90 degrees counter-clockwise) / 5 (layout) | | |
+| `std_scale_type` (75) / `std_scale_factor` (147) / `paper_units` (142) / `drawing_units` (143) | 16 (1:1) / 1.0 / 1.0 / 1.0 | | scale 1:1 |
+| `plot_flags` (70 under `AcDbPlotSettings`) | 688 (0x2b0) | | |
+| `shadeplot_type` / `shadeplot_reslevel` / `shadeplot_customdpi` | 0 / 0 / 0 (R2004+ groups, not written) | | |
+| `HEADER.DICTIONARY_NAMED_OBJECT` / `DICTIONARY_LAYOUT` / `DICTIONARY_PLOTSETTINGS` | `C` / `1A` / null | | |
+| Objects | 16: the 13 above (`BLOCK_HEADER`, `LAYER_CONTROL`, `LAYER`, `BLOCK_CONTROL`, `BLOCK_RECORD`, 2 x `BLOCK`/`ENDBLK`, `LINE`, `VIEWPORT`, `VX_CONTROL`, `VX_TABLE_RECORD`) plus `DICTIONARY` `C`, `DICTIONARY` `1A`, `LAYOUT` `2B` | | |
+
+Why the file carries an OBJECTS section, and what the reader needs from it
+(`src/in_dxf.c`, read at trace level so every group's landing is visible):
+
+- `dxf_objects_read` turns any `0 LAYOUT` into a LAYOUT object by itself;
+  no dictionary is needed for the object to exist. Every group above landed
+  in the field named (`set LAYOUT.plotsettings.<field> [.. <group>]` and
+  `LAYOUT.<field> = ... [.. <group>]` in the trace); nothing written was
+  ignored or altered. Values that equal a default cannot be told from the
+  default by value alone: the zero points, and `paper_units` (142), which
+  the reader forces to 1.0 for every LAYOUT before it reads the groups.
+- The two `330`s matter. The first (before the `100` markers) becomes the
+  object's `ownerhandle` through the generic path; the second, inside
+  `AcDbLayout`, is taken as `block_header` only because an owner is already
+  set (the LAYOUT branch guards on `ownerhandle`). With a single `330` the
+  block record would become the owner and `block_header` would stay null.
+  `331` is stored as an absolute reference and resolves to the VIEWPORT.
+- The named object dictionary (which must be the file's first DICTIONARY)
+  and its `ACAD_LAYOUT` entry are what `CHECK_DICTIONARY_HDR(LAYOUT)` needs
+  to set `HEADER.DICTIONARY_LAYOUT` (it tries the entry names `LAYOUT`, then
+  `ACAD_LAYOUT`). Without any DICTIONARY the reader makes an empty NOD of
+  its own and that header handle stays null; the LAYOUT is unaffected.
+- `340` on the BLOCK_RECORD goes through the generic handle path (codes
+  above 300 are hex handles) into `BLOCK_HEADER.layout`, so the block and
+  the layout point at each other.
+- A `6` plot-view name is only taken when non-empty (and then looked up as
+  a table handle in `dxf_postprocess_LAYOUT`), so it is omitted;
+  `plotview_name` comes back NULL rather than `""`.
+- At warning level the reader prints the same three "Duplicate handle
+  20/21/22" errors it printed before the OBJECTS section existed: its own
+  LAYER_CONTROL, LAYER and BLOCK_CONTROL take 20-22 before the BLOCK/ENDBLK
+  entities with those explicit handles arrive. Harmless so far (nothing
+  refers to an ENDBLK), but new handles in this file must avoid 1, 2, 20-23
+  as well as C, 1A, 1C, 1F, 24, 2A and 2B.
 
 ## What did not work
 
@@ -216,13 +302,15 @@ paper-size/plot-settings path is not exercised by this fixture.
    `example_2000.dwg`/`.dxf` pair instead.
 3. **`±` as `A1 B1`**: not a valid encoding of the character; the file uses
    `A1 BE`.
-4. **No LAYOUT object** in the viewport fixture: the paper-size and
-   plot-settings path (P7) needs a fixture with an OBJECTS section.
+4. **A `Model` LAYOUT, a plot view (`6`) and a page-setup name** are not
+   in the viewport fixture (its `Layout1` LAYOUT was added 2026-09-22): the
+   reader needs none of them, and the `num_viewports` list cannot come from
+   DXF at all.
 
 ## Regenerating
 
 ```
-python crates/uncad/tests/fixtures/make_fixtures.py                    # the four shipped files
+python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
 ```
@@ -231,5 +319,7 @@ The default mode is meant to reproduce the shipped bytes exactly; check with
 `git status` after running it. Verify any regenerated file the same way the
 shipped ones were: read it through `libredwg-sys` (`dxf_read_file`, then
 `dwg_dynapi_entity_value` / `dwg_dynapi_entity_utf8text` per entity and the
-`codepage` field of `Dwg_Data.header`) and through `uncad <file> -o
-out.json --pretty`, and update the tables above and `tests/fixtures.rs`.
+`codepage` field of `Dwg_Data.header`; for the viewport fixture also the
+LAYOUT and its embedded `plotsettings`, see that section) and through
+`uncad <file> -o out.json --pretty`, and update the tables above and
+`tests/fixtures.rs`.
