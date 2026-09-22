@@ -280,7 +280,9 @@ to CIRCLE/ARC centres, LWPOLYLINE/POLYLINE_2D vertices (at their
 corners, and each of those entities carries its `extrusion` so a consumer
 can tell a mirrored one apart. A mirrored ARC's angles are mirrored and
 swapped so the arc still runs counter-clockwise from `start_angle` to
-`end_angle`. A mirrored INSERT keeps its stored `rotation` and `scale`; the
+`end_angle`, and a mirrored polyline's `bulges` change sign with its
+vertices (the reflection reverses each arc's turn; `mirrored_bulge_r2000.dxf`
+draws the same arc both ways). A mirrored INSERT keeps its stored `rotation` and `scale`; the
 renderer draws it with the x scale and the rotation negated, which is the
 same transform. `tests/fixtures.rs` checks all of this against
 `mirrored_ocs_r2000.dxf`.
