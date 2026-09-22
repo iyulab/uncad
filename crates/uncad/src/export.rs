@@ -1037,17 +1037,17 @@ pub fn export_package(
             "UnshapedGlyphs: {unshaped_texts} texts hold characters the bundled font lacks (drawn as boxes); Fonts::BundledAndSystem / --fonts bundled+system uses the host's fonts for them"
         ));
     }
-    // The extents the renderer measured hold the 0.6-em-per-character
-    // estimate for every text; the metrics pass above has the real glyph
-    // boxes. A Hangul syllable advances about a full em and `W` 0.92, so a
-    // 40-character Korean note is half again as wide as its estimate --
-    // and the frames, the frame overviews and the tiles are all culled by
-    // these extents, while `texts.json` lists the tiles from the measured
-    // box. The tile the records named then showed no text at all. Widening
-    // each drawn part by the boxes of the texts it draws (the part is the
-    // top-level entity or INSERT, i.e. the first segment of a text's id)
-    // keeps the two in step, and costs nothing for an estimate that was
-    // already generous.
+    // The extents the renderer measured hold `text::CHAR_ADVANCE`
+    // (0.8186 text heights) per character; the metrics pass above has the
+    // real glyph boxes. A Hangul syllable advances about 0.92 heights, so
+    // a long Korean note runs some 12 % past its estimate -- 200 units for
+    // a 100-syllable note at height 20 -- and the frames, the frame
+    // overviews and the tiles are all culled by these extents, while
+    // `texts.json` lists a text's tiles from the measured box. The tile
+    // the records named then showed no text at all. Widening each drawn
+    // part by the boxes of the texts it draws (the part is the top-level
+    // entity or INSERT, i.e. the first segment of a text's id) keeps the
+    // two in step, and never shrinks an estimate that was generous.
     widen_extents_with_texts(&mut drawn_extents, &texts);
     let extents: &[Extent] = &drawn_extents;
 
