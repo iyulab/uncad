@@ -129,9 +129,12 @@ That suits the design rather than fighting it: entity fields were always going t
 through `dwg_dynapi_entity_value`/`dwg_dynapi_common_value`, LibreDWG's own
 reflection API keyed by string field name, with runtime type and range checks.
 `uncad::dynapi` wraps it in the generic helpers `get_field::<T>`, `get_common_field::<T>`,
-`get_utf8_field` and `get_array_field::<C, T>`, comparing the field size dynapi reports
+`get_text_bytes` and `get_array_field::<C, T>`, comparing the field size dynapi reports
 against the requested Rust type's size so a wrong type mapping fails loudly instead of
-quietly corrupting data.
+quietly corrupting data. Text fields come back as bytes on purpose: for a pre-R2007
+drawing they are codepage bytes, not UTF-8, and `uncad::text::TextDecoder` (one per
+`parse()`) is the only place they become `String`s -- through LibreDWG's codepage tables,
+with what could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
 
 **The same bindgen failure recurs for individual types.** Even with the whole `tio` union
 opaque, allowlisting a nested struct on its own (`Dwg_HATCH_Path`, `Dwg_HATCH_PathSeg`,

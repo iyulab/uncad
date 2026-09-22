@@ -12,6 +12,7 @@ mod convert;
 mod dynapi;
 mod hatch_color;
 mod table_convert;
+mod text;
 
 use std::ffi::CString;
 use std::mem::MaybeUninit;
@@ -170,12 +171,18 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // Below the critical threshold the bits still mean something (an
     // UNHANDLEDCLASS read may be missing objects); they travel with the
     // result instead of being dropped here.
-    let read_diagnostics = read_diagnostics_from_libredwg_bits(error);
+    let mut read_diagnostics = read_diagnostics_from_libredwg_bits(error);
+
+    // Every string the two walks below read goes through this decoder: the
+    // library returns a pre-R2007 string as the codepage bytes the file
+    // holds, and what could not be decoded is reported, never dropped.
+    let text = unsafe { text::TextDecoder::new(dwg.as_mut(), is_dxf) };
 
     // Two walks over the live C structure, neither of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
-    let entities = unsafe { convert::convert_entities(dwg.as_mut()) };
-    let tables = unsafe { table_convert::convert_tables(dwg.as_mut()) };
+    let entities = unsafe { convert::convert_entities(dwg.as_mut(), &text) };
+    let tables = unsafe { table_convert::convert_tables(dwg.as_mut(), &text) };
+    read_diagnostics.warnings.extend(text.into_warnings());
 
     // Nothing needs LibreDWG's structure past this point: this crate has no
     // write path, and the model above is what every export reads. Freeing it

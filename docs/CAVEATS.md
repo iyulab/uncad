@@ -179,6 +179,60 @@ in the LibreDWG corpus and checks that exactly the R2007+ files are refused; a s
 feeds the same minimal drawing with two `$ACADVER` values and requires one refusal and one
 successful read.
 
+## Text before R2007 is decoded here, through the drawing's codepage
+
+A drawing saved as R2004 or earlier stores every string -- text values, attribute values
+and defaults, layer and block names, MTEXT -- as 8-bit bytes in the drawing's codepage:
+`header.codepage`, read from the DWG header or, for a DXF, from `$DWGCODEPAGE` (the
+importer defaults to `ANSI_1252` when the variable is absent). LibreDWG keeps those bytes
+as they are. Its text accessors (`dwg_dynapi_entity_utf8text`, `dwg_dynapi_handle_name`,
+`dwg_handle_name`) convert only the UTF-16 strings of R2007 and later; for an older
+drawing they return the codepage bytes unchanged, whatever the `utf8` in the name says.
+
+Read as UTF-8, that made every non-ASCII character in a CP949 (Korean) or CP1252 drawing
+into mojibake or U+FFFD, with nothing in `read_diagnostics`: measured on an R2000 DXF with
+`$DWGCODEPAGE = ANSI_949` and CP949 text, which came back as raw bytes reinterpreted, and
+the same for `ANSI_1252` with `café`.
+
+`uncad::text::TextDecoder` is now the one place bytes become `String`s. It decodes through
+LibreDWG's own codepage tables (`codepages.h`: the same tables the library's DXF writer
+uses), one byte per character in a single-byte codepage and lead+trail bytes in an East
+Asian one, and reports what it could not decode:
+
+- `TEXT_ENCODING: TEXT.text_value (handle 1A2): 2 byte(s) have no character in codepage
+  ANSI_1252 (30); replaced with U+FFFD` -- each such byte is U+FFFD in the string, and the
+  warning names the entity and the field. One warning per string, not per visit.
+- A codepage the library has no table for (`CP_UNDEFINED`, 0xFF, which pre-R13 drawings
+  can carry) is never looked up; such bytes are taken as UTF-8 when they are valid UTF-8,
+  and reported otherwise.
+
+The library's own converter for this (`bit_TV_to_utf8_codepage`) is not used: it writes a
+NUL for an unmapped character, which cuts the string short at that point, and in some
+cases returns its input aliased rather than copied.
+
+**What is trusted, and what cannot be told:**
+
+- **The declared codepage is what the bytes mean.** A file whose bytes are CP949 but whose
+  header says `ANSI_1252` decodes cleanly into wrong text when every byte happens to have
+  a Windows-1252 character, which is common: a wrong declaration is not detectable from
+  the bytes, so it is not second-guessed. Both this and the correct case are golden tests
+  (`tests/golden.rs`, G8).
+- **DXF input is taken as UTF-8 first.** The DXF importer keeps the file's bytes and assumes
+  UTF-8 -- LibreDWG's own DXF writer emits UTF-8 text whatever `$DWGCODEPAGE` it declares,
+  and a DXF written that way and read back would otherwise decode as Latin-1 mojibake. So
+  for a DXF, bytes that are valid UTF-8 are read as UTF-8 and the codepage is applied only
+  to the rest. The residual ambiguity: a short CP949 string whose lead bytes all fall in
+  `C2..DF` and trail bytes in `80..BF` is also valid UTF-8 (one syllable stored as `C8 A3`
+  reads as U+0223). Title-block strings of more than one or two syllables are never valid UTF-8 as a
+  whole, and a DWG never holds UTF-8 in a codepage string, so the codepage always applies
+  there.
+- R2007 and later: the library converts from UTF-16 itself and the codepage is moot; the
+  result is checked to be UTF-8 and reported if it is not.
+
+The golden case G8 (a title block with Korean layer and block names, attribute values and
+defaults, and a text, written as CP949 with `$DWGCODEPAGE = ANSI_949`) reads back exactly,
+with clean diagnostics.
+
 ## What LibreDWG reported but did not fail on
 
 `dwg_read_file`/`dxf_read_file` return a bit set. Bits at or above `DWG_ERR_CLASSESNOTFOUND`

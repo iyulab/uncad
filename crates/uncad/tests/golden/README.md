@@ -4,16 +4,22 @@ Copies of what the `uncad-model` repository's golden writer produces, one pair p
 
 | File | What it is |
 |---|---|
-| `g1.dxf` | The synthetic drawing (R2000 ASCII DXF) written from the G1 spec |
-| `g1.expected.json` | The model that spec says a reader must produce from it |
+| `<case>.dxf` | The synthetic drawing (R2000 ASCII DXF) written from that case's spec |
+| `<case>.expected.json` | The model that spec says a reader must produce from it |
 
-`tests/golden.rs` parses the DXF and requires the model to match exactly.
+Cases here: `g1`, `g2`, `g6`, `g7`, `g8`, `g9`, `g10`. `tests/golden.rs` parses each DXF and
+requires the model to match exactly.
+
+`g8.dxf` is not UTF-8 by design: it declares `$DWGCODEPAGE = ANSI_949` and stores its
+Korean text as CP949 bytes, which is how an R2000 DXF carries such text. An editor shows
+those strings as mojibake; the expected JSON has them as UTF-8. Do not "fix" the encoding of
+the file.
 
 The pair is generated, not hand-written. To regenerate after a change to the writer or the
 spec, from a checkout of `uncad-model`:
 
 ```
-cargo run -p uncad-model-golden --example write_case -- g1 g1.dxf g1.expected.json
+cargo run -p uncad-model-golden --example write_case -- <case> <case>.dxf <case>.expected.json
 ```
 
 and copy both files here. A tree that carries both repositories side by side checks that

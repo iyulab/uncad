@@ -198,6 +198,20 @@ fn main() {
         .allowlist_function("uncad_free_sat_text")
         .allowlist_function("uncad_dwg_is_pre_r13")
         .allowlist_function("uncad_dwg_is_r13_to_r2000")
+        .allowlist_function("uncad_dwg_codepage")
+        .allowlist_function("uncad_dwg_is_wide_string")
+        // The codepage tables (src/codepages.h): what decodes a pre-R2007
+        // string's bytes, since the library's text accessors return them
+        // undecoded. Predicates plus the byte -> code point lookups.
+        .allowlist_type("Dwg_Codepage")
+        .allowlist_function("dwg_codepage_isasian")
+        .allowlist_function("dwg_codepage_is_twobyte")
+        .allowlist_function("dwg_codepage_uc")
+        .allowlist_function("dwg_codepage_uwc")
+        .allowlist_function("dwg_codepage_dxfstr")
+        // The handle of the object a type-specific struct pointer belongs
+        // to, for naming a string in a diagnostic.
+        .allowlist_function("dwg_obj_generic_handlevalue")
         // The R13..R2000 entity chain is walked by this crate's consumer
         // itself (see uncad_shim.h, uncad_dwg_is_r13_to_r2000): the next
         // link, and a handle -> object lookup for links the DXF importer

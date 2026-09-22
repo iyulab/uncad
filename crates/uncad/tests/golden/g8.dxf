@@ -1,0 +1,604 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$DWGCODEPAGE
+  3
+ANSI_949
+  9
+$HANDSEED
+  5
+111
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LTYPE
+  5
+1
+100
+AcDbSymbolTable
+ 70
+1
+  0
+LTYPE
+  5
+2
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+CONTINUOUS
+ 70
+0
+  3
+Solid line
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+ENDTAB
+  0
+TABLE
+  2
+LAYER
+  5
+3
+100
+AcDbSymbolTable
+ 70
+3
+  0
+LAYER
+  5
+4
+330
+3
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+0
+ 70
+0
+ 62
+7
+  6
+CONTINUOUS
+  0
+LAYER
+  5
+5
+330
+3
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+외형선
+ 70
+0
+ 62
+7
+  6
+CONTINUOUS
+  0
+LAYER
+  5
+6
+330
+3
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+표제란
+ 70
+0
+ 62
+2
+  6
+CONTINUOUS
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+  5
+7
+100
+AcDbSymbolTable
+ 70
+3
+  0
+BLOCK_RECORD
+  5
+8
+330
+7
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*Model_Space
+  0
+BLOCK_RECORD
+  5
+9
+330
+7
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*Paper_Space
+  0
+BLOCK_RECORD
+  5
+A
+330
+7
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+표제블록
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+100
+330
+8
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*Model_Space
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*Model_Space
+  1
+
+  0
+ENDBLK
+  5
+101
+330
+8
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+102
+330
+9
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*Paper_Space
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*Paper_Space
+  1
+
+  0
+ENDBLK
+  5
+103
+330
+9
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+104
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+표제블록
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+표제블록
+  1
+
+  0
+LWPOLYLINE
+  5
+105
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 10
+80.0
+ 20
+0.0
+ 10
+80.0
+ 20
+20.0
+ 10
+0.0
+ 20
+20.0
+  0
+ATTDEF
+  5
+106
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+5.0
+ 20
+15.0
+ 30
+0.0
+ 40
+3.5
+  1
+
+100
+AcDbAttributeDefinition
+  3
+DWGNO
+  2
+DWGNO
+ 70
+0
+  0
+ATTDEF
+  5
+107
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+5.0
+ 20
+8.0
+ 30
+0.0
+ 40
+3.5
+  1
+SS400
+100
+AcDbAttributeDefinition
+  3
+MATERIAL
+  2
+MATERIAL
+ 70
+0
+  0
+ATTDEF
+  5
+108
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+5.0
+ 20
+1.0
+ 30
+0.0
+ 40
+3.5
+  1
+미정
+100
+AcDbAttributeDefinition
+  3
+DRAWN
+  2
+DRAWN
+ 70
+0
+  0
+ENDBLK
+  5
+109
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LWPOLYLINE
+  5
+10A
+330
+8
+100
+AcDbEntity
+  8
+외형선
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 10
+200.0
+ 20
+0.0
+ 10
+200.0
+ 20
+100.0
+ 10
+0.0
+ 20
+100.0
+  0
+INSERT
+  5
+10B
+330
+8
+100
+AcDbEntity
+  8
+표제란
+ 66
+1
+100
+AcDbBlockReference
+  2
+표제블록
+ 10
+120.0
+ 20
+-60.0
+ 30
+0.0
+ 41
+1.0
+ 42
+1.0
+ 43
+1.0
+ 50
+0.0
+  0
+ATTRIB
+  5
+10C
+330
+10B
+100
+AcDbEntity
+  8
+표제란
+100
+AcDbText
+ 10
+125.0
+ 20
+-45.0
+ 30
+0.0
+ 40
+3.5
+  1
+BP-1042
+100
+AcDbAttribute
+  2
+DWGNO
+ 70
+0
+  0
+ATTRIB
+  5
+10D
+330
+10B
+100
+AcDbEntity
+  8
+표제란
+100
+AcDbText
+ 10
+125.0
+ 20
+-52.0
+ 30
+0.0
+ 40
+3.5
+  1
+SS400 일반구조용 압연강재
+100
+AcDbAttribute
+  2
+MATERIAL
+ 70
+0
+  0
+ATTRIB
+  5
+10E
+330
+10B
+100
+AcDbEntity
+  8
+표제란
+100
+AcDbText
+ 10
+125.0
+ 20
+-59.0
+ 30
+0.0
+ 40
+3.5
+  1
+홍길동
+100
+AcDbAttribute
+  2
+DRAWN
+ 70
+0
+  0
+SEQEND
+  5
+10F
+330
+10B
+100
+AcDbEntity
+  8
+표제란
+  0
+TEXT
+  5
+110
+330
+8
+100
+AcDbEntity
+  8
+표제란
+100
+AcDbText
+ 10
+0.0
+ 20
+-70.0
+ 30
+0.0
+ 40
+3.5
+  1
+축척 1:1
+ 50
+0.0
+100
+AcDbText
+  0
+ENDSEC
+  0
+EOF

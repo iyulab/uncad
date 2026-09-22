@@ -1,0 +1,405 @@
+{
+  "entities": [
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 260,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "104"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "vertices": [
+        {
+          "x": 100.0,
+          "y": -60.0
+        },
+        {
+          "x": 180.0,
+          "y": -60.0
+        },
+        {
+          "x": 180.0,
+          "y": -40.0
+        },
+        {
+          "x": 100.0,
+          "y": -40.0
+        }
+      ],
+      "closed": true
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 261,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "105"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -45.0
+      },
+      "text_height": 3.5,
+      "text": "DWG NO",
+      "rotation": 0.0
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 262,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "106"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 130.0,
+        "y": -45.0
+      },
+      "text_height": 3.5,
+      "text": "BP-1042",
+      "rotation": 0.0
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 263,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "107"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -52.0
+      },
+      "text_height": 3.5,
+      "text": "REV",
+      "rotation": 0.0
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 264,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "108"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 130.0,
+        "y": -52.0
+      },
+      "text_height": 3.5,
+      "text": "B",
+      "rotation": 0.0
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 265,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "109"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -59.0
+      },
+      "text_height": 3.5,
+      "text": "MATERIAL",
+      "rotation": 0.0
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 266,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10A"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "start_point": {
+        "x": 130.0,
+        "y": -59.0
+      },
+      "text_height": 3.5,
+      "text": "SS400",
+      "rotation": 0.0
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7
+      },
+      "TITLE": {
+        "name": "TITLE",
+        "color_index": 2
+      }
+    },
+    "block_records": {
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 260,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "104"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "vertices": [
+              {
+                "x": 100.0,
+                "y": -60.0
+              },
+              {
+                "x": 180.0,
+                "y": -60.0
+              },
+              {
+                "x": 180.0,
+                "y": -40.0
+              },
+              {
+                "x": 100.0,
+                "y": -40.0
+              }
+            ],
+            "closed": true
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -45.0
+            },
+            "text_height": 3.5,
+            "text": "DWG NO",
+            "rotation": 0.0
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 130.0,
+              "y": -45.0
+            },
+            "text_height": 3.5,
+            "text": "BP-1042",
+            "rotation": 0.0
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 263,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "107"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -52.0
+            },
+            "text_height": 3.5,
+            "text": "REV",
+            "rotation": 0.0
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 130.0,
+              "y": -52.0
+            },
+            "text_height": 3.5,
+            "text": "B",
+            "rotation": 0.0
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 265,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "109"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -59.0
+            },
+            "text_height": 3.5,
+            "text": "MATERIAL",
+            "rotation": 0.0
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 266,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10A"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 130.0,
+              "y": -59.0
+            },
+            "text_height": 3.5,
+            "text": "SS400",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": []
+      }
+    },
+    "mlinestyles": {}
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}

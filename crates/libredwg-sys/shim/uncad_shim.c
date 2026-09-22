@@ -186,3 +186,24 @@ uncad_dwg_is_r13_to_r2000 (const Dwg_Data *dwg)
     return 0;
   return R_13b1 <= dwg->header.version && dwg->header.version <= R_2000;
 }
+
+uint16_t
+uncad_dwg_codepage (const Dwg_Data *dwg)
+{
+  if (!dwg)
+    return 0;
+  return dwg->header.codepage;
+}
+
+int
+uncad_dwg_is_wide_string (const Dwg_Data *dwg)
+{
+  if (!dwg)
+    return 0;
+  /* The same test as the library's IS_FROM_TU_DWG (bits.h, an internal
+   * header): read from an R2007+ DWG, and not through an importer
+   * (DWG_OPTS_IN -- DXF/JSON input), whose strings are stored as given. */
+  return (dwg->header.from_version >= R_2007 && !(dwg->opts & DWG_OPTS_IN))
+             ? 1
+             : 0;
+}

@@ -12,9 +12,9 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, get_utf8_field, is_pre_r13, resolve_handle_name, resolve_table_entry_name,
-    SplineControlPoint,
+    get_point3d_array, is_pre_r13, SplineControlPoint,
 };
+use crate::text::TextDecoder;
 use std::ffi::CStr;
 use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
@@ -61,7 +61,10 @@ fn is_paper_space(name: &str) -> bool {
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
 /// `Dwg_Data`.
-pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> {
+pub unsafe fn convert_entities(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+) -> Vec<Entity> {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut entities = Vec::new();
 
@@ -87,7 +90,7 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> 
         if object_ptr.is_null() {
             continue;
         }
-        let Some(name) = get_utf8_field(object_ptr, "BLOCK_HEADER", "name") else {
+        let Some(name) = text.field(object_ptr, "BLOCK_HEADER", "name") else {
             continue;
         };
         if !is_model_space(&name) && !is_paper_space(&name) {
@@ -100,7 +103,7 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> 
         // Deliberately here and not inside owned_entities(): a block
         // record's own entity list must not carry the duplication (see
         // uncad_model::tables::BlockRecord).
-        for entity in unsafe { owned_entities(dwg, block_obj) } {
+        for entity in unsafe { owned_entities(dwg, text, block_obj) } {
             let attribs: Vec<Entity> = match &entity {
                 Entity::Insert(insert) => {
                     insert.attribs.iter().cloned().map(Entity::Attrib).collect()
@@ -126,15 +129,16 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> 
 /// `block_obj` must be a valid, non-null `BLOCK_HEADER` object.
 pub(crate) unsafe fn owned_entities(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     block_obj: *mut libredwg_sys::Dwg_Object,
 ) -> Vec<Entity> {
     if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
-        return unsafe { chained_block_entities(dwg, block_obj) };
+        return unsafe { chained_block_entities(dwg, text, block_obj) };
     }
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
-        if let Some(entity) = unsafe { convert_entity(dwg, owned) } {
+        if let Some(entity) = unsafe { convert_entity(dwg, text, owned) } {
             entities.push(entity);
         }
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
@@ -201,6 +205,7 @@ fn is_sub_entity(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> bool {
 /// Same contract as [`owned_entities`].
 unsafe fn chained_block_entities(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     block_obj: *mut libredwg_sys::Dwg_Object,
 ) -> Vec<Entity> {
     let mut entities = Vec::new();
@@ -223,7 +228,7 @@ unsafe fn chained_block_entities(
         let fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(obj) } as libredwg_sys::DWG_OBJECT_TYPE;
         if !is_sub_entity(fixedtype) {
-            if let Some(entity) = unsafe { convert_entity(dwg, obj) } {
+            if let Some(entity) = unsafe { convert_entity(dwg, text, obj) } {
                 entities.push(entity);
             }
         }
@@ -251,6 +256,7 @@ unsafe fn chained_block_entities(
 /// valid INSERT object of it.
 unsafe fn chained_insert_attribs(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     entity_ptr: *mut std::ffi::c_void,
 ) -> Vec<AttribEntity> {
     let mut attribs = Vec::new();
@@ -266,7 +272,7 @@ unsafe fn chained_insert_attribs(
             if sub.is_null() {
                 continue;
             }
-            if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+            if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) } {
                 attribs.push(attrib);
             }
         }
@@ -288,7 +294,7 @@ unsafe fn chained_insert_attribs(
         if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB {
             break;
         }
-        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) } {
             attribs.push(attrib);
         }
         if sub == last_obj {
@@ -462,6 +468,7 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
 /// valid pointer from `dwg_get_object` on that same `Dwg_Data`.
 unsafe fn convert_entity(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
 ) -> Option<Entity> {
     // Cast for cross-platform bindgen enum-width consistency -- see the
@@ -494,9 +501,10 @@ unsafe fn convert_entity(
     let (id, source_handle) = unsafe { entity_identity(obj) };
     let layer = reference(
         dwg,
+        text,
         get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "layer"),
         c"LAYER",
-        |handle_ptr| resolve_handle_name(dwg, handle_ptr),
+        |handle_ptr| text.handle_name(dwg, handle_ptr),
     );
     let (color_index, true_color) = entity_color(entity_ptr);
     // This backend reads vector files: everything it produces is a vector
@@ -534,7 +542,9 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
             let start_point = get_point2d(entity_ptr, "TEXT", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
-            let text = get_utf8_field(entity_ptr, "TEXT", "text_value").unwrap_or_default();
+            let text = text
+                .field(entity_ptr, "TEXT", "text_value")
+                .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
             Entity::Text(TextEntity {
                 common,
@@ -645,7 +655,9 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB => {
             let start_point = get_point2d(entity_ptr, "ATTRIB", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
-            let text = get_utf8_field(entity_ptr, "ATTRIB", "text_value").unwrap_or_default();
+            let text = text
+                .field(entity_ptr, "ATTRIB", "text_value")
+                .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTRIB", "rotation").unwrap_or(0.0);
             Entity::Attrib(AttribEntity {
                 common,
@@ -658,13 +670,14 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
             let block_name = reference(
                 dwg,
+                text,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
                     entity_ptr,
                     "INSERT",
                     "block_header",
                 ),
                 c"BLOCK",
-                crate::table_convert::resolve_block_name,
+                |handle_ptr| crate::table_convert::resolve_block_name(text, handle_ptr),
             );
             let insertion_point = get_point3d(entity_ptr, "INSERT", "ins_pt")?;
             let scale = get_point3d(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
@@ -682,12 +695,13 @@ unsafe fn convert_entity(
             // from the INSERT's own Dwg_Object rather than from entity_ptr
             // (the type-specific struct dynapi needs, a different pointer).
             let attribs = if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
-                unsafe { chained_insert_attribs(dwg, entity_ptr) }
+                unsafe { chained_insert_attribs(dwg, text, entity_ptr) }
             } else {
                 let mut attribs = Vec::new();
                 let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
                 while !sub.is_null() {
-                    if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+                    if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) }
+                    {
                         attribs.push(attrib);
                     }
                     sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
@@ -707,8 +721,9 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTDEF => {
             let start_point = get_point2d(entity_ptr, "ATTDEF", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "ATTDEF", "height")?;
-            let default_value =
-                get_utf8_field(entity_ptr, "ATTDEF", "default_value").unwrap_or_default();
+            let default_value = text
+                .field(entity_ptr, "ATTDEF", "default_value")
+                .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
             Entity::Attdef(AttdefEntity {
                 common,
@@ -764,7 +779,7 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MTEXT => {
             let insertion_point = get_point3d(entity_ptr, "MTEXT", "ins_pt")?;
-            let text = get_utf8_field(entity_ptr, "MTEXT", "text").unwrap_or_default();
+            let text = text.field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
             // dwg.h's comment on x_axis_dir says it "defines the rotation",
             // and atan2(x_axis_dir.y, x_axis_dir.x) looks like the right
@@ -830,9 +845,10 @@ unsafe fn convert_entity(
             let dxfname = dimension_dxfname(fixedtype);
             let block_name = reference(
                 dwg,
+                text,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block"),
                 c"BLOCK",
-                crate::table_convert::resolve_block_name,
+                |handle_ptr| crate::table_convert::resolve_block_name(text, handle_ptr),
             );
             Entity::Dimension(DimensionEntity { common, block_name })
         }
@@ -844,9 +860,10 @@ unsafe fn convert_entity(
             // pitfall as REGION/3DSOLID (see acis.rs).
             let block_name = reference(
                 dwg,
+                text,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header"),
                 c"BLOCK",
-                crate::table_convert::resolve_block_name,
+                |handle_ptr| crate::table_convert::resolve_block_name(text, handle_ptr),
             );
             let insertion_point = get_point3d(entity_ptr, "TABLE", "ins_pt")?;
             let scale = get_point3d(entity_ptr, "TABLE", "scale").unwrap_or(Point3D {
@@ -886,8 +903,9 @@ unsafe fn convert_entity(
                             != 0;
                     let gradient_tint =
                         get_field::<f64>(entity_ptr, "HATCH", "gradient_tint").unwrap_or(0.0);
-                    let gradient_name =
-                        get_utf8_field(entity_ptr, "HATCH", "gradient_name").unwrap_or_default();
+                    let gradient_name = text
+                        .field(entity_ptr, "HATCH", "gradient_name")
+                        .unwrap_or_default();
                     let colors: Vec<libredwg_sys::Dwg_HATCH_Color> =
                         get_array_field::<u32, _>(entity_ptr, "HATCH", "num_colors", "colors");
                     convert_hatch_gradient(
@@ -947,8 +965,9 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
             let insertion_point = get_point3d(entity_ptr, "TOLERANCE", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
-            let text_value =
-                get_utf8_field(entity_ptr, "TOLERANCE", "text_value").unwrap_or_default();
+            let text_value = text
+                .field(entity_ptr, "TOLERANCE", "text_value")
+                .unwrap_or_default();
             Entity::Tolerance(ToleranceEntity {
                 common,
                 insertion_point,
@@ -974,7 +993,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINE => {
-            Entity::MLine(convert_mline(dwg, entity_ptr, common))
+            Entity::MLine(convert_mline(dwg, text, entity_ptr, common))
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MULTILEADER => Entity::MultiLeader({
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_MULTILEADER*
@@ -1202,6 +1221,7 @@ fn convert_hatch_gradient(
 /// resolution is deferred.
 fn convert_mline(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     entity_ptr: *mut std::ffi::c_void,
     common: EntityCommon,
 ) -> MLineEntity {
@@ -1226,9 +1246,10 @@ fn convert_mline(
     let flags = get_field::<u16>(entity_ptr, "MLINE", "flags").unwrap_or(0);
     let mlinestyle_name = reference(
         dwg,
+        text,
         get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle"),
         c"MLINESTYLE",
-        |handle_ptr| resolve_handle_name(dwg, handle_ptr),
+        |handle_ptr| text.handle_name(dwg, handle_ptr),
     );
     MLineEntity {
         common,
@@ -1323,6 +1344,7 @@ const HANDLELESS_ID_BASE: u64 = 1 << 63;
 ///   not carry (a DIMENSION without a block, for instance): `Absent`.
 fn reference(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
     table: &CStr,
     resolve: impl FnOnce(*mut libredwg_sys::Dwg_Object_Ref) -> Option<String>,
@@ -1347,7 +1369,7 @@ fn reference(
         )
     };
     if is_pre_r13(dwg) {
-        return match resolve_table_entry_name(dwg, handle_ptr, table) {
+        return match text.table_entry_name(dwg, handle_ptr, table) {
             Some(name) => Ref::Resolved(name),
             None => Ref::Unresolved(format!("idx:{r11_idx}")),
         };

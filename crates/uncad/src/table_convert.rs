@@ -4,6 +4,7 @@
 
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field};
+use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use uncad_model::tables::{BlockRecord, LayerRecord, Tables};
@@ -16,7 +17,10 @@ use uncad_model::tables::{BlockRecord, LayerRecord, Tables};
 /// `pub(crate)`, not `pub`: `parse()` is the only intended caller. Exporting
 /// a `*mut Dwg_Data` entry point would bypass the lock and leak
 /// `libredwg_sys` types into the public surface.
-pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
+pub(crate) unsafe fn convert_tables(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
@@ -35,22 +39,22 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
         if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LAYER {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(record) = convert_layer(object_ptr) {
+                if let Some(record) = convert_layer(text, object_ptr) {
                     layers.insert(record.name.clone(), record);
                 }
             }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_BLOCK_HEADER {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(name) = block_record_name(object_ptr) {
-                    let entities = unsafe { owned_entities(dwg, obj) };
+                if let Some(name) = block_record_name(text, object_ptr) {
+                    let entities = unsafe { owned_entities(dwg, text, obj) };
                     block_records.insert(name.clone(), BlockRecord { name, entities });
                 }
             }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINESTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some((name, offsets)) = convert_mlinestyle(object_ptr) {
+                if let Some((name, offsets)) = convert_mlinestyle(text, object_ptr) {
                     mlinestyles.insert(name, offsets);
                 }
             }
@@ -74,9 +78,8 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
 /// sentinels entirely. Without this, every anonymous block in a drawing
 /// collapses onto one `"*D"` map key. Falls back to the abbreviated name if
 /// there is no BLOCK entity.
-fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
-    let abbreviated =
-        crate::dynapi::get_utf8_field(block_header_object_ptr, "BLOCK_HEADER", "name");
+fn block_record_name(text: &TextDecoder, block_header_object_ptr: *mut c_void) -> Option<String> {
+    let abbreviated = text.field(block_header_object_ptr, "BLOCK_HEADER", "name");
 
     if let Some(block_ref) = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
         block_header_object_ptr,
@@ -94,8 +97,7 @@ fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
                 // `_dwg_object` C tag that Dwg_Object is opaqued to elsewhere.
                 // Identical layout, so the pointer cast is sound.
                 let entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(block_obj.cast()) };
-                if let Some(full_name) = crate::dynapi::get_utf8_field(entity_ptr, "BLOCK", "name")
-                {
+                if let Some(full_name) = text.field(entity_ptr, "BLOCK", "name") {
                     if !full_name.is_empty() {
                         return Some(full_name);
                     }
@@ -112,11 +114,12 @@ fn block_record_name(block_header_object_ptr: *mut c_void) -> Option<String> {
 /// the same resolution `convert_tables` uses to key `block_records`, so a
 /// caller can look the result up there.
 ///
-/// **Not** interchangeable with [`crate::dynapi::resolve_handle_name`], which
+/// **Not** interchangeable with `TextDecoder::handle_name`, which
 /// returns `BLOCK_HEADER.name` directly. Using that here was a real bug: every
 /// anonymous dimension cache resolved to `"*D"`, which is never a key in
 /// `block_records`, so no DIMENSION rendered at all.
 pub(crate) fn resolve_block_name(
+    text: &TextDecoder,
     block_header_ref: *mut libredwg_sys::Dwg_Object_Ref,
 ) -> Option<String> {
     if block_header_ref.is_null() {
@@ -131,13 +134,13 @@ pub(crate) fn resolve_block_name(
     if object_ptr.is_null() {
         return None;
     }
-    block_record_name(object_ptr)
+    block_record_name(text, object_ptr)
 }
 
 /// Reads an MLINESTYLE object's name and each of its parallel lines' `offset`,
 /// in array order -- see [`Tables::mlinestyles`].
-fn convert_mlinestyle(object_ptr: *mut c_void) -> Option<(String, Vec<f64>)> {
-    let name = crate::dynapi::get_utf8_field(object_ptr, "MLINESTYLE", "name")?;
+fn convert_mlinestyle(text: &TextDecoder, object_ptr: *mut c_void) -> Option<(String, Vec<f64>)> {
+    let name = text.field(object_ptr, "MLINESTYLE", "name")?;
     // num_lines is BITCODE_RC (one unsigned byte), unlike num_paths'
     // BITCODE_BL -- see get_array_field on why the count width cannot be
     // hardcoded for every caller.
@@ -147,8 +150,8 @@ fn convert_mlinestyle(object_ptr: *mut c_void) -> Option<(String, Vec<f64>)> {
     Some((name, offsets))
 }
 
-fn convert_layer(object_ptr: *mut c_void) -> Option<LayerRecord> {
-    let name = crate::dynapi::get_utf8_field(object_ptr, "LAYER", "name")?;
+fn convert_layer(text: &TextDecoder, object_ptr: *mut c_void) -> Option<LayerRecord> {
+    let name = text.field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
     let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
     Some(LayerRecord { name, color_index })

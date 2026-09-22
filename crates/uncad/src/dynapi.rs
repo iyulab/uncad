@@ -325,13 +325,14 @@ pub fn get_common_field<T: DwgRaw>(entity: *mut c_void, field: &str) -> Option<T
 }
 
 /// Resolves a `BITCODE_H` handle reference (e.g. an entity's `layer`
-/// field) to the name of the object it points at, via
+/// field) to the name bytes of the object it points at (undecoded -- see
+/// [`get_text_bytes`]), via
 /// `dwg_dynapi_handle_name`. Returns `None` for a null handle or an object
 /// with no name field (not every handle target has one).
-pub fn resolve_handle_name(
+pub fn handle_name_bytes(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle: *mut libredwg_sys::Dwg_Object_Ref,
-) -> Option<String> {
+) -> Option<Vec<u8>> {
     if handle.is_null() {
         return None;
     }
@@ -343,9 +344,7 @@ pub fn resolve_handle_name(
         return None;
     }
     // SAFETY: name_ptr is a valid NUL-terminated C string per dynapi's contract.
-    let owned = unsafe { CStr::from_ptr(name_ptr) }
-        .to_string_lossy()
-        .into_owned();
+    let owned = unsafe { CStr::from_ptr(name_ptr) }.to_bytes().to_vec();
     if alloced != 0 {
         // SAFETY: alloced != 0 means dwg_dynapi_handle_name malloc'd this
         // buffer itself (documented in dwg_api.h); ours to free.
@@ -372,11 +371,11 @@ pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
 /// table's entry order, since such references carry no handle; from R13 on it
 /// matches the handle. Returns `None` when there is no such table or entry.
 /// The library always hands back a copy, freed here once it has been read.
-pub fn resolve_table_entry_name(
+pub fn table_entry_name_bytes(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle: *mut libredwg_sys::Dwg_Object_Ref,
     table: &CStr,
-) -> Option<String> {
+) -> Option<Vec<u8>> {
     if dwg.is_null() || handle.is_null() {
         return None;
     }
@@ -389,26 +388,25 @@ pub fn resolve_table_entry_name(
     // SAFETY: name_ptr is a NUL-terminated string dwg_handle_name allocated
     // for its caller (every non-NULL return is a strdup or a fresh utf8text
     // conversion); ours to free once copied.
-    let owned = unsafe { CStr::from_ptr(name_ptr) }
-        .to_string_lossy()
-        .into_owned();
+    let owned = unsafe { CStr::from_ptr(name_ptr) }.to_bytes().to_vec();
     unsafe { libc::free(name_ptr.cast()) };
     Some(owned)
 }
 
-/// Reads a text field (BITCODE_T/TV/TU) as a UTF-8 `String`, via
-/// `dwg_dynapi_entity_utf8text` -- which itself handles the r2007+
-/// UTF-16-wide-string-to-UTF-8 conversion (older DWGs store text fields as
-/// plain 8-bit strings already). Returns `None` if the field doesn't exist
-/// or is a null string.
+/// Reads a text field (`BITCODE_T`/`TV`/`TU`) as the bytes LibreDWG holds
+/// for it, via `dwg_dynapi_entity_utf8text`. For an R2007+ drawing those
+/// bytes are UTF-8 (the library converts its UTF-16 strings); for an older
+/// one they are the file's own 8-bit bytes in the drawing's codepage, which
+/// the function does not decode despite its name. [`crate::text::TextDecoder`]
+/// is what turns either into a `String`; nothing else reads text fields.
+/// Returns `None` if the field doesn't exist or is a null string.
 ///
 /// The C function may return a freshly `malloc`'d buffer (r2007+ conversion
 /// path) or a pointer straight into the parsed `Dwg_Data` (older formats) --
-/// `isnew` tells us which. We always copy into an owned Rust `String`
-/// before returning, and `free()` the malloc'd buffer ourselves in the
-/// `isnew` case so this doesn't leak one string per TEXT/MTEXT/... field
-/// read for the lifetime of the process.
-pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option<String> {
+/// `isnew` tells us which. We always copy before returning, and `free()` the
+/// malloc'd buffer ourselves in the `isnew` case so this doesn't leak one
+/// string per TEXT/MTEXT/... field read for the lifetime of the process.
+pub fn get_text_bytes(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Vec<u8>> {
     if entity.is_null() {
         return None;
     }
@@ -436,9 +434,7 @@ pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option
 
     // SAFETY: text_ptr is a valid, NUL-terminated C string per dynapi's
     // contract (checked non-null above).
-    let owned = unsafe { CStr::from_ptr(text_ptr) }
-        .to_string_lossy()
-        .into_owned();
+    let owned = unsafe { CStr::from_ptr(text_ptr) }.to_bytes().to_vec();
 
     if is_new != 0 {
         // SAFETY: is_new != 0 means dwg_dynapi_entity_utf8text malloc'd

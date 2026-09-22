@@ -2,6 +2,7 @@
 #define UNCAD_SHIM_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -130,6 +131,27 @@ int uncad_dwg_is_pre_r13(const Dwg_Data *dwg);
  * (the target version), the same field those walkers branch on.
  */
 int uncad_dwg_is_r13_to_r2000(const Dwg_Data *dwg);
+
+/* `dwg->header.codepage`: the codepage the drawing's 8-bit strings (every
+ * string before R2007) are in, as the Dwg_Codepage number -- read from the
+ * DWG header, or from `$DWGCODEPAGE` by the DXF importer (which defaults to
+ * ANSI_1252 when the variable is absent). 0 when `dwg` is NULL.
+ *
+ * This exists because Dwg_Data is opaque on the Rust side (see build.rs),
+ * and the library's own text accessors do not apply the codepage to such
+ * strings: they return the bytes as stored. The Rust side decodes them
+ * itself through the library's codepage tables (codepages.h).
+ */
+uint16_t uncad_dwg_codepage(const Dwg_Data *dwg);
+
+/* 1 when the drawing's strings are wide (UTF-16, R2007 and later), which the
+ * library converts to UTF-8 in its text accessors, 0 otherwise or when `dwg`
+ * is NULL. The same test as the library's own IS_FROM_TU_DWG (an internal
+ * macro): `from_version` (the source's version) is R2007 or later and the
+ * drawing did not come through an importer (DXF/JSON input keeps strings
+ * as given).
+ */
+int uncad_dwg_is_wide_string(const Dwg_Data *dwg);
 
 #ifdef __cplusplus
 }

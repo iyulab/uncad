@@ -30,6 +30,14 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- **Text before R2007 is decoded through the drawing's codepage** (`header.codepage`, DXF
+  `$DWGCODEPAGE`). LibreDWG returns such strings as the 8-bit bytes
+  the file holds; they were read as UTF-8, so every non-ASCII character of a CP949 or CP1252
+  drawing -- text values, attribute values, layer and block names -- came back as mojibake
+  or U+FFFD with clean diagnostics. The decoding goes through the library's own codepage
+  tables, and a byte the declared codepage has no character for is now U+FFFD *and* a
+  `TEXT_ENCODING: ...` warning in `read_diagnostics` naming the entity and field. See
+  `docs/CAVEATS.md`, "Text before R2007 is decoded here".
 - **Closed LWPOLYLINEs are closed.** The `closed` field read bit 1 of the entity's `flag`,
   which in the library's LWPOLYLINE layout means "has extrusion"; closed is bit 512. Not one
   of the corpus's 1,137 LWPOLYLINEs had ever been reported closed, so every closed outline
