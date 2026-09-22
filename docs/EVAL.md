@@ -88,5 +88,8 @@ test`'s wall clock.
 - **Legibility**: whether the dominant text class really reads at 14 px in
   a given model is a judgement the `legibility.height_classes` block leaves
   to the agent; no VLM-in-the-loop check exists.
-- **Frames and paper layouts** (design section 4, steps 5 and 10) are not
-  exported, so nothing evaluates them.
+- **Frames** are checked structurally (`tests/export.rs`: two islands of
+  lines become two frames with their own overviews and tiles) and by eye on
+  the samples; whether the 5 % gap splits real drawings the way a reader
+  would is not measured. **Paper layouts** (design section 4, step 10) are
+  not exported, so nothing evaluates them.

@@ -722,8 +722,6 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::Arc(a) => {
-            ctx.consider(a.center.x - a.radius, a.center.y - a.radius);
-            ctx.consider(a.center.x + a.radius, a.center.y + a.radius);
             let (x, y, r) = (a.center.x, a.center.y, a.radius);
             let (x1, y1) = (x + r * a.start_angle.cos(), y + r * a.start_angle.sin());
             let (x2, y2) = (x + r * a.end_angle.cos(), y + r * a.end_angle.sin());
@@ -731,6 +729,18 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             if sweep < 0.0 {
                 sweep += 2.0 * std::f64::consts::PI;
             }
+            // The arc's own extent, not the whole circle's: a large-radius
+            // fillet must not stretch the crop (or a frame) to its centre.
+            let arc = crate::geom::BulgeArc {
+                center: Point2D { x, y },
+                radius: r,
+                start_angle: a.start_angle,
+                end_angle: a.start_angle + sweep,
+                sweep,
+            };
+            let (min_x, min_y, max_x, max_y) = arc.bounds();
+            ctx.consider(min_x, min_y);
+            ctx.consider(max_x, max_y);
             let large = if sweep > std::f64::consts::PI { 1 } else { 0 };
             Some(format!(
                 "<path d=\"M {x1} {} A {r} {r} 0 {large} 0 {x2} {}\" fill=\"none\" stroke=\"{color}\"/>",
