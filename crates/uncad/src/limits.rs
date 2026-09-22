@@ -41,6 +41,24 @@ pub const MAX_BLOCK_REF_DEPTH: u32 = 20;
 /// decremented once per expanded reference and never restored.
 pub const MAX_BLOCK_REFS: u32 = 100_000;
 
+/// How deep an entity's owned-*sub*entity chain may recurse on the way in.
+///
+/// Only one kind of nesting is real: an INSERT owns its ATTRIBs, which are
+/// themselves entities, so converting an INSERT converts them too. A file
+/// whose handles have been damaged can point an INSERT's subentity chain
+/// back at the INSERT (or around a cycle of them), and that conversion then
+/// recurses until the stack runs out -- a 512 MB stack was not enough for
+/// one byte-flipped `example_2000.dwg`. One level of nesting is what the
+/// format has; two is the cap.
+pub const MAX_SUBENTITY_DEPTH: u32 = 2;
+
+/// How many subentities one owned-subentity walk may hand back.
+///
+/// The same damaged handles can make the chain a *ring* instead of a list,
+/// which is not recursion but a loop that never ends. No real entity owns
+/// anything like this many children.
+pub const MAX_OWNED_SUBENTITIES: usize = 100_000;
+
 /// How many bytes of drawing body one render may emit.
 ///
 /// The backstop behind every other cap here, and the one that bounds the

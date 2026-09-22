@@ -233,6 +233,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A corrupt DWG could make *this crate* (not LibreDWG) recurse until the stack ran out.
+  An INSERT owns its ATTRIBs, the one place `convert_entity` recurses; three flipped bytes
+  of `example_2000.dwg` point that chain back at the INSERT, and the conversion then
+  recursed endlessly -- a 512 MB stack did not survive it, while the decoder alone read
+  the same file without complaint. The walk now stops at the first subentity that is not
+  an ATTRIB, and is bounded by `limits::MAX_SUBENTITY_DEPTH` and
+  `limits::MAX_OWNED_SUBENTITIES` (the latter against a chain damage turned into a ring);
+  the POLYLINE subentity walks carry the same length bound. See `docs/CAVEATS.md`, which
+  also records the unchecked null dereference this exposed in the vendored
+  `get_next_owned_subentity`, left in place as a below-the-boundary fix.
 - A corrupt drawing could make the *renderer* attempt a multi-gigabyte allocation and
   abort the process on the failure. One flipped byte of `example_2000.dwg` (offset
   130005) redirects a block record's owned-entity chain so the block holds eight INSERTs

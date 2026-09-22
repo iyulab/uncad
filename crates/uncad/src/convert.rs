@@ -123,7 +123,7 @@ pub(crate) unsafe fn owned_entities(
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
-        if let Some(entity) = unsafe { convert_entity(dwg, owned) } {
+        if let Some(entity) = unsafe { convert_entity(dwg, owned, 0) } {
             entities.push(entity);
         }
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
@@ -180,7 +180,11 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
     let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    while !sub.is_null() {
+    // A damaged handle can make this chain a ring; the walk is bounded so
+    // it ends either way (see [`crate::limits::MAX_OWNED_SUBENTITIES`]).
+    let mut walked = 0usize;
+    while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
+        walked += 1;
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
@@ -275,7 +279,11 @@ fn mirror_bulges(bulges: &mut [f64], extrusion: Point3D) {
 unsafe fn polyline_2d_bulges(obj: *mut libredwg_sys::Dwg_Object) -> Vec<f64> {
     let mut bulges = Vec::new();
     let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    while !sub.is_null() {
+    // Bounded against a chain a damaged handle turned into a ring (see
+    // [`crate::limits::MAX_OWNED_SUBENTITIES`]).
+    let mut walked = 0usize;
+    while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
+        walked += 1;
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D {
@@ -424,13 +432,24 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
         .collect()
 }
 
+/// `depth` is how many owned-*sub*entity steps were taken to reach `obj`
+/// (0 for an entity owned by a block record). An INSERT converts its own
+/// ATTRIBs, which is the one real nesting the format has; a file whose
+/// handles have been damaged can point that chain back at the INSERT and
+/// make the recursion endless, so it stops at
+/// [`MAX_SUBENTITY_DEPTH`](crate::limits::MAX_SUBENTITY_DEPTH).
+///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `obj` was obtained from; `obj` must be a
 /// valid pointer from `dwg_get_object` on that same `Dwg_Data`.
 unsafe fn convert_entity(
     dwg: *mut libredwg_sys::Dwg_Data,
     obj: *mut libredwg_sys::Dwg_Object,
+    depth: u32,
 ) -> Option<Entity> {
+    if depth > crate::limits::MAX_SUBENTITY_DEPTH {
+        return None;
+    }
     // Cast for cross-platform bindgen enum-width consistency -- see the
     // comment on the same call in convert_entities() above.
     let fixedtype =
@@ -708,8 +727,24 @@ unsafe fn convert_entity(
             // the type-specific struct dynapi needs, a different pointer).
             let mut attribs = Vec::new();
             let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-            while !sub.is_null() {
-                if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+            // Bounded three ways over, because a damaged handle can turn
+            // this chain into a ring (an endless walk), point it back at
+            // the INSERT (endless recursion through `convert_entity`, which
+            // a 512 MB stack did not survive), or run it off the end of the
+            // object list (where LibreDWG's own walker dereferences a null
+            // -- see `docs/CAVEATS.md`). An INSERT owns ATTRIBs and nothing
+            // else, so the walk stops the moment the chain says otherwise;
+            // the other two bounds are in [`crate::limits`].
+            let mut walked = 0usize;
+            while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
+                walked += 1;
+                let sub_type = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
+                    as libredwg_sys::DWG_OBJECT_TYPE;
+                if sub_type != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB {
+                    break;
+                }
+                if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub, depth + 1) }
+                {
                     attribs.push(attrib);
                 }
                 sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };

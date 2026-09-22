@@ -20,6 +20,11 @@ const HELIX: &str = concat!(
     "/../../lib/libredwg/test/test-data/2000/Helix.dwg"
 );
 
+const EXAMPLE_2000: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2000.dwg"
+);
+
 /// The single byte that turned this R2000 drawing into a process killer,
 /// minimised from a fuzzed corpus file by bisecting over 89 mutated
 /// offsets. It sits in the header-variables bit stream just before
@@ -65,4 +70,60 @@ fn a_truncated_dwg_does_not_kill_the_process() {
             Ok(_) | Err(_) => {}
         }
     }
+}
+
+/// Three bytes of `example_2000.dwg`, bisected out of a fuzzed file's 1 155
+/// mutated offsets, that damage an INSERT's attribute chain.
+///
+/// An INSERT owns its ATTRIBs, so converting one converts them too -- the
+/// single place `convert_entity` recurses. With these bytes the chain leads
+/// back to the INSERT, and the conversion recursed until the stack ran out:
+/// not deep recursion but endless, since a 512 MB stack did not survive it
+/// either. The decoder itself is untouched by this -- reading the same file
+/// through `uncad_dwg_read_bytes` alone returned normally -- so it was this
+/// crate's walk, not LibreDWG's, that died.
+///
+/// The walk now stops at the first subentity that is not an ATTRIB (an
+/// INSERT owns nothing else), and is bounded by `limits::MAX_SUBENTITY_DEPTH`
+/// and `limits::MAX_OWNED_SUBENTITIES` besides.
+const ATTRIB_CHAIN_FLIPS: [(usize, u8, u8); 3] = [
+    (581_356, 0x32, 0xC4),
+    (581_784, 0xC6, 0x6A),
+    (582_336, 0x34, 0x30),
+];
+
+#[test]
+fn an_inserts_attribute_chain_leading_back_to_itself_does_not_kill_the_process() {
+    let mut bytes = std::fs::read(EXAMPLE_2000).expect("the corpus DWG is readable");
+    for (offset, original, corrupt) in ATTRIB_CHAIN_FLIPS {
+        assert_eq!(
+            bytes.get(offset).copied(),
+            Some(original),
+            "the corpus file changed: byte {offset} is no longer the one this              regression was minimised against"
+        );
+        bytes[offset] = corrupt;
+    }
+
+    // Reaching the next line at all is the assertion: before the fix this
+    // call ended the test binary with STATUS_STACK_OVERFLOW (0xC00000FD),
+    // and with only the recursion bounded it ended it with an access
+    // violation (0xC0000005) inside LibreDWG's own subentity walker.
+    let drawing = parse_bytes(&bytes, Format::Dwg).expect("the corrupted file still parses");
+
+    // And the walk terminated with a sane answer rather than by running out
+    // of some other resource.
+    let attribs: usize = drawing
+        .tables
+        .block_records
+        .values()
+        .flat_map(|b| b.entities.iter())
+        .filter_map(|e| match e {
+            uncad::Entity::Insert(i) => Some(i.attribs.len()),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        attribs < uncad::limits::MAX_OWNED_SUBENTITIES,
+        "{attribs} attributes were collected"
+    );
 }

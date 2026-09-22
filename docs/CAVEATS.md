@@ -499,6 +499,38 @@ the regression: the one-byte corruption above, a self-referencing block, a block
 deeper than the cap, a block fanning out below it, a polyline past `MAX_ENTITY_POINTS` and
 a hatch whose tile dwarfs its shape.
 
+## Fixed: a corrupt attribute chain recursed until the stack ran out (since 0.3.0)
+
+An INSERT owns its ATTRIBs, and an ATTRIB is itself an entity, so converting an INSERT
+converts them too -- the one place `convert::convert_entity` recurses. Three flipped bytes
+of `example_2000.dwg` (offsets 581356, 581784 and 582336, bisected out of a fuzzed file's
+1 155 mutated offsets) point that chain back at the INSERT, and the conversion then
+recursed endlessly: a 512 MB stack was not enough either, and the process died with
+STATUS_STACK_OVERFLOW (0xC00000FD). The decoder itself was untouched by this -- reading the
+same file through `uncad_dwg_read_bytes` alone returned normally -- so it was this crate's
+walk, above the FFI boundary, that died.
+
+The walk now stops at the first subentity whose type is not ATTRIB (an INSERT owns nothing
+else, and LibreDWG's own R2000 walker uses the same condition to terminate), and is bounded
+besides by `limits::MAX_SUBENTITY_DEPTH` (2) and `limits::MAX_OWNED_SUBENTITIES` (100 000)
+-- the second against a chain damage has turned into a *ring*, which is not recursion but a
+loop that never ends. The other two owned-subentity walks (`polyline_pface_wireframe`,
+`polyline_2d_bulges`) carry the same length bound. `crates/uncad/tests/corrupt_dwg.rs` is
+the regression.
+
+**A null dereference below the boundary is still reachable from here.**
+`get_next_owned_subentity()` in the vendored `dwg.c` (line 1426) calls
+`dwg_next_object (current)` and then reads `obj->fixedtype` in the R13-R2000 INSERT, MINSERT
+and POLYLINE branches without checking for null -- and `dwg_next_object` returns null when
+`current` is the last object in the file. With only the recursion bounded, the three-byte
+file above reached exactly that and died with an access violation (0xC0000005); adding
+`if (!obj) return NULL;` at the top of the function made the same file parse cleanly, which
+is how the diagnosis was confirmed. Stopping the walk at the first non-ATTRIB takes this
+crate off that path for that file, but not in general: a corrupt drawing whose *last* object
+is a real ATTRIB on an INSERT's chain can still reach the unchecked read. It is left in
+place here because it is below the FFI boundary -- the one-line fix belongs upstream, and
+this vendored copy already carries two local patches that a submodule update must re-apply.
+
 ## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
