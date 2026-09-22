@@ -1174,3 +1174,132 @@ fn a_dense_drawing_keeps_every_sidecar_under_the_32_kb_cap() {
         "6000 regions on one level must overflow at least one sidecar"
     );
 }
+
+#[test]
+fn a_sidecar_lists_the_layers_of_everything_on_its_tile() {
+    // `layers_present` chained only texts, dimensions and block instances,
+    // so a tile drawn from geometry alone reported none -- and geometry is
+    // the bulk of every tile. The design calls sidecars authoritative for
+    // "what is on this image", so the field has to cover the ink.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("layers");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    // What each tile shows, derived from the records' own `tiles` lists
+    // (the same membership test the sidecar uses, computed independently).
+    let mut expected: std::collections::BTreeMap<String, BTreeSet<String>> = Default::default();
+    let mut geometry_layers: BTreeSet<String> = BTreeSet::new();
+    for kind in ["texts", "dimensions", "geometry", "regions", "blocks"] {
+        let rows = if kind == "blocks" {
+            read_json(&tmp.0.join("blocks.json"))["instances"]
+                .as_array()
+                .unwrap()
+                .clone()
+        } else {
+            records(&tmp.0, kind)
+        };
+        for record in rows {
+            let layer = record["layer"].as_str().unwrap().to_string();
+            if kind == "geometry" {
+                geometry_layers.insert(layer.clone());
+            }
+            for tile in record["tiles"].as_array().unwrap() {
+                expected
+                    .entry(tile.as_str().unwrap().to_string())
+                    .or_default()
+                    .insert(layer.clone());
+            }
+        }
+    }
+    assert!(geometry_layers.len() > 1, "{geometry_layers:?}");
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let id = entry["id"].as_str().unwrap();
+        let sidecar = read_json(&tmp.0.join(path));
+        let listed: BTreeSet<String> = sidecar["layers_present"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            listed,
+            *expected.get(id).unwrap_or(&BTreeSet::new()),
+            "{id}: {listed:?}"
+        );
+        seen.extend(listed);
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    // Every layer that carries geometry reaches some sidecar; before the
+    // fix the geometry-only layers reached none.
+    for layer in &geometry_layers {
+        assert!(seen.contains(layer), "{layer} is on no sidecar: {seen:?}");
+    }
+}
+
+#[test]
+fn the_guidance_quotes_the_profile_in_use() {
+    // manifest.guidance told the reader "224 px overlap" whatever the
+    // profile was, while frames[].levels[].overlap_px said 392 for
+    // claude-hires: the prose an agent is told to read first contradicted
+    // the structured data it is meant to trust.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    for profile in [
+        Profile::CLAUDE,
+        Profile::CLAUDE_HIRES,
+        Profile::OPENAI_PATCH,
+    ] {
+        let tmp = TempDir::new(&format!("guidance_{}", profile.name));
+        // One level for the default profile (so the prose can be held
+        // against real `levels[]` numbers), none for the others: a
+        // 1932 px tile pyramid costs minutes and says nothing more here.
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                profile,
+                max_levels: u32::from(profile == Profile::CLAUDE),
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let manifest = read_json(&tmp.0.join("manifest.json"));
+        let guidance = manifest["guidance"].as_str().unwrap();
+        let sentence = format!("{} px with {} px overlap", profile.tile, profile.overlap);
+        assert!(guidance.contains(&sentence), "{}: {guidance}", profile.name);
+        // And it says what the levels say.
+        for level in &report.frames[0].levels {
+            assert_eq!(level.overlap_px, profile.overlap);
+            assert_eq!(level.tile_px, profile.tile);
+        }
+        // No other profile's numbers are quoted.
+        for other in [
+            Profile::CLAUDE,
+            Profile::CLAUDE_HIRES,
+            Profile::OPENAI_PATCH,
+        ] {
+            if other.overlap != profile.overlap {
+                assert!(
+                    !guidance.contains(&format!("{} px overlap", other.overlap)),
+                    "{}: {guidance}",
+                    profile.name
+                );
+            }
+        }
+    }
+}

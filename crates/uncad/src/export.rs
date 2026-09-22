@@ -1852,6 +1852,7 @@ pub fn export_package(
                     &dim_records,
                     &block_records,
                     &region_records,
+                    &geo_records,
                     &rounder,
                 );
                 let sidecar_path = img.png.replace(".png", ".json");
@@ -1976,7 +1977,13 @@ pub fn export_package(
         "paper_layouts": if sheet_reports.is_empty() { "none" } else { "composited" },
         "frames": frame_reports.len(),
     });
-    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, 2x zooms with 224 px overlap, row 0 at the top; report.json lists what was left out and why.";
+    // The tile and overlap numbers come from the profile in use, not from
+    // the prose: --profile claude-hires writes 1932 px tiles with 392 px of
+    // overlap, and the sentence used to say 224 whatever the levels said.
+    let guidance = format!(
+        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; report.json lists what was left out and why.",
+        profile.tile, profile.overlap
+    );
     writer.files.push(WrittenFile {
         path: "manifest.json".into(),
         bytes: None,
@@ -2523,6 +2530,7 @@ fn sidecar(
     dims: &[Record],
     blocks: &[Record],
     regions: &[Record],
+    geometry: &[Record],
     rounder: &Rounder,
 ) -> Value {
     let find = |z: u32, row: i64, col: i64| -> Option<String> {
@@ -2620,11 +2628,18 @@ fn sidecar(
             ])
         })
         .collect();
+    // Every record the tile draws, geometry and regions included: geometry
+    // is the bulk of a tile, and a tile full of walls used to report no
+    // layers at all, so filtering tiles by layer skipped it. Computed
+    // before the truncation loop, so the layer set stays complete even
+    // when rows are cut.
     let mut layers: BTreeSet<String> = BTreeSet::new();
     for rec in on_tile(texts, &tile.world)
         .iter()
         .chain(on_tile(dims, &tile.world).iter())
         .chain(on_tile(blocks, &tile.world).iter())
+        .chain(on_tile(regions, &tile.world).iter())
+        .chain(on_tile(geometry, &tile.world).iter())
     {
         if let Some(Value::String(l)) = rec.value.get("layer") {
             layers.insert(l.clone());

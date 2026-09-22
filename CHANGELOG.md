@@ -173,6 +173,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A tile sidecar's `layers_present` listed only the layers of the texts, dimensions and
+  block instances on the tile, so a tile drawn from geometry alone -- the usual case --
+  reported no layers at all and an agent filtering tiles by layer skipped it. It now
+  covers every record the tile shows, geometry and regions included, and is computed
+  before the size trim so cutting rows never shortens the layer list.
+- `manifest.guidance` quoted "224 px overlap" whatever the profile was, contradicting
+  `frames[].levels[].overlap_px` (392 for `claude-hires`, 320 for `openai-patch`). The
+  sentence is built from the profile in use now and names the tile size as well.
 - Tile sidecars broke their own 32 KB cap: the trim loop measured the compact JSON but
   the file was written pretty-printed, about 3.3x larger, so a dense drawing's sidecars
   reached 100 KB *and* dropped a quarter of their record rows (`records_truncated: true`)
