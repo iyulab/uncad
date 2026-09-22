@@ -10,7 +10,6 @@
 mod acis;
 mod convert;
 mod dynapi;
-mod hatch_color;
 mod table_convert;
 mod text;
 

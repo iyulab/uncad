@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
+  `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
+  instead of two rendered hex strings. The parser no longer decides how a
+  single-color gradient fades or whether white is flipped for a white background;
+  those are a renderer's derivations. Breaking for consumers reading the two fields.
+
 ### Added
 
 - `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value

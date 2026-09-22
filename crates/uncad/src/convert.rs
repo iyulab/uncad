@@ -1165,15 +1165,16 @@ fn convert_hatch_defline(defline: &libredwg_sys::Dwg_HATCH_DefLine) -> HatchPatt
     }
 }
 
-/// Resolves one gradient stop's `Dwg_Color` to a hex string. Same
+/// Resolves one gradient stop's `Dwg_Color` to packed 24-bit RGB. Same
 /// truecolor-overrides-ACI precedence as [`entity_color`], but a gradient stop
 /// is never BYLAYER/BYBLOCK, so it needs no layer or inherited-color context.
-fn hatch_stop_color(c: &libredwg_sys::Dwg_HATCH_Color) -> String {
-    let true_color = (c.color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
-        .then_some(c.color.rgb & 0xff_ffff);
-    crate::hatch_color::true_color_to_hex(true_color)
-        .or_else(|| crate::hatch_color::aci_to_hex(c.color.index.unsigned_abs()))
-        .unwrap_or_else(|| crate::hatch_color::DEFAULT_COLOR.to_string())
+/// An ACI index outside the palette (a malformed stop) reads as black, as it
+/// always has; what the fill then looks like is the renderer's call.
+fn hatch_stop_color(c: &libredwg_sys::Dwg_HATCH_Color) -> u32 {
+    if c.color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR {
+        return c.color.rgb & 0xff_ffff;
+    }
+    uncad_model::color::aci_to_rgb(c.color.index.unsigned_abs()).unwrap_or(0)
 }
 
 /// Builds a [`HatchGradient`] from the raw `Dwg_Entity_HATCH` gradient fields.
@@ -1186,10 +1187,11 @@ fn convert_hatch_gradient(
     gradient_name: &str,
     colors: &[libredwg_sys::Dwg_HATCH_Color],
 ) -> Option<HatchGradient> {
-    let (color1, color2) = if single_color_gradient {
-        let color1 = hatch_stop_color(colors.first()?);
-        let color2 = crate::hatch_color::tint_toward_white(&color1, gradient_tint);
-        (color1, color2)
+    // The stops as the file states them; how a single-color gradient fades
+    // toward white by `tint` is a renderer's derivation, not a color the
+    // file carries.
+    let (color1, color2, tint) = if single_color_gradient {
+        (hatch_stop_color(colors.first()?), None, gradient_tint)
     } else if colors.len() >= 2 {
         // shift_value (0.0-1.0) orders the stops; `colors` is not guaranteed
         // to already be sorted by it.
@@ -1201,11 +1203,12 @@ fn convert_hatch_gradient(
         });
         (
             hatch_stop_color(sorted[0]),
-            hatch_stop_color(sorted[sorted.len() - 1]),
+            Some(hatch_stop_color(sorted[sorted.len() - 1])),
+            0.0,
         )
     } else {
         let color1 = hatch_stop_color(colors.first()?);
-        (color1.clone(), color1)
+        (color1, Some(color1), 0.0)
     };
     let is_radial = matches!(
         gradient_name.to_ascii_uppercase().as_str(),
@@ -1216,6 +1219,7 @@ fn convert_hatch_gradient(
         angle,
         color1,
         color2,
+        tint,
     })
 }
 
@@ -1430,12 +1434,12 @@ mod tests {
                 ..Default::default()
             },
         };
-        assert_eq!(hatch_stop_color(&stop), "#00ff00");
+        assert_eq!(hatch_stop_color(&stop), 0x00ff00);
     }
 
     #[test]
     fn hatch_stop_color_falls_back_to_aci_index() {
-        assert_eq!(hatch_stop_color(&aci_stop(0.0, 1)), "#ff0000"); // ACI 1 = red
+        assert_eq!(hatch_stop_color(&aci_stop(0.0, 1)), 0xff0000); // ACI 1 = red
     }
 
     #[test]
@@ -1444,17 +1448,22 @@ mod tests {
         // guaranteed to already be sorted.
         let colors = [aci_stop(1.0, 5), aci_stop(0.0, 1)];
         let g = convert_hatch_gradient(0.0, false, 0.0, "LINEAR", &colors).unwrap();
-        assert_eq!(g.color1, "#ff0000"); // ACI 1, shift 0.0
-        assert_eq!(g.color2, "#0000ff"); // ACI 5, shift 1.0
+        assert_eq!(g.color1, 0xff0000); // ACI 1, shift 0.0
+        assert_eq!(g.color2, Some(0x0000ff)); // ACI 5, shift 1.0
+        assert_eq!(g.tint, 0.0);
         assert!(!g.is_radial);
     }
 
     #[test]
-    fn gradient_single_color_tints_toward_white_for_second_stop() {
-        let colors = [aci_stop(0.0, 7)]; // ACI 7 -> normalized to black
+    fn gradient_single_color_carries_the_tint_and_no_second_stop() {
+        // ACI 7 is white in the palette; whether a renderer flips it for a
+        // white background is the renderer's decision, so the stop is white
+        // here and the second stop is left to the renderer to derive.
+        let colors = [aci_stop(0.0, 7)];
         let g = convert_hatch_gradient(0.0, true, 0.5, "LINEAR", &colors).unwrap();
-        assert_eq!(g.color1, "#000000");
-        assert_eq!(g.color2, "#808080");
+        assert_eq!(g.color1, 0xffffff);
+        assert_eq!(g.color2, None);
+        assert_eq!(g.tint, 0.5);
     }
 
     #[test]
