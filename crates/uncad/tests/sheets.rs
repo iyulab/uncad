@@ -20,6 +20,10 @@ const TWISTED: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/twisted_viewport_r2000.dxf"
 );
+const HATCHED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/hatched_viewport_r2000.dxf"
+);
 
 struct TempDir(PathBuf);
 
@@ -279,4 +283,66 @@ fn the_model_is_composited_through_a_real_viewport() {
     // Well inside the frame's lower-right quarter: blank.
     let (bx, by) = at(220.0, 70.0);
     assert!(!dark(bx, by), "unexpected ink at ({bx}, {by})");
+}
+
+#[test]
+fn a_paper_hatch_keeps_its_own_pattern_on_the_composited_sheet() {
+    // hatched_viewport_r2000.dxf: the twisted viewport plus a pattern
+    // hatch in each space -- horizontal lines 4 units apart over paper
+    // (10,10)-(40,30), vertical lines 2 units apart in the model. Both
+    // were the document's `hp0` in the composited sheet, and usvg resolves
+    // an id to its last definition, so the paper hatch was filled with
+    // the model's pattern.
+    let db = uncad::parse(HATCHED).expect("fixture must parse");
+    let tmp = TempDir::new("hatched");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let sheet = &report.sheets[0];
+    assert!(sheet.viewports[0].composited);
+    let png = std::fs::read(tmp.0.join(&sheet.overview.png)).unwrap();
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().expect("a frame size")];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let w = info.width as usize;
+    let dark = |x: usize, y: usize| buf[(y * w + x) * 3] < 160;
+    let ov = &sheet.overview;
+    let at = |wx: f64, wy: f64| -> (usize, usize) {
+        (
+            ((wx - ov.world.min_x) * ov.ppu).round() as usize,
+            ((ov.world.max_y - wy) * ov.ppu).round() as usize,
+        )
+    };
+    // Inside the paper hatch, clear of its outline: rows of pixels
+    // between x 12..38 and y 12..28. Horizontal pattern lines make some
+    // rows (nearly) all dark and the rows between them empty; the
+    // model's vertical lines would make every row about 10 % dark and
+    // none full.
+    let (x0, y_top) = at(12.0, 28.0);
+    let (x1, y_bottom) = at(38.0, 12.0);
+    let mut fractions: Vec<f64> = Vec::new();
+    for y in y_top..y_bottom {
+        let dark_px = (x0..x1).filter(|&x| dark(x, y)).count();
+        fractions.push(dark_px as f64 / (x1 - x0) as f64);
+    }
+    let fullest = fractions.iter().cloned().fold(0.0, f64::max);
+    let emptiest = fractions.iter().cloned().fold(1.0, f64::min);
+    assert!(
+        fullest > 0.9,
+        "no row of the paper hatch is a horizontal line: fullest {fullest}, {fractions:?}"
+    );
+    assert!(
+        emptiest < 0.05,
+        "no empty row between the lines: emptiest {emptiest}, {fractions:?}"
+    );
+    // At 4 units apart and this scale there are 4 lines in 16 units.
+    let full_rows = fractions.iter().filter(|f| **f > 0.9).count();
+    assert!((3..=10).contains(&full_rows), "{full_rows} full rows");
 }

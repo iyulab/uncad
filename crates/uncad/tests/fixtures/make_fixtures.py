@@ -104,6 +104,50 @@ def arc(cx, cy, r, a0, a1, extrusion=None, layer=b"0"):
     return entity("ARC", layer, *g)
 
 
+def hatch(points, angle_deg, spacing, handle=None, owner=None, paper=False, layer=b"0"):
+    """A pattern HATCH (not solid) over the closed polyline `points`: one
+    user-defined family of lines at `angle_deg`, `spacing` apart, no dashes.
+    The definition line's offset (45/46) is the perpendicular to the line
+    direction scaled to `spacing`; the seed point sits one unit inside the
+    first vertex."""
+    import math
+    a = math.radians(angle_deg)
+    # Rounded so a right angle writes 0.0, not 1.2e-16 or -0.0.
+    ox, oy = round(-math.sin(a) * spacing, 12) + 0.0, round(math.cos(a) * spacing, 12) + 0.0
+    g = [
+        (100, "AcDbHatch"),
+        (10, 0.0), (20, 0.0), (30, 0.0),     # elevation point
+        (210, 0.0), (220, 0.0), (230, 1.0),  # extrusion
+        (2, "USER"),                         # pattern name
+        (70, 0),                             # pattern fill, not solid
+        (71, 0),                             # not associative
+        (91, 1),                             # one boundary path
+        (92, 3),                             # external + polyline
+        (72, 0),                             # no bulges
+        (73, 1),                             # closed
+        (93, len(points)),
+    ]
+    for x, y in points:
+        g += [(10, float(x)), (20, float(y))]
+    g += [
+        (97, 0),                             # no source boundary objects
+        (75, 1),                             # hatch style: outermost
+        (76, 0),                             # user-defined pattern
+        (52, 0.0),                           # pattern angle
+        (41, 1.0),                           # pattern scale
+        (77, 0),                             # not double
+        (78, 1),                             # one definition line
+        (53, float(angle_deg)),
+        (43, 0.0), (44, 0.0),                # base point
+        (45, ox), (46, oy),                  # offset
+        (79, 0),                             # no dash items
+        (47, 1.0),                           # pixel size
+        (98, 1),                             # one seed point
+        (10, float(points[0][0]) + 1.0), (20, float(points[0][1]) + 1.0),
+    ]
+    return entity("HATCH", layer, *g, handle=handle, owner=owner, paper=paper)
+
+
 def tables(layers=((b"0", 7),), dimstyle=False, block_records=(), dimlfac=None):
     """TABLES section: a LAYER table, optionally DIMSTYLE STANDARD (handle
     30, with DIMLFAC group 144 when `dimlfac` is given -- a dimension uses
@@ -371,6 +415,51 @@ def twisted_viewport(variant="full"):
     return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
 
 
+def hatched_viewport():
+    """The twisted-viewport fixture (its full form: tables, blocks, the
+    LAYOUT) with a pattern HATCH in each space: vertical lines 2 units apart
+    over model (20,10)-(60,30), under the viewport, and horizontal lines 4
+    units apart over paper (10,10)-(40,30), outside the viewport's frame
+    (x 50..250, y 40..160). Both hatches are the first pattern of their
+    render, so a composited sheet that did not namespace its <defs> would
+    define `hp0` twice."""
+    hdr = header(INSUNITS=(70, 4))
+    pre = tables(block_records=(("1F", "*Model_Space"), ("1C", "*Paper_Space", "2B")))
+    pre += section("BLOCKS",
+                   block("*Model_Space", "1F", ("20", "21"))
+                   + block("*Paper_Space", "1C", ("22", "23"), paper=True))
+    post = section("OBJECTS",
+                   dictionary("C", "0", (("ACAD_LAYOUT", "1A"),))
+                   + dictionary("1A", "C", (("Layout1", "2B"),))
+                   + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
+                            paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0)))
+    vp = entity(
+        "VIEWPORT", b"0",
+        (100, "AcDbViewport"),
+        (10, 150.0), (20, 100.0), (30, 0.0),
+        (40, 200.0), (41, 120.0),
+        (68, 1), (69, 2),
+        (12, 50.0), (22, 25.0),
+        (13, 0.0), (23, 0.0),
+        (14, 10.0), (24, 10.0),
+        (15, 10.0), (25, 10.0),
+        (16, 0.0), (26, 0.0), (36, 1.0),
+        (17, 0.0), (27, 0.0), (37, 0.0),
+        (42, 50.0), (43, 0.0), (44, 0.0),
+        (45, 60.0),
+        (50, 0.0),
+        (51, 30.0),
+        (72, 100),
+        (90, 32864),
+        handle="2A", owner="1C", paper=True,
+    )
+    ents = (line(0, 0, 100, 50, handle="24", owner="1F")
+            + hatch([(20, 10), (60, 10), (60, 30), (20, 30)], 90.0, 2.0, handle="30", owner="1F")
+            + vp
+            + hatch([(10, 10), (40, 10), (40, 30), (10, 30)], 0.0, 4.0, handle="31", owner="1C", paper=True))
+    return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
+
+
 def hidden_layers():
     """Every way an entity can be hidden: a LINE on each of the layers below
     (one per 10 units of y), plus an invisible LINE (DXF 60 = 1) and a
@@ -432,6 +521,8 @@ if __name__ == "__main__":
         write("twisted_viewport_r2000.dxf", twisted_viewport("full"))
     if which in ("all", "hidden"):
         write("hidden_layers_r2000.dxf", hidden_layers())
+    if which in ("all", "hatched-viewport"):
+        write("hatched_viewport_r2000.dxf", hatched_viewport())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

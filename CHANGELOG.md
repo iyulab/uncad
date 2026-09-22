@@ -179,6 +179,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
   vertices, since the reflection reverses each arc's turn; `bulges` are documented as
   world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- On a composited sheet the paper's and the model's hatch pattern definitions shared ids
+  (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
+  legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's
+  pattern lines were not scaled by the viewport, so a 1:16 viewport drew them 0.08 px
+  wide. A paper render prefixes its ids with `p`, and every composited viewport gets its
+  own copy of the model's defs (ids suffixed with the viewport handle) with the pattern
+  strokes scaled by its scale. New fixture `hatched_viewport_r2000.dxf`.
 - A rotated block nested inside a mirrored (negative x scale or extrusion `(0,0,-1)`)
   or non-uniformly scaled block reference had its bounds, crop, tile membership,
   `blocks.json` box and `texts.json` anchors reflected about the parent's insertion

@@ -30,6 +30,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `dimlfac12_r2000.dxf` | 1304 | 12 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 2253 | 16 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
+| `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
 
 ## cp949_r2000.dxf
 
@@ -295,6 +296,30 @@ Why the file carries an OBJECTS section, and what the reader needs from it
   refers to an ENDBLK), but new handles in this file must avoid 1, 2, 20-23
   as well as C, 1A, 1C, 1F, 24, 2A and 2B.
 
+## hatched_viewport_r2000.dxf
+
+`twisted_viewport_r2000.dxf` in its full form (the same HEADER, TABLES,
+BLOCKS, LINE `24`, VIEWPORT `2A` and OBJECTS section, so everything that
+section says holds here) plus one pattern HATCH per space, written by
+`make_fixtures.py`'s `hatch` helper: a user-defined pattern (`76 = 0`, `2
+USER`) of one definition line (`78 = 1`) with no dashes, one closed
+polyline boundary (`92 = 3`, `73 = 1`), style outermost (`75 = 1`), and a
+seed point one unit inside the first vertex. Added 2026-09-22 for the
+sheet-defs fix.
+
+| Handle | Entity | Space | Boundary | Definition line (53 / 45,46) | uncad |
+|---|---|---|---|---|---|
+| 30 | HATCH | model (`330 = 1F`) | (20,10) (60,10) (60,30) (20,30) | 90 degrees, offset (-2, 0): vertical lines 2 units apart | `pattern_lines[0].angle` pi/2, `offset (-2, 0)`; the first pattern of a model render, `<pattern id="hp0">` |
+| 31 | HATCH | paper (`330 = 1C`, `67 = 1`) | (10,10) (40,10) (40,30) (10,30) | 0 degrees, offset (0, 4): horizontal lines 4 units apart | `angle` 0, `offset (0, 4)`; the first pattern of a paper render, `<pattern id="php0">` (prefix `p`) |
+
+The paper hatch lies outside the viewport's 200 x 120 frame (x 50..250,
+y 40..160 on the sheet), so on `sheets/Layout1/overview.png` its rows are
+either full (a horizontal line) or empty; `tests/sheets.rs` asserts that,
+and the `assemble_sheet` unit test in `svg.rs` asserts the ids are unique,
+each hatch references its own pattern and the model pattern's line inside
+the scale-2 viewport is half the sheet stroke. Objects read: the 16 of the
+viewport fixture plus the two HATCHes.
+
 ## What did not work
 
 1. **`cp949_r2000.dwg` via LibreDWG's add/write API**: `dwg_add_Document`,
@@ -328,7 +353,7 @@ Why the file carries an OBJECTS section, and what the reader needs from it
 ## Regenerating
 
 ```
-python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (`mirrored-bulge` writes only that one)
+python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (a name such as `mirrored-bulge` or `hatched-viewport` writes only that one)
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
 ```

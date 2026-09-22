@@ -39,7 +39,19 @@ const MIRRORED_BULGE: &str = concat!(
     "/tests/fixtures/mirrored_bulge_r2000.dxf"
 );
 
-const ALL: [&str; 5] = [CP949, MIRRORED, DIMLFAC12, TWISTED_VIEWPORT, MIRRORED_BULGE];
+const HATCHED_VIEWPORT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/hatched_viewport_r2000.dxf"
+);
+
+const ALL: [&str; 6] = [
+    CP949,
+    MIRRORED,
+    DIMLFAC12,
+    TWISTED_VIEWPORT,
+    MIRRORED_BULGE,
+    HATCHED_VIEWPORT,
+];
 
 fn parse(path: &str) -> uncad::CadDatabase {
     uncad::parse(path).unwrap_or_else(|e| panic!("{path} should parse: {e}"))

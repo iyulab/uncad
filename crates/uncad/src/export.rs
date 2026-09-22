@@ -1163,6 +1163,7 @@ pub fn export_package(
                     include_hidden: options.include_hidden,
                     ..Default::default()
                 },
+                "p",
             );
             let (rect, rect_source) = match spec.plot.as_ref().and_then(|p| p.sheet_rect()) {
                 Some(r) => (r, "paper_size"),

@@ -263,6 +263,10 @@ struct Ctx<'a> {
     /// transform save/restore, since a HATCH can appear inside a block too.
     defs: Vec<String>,
     next_def_id: u32,
+    /// Namespace for the def ids this render mints (`""` for a model
+    /// render, `"p"` for a paper one), so two renders composited into one
+    /// document ([`assemble_sheet`]) do not both define `hp0`.
+    def_prefix: String,
     /// Remaining budget for `render_block_ref` calls across the whole render
     /// pass, decremented once per call and never restored. The depth cap alone
     /// bounds nesting but not *breadth*: a crafted file with many INSERTs per
@@ -291,6 +295,7 @@ impl<'a> Ctx<'a> {
             transform: Transform::identity(),
             defs: Vec::new(),
             next_def_id: 0,
+            def_prefix: String::new(),
             block_ref_budget: BLOCK_REF_BUDGET,
             include_hidden: false,
             hidden: 0,
@@ -377,9 +382,10 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    /// A document-unique id for a `<defs>` entry, e.g. `"hp3"`.
+    /// A document-unique id for a `<defs>` entry, e.g. `"hp3"` (`"php3"`
+    /// in a paper render).
     fn next_def_id(&mut self, prefix: &str) -> String {
-        let id = format!("{prefix}{}", self.next_def_id);
+        let id = format!("{}{prefix}{}", self.def_prefix, self.next_def_id);
         self.next_def_id += 1;
         id
     }
@@ -1356,21 +1362,31 @@ impl Rendered {
 /// Renders every selected entity, measures each visible one's extent and
 /// decides the crop ([`crate::crop`]), leaving the stroke width unresolved.
 pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
-    render_selected(db, select_entities_for_space(db, options.space), options)
+    render_selected(
+        db,
+        select_entities_for_space(db, options.space),
+        options,
+        "",
+    )
 }
 
 /// [`render`] over an explicit entity list (a layout's paper-space block,
-/// say) instead of the options' space.
+/// say) instead of the options' space. `def_prefix` namespaces the
+/// `<defs>` ids (see [`Ctx::def_prefix`]): `""` for a render that stands
+/// alone or supplies the model of a sheet, `"p"` for the sheet's own
+/// entities.
 pub(crate) fn render_selected(
     db: &CadDatabase,
     selected: Vec<&Entity>,
     options: ToSvgOptions,
+    def_prefix: &str,
 ) -> Rendered {
     let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<(String, String)> = Vec::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
+    ctx.def_prefix = def_prefix.to_string();
     for e in selected {
         // A hidden entity never affects the crop, drawn faded or not.
         let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
@@ -1494,11 +1510,58 @@ fn scale_stroke_placeholders(fragment: &str, factor: f64) -> String {
     out
 }
 
+/// Appends `-{suffix}` to every `url(#id)` reference in `fragment`.
+fn suffix_url_refs(fragment: &str, suffix: &str) -> String {
+    let mut out = String::with_capacity(fragment.len());
+    let mut rest = fragment;
+    while let Some(start) = rest.find("url(#") {
+        let after = &rest[start + "url(#".len()..];
+        match after.find(')') {
+            Some(end) => {
+                out.push_str(&rest[..start]);
+                let _ = write!(out, "url(#{}-{suffix})", &after[..end]);
+                rest = &after[end + 1..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Appends `-{suffix}` to the first `id="..."` in `def` (the element's
+/// own id).
+fn suffix_def_id(def: &str, suffix: &str) -> String {
+    let Some(start) = def.find("id=\"") else {
+        return def.to_string();
+    };
+    let after = &def[start + "id=\"".len()..];
+    let Some(end) = after.find('"') else {
+        return def.to_string();
+    };
+    format!(
+        "{}id=\"{}-{suffix}\"{}",
+        &def[..start],
+        &after[..end],
+        &after[end + 1..]
+    )
+}
+
 /// A paper layout as one SVG document: the sheet's own entities (`paper`),
 /// and for every viewport in `viewports` the model (`model`'s fragments,
 /// those whose extent touches the viewport's model window and whose layer
 /// is not frozen in it) clipped to the viewport's frame and transformed
 /// with [`ViewportEntity::model_to_paper`]. `view_box` is the sheet.
+///
+/// `paper` must have been rendered with a def prefix (`"p"`) so its
+/// `<defs>` ids cannot collide with the model's, and every viewport gets
+/// its own copy of the model's defs (ids suffixed with the viewport's
+/// handle, references in its fragments rewritten to match) with the
+/// pattern strokes scaled by that viewport's scale: `<pattern>` content is
+/// drawn in the referencing element's user space, i.e. inside the
+/// viewport's matrix, so one shared def could not serve two viewports at
+/// different scales. usvg resolves a duplicated id to the last definition,
+/// which used to hand the paper's hatches the model's patterns.
 pub(crate) fn assemble_sheet(
     paper: &Rendered,
     model: &Rendered,
@@ -1513,6 +1576,7 @@ pub(crate) fn assemble_sheet(
         body.push_str(svg);
         body.push_str("\n  ");
     }
+    let mut defs: Vec<String> = paper.defs.clone();
     for vp in viewports {
         let Some(scale) = vp.scale() else { continue };
         let Some(window) = vp.model_window() else {
@@ -1547,6 +1611,12 @@ pub(crate) fn assemble_sheet(
         let e = cx - scale * (co * tx - si * ty) - scale * vx;
         let f = -cy + scale * (si * tx + co * ty) + scale * vy;
         let handle = escape_xml(&vp.common.handle);
+        defs.extend(
+            model
+                .defs
+                .iter()
+                .map(|def| scale_stroke_placeholders(&suffix_def_id(def, &handle), scale)),
+        );
         let _ = write!(
             body,
             "<clipPath id=\"vp-{handle}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>\n  <g clip-path=\"url(#vp-{handle})\"><g transform=\"matrix({} {} {} {} {} {})\" stroke-width=\"{}\">\n  ",
@@ -1574,14 +1644,15 @@ pub(crate) fn assemble_sheet(
             {
                 continue;
             }
-            body.push_str(&scale_stroke_placeholders(svg, scale));
+            body.push_str(&suffix_url_refs(
+                &scale_stroke_placeholders(svg, scale),
+                &handle,
+            ));
             body.push_str("\n  ");
         }
         body.push_str("</g></g>\n  ");
     }
     let resolved_body = resolve_stroke_widths(&body, effective_stroke_width);
-    let mut defs: Vec<&str> = paper.defs.iter().map(String::as_str).collect();
-    defs.extend(model.defs.iter().map(String::as_str));
     let defs_block = if defs.is_empty() {
         String::new()
     } else {
@@ -1755,6 +1826,119 @@ mod tests {
         assert!(
             bottom.contains(&format!(" y=\"{expected_y}\"")),
             "{bottom} vs {expected_y}"
+        );
+    }
+
+    /// The value of every `id="..."` attribute in `svg`, in order.
+    fn ids(svg: &str) -> Vec<&str> {
+        svg.match_indices("id=\"")
+            .map(|(at, _)| {
+                let after = &svg[at + 4..];
+                &after[..after.find('"').unwrap()]
+            })
+            .collect()
+    }
+
+    /// The `stroke-width` of the `<line>` inside the `<pattern id="{id}">`.
+    fn pattern_stroke_width(svg: &str, id: &str) -> f64 {
+        let start = svg
+            .find(&format!("<pattern id=\"{id}\""))
+            .unwrap_or_else(|| panic!("pattern {id} in {svg}"));
+        let def = &svg[start..start + svg[start..].find("</pattern>").unwrap()];
+        let at = def.find("stroke-width=\"").unwrap() + "stroke-width=\"".len();
+        def[at..at + def[at..].find('"').unwrap()].parse().unwrap()
+    }
+
+    #[test]
+    fn a_sheet_keeps_paper_and_model_defs_apart_and_scales_each_viewports_patterns() {
+        // hatched_viewport_r2000.dxf: a pattern hatch in model space
+        // (vertical lines, handle 30) and one in paper space (horizontal
+        // lines, handle 31), each the first pattern of its render, plus a
+        // viewport (handle 2A) at scale 2 twisted 30 degrees.
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/hatched_viewport_r2000.dxf"
+        );
+        let db = crate::parse(path).expect("fixture parses");
+        let options = ToSvgOptions {
+            crop: CropMode::Raw,
+            padding: Some(0.0),
+            ..Default::default()
+        };
+        let model = render(&db, options);
+        let paper_block = &db.tables.block_records["*Paper_Space"];
+        let paper = render_selected(&db, paper_block.entities.iter().collect(), options, "p");
+        let viewports: Vec<&crate::model::ViewportEntity> = paper_block
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Viewport(v) => Some(v),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(viewports.len(), 1);
+        assert_eq!(viewports[0].scale(), Some(2.0));
+        let extents: std::collections::HashMap<&str, Rect> = model
+            .extents
+            .iter()
+            .map(|e| (e.handle.as_str(), e.rect))
+            .collect();
+        let layers = std::collections::HashMap::new();
+        let view_box = ViewBox::from_world(&Rect::new(0.0, 0.0, 297.0, 210.0));
+        let svg = assemble_sheet(
+            &paper, &model, &viewports, &extents, &layers, &view_box, 0.5,
+        );
+
+        // Every id is defined once: the paper's pattern under its own
+        // prefix, the model's as a copy for the viewport, none bare.
+        let mut all = ids(&svg);
+        let count = all.len();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), count, "duplicate ids in {svg}");
+        assert!(svg.contains("<pattern id=\"php0\""), "{svg}");
+        assert!(svg.contains("<pattern id=\"hp0-2A\""), "{svg}");
+        assert!(!svg.contains("<pattern id=\"hp0\""), "{svg}");
+        // Each hatch fills with its own pattern: the paper one horizontal
+        // (rotate(0)), the model one vertical (rotate(-90) on the y-down
+        // canvas), the viewport's fragment rewritten to the copy.
+        assert!(svg.contains("fill=\"url(#php0)\""), "{svg}");
+        assert!(svg.contains("fill=\"url(#hp0-2A)\""), "{svg}");
+        assert!(!svg.contains("url(#hp0)"), "{svg}");
+        let paper_def = &svg[svg.find("<pattern id=\"php0\"").unwrap()..];
+        assert!(paper_def[..paper_def.find('>').unwrap()].contains("rotate(0)"));
+        let model_def = &svg[svg.find("<pattern id=\"hp0-2A\"").unwrap()..];
+        assert!(model_def[..model_def.find('>').unwrap()].contains("rotate(-90)"));
+        // Pattern content is drawn in the referencing element's user
+        // space. The paper hatch is in sheet units: its line is the sheet
+        // stroke, 0.5. The model copy is used inside the viewport's
+        // matrix(2 ...), so its line must be 0.5 / 2 to come out 0.5 on
+        // the sheet -- the same rule the viewport group's own
+        // stroke-width follows.
+        assert!((pattern_stroke_width(&svg, "php0") - 0.5).abs() < 1e-12);
+        assert!((pattern_stroke_width(&svg, "hp0-2A") - 0.25).abs() < 1e-12);
+        assert!(
+            svg.contains("stroke-width=\"0.25\">"),
+            "the viewport group: {svg}"
+        );
+    }
+
+    #[test]
+    fn suffixing_rewrites_every_reference_and_only_the_defs_own_id() {
+        assert_eq!(
+            suffix_url_refs(
+                "<path fill=\"url(#hp0)\"/><path fill=\"url(#hg12)\"/>",
+                "2A"
+            ),
+            "<path fill=\"url(#hp0-2A)\"/><path fill=\"url(#hg12-2A)\"/>"
+        );
+        assert_eq!(suffix_url_refs("no refs", "2A"), "no refs");
+        assert_eq!(
+            suffix_def_id(
+                "<pattern id=\"hp0\" width=\"1\"><line id=\"x\"/></pattern>",
+                "2A"
+            ),
+            "<pattern id=\"hp0-2A\" width=\"1\"><line id=\"x\"/></pattern>"
         );
     }
 
