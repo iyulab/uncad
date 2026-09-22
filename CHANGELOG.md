@@ -173,6 +173,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- The attribute values of a block reference nested inside another block -- a tag block
+  inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
+  `strings.json` listed only top-level attributes, so "which door is D-101" could not be
+  answered, and for DWG input (where the value hangs off the nested INSERT rather than
+  being a child of the block) the text was not even drawn. Both shapes are now collected
+  and rendered once each, under the id `<insert>/<attrib>`. New fixture
+  `nested_attrib_r2000.dxf`.
 - A long Hangul (or wide-glyph) text vanished from tiles it reaches: frames, frame
   overviews and tiles are culled by the renderer's extents, which hold the 0.6-em
   estimate, while `texts.json` lists a text's tiles from its measured glyph box -- so a

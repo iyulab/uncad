@@ -1671,3 +1671,220 @@ fn a_tile_keeps_the_half_of_a_long_hangul_text_that_reaches_it() {
         "no tile starts past the estimate's end: the case is not exercised"
     );
 }
+
+const NESTED_ATTRIB: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/nested_attrib_r2000.dxf"
+);
+
+#[test]
+fn a_nested_block_references_attribute_is_drawn_and_indexed() {
+    // The tag-inside-assembly pattern: block DOOR holds an INSERT of block
+    // TAG whose ATTRIB says NUM = D-101. `collect_texts` skipped every
+    // ATTRIB child of a block ("the top-level walk already sees them",
+    // which holds only for a top-level INSERT's own attribs) and never
+    // looked at a nested INSERT's `attribs` at all, so the value was in no
+    // record -- and in the DWG shape it was not even drawn. An agent asked
+    // "which door is D-101" could not find it.
+    let db = uncad::parse(NESTED_ATTRIB).expect("fixture must parse");
+    let tmp = TempDir::new("nested_attrib");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let texts = records(&tmp.0, "texts");
+    // DOOR is inserted at (100, 100) unrotated and unscaled and the ATTRIB
+    // sits at (21, 21) in DOOR's own frame, so the value is drawn at
+    // (121, 121) at height 2.5; its id is the INSERT's handle and the
+    // ATTRIB's, the same id the renderer gives the <text>.
+    let nested = texts
+        .iter()
+        .find(|t| t["id"] == "60/56")
+        .unwrap_or_else(|| panic!("the nested attribute: {texts:?}"));
+    assert_eq!(nested["text"], "D-101");
+    assert_eq!(nested["kind"], "ATTRIB");
+    assert_eq!(nested["tag"], "NUM");
+    let b: Vec<f64> = nested["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (120.5..122.5).contains(&b[0]) && (120.5..122.5).contains(&b[1]),
+        "{b:?}"
+    );
+    assert!((b[3] - b[1] - 2.5).abs() < 0.3, "cap height 2.5: {b:?}");
+    // The top-level attribute, which always worked, is still there once,
+    // and the nested one is not listed twice (the fixture's ATTRIB is a
+    // child of DOOR, and from R2004 on the same record is linked to the
+    // nested INSERT as well).
+    assert_eq!(texts.iter().filter(|t| t["text"] == "D-TOP").count(), 1);
+    assert_eq!(texts.iter().filter(|t| t["text"] == "D-101").count(), 1);
+
+    // strings.json finds it, and so does the picture: exactly one <text>.
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(
+        strings["strings"]["d-101"],
+        serde_json::json!(["60/56"]),
+        "{}",
+        strings["strings"]
+    );
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).unwrap();
+    assert_eq!(svg.matches("D-101").count(), 1, "drawn once");
+    assert!(svg.contains("id=\"60/56\""), "with the record's id");
+
+    // And the tile the record names really shows it.
+    let tile = nested["tiles"].as_array().unwrap()[0].as_str().unwrap();
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let entry = tiles["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == tile)
+        .expect("the tile");
+    let png = std::fs::read(tmp.0.join(entry["png"].as_str().unwrap())).unwrap();
+    let area: Vec<i64> = nested["px"][tile]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert!(
+        dark_pixels_in(&png, [area[0], area[1], area[2], area[3]]) > 20,
+        "{tile} shows no attribute text"
+    );
+}
+
+/// The same block nesting in the shape a DWG (and an R2004+ DXF) gives:
+/// the nested INSERT carries its ATTRIB in `attribs` and the block has no
+/// ATTRIB child at all. No R2000 DXF produces that, so it is built here.
+fn nested_attrib_dwg_shape() -> uncad::CadDatabase {
+    use uncad::model::{AttribEntity, EntityCommon, InsertEntity, LineEntity, Point2D, Point3D};
+    let common = |handle: &str| EntityCommon {
+        handle: handle.into(),
+        layer: "0".into(),
+        ..EntityCommon::default()
+    };
+    let line = |handle: &str, x1: f64, y1: f64| {
+        uncad::Entity::Line(LineEntity {
+            common: common(handle),
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+        })
+    };
+    let insert = |handle: &str, block: &str, x: f64, y: f64, attribs: Vec<AttribEntity>| {
+        uncad::Entity::Insert(InsertEntity {
+            common: common(handle),
+            block_name: block.into(),
+            insertion_point: Point3D { x, y, z: 0.0 },
+            scale: Point3D {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+            rotation: 0.0,
+            extrusion: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            attribs,
+        })
+    };
+    let value = AttribEntity {
+        common: common("56"),
+        start_point: Point2D { x: 21.0, y: 21.0 },
+        text_height: 2.5,
+        text: "D-101".into(),
+        text_plain: "D-101".into(),
+        rotation: 0.0,
+        tag: "NUM".into(),
+        invisible: false,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    };
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "TAG".into(),
+        uncad::tables::BlockRecord {
+            name: "TAG".into(),
+            entities: vec![line("42", 10.0, 0.0)],
+        },
+    );
+    tables.block_records.insert(
+        "DOOR".into(),
+        uncad::tables::BlockRecord {
+            name: "DOOR".into(),
+            entities: vec![
+                line("52", 40.0, 0.0),
+                line("53", 0.0, 40.0),
+                insert("55", "TAG", 20.0, 20.0, vec![value]),
+            ],
+        },
+    );
+    let model = vec![insert("60", "DOOR", 100.0, 100.0, Vec::new())];
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: model.clone(),
+        },
+    );
+    uncad::CadDatabase::new(model, tables)
+}
+
+#[test]
+fn a_nested_attribute_stored_on_the_insert_is_drawn_and_indexed_too() {
+    let db = nested_attrib_dwg_shape();
+    let tmp = TempDir::new("nested_attrib_dwg");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let texts = records(&tmp.0, "texts");
+    assert_eq!(texts.len(), 1, "{texts:?}");
+    assert_eq!(texts[0]["id"], "60/56");
+    assert_eq!(texts[0]["text"], "D-101");
+    // Same placement as the DXF shape: DOOR at (100, 100), the value at
+    // (21, 21) inside it.
+    let b: Vec<f64> = texts[0]["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (120.5..122.5).contains(&b[0]) && (120.5..122.5).contains(&b[1]),
+        "{b:?}"
+    );
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(strings["strings"]["d-101"], serde_json::json!(["60/56"]));
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).unwrap();
+    assert_eq!(svg.matches("D-101").count(), 1, "drawn once: {svg}");
+}

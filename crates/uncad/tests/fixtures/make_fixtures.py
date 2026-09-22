@@ -520,6 +520,75 @@ def hidden_layers():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# ---------------------------------------------------------------- fixture 8
+def attdef(tag, prompt, default, x, y, height, handle, owner):
+    """An ATTDEF: the attribute *template* a block definition carries."""
+    return entity(
+        "ATTDEF", b"0",
+        (100, "AcDbEntity"), (100, "AcDbText"),
+        (10, float(x)), (20, float(y)), (30, 0.0), (40, float(height)), (1, default),
+        (100, "AcDbAttributeDefinition"), (3, prompt), (2, tag), (70, 0),
+        handle=handle, owner=owner,
+    )
+
+
+def attrib(tag, value, x, y, height, handle, owner):
+    """An ATTRIB: one INSERT's value for a tag. `owner` (DXF 330) decides the
+    shape LibreDWG builds -- the owning INSERT links it into that INSERT's
+    attribute chain, the block record makes it a child of the block."""
+    return entity(
+        "ATTRIB", b"0",
+        (100, "AcDbEntity"), (100, "AcDbText"),
+        (10, float(x)), (20, float(y)), (30, 0.0), (40, float(height)), (1, value),
+        (100, "AcDbAttribute"), (2, tag), (70, 0),
+        handle=handle, owner=owner,
+    )
+
+
+def insert(name, x, y, handle, owner, attribs=None, seqend=None):
+    """An INSERT, with its ATTRIB chain (DXF 66 = 1) and SEQEND when given."""
+    groups = [(100, "AcDbEntity"), (100, "AcDbBlockReference")]
+    if attribs:
+        groups.append((66, 1))
+    groups += [(2, name), (10, float(x)), (20, float(y)), (30, 0.0)]
+    out = entity("INSERT", b"0", *groups, handle=handle, owner=owner)
+    if attribs:
+        out += attribs
+        out += entity("SEQEND", b"0", (100, "AcDbEntity"), handle=seqend, owner=owner)
+    return out
+
+
+def nested_attrib():
+    """An attributed block inside another block -- the tag-inside-assembly
+    pattern -- so the export has to find a nested INSERT's attribute value.
+
+    Block TAG is a LINE and an ATTDEF `NUM`; block DOOR is two LINEs and an
+    INSERT of TAG at (20, 20) whose ATTRIB `NUM = D-101` is owned (DXF 330)
+    by the *block record*, the shape ezdxf- and AutoCAD-written DXFs use and
+    the one LibreDWG turns into a child of DOOR. Model space holds INSERT
+    `60` of DOOR at (100, 100) -- so the nested value is drawn at
+    (100+21, 100+21) and belongs to the text id `60/56` -- and INSERT `61`
+    of TAG at (0, 0) with its own top-level ATTRIB `NUM = D-TOP`, the
+    control that always worked."""
+    hdr = header(INSUNITS=(70, 4))
+    pre = tables(block_records=(("1F", "*Model_Space"), ("40", "TAG"), ("50", "DOOR")))
+    tag_body = (line(0, 0, 10, 0, handle="42", owner="40")
+                + attdef("NUM", "Number", b"D-000", 1, 1, 2.5, "43", "40"))
+    door_body = (line(0, 0, 40, 0, handle="52", owner="50")
+                 + line(0, 0, 0, 40, handle="53", owner="50")
+                 + insert("TAG", 20, 20, "55", "50",
+                          attribs=attrib("NUM", b"D-101", 21, 21, 2.5, "56", "50"),
+                          seqend="57"))
+    pre += section("BLOCKS",
+                   block("TAG", "40", ("41", "44"), body=tag_body)
+                   + block("DOOR", "50", ("51", "54"), body=door_body))
+    ents = insert("DOOR", 100, 100, "60", "1F")
+    ents += insert("TAG", 0, 0, "61", "1F",
+                   attribs=attrib("NUM", b"D-TOP", 1, 1, 2.5, "62", "1F"),
+                   seqend="63")
+    return hdr + pre + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 # ---------------------------------------------------------------- fixture 6
 def plot_origin():
     """A paper layout with the page setup AutoCAD-written drawings usually
@@ -654,6 +723,8 @@ if __name__ == "__main__":
         write("angular_ordinate_r2000.dxf", angular_ordinate())
     if which in ("all", "hatched-viewport"):
         write("hatched_viewport_r2000.dxf", hatched_viewport())
+    if which in ("all", "nested-attrib"):
+        write("nested_attrib_r2000.dxf", nested_attrib())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

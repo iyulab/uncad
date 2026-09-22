@@ -573,6 +573,13 @@ fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
     for e in top {
         collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut out);
     }
+    // One text can be reached twice: a DXF whose ATTRIB is owned by the
+    // block record gives the containing block an ATTRIB child *and* (from
+    // R2004 on) links the same ATTRIB into the nested INSERT's `attribs`.
+    // Both paths mint the same id, which is also the one `<text>` the
+    // renderer draws, so the second is a duplicate.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    out.retain(|t| seen.insert(t.id.clone()));
     out
 }
 
@@ -714,10 +721,25 @@ fn collect_texts(
             };
             let child_affine = Affine::for_insert(i).then(affine);
             let child_prefix = id(&i.common.handle);
+            // A *nested* INSERT's attribute values hang off the INSERT
+            // itself and nothing else sees them: `convert.rs` duplicates
+            // only a top-level INSERT's attribs into the entity list, which
+            // is why the top level is left to that walk (`depth > 0`
+            // here). They are placed in the containing block's own frame,
+            // like the INSERT's insertion point, so they go through the
+            // parent affine and the current prefix -- the id the renderer
+            // draws them with.
+            if depth > 0 {
+                for a in &i.attribs {
+                    collect_texts(db, &Entity::Attrib(a.clone()), affine, prefix, depth, out);
+                }
+            }
             for child in &block.entities {
-                if matches!(child, Entity::Attdef(_) | Entity::Attrib(_)) {
-                    // Attribute values are the INSERT's own ATTRIBs, which
-                    // the top-level walk already sees.
+                // Only the attribute *template* is skipped. A block child
+                // that is an ATTRIB is the value LibreDWG builds from a DXF
+                // whose ATTRIB is owned by the block record: it is drawn,
+                // so it belongs in the records too.
+                if matches!(child, Entity::Attdef(_)) {
                     continue;
                 }
                 collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);

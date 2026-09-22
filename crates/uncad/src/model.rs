@@ -320,9 +320,12 @@ pub struct InsertEntity {
     #[serde(default = "world_z")]
     pub extrusion: Point3D,
     /// Attribute values attached to this INSERT (the ATTRIB records between
-    /// the INSERT and its SEQEND). Also present as top-level
-    /// [`Entity::Attrib`] entries in `CadDatabase::entities` -- that is what
-    /// rendering actually draws; see `convert.rs`.
+    /// the INSERT and its SEQEND). A *top-level* INSERT's are also present
+    /// as [`Entity::Attrib`] entries in `CadDatabase::entities` -- that is
+    /// what rendering draws for those; see `convert.rs`. A block-nested
+    /// INSERT's exist only here (or as ATTRIB children of the containing
+    /// block, the shape a DXF that owns them by the block record gives),
+    /// and `render_block_ref` draws them from this list.
     pub attribs: Vec<AttribEntity>,
 }
 

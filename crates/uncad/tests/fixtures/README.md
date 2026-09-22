@@ -33,6 +33,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `plot_origin_r2000.dxf` | 2430 | 17 | A LAYOUT `Layout1` in inches (ANSI B landscape, rotation 0) with asymmetric margins and a non-zero plot origin (DXF 46/47), so the sheet is not at `(-left, -bottom)`; a paper-space border LWPOLYLINE and a 1:5 plan VIEWPORT over a model LINE |
 | `angular_ordinate_r2000.dxf` | 1491 | 10 | A 2-line angular DIMENSION (60 degrees) and an X- and a Y-type ordinate DIMENSION (30 and 50): the two kinds whose definition points LibreDWG's DXF reader lays out differently from its DWG decoder |
 | `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
+| `nested_attrib_r2000.dxf` | 2174 | 3 model-space entities, 2 blocks (6 entities) | A block with an ATTDEF inserted inside another block, its ATTRIB value owned by the block record: the attribute of a *nested* block reference, which the export used to drop |
 
 ## cp949_r2000.dxf
 
@@ -385,6 +386,33 @@ each hatch references its own pattern and the model pattern's line inside
 the scale-2 viewport is half the sheet stroke. Objects read: the 16 of the
 viewport fixture plus the two HATCHes.
 
+## nested_attrib_r2000.dxf
+
+The tag-inside-assembly pattern: an attributed block inside another block,
+written by `make_fixtures.py`'s `nested_attrib()` on 2026-09-22 for the
+nested-attribute fix. HEADER: `$INSUNITS 4`. TABLES: BLOCK_RECORDs `1F`
+(`*Model_Space`), `40` (`TAG`) and `50` (`DOOR`). BLOCKS: `TAG` = LINE `42`
+(0,0)-(10,0) and ATTDEF `43` (tag `NUM`, default `D-000`, height 2.5);
+`DOOR` = LINEs `52` and `53` plus INSERT `55` of `TAG` at (20, 20) whose
+ATTRIB `56` (`NUM` = `D-101`, at (21, 21)) is owned by the **block record**
+(`330 = 50`) -- the shape ezdxf- and AutoCAD-written DXFs use. ENTITIES:
+INSERT `60` of `DOOR` at (100, 100) and INSERT `61` of `TAG` at (0, 0) with
+its own ATTRIB `62` (`NUM` = `D-TOP`), the control that always worked.
+
+| Item | uncad |
+|---|---|
+| `tables.block_records["DOOR"].entities` | LINE `52`, LINE `53`, INSERT `55` (`attribs` empty at R2000), ATTRIB `56` = `D-101` |
+| `tables.block_records["TAG"].entities` | LINE `42`, ATTDEF `43` |
+| `entities` (model space) | INSERT `60`, INSERT `61`, ATTRIB `62` = `D-TOP` |
+| `texts.json` | `60/56` = `D-101` at (121, 121), height 2.5, and `62` = `D-TOP` |
+| `strings.json` | `d-101` -> `["60/56"]`, `d-top` -> `["62"]` |
+| `drawing.svg` | one `<text id="60/56">D-101</text>` |
+
+An R2000 DXF gives only this shape: LibreDWG links an ATTRIB to its INSERT
+from R2004 on, and a DWG stores the value on the INSERT itself with no
+block child. `tests/export.rs` covers that second shape with a database
+built in the test, and both reach the same record id.
+
 ## What did not work
 
 1. **`cp949_r2000.dwg` via LibreDWG's add/write API**: `dwg_add_Document`,
@@ -423,7 +451,7 @@ viewport fixture plus the two HATCHes.
 ## Regenerating
 
 ```
-python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (a name such as `mirrored-bulge` or `hatched-viewport` writes only that one)
+python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (a name such as `mirrored-bulge`, `hatched-viewport` or `nested-attrib` writes only that one)
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
 python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, cp949, mirrored, dimlfac, viewport, hidden)
