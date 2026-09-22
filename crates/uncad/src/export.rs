@@ -3262,6 +3262,15 @@ fn plan_tiles(
 
 const SIDECAR_LIMIT: usize = 32 * 1024;
 
+/// The most rows of one kind a sidecar builds before the shrink loop even
+/// looks at it. The shortest row a group can write --
+/// `["1F",[0,0,1,1],"LINE"]` -- is about 25 bytes, so nothing beyond this
+/// could ever fit in [`SIDECAR_LIMIT`], and building it only to serialize
+/// and halve it again costs a tile of 50 000 lines several megabytes of
+/// string per shrink pass. Cutting here is the same cut the loop would
+/// make, and it is reported the same way (`records_truncated`).
+const MAX_SIDECAR_ROWS: usize = SIDECAR_LIMIT / 20;
+
 #[allow(clippy::too_many_arguments)]
 fn sidecar(
     img: &ImageInfo,
@@ -3339,6 +3348,7 @@ fn sidecar(
     );
     let mut text_rows: Vec<Value> = on_texts
         .iter()
+        .take(MAX_SIDECAR_ROWS)
         .map(|rec| {
             json!([
                 rec.id,
@@ -3349,6 +3359,7 @@ fn sidecar(
         .collect();
     let mut dim_rows: Vec<Value> = on_dims
         .iter()
+        .take(MAX_SIDECAR_ROWS)
         .map(|rec| {
             json!([
                 rec.id,
@@ -3365,6 +3376,7 @@ fn sidecar(
         .collect();
     let mut block_rows: Vec<Value> = on_blocks
         .iter()
+        .take(MAX_SIDECAR_ROWS)
         .map(|rec| {
             json!([
                 rec.id,
@@ -3375,6 +3387,7 @@ fn sidecar(
         .collect();
     let mut region_rows: Vec<Value> = on_regions
         .iter()
+        .take(MAX_SIDECAR_ROWS)
         .map(|rec| {
             json!([
                 rec.id,
@@ -3394,6 +3407,7 @@ fn sidecar(
     // really there.
     let mut geometry_rows: Vec<Value> = on_geometry
         .iter()
+        .take(MAX_SIDECAR_ROWS)
         .map(|rec| {
             json!([
                 rec.id,
@@ -3484,7 +3498,15 @@ fn sidecar(
         }
         value
     };
-    let mut truncated = false;
+    let mut truncated = [
+        (text_rows.len(), on_texts.len()),
+        (dim_rows.len(), on_dims.len()),
+        (block_rows.len(), on_blocks.len()),
+        (region_rows.len(), on_regions.len()),
+        (geometry_rows.len(), on_geometry.len()),
+    ]
+    .iter()
+    .any(|(rows, all)| rows < all);
     let mut value = build(
         &text_rows,
         &dim_rows,
