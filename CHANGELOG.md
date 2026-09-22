@@ -233,6 +233,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Not fixed, newly measured and documented: one changed byte in a class name makes
+  LibreDWG's own DXF reader peak at 11.3 GB on a 143 KB file -- and succeed. It is below
+  the FFI boundary, so nothing in this crate can refuse it; see `docs/CAVEATS.md`, "A
+  corrupt DWG can abort the process below the FFI boundary", which the measurement is
+  filed under along with the unchecked null dereference in `get_next_owned_subentity`.
 - A corrupt DWG could make *this crate* (not LibreDWG) recurse until the stack ran out.
   An INSERT owns its ATTRIBs, the one place `convert_entity` recurses; three flipped bytes
   of `example_2000.dwg` point that chain back at the INSERT, and the conversion then

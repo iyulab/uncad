@@ -700,6 +700,19 @@ attempt a multi-gigabyte allocation and abort on the failure. That one was above
 boundary and is fixed -- see "Every number the renderer takes from the file is bounded"
 above.
 
+**A one-byte DXF corruption can still cost eleven gigabytes, inside the decoder.** Re-running
+the sweep against the fixed renderer turned up `lib/libredwg/test/test-data/2018/Leader.dxf`
+with byte 8479 changed from `0x65` to `0xEF` -- the final `e` of `AcDbVisualStyle`, a class
+name in the CLASSES section. `uncad_dxf_read_bytes` then peaks at **11.3 GB of working set
+over 7 seconds** on a 143 KB file, and *succeeds*: it returns 0 with 182 objects, and the
+summary, the SVG and the PNG that follow are all fine. Nothing above the boundary sees the
+allocation happen, and nothing above it can refuse it; on a machine with less memory than
+this one the allocation fails and the process dies with it. Bisected to that single byte
+from a fuzzed file's 71 mutated offsets; measured with `GetProcessMemoryInfo` on the
+release build, calling the shim directly so the cost is unambiguously the C decoder's.
+There is no regression test for it -- a test that allocates 11 GB does not belong in a
+suite -- which is the other half of why the out-of-process advice above is not optional.
+
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
