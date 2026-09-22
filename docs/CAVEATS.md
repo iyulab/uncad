@@ -164,9 +164,12 @@ its 0.3.0 form. Known gaps:
   content on the tile; a dense drawing whose every entity touches every
   tile still costs `tiles x content`. Tiles of a level render in parallel;
   `--max-tiles` (400) and `--max-levels` (5) bound the total.
-- **One frame, model space only.** Detached clusters do not get their own
-  tile pyramid and paper layouts are not exported (design section 4, steps
-  5 and 10).
+- **Frames follow proximity, not meaning.** Entities within 5 % of the crop
+  diagonal of each other (`--frame-gap`) are one group; a detached group
+  with 20 entities or a text becomes a frame. Two details drawn close
+  together share a frame, and a title block touching the plan joins it.
+  Model space only: paper layouts are not exported (design section 4,
+  step 10).
 - Text is rendered with the host's fonts (no bundled face).
 - Records for entities inside block references are limited to texts;
   geometry inside blocks is drawn but not listed (INSERT instances are).

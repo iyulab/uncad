@@ -145,15 +145,22 @@ fn tiles_cover_the_levels_and_their_sidecars_round_trip() {
     let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
     let tmp = TempDir::new("tiles");
     let report = export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+    assert_eq!(report.frames.len(), 1, "one connected drawing, one frame");
+    let frame = &report.frames[0];
+    assert_eq!(frame.id, "f0");
+    assert_eq!(
+        frame.overview.id, "ov",
+        "a single frame reuses the overview"
+    );
     assert!(
-        !report.levels.is_empty(),
+        !frame.levels.is_empty(),
         "the drawing has text, so it has zoom levels"
     );
 
     let tiles = read_json(&tmp.0.join("tiles.json"));
     let entries = tiles["tiles"].as_array().unwrap();
     let mut written = 0;
-    for level in &report.levels {
+    for level in &frame.levels {
         let step = level.tile_px - level.overlap_px;
         let expect = |extent: u32| -> u32 {
             if extent <= level.tile_px {
@@ -302,7 +309,7 @@ fn the_export_is_deterministic_and_options_are_honoured() {
     let b = TempDir::new("det_b");
     let ra = export_package(&db, &a.0, &options).expect("exports");
     let rb = export_package(&db, &b.0, &options).expect("exports");
-    assert_eq!(ra.levels.len(), 1);
+    assert_eq!(ra.frames[0].levels.len(), 1);
     assert!(a.0.join("drawing.svg").exists() && a.0.join("entities.json").exists());
     // A 4 KB shard size splits the geometry records.
     assert!(a.0.join("geometry.001.json").exists(), "{:?}", ra.files);
@@ -333,7 +340,7 @@ fn the_export_is_deterministic_and_options_are_honoured() {
     )
     .expect("exports");
     assert_eq!(rc.overview.px[0] % 32, 0);
-    assert!(rc.levels.is_empty());
+    assert!(rc.frames[0].levels.is_empty());
 }
 
 #[test]
@@ -356,4 +363,129 @@ fn hidden_entities_stay_out_of_the_records() {
     let report_json = read_json(&tmp.0.join("report.json"));
     assert_eq!(report_json["hidden"]["by_reason"]["layer_off"], 1);
     assert_eq!(report_json["hidden"]["by_reason"]["invisible"], 1);
+}
+
+/// Two 100 x 100 squares of 25 lines each, 1000 units apart, the second
+/// with a label: two frames.
+fn two_islands() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let mut entities = Vec::new();
+    let mut handle = 0x100u32;
+    for dx in [0.0, 1000.0] {
+        for i in 0..25 {
+            let y = f64::from(i) * 4.0;
+            entities.push(uncad::Entity::Line(LineEntity {
+                common: EntityCommon {
+                    handle: format!("{handle:X}"),
+                    layer: "0".into(),
+                    ..EntityCommon::default()
+                },
+                start_point: Point3D { x: dx, y, z: 0.0 },
+                end_point: Point3D {
+                    x: dx + 100.0,
+                    y,
+                    z: 0.0,
+                },
+            }));
+            handle += 1;
+        }
+    }
+    entities.push(uncad::Entity::Text(TextEntity {
+        common: EntityCommon {
+            handle: "TXT".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point2D {
+            x: 1010.0,
+            y: 110.0,
+        },
+        text_height: 5.0,
+        text: "DETAIL A".into(),
+        text_plain: "DETAIL A".into(),
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    }));
+    // Model-space membership is what the renderer selects by.
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_detached_group_becomes_its_own_frame() {
+    let db = two_islands();
+    let tmp = TempDir::new("frames");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(report.frames.len(), 2, "{:?}", report.frames);
+    let (f0, f1) = (&report.frames[0], &report.frames[1]);
+    assert_eq!((f0.id.as_str(), f0.kind.as_str()), ("f0", "primary"));
+    assert_eq!((f1.id.as_str(), f1.kind.as_str()), ("f1", "detached"));
+    // The primary frame is the group with the most entities: the labelled
+    // island (25 lines and the text).
+    assert_eq!((f0.entities, f1.entities), (26, 25));
+    assert_eq!((f0.texts, f1.texts), (1, 0));
+    // Each frame has its own overview file and tiles under its directory.
+    assert_eq!(f0.overview.png, "frames/f0/overview.png");
+    assert!(tmp.0.join("frames/f1/overview.png").exists());
+    assert!(tmp.0.join("overview.png").exists());
+    assert!(f0.content.min_x >= 999.0 && f1.content.max_x <= 101.0);
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let ids: Vec<&str> = tiles["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        ids.iter().any(|i| i.starts_with("f0/z1/")) && ids.iter().any(|i| i.starts_with("f1/z1/")),
+        "{ids:?}"
+    );
+    // The label's record shows where it is on the whole overview, on its
+    // frame's overview and on its tiles -- not on the other frame's images.
+    let texts = records(&tmp.0, "texts");
+    let label = texts.iter().find(|t| t["id"] == "TXT").expect("the label");
+    let px = label["px"].as_object().unwrap();
+    assert!(px.contains_key("ov") && px.contains_key("f0/ov"), "{px:?}");
+    assert!(!px.contains_key("f1/ov"));
+    assert!(label["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t.as_str().unwrap().starts_with("f0/")));
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["frames"].as_array().unwrap().len(), 2);
+    assert_eq!(manifest["capabilities"]["frames"], 2);
+    // A gap of 100 % of the diagonal merges everything into one frame.
+    let merged = export_package(
+        &db,
+        &TempDir::new("frames_merged").0,
+        &ExportOptions {
+            max_levels: 0,
+            frame_gap: 1.0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(merged.frames.len(), 1);
+    assert_eq!(merged.frames[0].overview.id, "ov");
 }

@@ -143,6 +143,15 @@ pub struct ExportOptions {
     pub full: bool,
     /// What the manifest records as the source's name (a file name, say).
     pub source_name: Option<String>,
+    /// Entities closer than this fraction of the crop's diagonal belong to
+    /// the same group; a detached group becomes its own frame. Default 0.05.
+    pub frame_gap: f64,
+    /// A detached group needs this many entities, or one text, to become a
+    /// frame. Default 20.
+    pub min_frame_entities: usize,
+    /// The most frames written (the primary one included); further groups
+    /// stay in the overview only and are listed as dropped. Default 8.
+    pub max_frames: usize,
 }
 
 impl Default for ExportOptions {
@@ -158,6 +167,9 @@ impl Default for ExportOptions {
             svg: false,
             full: false,
             source_name: None,
+            frame_gap: 0.05,
+            min_frame_entities: 20,
+            max_frames: 8,
         }
     }
 }
@@ -264,6 +276,37 @@ pub struct LevelInfo {
     pub tiles_empty: usize,
 }
 
+/// One text height class of a frame and how legible it is at the deepest
+/// level.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HeightClass {
+    pub height: f64,
+    pub count: usize,
+    pub px_at_zmax: f64,
+    pub legible: bool,
+}
+
+/// A frame: a region of the drawing with its own overview and tile pyramid
+/// under `frames/<id>/`. `f0` is the primary frame (the largest connected
+/// group of entities); detached groups -- a detail drawn beside the plan --
+/// get `f1`, `f2`, ...
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FrameReport {
+    pub id: String,
+    /// `primary` or `detached`.
+    pub kind: String,
+    /// The tight bounds of the frame's entities.
+    pub content: Rect,
+    pub entities: usize,
+    pub texts: usize,
+    pub overview: ImageInfo,
+    pub levels: Vec<LevelInfo>,
+    pub z_max: u32,
+    /// `false` when the tile budget cut the pyramid short.
+    pub reached: bool,
+    pub height_classes: Vec<HeightClass>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WrittenFile {
     pub path: String,
@@ -284,6 +327,7 @@ pub struct Counts {
     pub hidden: usize,
     pub excluded: usize,
     pub tiles: usize,
+    pub frames: usize,
 }
 
 /// What [`export_package`] wrote.
@@ -291,8 +335,10 @@ pub struct Counts {
 pub struct ExportReport {
     pub dir: PathBuf,
     pub files: Vec<WrittenFile>,
+    /// The whole crop in one image.
     pub overview: ImageInfo,
-    pub levels: Vec<LevelInfo>,
+    /// The frames, `f0` first.
+    pub frames: Vec<FrameReport>,
     pub crop: CropReport,
     pub counts: Counts,
     pub warnings: Vec<String>,
@@ -694,6 +740,7 @@ impl Writer<'_> {
 
 struct Tile {
     id: String,
+    frame: String,
     z: u32,
     row: u32,
     col: u32,
@@ -748,37 +795,46 @@ pub fn export_package(
         })
         .collect();
     let visible: &[&Entity] = &shown;
-    let extents: &[Extent] = &rendered.extents;
+    // Extents of what is drawn: the crop's exclusions are not, and would
+    // otherwise make frames and tiles of their own.
+    let drawn_extents: Vec<Extent> = rendered
+        .extents
+        .iter()
+        .filter(|e| !excluded_handles.contains(e.handle.as_str()))
+        .cloned()
+        .collect();
+    let extents: &[Extent] = &drawn_extents;
 
-    // --- overview size: profile edge and patch budget --------------------
-    let lattice = f64::from(profile.lattice.max(1));
-    let edge_patches = (f64::from(profile.overview_edge) / lattice)
-        .floor()
-        .max(1.0);
-    let (w, h) = (content.width().max(1e-9), content.height().max(1e-9));
-    let aspect = w / h;
-    let budget = f64::from(profile.overview_patches);
-    let pw = edge_patches.min((budget * aspect).sqrt().floor()).max(1.0);
-    let ph = edge_patches
-        .min((budget / pw).floor())
-        .min((pw / aspect).ceil())
-        .max(1.0);
-    let seed_ppu = (pw * lattice / (1.04 * w)).min(ph * lattice / (1.04 * h));
-    let padding = crop::auto_padding(&content, Some(seed_ppu));
-    let padded = content.padded(padding);
-    let ppu_0 = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
-    let (rect0, w0, h0) = crop::snap_to_lattice(&padded, ppu_0, profile.lattice);
-    if w0.max(h0) < 200 {
+    // --- overview: the whole crop, sized to the profile ---------------------
+    let stroke_px = 1.25;
+    let fit = fit_overview(&content, &profile);
+    if fit.width.max(fit.height) < 200 {
         warnings.push(format!(
-            "TinyOverview: the overview is only {w0} x {h0} px; the drawing's aspect leaves little of the patch budget"
+            "TinyOverview: the overview is only {} x {} px; the drawing's aspect leaves little of the patch budget",
+            fit.width, fit.height
         ));
     }
-    let overview_view_box = ViewBox::from_world(&rect0);
-    let stroke_px = 1.25;
-    let overview_svg = svg::assemble(&rendered, &overview_view_box, stroke_px / ppu_0);
-    let overview_tree = png::parse_tree(&overview_svg)?;
-    let overview_png = png::render_region(&overview_tree, ppu_0, (0.0, 0.0), w0, h0)?;
-    let overview = ImageInfo::new("ov", "overview.png", rect0, ppu_0, w0, h0);
+    let overview_svg = svg::assemble(
+        &rendered,
+        &ViewBox::from_world(&fit.rect),
+        stroke_px / fit.ppu,
+    );
+    let overview_png = png::render_region(
+        &png::parse_tree(&overview_svg)?,
+        fit.ppu,
+        (0.0, 0.0),
+        fit.width,
+        fit.height,
+    )?;
+    let overview = ImageInfo::new(
+        "ov",
+        "overview.png",
+        fit.rect,
+        fit.ppu,
+        fit.width,
+        fit.height,
+    );
+    let padding = fit.padding;
 
     // --- records: texts, dimensions, geometry, regions, blocks ---------
     let rounder = Rounder {
@@ -787,47 +843,78 @@ pub fn export_package(
     };
     let unit = db.header.units.name.clone();
     let texts = placed_texts(db, visible);
-    let heights: Vec<(f64, usize)> = height_classes(&texts);
 
-    // --- levels and tiles ------------------------------------------------
-    let z_max = depth_for(&heights, ppu_0, options);
-    let mut levels: Vec<LevelInfo> = Vec::new();
-    let mut tiles: Vec<Tile> = Vec::new();
-    let mut written_total = 0usize;
-    let mut reached = true;
-    for z in 1..=z_max {
-        let factor = 2f64.powi(z as i32);
-        let ppu = ppu_0 * factor;
-        let (cw, ch) = (w0 * 2u32.pow(z), h0 * 2u32.pow(z));
-        let plan = plan_tiles(z, cw, ch, &rect0, ppu, &profile, extents);
-        let written = plan.iter().filter(|t| !t.empty).count();
-        if written_total + written > options.max_tiles {
-            reached = false;
-            warnings.push(format!(
-                "MaxTiles: level z{z} would need {written} more tiles ({} so far, limit {}); stopping at z{}",
-                written_total,
-                options.max_tiles,
-                z - 1
-            ));
-            break;
+    // --- frames: the primary group and each detached group -----------------
+    // Each tile rasterizes only the entities whose extent touches it (plus
+    // a margin for strokes and text overhang): parsing and rendering cost
+    // what is on the tile, not the whole drawing.
+    let extent_of_handle: std::collections::HashMap<&str, Rect> = extents
+        .iter()
+        .map(|e| (e.handle.as_str(), e.rect))
+        .collect();
+    let groups = crop::detached_groups(extents, options.frame_gap * content.diagonal());
+    let group_rect =
+        |g: &[usize]| Rect::bounding(g.iter().map(|i| &extents[*i].rect)).expect("non-empty");
+    let group_texts = |r: &Rect| texts.iter().filter(|t| r.intersects(&t.bbox)).count();
+    let mut specs: Vec<(String, &str, Rect, usize)> = Vec::new();
+    let mut dropped: Vec<Value> = Vec::new();
+    if groups.len() <= 1 {
+        specs.push(("f0".to_string(), "primary", content, extents.len()));
+    } else {
+        for (n, g) in groups.iter().enumerate() {
+            let r = group_rect(g);
+            let qualifies = n == 0 || g.len() >= options.min_frame_entities || group_texts(&r) > 0;
+            if !qualifies {
+                continue;
+            }
+            if specs.len() >= options.max_frames.max(1) {
+                dropped.push(json!({ "content": rounder.rect(&r), "entities": g.len(), "texts": group_texts(&r) }));
+                continue;
+            }
+            let id = format!("f{}", specs.len());
+            specs.push((id, if n == 0 { "primary" } else { "detached" }, r, g.len()));
         }
-        written_total += written;
-        let (cols, rows) = grid(cw, ch, &profile);
-        levels.push(LevelInfo {
-            z,
-            ppu,
-            canvas_px: [cw, ch],
-            cols,
-            rows,
-            tile_px: profile.tile,
-            overlap_px: profile.overlap,
-            step_px: profile.step(),
-            tiles_written: written,
-            tiles_empty: plan.len() - written,
-        });
-        tiles.extend(plan);
+        if !dropped.is_empty() {
+            warnings.push(format!(
+                "MaxFrames: {} detached groups beyond the {} frames written stay in the overview only",
+                dropped.len(),
+                options.max_frames
+            ));
+        }
     }
-    let z_reached = levels.last().map_or(0, |l| l.z);
+    let mut frame_builds: Vec<FrameBuild> = Vec::new();
+    let mut tile_budget = options.max_tiles;
+    for (id, kind, frame_content, entities_in) in &specs {
+        let reuse = if specs.len() == 1 {
+            Some(overview.clone())
+        } else {
+            None
+        };
+        let build = build_frame(
+            id,
+            kind,
+            *frame_content,
+            *entities_in,
+            &texts,
+            extents,
+            &profile,
+            options,
+            reuse,
+            &mut tile_budget,
+            &mut warnings,
+        );
+        frame_builds.push(build);
+    }
+    let written_total: usize = frame_builds
+        .iter()
+        .map(|f| {
+            f.report
+                .levels
+                .iter()
+                .map(|l| l.tiles_written)
+                .sum::<usize>()
+        })
+        .sum();
 
     // --- write images ---------------------------------------------------
     let mut writer = Writer {
@@ -844,41 +931,62 @@ pub fn export_package(
     };
     writer.write_bytes("overview.png", &overview_png, "image")?;
     let mut tile_images: Vec<ImageInfo> = Vec::new();
-    // Each tile rasterizes only the entities whose extent touches it (plus
-    // a margin for strokes and text overhang): parsing and rendering cost
-    // what is on the tile, not the whole drawing.
-    let extent_of_handle: std::collections::HashMap<&str, Rect> = extents
-        .iter()
-        .map(|e| (e.handle.as_str(), e.rect))
-        .collect();
-    for level in &levels {
-        let level_tiles: Vec<&Tile> = tiles
-            .iter()
-            .filter(|t| t.z == level.z && !t.empty)
-            .collect();
-        let margin = 16.0 / level.ppu;
-        let rendered_tiles = render_tiles_parallel(
-            &rendered,
-            &extent_of_handle,
-            level.ppu,
-            stroke_px,
-            margin,
-            &level_tiles,
-        )?;
-        for (tile, bytes) in level_tiles.iter().zip(rendered_tiles) {
-            let png_path = format!(
-                "frames/f0/tiles/z{}/r{:02}_c{:02}.png",
-                tile.z, tile.row, tile.col
+    let mut frame_overviews: Vec<ImageInfo> = Vec::new();
+    for build in &frame_builds {
+        // The frame's own overview, unless it is the whole crop already.
+        if build.report.overview.id != "ov" {
+            let ov = &build.report.overview;
+            let window = ov.world.padded(16.0 / ov.ppu);
+            let svg_text = svg::assemble_subset(
+                &rendered,
+                &ViewBox::from_world(&ov.world),
+                stroke_px / ov.ppu,
+                |handle| {
+                    extent_of_handle
+                        .get(handle)
+                        .is_none_or(|rect| rect.intersects(&window))
+                },
             );
-            writer.write_bytes(&png_path, &bytes, "tile")?;
-            tile_images.push(ImageInfo::new(
-                &tile.id,
-                &png_path,
-                tile.world,
+            let bytes = png::render_region(
+                &png::parse_tree(&svg_text)?,
+                ov.ppu,
+                (0.0, 0.0),
+                ov.px[0],
+                ov.px[1],
+            )?;
+            writer.write_bytes(&ov.png, &bytes, "image")?;
+            frame_overviews.push(ov.clone());
+        }
+        for level in &build.report.levels {
+            let level_tiles: Vec<&Tile> = build
+                .tiles
+                .iter()
+                .filter(|t| t.z == level.z && !t.empty)
+                .collect();
+            let margin = 16.0 / level.ppu;
+            let rendered_tiles = render_tiles_parallel(
+                &rendered,
+                &extent_of_handle,
                 level.ppu,
-                tile.width,
-                tile.height,
-            ));
+                stroke_px,
+                margin,
+                &level_tiles,
+            )?;
+            for (tile, bytes) in level_tiles.iter().zip(rendered_tiles) {
+                let png_path = format!(
+                    "frames/{}/tiles/z{}/r{:02}_c{:02}.png",
+                    tile.frame, tile.z, tile.row, tile.col
+                );
+                writer.write_bytes(&png_path, &bytes, "tile")?;
+                tile_images.push(ImageInfo::new(
+                    &tile.id,
+                    &png_path,
+                    tile.world,
+                    level.ppu,
+                    tile.width,
+                    tile.height,
+                ));
+            }
         }
     }
 
@@ -892,6 +1000,9 @@ pub fn export_package(
     let px_map = |bbox: &Rect| -> Value {
         let mut m = Map::new();
         m.insert("ov".to_string(), json!(overview.px_box(bbox)));
+        for ov in frame_overviews.iter().filter(|o| o.world.intersects(bbox)) {
+            m.insert(ov.id.clone(), json!(ov.px_box(bbox)));
+        }
         for img in images_for(bbox) {
             m.insert(img.id.clone(), json!(img.px_box(bbox)));
         }
@@ -1371,42 +1482,49 @@ pub fn export_package(
 
     // sidecars and tiles.json
     let mut tiles_json: Vec<Value> = Vec::new();
-    for tile in &tiles {
-        let image = tile_images.iter().find(|i| i.id == tile.id);
-        let mut entry = json!({
-            "id": tile.id,
-            "z": tile.z,
-            "row": tile.row,
-            "col": tile.col,
-            "px": [tile.width, tile.height],
-            "world": rounder.rect(&tile.world),
-            "empty": tile.empty,
-        });
-        if let Some(img) = image {
-            entry["png"] = json!(img.png);
-            let sidecar = sidecar(
-                img,
-                tile,
-                &tiles,
-                &profile,
-                &text_records,
-                &dim_records,
-                &block_records,
-                &region_records,
-                &rounder,
-            );
-            let sidecar_path = img.png.replace(".png", ".json");
-            writer.write_json(&sidecar_path, &sidecar, "sidecar")?;
-            entry["sidecar"] = json!(sidecar_path);
+    for build in &frame_builds {
+        for tile in &build.tiles {
+            let image = tile_images.iter().find(|i| i.id == tile.id);
+            let mut entry = json!({
+                "id": tile.id,
+                "frame": tile.frame,
+                "z": tile.z,
+                "row": tile.row,
+                "col": tile.col,
+                "px": [tile.width, tile.height],
+                "world": rounder.rect(&tile.world),
+                "empty": tile.empty,
+            });
+            if let Some(img) = image {
+                entry["png"] = json!(img.png);
+                let sidecar = sidecar(
+                    img,
+                    tile,
+                    &build.tiles,
+                    &profile,
+                    &text_records,
+                    &dim_records,
+                    &block_records,
+                    &region_records,
+                    &rounder,
+                );
+                let sidecar_path = img.png.replace(".png", ".json");
+                writer.write_json(&sidecar_path, &sidecar, "sidecar")?;
+                entry["sidecar"] = json!(sidecar_path);
+            }
+            tiles_json.push(entry);
         }
-        tiles_json.push(entry);
     }
+    let frame_reports: Vec<FrameReport> = frame_builds.iter().map(|b| b.report.clone()).collect();
     writer.write_json(
         "tiles.json",
-        &json!({ "$schema": SCHEMA, "frame": "f0", "levels": levels, "tiles": tiles_json }),
+        &json!({
+            "$schema": SCHEMA,
+            "frames": frame_reports.iter().map(|f| json!({ "id": f.id, "kind": f.kind, "content": rounder.rect(&f.content), "levels": f.levels })).collect::<Vec<_>>(),
+            "tiles": tiles_json,
+        }),
         "tiles",
     )?;
-
     // drawing.json
     let mut layer_counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut type_counts: BTreeMap<String, usize> = BTreeMap::new();
@@ -1465,7 +1583,7 @@ pub fn export_package(
             }
         }
     }
-    let crop_report = rendered.choice.report(rect0, padding);
+    let crop_report = rendered.choice.report(fit.rect, padding);
     let counts = Counts {
         entities: top.len(),
         texts: text_records.len(),
@@ -1476,6 +1594,7 @@ pub fn export_package(
         hidden: rendered.hidden,
         excluded: crop_report.excluded.len(),
         tiles: written_total,
+        frames: frame_reports.len(),
     };
     let hidden_top_level: usize = hidden_by_reason.values().sum();
     // Written after the manifest (its timings would change the byte count
@@ -1500,23 +1619,14 @@ pub fn export_package(
     });
 
     // manifest.json, README.txt and report.json, last (they list the files)
-    let legibility = json!({
-        "target_px": options.target_text_px,
-        "z_max": z_reached,
-        "reached": reached,
-        "height_classes": heights.iter().map(|(h, n)| {
-            let px = h * ppu_0 * 2f64.powi(z_reached as i32);
-            json!({"height": rounder.derived(*h), "count": n, "px_at_zmax": rounder.derived(px), "legible": px >= options.target_text_px})
-        }).collect::<Vec<_>>(),
-    });
     let capabilities = json!({
         "dimension_values": if dim_records.iter().any(|r| r.value.get("measurement").is_some_and(|m| !m.is_null())) { "exact" } else if dim_records.is_empty() { "none" } else { "text_only" },
         "areas": "exact",
         "text_boxes": "estimated",
         "paper_layouts": "none",
-        "frames": 1,
+        "frames": frame_reports.len(),
     });
-    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; tiles z1..zN are 2x zooms with 224 px overlap, row 0 at the top, and report.json lists what was left out and why.";
+    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, 2x zooms with 224 px overlap, row 0 at the top; report.json lists what was left out and why.";
     writer.files.push(WrittenFile {
         path: "manifest.json".into(),
         bytes: None,
@@ -1539,8 +1649,9 @@ pub fn export_package(
         "units": writer.units,
         "crop": crop_report,
         "overview": overview,
-        "levels": levels,
-        "legibility": legibility,
+        "frames": frame_reports,
+        "frames_dropped": dropped,
+        "legibility": { "target_px": options.target_text_px, "per_frame": frame_reports.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "reached": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
         "counts": counts,
         "capabilities": capabilities,
         "guidance": guidance,
@@ -1556,7 +1667,7 @@ pub fn export_package(
         }
     })?;
     let readme = format!(
-        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f0/tiles/z*/  zoomed tiles with .json sidecars\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
     );
     std::fs::write(dir.join("README.txt"), readme.as_bytes()).map_err(|source| {
@@ -1575,11 +1686,153 @@ pub fn export_package(
         dir: dir.to_path_buf(),
         files: writer.files,
         overview,
-        levels,
+        frames: frame_reports,
         crop: crop_report,
         counts,
         warnings,
     })
+}
+
+/// An overview fitted to the profile: the pixel size within both the edge
+/// and the patch budget, the world rectangle (padded and lattice-snapped)
+/// and the scale.
+struct OverviewFit {
+    rect: Rect,
+    width: u32,
+    height: u32,
+    ppu: f64,
+    padding: f64,
+}
+
+fn fit_overview(content: &Rect, profile: &Profile) -> OverviewFit {
+    let lattice = f64::from(profile.lattice.max(1));
+    let edge_patches = (f64::from(profile.overview_edge) / lattice)
+        .floor()
+        .max(1.0);
+    let (w, h) = (content.width().max(1e-9), content.height().max(1e-9));
+    let aspect = w / h;
+    let budget = f64::from(profile.overview_patches);
+    let pw = edge_patches.min((budget * aspect).sqrt().floor()).max(1.0);
+    let ph = edge_patches
+        .min((budget / pw).floor())
+        .min((pw / aspect).ceil())
+        .max(1.0);
+    let seed_ppu = (pw * lattice / (1.04 * w)).min(ph * lattice / (1.04 * h));
+    let padding = crop::auto_padding(content, Some(seed_ppu));
+    let padded = content.padded(padding);
+    let ppu = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
+    let (rect, width, height) = crop::snap_to_lattice(&padded, ppu, profile.lattice);
+    OverviewFit {
+        rect,
+        width,
+        height,
+        ppu,
+        padding,
+    }
+}
+
+struct FrameBuild {
+    report: FrameReport,
+    tiles: Vec<Tile>,
+}
+
+/// Plans one frame: its overview (or the whole-crop one when `reuse` is
+/// given), its depth from the texts inside it, and its tiles within the
+/// remaining `tile_budget`.
+#[allow(clippy::too_many_arguments)]
+fn build_frame(
+    id: &str,
+    kind: &str,
+    content: Rect,
+    entities: usize,
+    texts: &[PlacedText],
+    extents: &[Extent],
+    profile: &Profile,
+    options: &ExportOptions,
+    reuse: Option<ImageInfo>,
+    tile_budget: &mut usize,
+    warnings: &mut Vec<String>,
+) -> FrameBuild {
+    let fit = fit_overview(&content, profile);
+    let overview = reuse.unwrap_or_else(|| {
+        ImageInfo::new(
+            &format!("{id}/ov"),
+            &format!("frames/{id}/overview.png"),
+            fit.rect,
+            fit.ppu,
+            fit.width,
+            fit.height,
+        )
+    });
+    let (rect0, w0, h0, ppu_0) = (overview.world, overview.px[0], overview.px[1], overview.ppu);
+    let inside: Vec<&PlacedText> = texts
+        .iter()
+        .filter(|t| content.intersects(&t.bbox))
+        .collect();
+    let heights = height_classes(&inside);
+    let z_max = depth_for(&heights, ppu_0, options);
+    let mut levels: Vec<LevelInfo> = Vec::new();
+    let mut tiles: Vec<Tile> = Vec::new();
+    let mut reached = true;
+    for z in 1..=z_max {
+        let ppu = ppu_0 * 2f64.powi(z as i32);
+        let (cw, ch) = (w0 * 2u32.pow(z), h0 * 2u32.pow(z));
+        let plan = plan_tiles(id, z, cw, ch, &rect0, ppu, profile, extents);
+        let written = plan.iter().filter(|t| !t.empty).count();
+        if written > *tile_budget {
+            reached = false;
+            warnings.push(format!(
+                "MaxTiles: frame {id} level z{z} would need {written} tiles with {} left of {}; stopping at z{}",
+                *tile_budget,
+                options.max_tiles,
+                z - 1
+            ));
+            break;
+        }
+        *tile_budget -= written;
+        let (cols, rows) = grid(cw, ch, profile);
+        levels.push(LevelInfo {
+            z,
+            ppu,
+            canvas_px: [cw, ch],
+            cols,
+            rows,
+            tile_px: profile.tile,
+            overlap_px: profile.overlap,
+            step_px: profile.step(),
+            tiles_written: written,
+            tiles_empty: plan.len() - written,
+        });
+        tiles.extend(plan);
+    }
+    let z_reached = levels.last().map_or(0, |l| l.z);
+    let height_classes = heights
+        .iter()
+        .map(|(h, n)| {
+            let px = h * ppu_0 * 2f64.powi(z_reached as i32);
+            HeightClass {
+                height: round_to(*h, 6),
+                count: *n,
+                px_at_zmax: round_to(px, 3),
+                legible: px >= options.target_text_px,
+            }
+        })
+        .collect();
+    FrameBuild {
+        report: FrameReport {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            content,
+            entities,
+            texts: inside.len(),
+            overview,
+            levels,
+            z_max: z_reached,
+            reached,
+            height_classes,
+        },
+        tiles,
+    }
 }
 
 /// Renders `tiles` on as many threads as the machine offers (at most one
@@ -1653,7 +1906,7 @@ fn area_unit(unit: &str) -> String {
 
 /// Count-weighted text height classes (heights rounded to 3 decimals),
 /// most common first.
-fn height_classes(texts: &[PlacedText]) -> Vec<(f64, usize)> {
+fn height_classes(texts: &[&PlacedText]) -> Vec<(f64, usize)> {
     let mut classes: BTreeMap<i64, usize> = BTreeMap::new();
     for t in texts {
         if t.height > 0.0 && t.height.is_finite() {
@@ -1717,7 +1970,9 @@ fn grid(canvas_w: u32, canvas_h: u32, profile: &Profile) -> (u32, u32) {
 /// The tiles of one level: SAHI-style, the last row and column shifted
 /// inward so every tile is the full size (or the whole canvas when that
 /// is smaller); a tile is empty when no visible extent touches it.
+#[allow(clippy::too_many_arguments)]
 fn plan_tiles(
+    frame: &str,
     z: u32,
     canvas_w: u32,
     canvas_h: u32,
@@ -1745,7 +2000,8 @@ fn plan_tiles(
             let world = Rect::new(x0, y1 - f64::from(th) / ppu, x0 + f64::from(tw) / ppu, y1);
             let empty = !extents.iter().any(|e| e.rect.intersects(&world));
             tiles.push(Tile {
-                id: format!("f0/z{z}/r{row:02}_c{col:02}"),
+                id: format!("{frame}/z{z}/r{row:02}_c{col:02}"),
+                frame: frame.to_string(),
                 z,
                 row,
                 col,
@@ -2071,7 +2327,7 @@ mod tests {
             type_name: "LINE".into(),
             rect: Rect::new(2600.0, 100.0, 2650.0, 150.0),
         }];
-        let tiles = plan_tiles(1, 2688, 1792, &rect0, 1.0, &profile, &extents);
+        let tiles = plan_tiles("f0", 1, 2688, 1792, &rect0, 1.0, &profile, &extents);
         assert_eq!(tiles.len(), 6);
         assert!(tiles.iter().all(|t| t.width == 1092 && t.height == 1092));
         // The last column is shifted inward to end at the canvas edge.

@@ -34,7 +34,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   (`㎡` -> `m2`, full-width digits, fraction slash) and every string is also indexed
   without spaces. The renderer's text extents (and so the crop) use the same 0.6-em
   estimate as `texts.json` (`uncad::text::estimate_text_box`) instead of the anchor
-  point alone.
+  point alone. Frames: entities are grouped by proximity (closer than `frame_gap`, 5 % of
+  the crop diagonal, on a square grid); the largest group is the primary frame `f0` and
+  every detached group with `min_frame_entities` (20) entities or a text gets its own
+  overview and tile pyramid under `frames/fN/`, up to `max_frames` (8) -- a detail drawn
+  beside the plan is readable at its own scale. The manifest lists `frames` (content,
+  counts, overview, levels, per-frame legibility) and `frames_dropped`; a single
+  connected drawing keeps one frame whose overview is `overview.png` itself. CLI
+  `--frame-gap`, `--min-frame-entities`, `--max-frames`.
 - The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
   is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
   most `max(3, 1 %)` entities: the largest when they dwarf the rest of the drawing 20x,

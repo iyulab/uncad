@@ -63,6 +63,12 @@ Export options (uncad export):
   --max-tiles <n>             most tiles written (default: 400)
   --text-px <px>              target pixel height of the dominant text (default: 14)
   --shard-kb <kb>             split record files above this size (default: 96)
+  --frame-gap <fraction>      entities closer than this fraction of the crop's
+                                diagonal are one group; a detached group gets its
+                                own frame (default: 0.05)
+  --min-frame-entities <n>    a detached group needs this many entities, or one
+                                text, to become a frame (default: 20)
+  --max-frames <n>            frames written at most (default: 8)
   --svg                       also write drawing.svg
   --full                      also write entities.json (the whole model)
   (--crop, --include-hidden apply too)
@@ -342,6 +348,19 @@ fn run_export(argv: &[String]) -> Result<(), String> {
                 options.shard_kb = parse_pixels("--shard-kb", &next()?)? as usize;
                 i += 1;
             }
+            "--frame-gap" => {
+                options.frame_gap = parse_non_negative("--frame-gap", &next()?)?;
+                i += 1;
+            }
+            "--min-frame-entities" => {
+                options.min_frame_entities =
+                    parse_count("--min-frame-entities", &next()?)? as usize;
+                i += 1;
+            }
+            "--max-frames" => {
+                options.max_frames = parse_count("--max-frames", &next()?)? as usize;
+                i += 1;
+            }
             "--svg" => options.svg = true,
             "--full" => options.full = true,
             _ => {}
@@ -352,13 +371,13 @@ fn run_export(argv: &[String]) -> Result<(), String> {
     let report = uncad::export::export_package(&db, Path::new(output), &options)
         .map_err(|e| e.to_string())?;
     println!(
-        "wrote: {} ({} files; overview {}x{} px; {} tiles over {} levels; {} texts, {} dimensions, {} geometry, {} regions, {} block instances)",
+        "wrote: {} ({} files; overview {}x{} px; {} tiles in {} frames; {} texts, {} dimensions, {} geometry, {} regions, {} block instances)",
         report.dir.display(),
         report.files.len(),
         report.overview.px[0],
         report.overview.px[1],
         report.counts.tiles,
-        report.levels.len(),
+        report.frames.len(),
         report.counts.texts,
         report.counts.dimensions,
         report.counts.geometry,

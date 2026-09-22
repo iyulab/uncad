@@ -390,6 +390,99 @@ fn outlier_pass(
     out
 }
 
+/// Groups extents that lie within about `cell` of one another (rectangles
+/// are painted onto a grid of `cell`-sized squares; entities sharing a
+/// square or neighbouring squares are one group). Groups come back largest
+/// first (then by position), each with its indices in order. The export
+/// turns detached groups into frames.
+pub fn detached_groups(extents: &[Extent], cell: f64) -> Vec<Vec<usize>> {
+    let n = extents.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let cell = if cell.is_finite() && cell > 0.0 {
+        cell
+    } else {
+        1.0
+    };
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut x: usize) -> usize {
+        while parent[x] != x {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        x
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let (ra, rb) = (find(parent, a), find(parent, b));
+        if ra != rb {
+            parent[ra.max(rb)] = ra.min(rb);
+        }
+    }
+    // The first entity to touch a square owns it; later ones join it.
+    let mut owner: std::collections::HashMap<(i64, i64), usize> = std::collections::HashMap::new();
+    let key = |v: f64| (v / cell).floor() as i64;
+    for (i, e) in extents.iter().enumerate() {
+        let r = &e.rect;
+        if !(r.min_x.is_finite()
+            && r.max_x.is_finite()
+            && r.min_y.is_finite()
+            && r.max_y.is_finite())
+        {
+            continue;
+        }
+        let (x0, x1, y0, y1) = (key(r.min_x), key(r.max_x), key(r.min_y), key(r.max_y));
+        // A rectangle spanning an absurd number of squares (a runaway outlier
+        // that slipped through) only paints its corners and edges' ends.
+        let too_many = (x1 - x0 + 1).saturating_mul(y1 - y0 + 1) > 1 << 20;
+        let mut paint = |x: i64, y: i64| match owner.entry((x, y)) {
+            std::collections::hash_map::Entry::Occupied(o) => union(&mut parent, i, *o.get()),
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(i);
+            }
+        };
+        if too_many {
+            for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+                paint(x, y);
+            }
+        } else {
+            for x in x0..=x1 {
+                for y in y0..=y1 {
+                    paint(x, y);
+                }
+            }
+        }
+    }
+    // Neighbouring squares join too (8-connectivity), so the effective gap
+    // is between one and two cells.
+    let cells: Vec<((i64, i64), usize)> = owner.iter().map(|(k, v)| (*k, *v)).collect();
+    for ((x, y), i) in &cells {
+        for dx in -1..=1i64 {
+            for dy in -1..=1i64 {
+                if let Some(j) = owner.get(&(x + dx, y + dy)) {
+                    union(&mut parent, *i, *j);
+                }
+            }
+        }
+    }
+    let mut groups: std::collections::BTreeMap<usize, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for i in 0..n {
+        let r = find(&mut parent, i);
+        groups.entry(r).or_default().push(i);
+    }
+    let mut out: Vec<Vec<usize>> = groups.into_values().collect();
+    let rect_of =
+        |g: &[usize]| Rect::bounding(g.iter().map(|i| &extents[*i].rect)).expect("non-empty");
+    out.sort_by(|a, b| {
+        b.len()
+            .cmp(&a.len())
+            .then_with(|| rect_of(a).min_x.total_cmp(&rect_of(b).min_x))
+            .then_with(|| rect_of(a).min_y.total_cmp(&rect_of(b).min_y))
+    });
+    out
+}
+
 /// The header's `$EXTMIN/$EXTMAX` as a rectangle, when sane.
 pub fn header_extents(header: &Header) -> Option<Rect> {
     let rect = Rect::new(
@@ -685,6 +778,33 @@ mod tests {
         sparse.push(ext("t2", 50.0, 50.0, 50.0, 50.0));
         sparse.push(ext("t3", 100.0, 100.0, 100.0, 100.0));
         assert!(outliers(&sparse).is_empty());
+    }
+
+    #[test]
+    fn detached_groups_split_a_plan_from_its_details() {
+        // A 100 x 50 "plan" of four lines, a detail of three lines 30 units
+        // away, and a lone dot far off. With 5-unit cells the plan and the
+        // detail are separate; with 40-unit cells they merge.
+        let mut extents = vec![
+            ext("1", 0.0, 0.0, 100.0, 0.0),
+            ext("2", 100.0, 0.0, 100.0, 50.0),
+            ext("3", 0.0, 50.0, 100.0, 50.0),
+            ext("4", 0.0, 0.0, 0.0, 50.0),
+            ext("5", 130.0, 0.0, 150.0, 0.0),
+            ext("6", 150.0, 0.0, 150.0, 20.0),
+            ext("7", 130.0, 20.0, 150.0, 20.0),
+            ext("8", 500.0, 500.0, 500.0, 500.0),
+        ];
+        let groups = detached_groups(&extents, 5.0);
+        assert_eq!(groups, vec![vec![0, 1, 2, 3], vec![4, 5, 6], vec![7]]);
+        let merged = detached_groups(&extents, 40.0);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].len(), 7);
+        // The empty interior of the plan is no gap: opposite walls meet at
+        // the corners.
+        extents.truncate(4);
+        assert_eq!(detached_groups(&extents, 1.0).len(), 1);
+        assert!(detached_groups(&[], 1.0).is_empty());
     }
 
     #[test]
