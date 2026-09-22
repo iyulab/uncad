@@ -91,7 +91,7 @@ impl std::fmt::Display for ParseError {
             ParseError::InvalidPath => write!(f, "path is not valid UTF-8 / contains a NUL byte"),
             ParseError::UnsupportedDxfVersion(v) => write!(
                 f,
-                "DXF version {v} (R2007 or later) is not supported: LibreDWG's DXF importer                  would return a silently incomplete drawing -- save it as R2004 DXF or as DWG"
+                "DXF version {v} (R2007 or later) is not supported: LibreDWG's DXF importer would return a silently incomplete drawing -- save it as R2004 DXF or as DWG"
             ),
         }
     }
@@ -130,7 +130,7 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
                 _ => continue,
             };
             out.push(format!(
-                "MISSING_REQUIRED_GROUP: {name} carries no tag (group 2);                  the entity is kept with an empty one"
+                "MISSING_REQUIRED_GROUP: {name} carries no tag (group 2); the entity is kept with an empty one"
             ));
         }
     }
@@ -282,4 +282,47 @@ fn dxf_acadver(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod missing_required_groups_tests {
+    use super::missing_required_groups;
+    use uncad_model::model::{
+        AttribEntity, Confidence, Entity, EntityCommon, EntityId, Origin, Point2D, Ref,
+    };
+
+    /// No drawing is known to make this fire through the importer, so the
+    /// wording is pinned on the function itself: it must be the other
+    /// reader's, word for word.
+    #[test]
+    fn an_untagged_attribute_is_reported_in_the_other_readers_words() {
+        let untagged = Entity::Attrib(AttribEntity {
+            common: EntityCommon {
+                id: EntityId::new(0x41),
+                origin: Origin::Vector,
+                confidence: Confidence::High,
+                source_handle: Ref::Resolved("41".to_string()),
+                layer: Ref::Resolved("0".to_string()),
+                color_index: 256,
+                true_color: None,
+            },
+            start_point: Point2D::default(),
+            text_height: 1.0,
+            tag: String::new(),
+            text: "X".to_string(),
+            rotation: 0.0,
+        });
+        assert_eq!(
+            missing_required_groups(&[untagged]),
+            ["MISSING_REQUIRED_GROUP: ATTRIB carries no tag (group 2); the entity is kept with an empty one"]
+        );
+    }
+
+    /// A message split across source lines must not carry the indentation
+    /// of the second line into what the user reads.
+    #[test]
+    fn the_unsupported_version_message_reads_as_one_sentence() {
+        let message = super::ParseError::UnsupportedDxfVersion("AC1024".to_string()).to_string();
+        assert!(!message.contains("  "), "{message}");
+    }
 }

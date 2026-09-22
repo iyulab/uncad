@@ -50,6 +50,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- Two user-facing messages carried a run of spaces in mid-sentence: the refusal of an
+  R2007+ DXF (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag
+  diagnostic. Both now read as one sentence, pinned by tests.
 - **Text before R2007 is decoded through the drawing's codepage** (`header.codepage`, DXF
   `$DWGCODEPAGE`). LibreDWG returns such strings as the 8-bit bytes
   the file holds; they were read as UTF-8, so every non-ASCII character of a CP949 or CP1252
