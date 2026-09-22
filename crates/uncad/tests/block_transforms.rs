@@ -9,7 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use uncad::model::{
-    ArcEntity, CircleEntity, EntityCommon, InsertEntity, LineEntity, Point2D, Point3D, TextEntity,
+    ArcEntity, CircleEntity, DimensionEntity, DimensionGeometry, DisplaySource, EntityCommon,
+    InsertEntity, LineEntity, Point2D, Point3D, TextEntity,
 };
 use uncad::tables::BlockRecord;
 use uncad::{CropMode, Entity, Rect, ToSvgOptions};
@@ -412,4 +413,130 @@ fn a_rotated_block_inside_a_mirrored_one_is_measured_where_it_is_drawn() {
         "{r:?}"
     );
     assert!(r.min_y >= 100.0 - 1e-9 && r.max_x <= 101.0, "{r:?}");
+}
+
+/// A DIMENSION and the cached `*D1` geometry block AutoCAD writes for it.
+/// That block's contents are in *world* coordinates, which is why the
+/// renderer places it through an identity transform.
+fn dimension(handle: &str, block: &str, x: f64, y: f64) -> Entity {
+    Entity::Dimension(DimensionEntity {
+        common: common(handle),
+        block_name: block.into(),
+        geometry: DimensionGeometry::Unknown,
+        measurement: Some(100.0),
+        measurement_from_points: None,
+        user_text: String::new(),
+        display_text: "100".into(),
+        display_text_raw: "100".into(),
+        display_source: DisplaySource::None,
+        definition_point: p3(x, y),
+        text_midpoint: Point2D { x, y },
+        dimstyle: String::new(),
+        dimlfac: 1.0,
+    })
+}
+
+/// Two plain LINEs and one 100-unit DIMENSION, the whole thing offset by
+/// `(ox, oy)`. Every model entity's reference point is at `(ox, oy)` except
+/// the dimension's definition point, so the median origin the renderer
+/// chooses is exactly `(ox, oy)`.
+fn dimensioned(ox: f64, oy: f64) -> uncad::CadDatabase {
+    let cached = vec![
+        line("50", ox, oy + 20.0, ox + 100.0, oy + 20.0),
+        line("51", ox, oy, ox, oy + 20.0),
+        line("52", ox + 100.0, oy, ox + 100.0, oy + 20.0),
+        text("53", ox + 40.0, oy + 22.0, 5.0, "100"),
+    ];
+    drawing(
+        vec![
+            line("A", ox, oy, ox + 100.0, oy),
+            line("B", ox, oy, ox, oy + 40.0),
+            dimension("60", "*D1", ox + 100.0, oy),
+        ],
+        vec![("*D1", cached)],
+    )
+}
+
+/// The largest magnitude among the numbers written into `svg`: every
+/// whitespace- or comma-separated token of every quoted attribute value
+/// that parses as one.
+fn max_magnitude(svg: &str) -> f64 {
+    let mut max: f64 = 0.0;
+    let mut rest = svg;
+    while let Some(at) = rest.find('"') {
+        let after = &rest[at + 1..];
+        let Some(end) = after.find('"') else { break };
+        for token in after[..end].split([' ', ',']) {
+            if let Ok(v) = token.trim_start_matches(['M', 'A', 'L']).parse::<f64>() {
+                max = max.max(v.abs());
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    max
+}
+
+#[test]
+fn a_dimension_far_from_the_origin_is_drawn_where_the_records_say() {
+    // A site plan in millimetres at projected coordinates. Above 32768
+    // units the renderer writes its SVG relative to the drawing's own
+    // origin, because usvg and tiny-skia keep path points and transforms in
+    // f32 -- at 2.5e8 the f32 step is 16 units, so anything written at full
+    // world magnitude is quantised away. A DIMENSION's cached block used to
+    // be exempt: its interior was written unshifted inside a group that
+    // carried the whole 2.5e8 translation, so every dimension line and
+    // label vanished while the plain LINEs of the same drawing drew
+    // perfectly.
+    let far = 2.5e8;
+    let options = ToSvgOptions {
+        crop: CropMode::Raw,
+        padding: Some(0.0),
+        ..Default::default()
+    };
+    let here = dimensioned(0.0, 0.0).to_svg(options);
+    let there = dimensioned(far, far).to_svg(options);
+    assert_eq!(here.origin, [0.0, 0.0]);
+    assert_eq!(there.origin, [far, far]);
+
+    // Every coordinate written is its world value minus the origin, so the
+    // far drawing's document is the near one's, character for character.
+    assert_eq!(there.svg, here.svg);
+
+    // The cached block's group carries no shift of its own at all: its
+    // children are already written in the render's frame.
+    assert!(there.svg.contains("matrix(1 0 0 1 0 0)"), "{}", there.svg);
+
+    // And they land where the block record says. The dimension line runs
+    // (ox, oy+20) to (ox+100, oy+20), which minus the origin (ox, oy) and
+    // with y flipped for SVG is (0,-20) to (100,-20); the extension lines
+    // are (0,0)-(0,-20) and (100,0)-(100,-20); the label's anchor is
+    // (ox+40, oy+22) -> (40,-22).
+    for expected in [
+        "<line x1=\"0\" y1=\"-20\" x2=\"100\" y2=\"-20\"",
+        "<line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"-20\"",
+        "<line x1=\"100\" y1=\"0\" x2=\"100\" y2=\"-20\"",
+        "<text id=\"60/53\" x=\"40\" y=\"-22\"",
+    ] {
+        assert!(there.svg.contains(expected), "{expected} in {}", there.svg);
+    }
+    assert!(there.svg.contains(">100</text>"), "{}", there.svg);
+
+    // Nothing anywhere in the document is at world magnitude: the largest
+    // number is the 104-unit viewBox width, and an f32 resolves that to
+    // better than a millionth of a unit.
+    assert!(max_magnitude(&there.svg) < 1.0e4, "{}", there.svg);
+
+    // The same holds for an ordinary block reference whose contents sit far
+    // from its own base point: block W is inserted at the world origin but
+    // drawn at (far, far), which is the other shape of the same bug.
+    let world_block = drawing(
+        vec![
+            insert("I", "W", 0.0, 0.0, 1.0, 1.0, 0.0),
+            line("C", far, far, far + 1.0, far),
+        ],
+        vec![("W", vec![line("WL", far, far, far + 50.0, far + 50.0)])],
+    );
+    let svg = world_block.to_svg(options).svg;
+    assert!(max_magnitude(&svg) < 1.0e4, "{svg}");
+    assert!(svg.contains("x2=\"50\" y2=\"-50\""), "{svg}");
 }
