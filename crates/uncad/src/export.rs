@@ -793,6 +793,66 @@ fn collect_texts(
                 collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
             }
         }
+        Entity::AcadTable(t) => {
+            // An ACAD_TABLE draws the block it caches its laid-out cells in
+            // through the same block-reference path as an INSERT
+            // (`svg.rs`), so its cell texts are drawn, with the ids
+            // `<table>/<text>` this mints -- and used to be in no text
+            // record and no `strings.json` key, so a reader searching for a
+            // value they can see in a cell found nothing. The frame is the
+            // INSERT one without the extrusion flip: the renderer passes
+            // the table's `scale.x` through as it stands.
+            if depth >= MAX_BLOCK_DEPTH {
+                return;
+            }
+            let Some(block) = db.tables.block_records.get(&t.block_name) else {
+                return;
+            };
+            let child_affine =
+                Affine::placement(p2(t.insertion_point), t.scale.x, t.scale.y, t.rotation)
+                    .then(affine);
+            let child_prefix = id(&t.common.handle);
+            for child in &block.entities {
+                if matches!(child, Entity::Attdef(_)) {
+                    continue;
+                }
+                collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
+            }
+        }
+        Entity::Tolerance(t) => {
+            // A TOLERANCE draws one <text> of its own (the feature control
+            // frame's codes and values), anchored at the insertion point,
+            // unrotated, at the height `dimension::tolerance_text_height`
+            // resolved -- so it is as findable as any other string in the
+            // picture only if it is indexed like one.
+            if t.text_plain.trim().is_empty() {
+                return;
+            }
+            let base = p2(t.insertion_point);
+            out.push(PlacedText {
+                id: id(&t.common.handle),
+                kind: "TOLERANCE",
+                layer: t.common.layer.clone(),
+                text: t.text_plain.clone(),
+                raw: t.text_value.clone(),
+                height: t.text_height * scale,
+                rotation: affine.text_rotation(0.0),
+                anchor: affine.apply(base),
+                bbox: affine.apply_rect(&estimate_text_box(
+                    base,
+                    t.text_height,
+                    0.0,
+                    &t.text_plain,
+                    1.0,
+                    0,
+                    0,
+                )),
+                bbox_confidence: "estimated",
+                unshaped: 0,
+                style: String::new(),
+                tag: None,
+            });
+        }
         _ => {}
     }
 }

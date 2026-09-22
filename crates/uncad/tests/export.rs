@@ -2379,3 +2379,85 @@ fn a_tile_on_hundreds_of_layers_keeps_its_sidecar_under_the_cap() {
     assert!(trimmed >= 1, "900 layers on one tile must overflow it");
 }
 
+/// The DXF of the same drawing as `EXAMPLE_2000_DWG`. LibreDWG's DXF
+/// reader resolves the ACAD_TABLE's cached block where its DWG decoder
+/// does not, so this is the file whose picture carries table text.
+const EXAMPLE_2000_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2000.dxf"
+);
+
+#[test]
+fn every_string_the_picture_draws_is_a_text_record_and_a_strings_key() {
+    // `collect_texts` matched TEXT, ATTRIB, MTEXT and INSERT only, while
+    // the renderer also draws a TOLERANCE's own <text> and an ACAD_TABLE's
+    // cached block -- so seven table cells reading "test"/"xx" and one
+    // feature control frame were in the picture, with ids the export mints,
+    // and in no record and no strings.json key. The manifest's guidance
+    // tells the reader to find things by looking them up in strings.json.
+    let db = uncad::parse(EXAMPLE_2000_DXF).expect("corpus file must parse");
+    let tmp = TempDir::new("drawn_texts");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    // The expected set is not a list written here: it is every id the
+    // renderer put a <text> element under, read back out of the SVG the
+    // same run wrote. The dimension labels are the documented exception --
+    // they are drawn from each DIMENSION's *D block and carried by
+    // dimensions.json's `display` instead (docs/VLM_EXPORT_DESIGN.md).
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).expect("drawing.svg");
+    let drawn: BTreeSet<String> = svg
+        .match_indices("<text id=\"")
+        .map(|(i, m)| {
+            let rest = &svg[i + m.len()..];
+            rest[..rest.find('"').expect("closing quote")].to_string()
+        })
+        .collect();
+    let dimension_ids: BTreeSet<String> = records(&tmp.0, "dimensions")
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    let expected: BTreeSet<String> = drawn
+        .iter()
+        .filter(|id| !dimension_ids.contains(id.split('/').next().unwrap_or_default()))
+        .cloned()
+        .collect();
+    assert!(
+        expected.len() >= 11,
+        "the drawing draws more than the three top-level texts: {expected:?}"
+    );
+
+    let indexed: BTreeSet<String> = records(&tmp.0, "texts")
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        expected.difference(&indexed).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "drawn but not indexed"
+    );
+
+    // And the strings index carries what those records say, so the reader
+    // the manifest instructs finds a table cell by its text.
+    let strings = read_json(&tmp.0.join("strings.json"));
+    let ids = strings["strings"]["test"]
+        .as_array()
+        .expect("a table cell reading \"test\"");
+    assert!(
+        ids.iter()
+            .any(|v| v.as_str().is_some_and(|s| s.contains('/'))),
+        "{ids:?} should name the cells inside the table"
+    );
+    let texts = records(&tmp.0, "texts");
+    let kinds: BTreeSet<&str> = texts.iter().filter_map(|r| r["kind"].as_str()).collect();
+    assert!(kinds.contains("TOLERANCE"), "{kinds:?}");
+}
+
