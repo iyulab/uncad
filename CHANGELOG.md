@@ -173,6 +173,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Tile sidecars broke their own 32 KB cap: the trim loop measured the compact JSON but
+  the file was written pretty-printed, about 3.3x larger, so a dense drawing's sidecars
+  reached 100 KB *and* dropped a quarter of their record rows (`records_truncated: true`)
+  to satisfy a limit the file then exceeded threefold. Sidecars are written compact now,
+  like the record shards, so the measured and the written form are the same file.
 - A paper layout with no paper size, no limits and nothing but point-like content (a
   lone POINT or a zero-length LINE in `*Paper_Space`, the R13/R14 and OBJECTS-less DXF
   case) failed the whole export with `rendering failed: render size is zero`, leaving a

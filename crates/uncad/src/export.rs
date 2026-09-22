@@ -832,6 +832,22 @@ impl Writer<'_> {
         self.write_bytes(rel, text.as_bytes(), kind)
     }
 
+    /// [`Writer::write_json`] without the indentation, for a file whose own
+    /// size is the thing being kept: a sidecar drops record rows until its
+    /// compact form fits [`SIDECAR_LIMIT`], so pretty-printing it afterwards
+    /// put a file three times the measured size on disk -- rows cut to
+    /// satisfy a limit the file then broke anyway. Record shards are written
+    /// compact for the same reason.
+    fn write_json_compact(
+        &mut self,
+        rel: &str,
+        value: &Value,
+        kind: &str,
+    ) -> Result<(), ExportError> {
+        let text = serde_json::to_string(value)?;
+        self.write_bytes(rel, text.as_bytes(), kind)
+    }
+
     /// Writes `records` (already sorted by id) as `name.json`, or as
     /// `name.NNN.json` shards under the size rule, and indexes them.
     fn write_records(
@@ -1839,7 +1855,7 @@ pub fn export_package(
                     &rounder,
                 );
                 let sidecar_path = img.png.replace(".png", ".json");
-                writer.write_json(&sidecar_path, &sidecar, "sidecar")?;
+                writer.write_json_compact(&sidecar_path, &sidecar, "sidecar")?;
                 entry["sidecar"] = json!(sidecar_path);
             }
             tiles_json.push(entry);

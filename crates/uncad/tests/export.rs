@@ -1080,3 +1080,97 @@ fn a_drawing_far_from_the_origin_rasterizes_like_one_at_the_origin() {
         }
     }
 }
+
+/// `count` small closed squares on a grid: `count` geometry records and
+/// `count` region records, enough of them on one tile to push its sidecar
+/// past the 32 KB budget.
+fn many_regions(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LwPolylineEntity, Point2D, Point3D};
+    let side = (count as f64).sqrt().ceil() as usize;
+    let mut entities = Vec::new();
+    for i in 0..count {
+        let (x, y) = ((i % side) as f64 * 10.0, (i / side) as f64 * 10.0);
+        entities.push(uncad::Entity::LwPolyline(LwPolylineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            vertices: vec![
+                Point2D { x, y },
+                Point2D { x: x + 6.0, y },
+                Point2D {
+                    x: x + 6.0,
+                    y: y + 6.0,
+                },
+                Point2D { x, y: y + 6.0 },
+            ],
+            closed: true,
+            bulges: Vec::new(),
+            widths: Vec::new(),
+            const_width: 0.0,
+            elevation: 0.0,
+            extrusion: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_dense_drawing_keeps_every_sidecar_under_the_32_kb_cap() {
+    // The trim loop measures the compact serialization against 32 KB, but
+    // the file used to be written with `to_string_pretty`, which puts every
+    // number of every [id, [x0,y0,x1,y1], value] row on its own line: the
+    // file on disk was about 3.3x the measured size, so rows were dropped
+    // (`records_truncated: true`) to satisfy a limit the file then broke
+    // threefold anyway.
+    let db = many_regions(6000);
+    let tmp = TempDir::new("dense");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(report.counts.regions, 6000);
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut checked = 0;
+    let mut truncated = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let file = tmp.0.join(path);
+        let bytes = std::fs::metadata(&file).unwrap().len();
+        assert!(bytes <= 32 * 1024, "{path} is {bytes} bytes");
+        let sidecar = read_json(&file);
+        // The rows that survived are still valid JSON, and the file says so
+        // when it had to cut any.
+        assert!(sidecar["records"]["regions"].is_array());
+        if sidecar["records_truncated"] == true {
+            truncated += 1;
+        }
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    assert!(
+        truncated >= 1,
+        "6000 regions on one level must overflow at least one sidecar"
+    );
+}
