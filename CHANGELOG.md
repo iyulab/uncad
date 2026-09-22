@@ -173,6 +173,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A drawing whose whole content is one point -- a single POINT, coincident entities, or
+  only RAY/XLINE entities, which contribute just their base point -- was rendered into a
+  window 5e-11 units wide at 2.4e13 px/unit: every image blank, `crop.padding_units`
+  2e-11, and every `world` box in tiles.json and the sidecars collapsing to zero size
+  when it was rounded, so the affines no longer matched it. The padding of a zero-size
+  rectangle is now at least half a unit whatever scale it is seeded with (the plain PNG
+  path too), the package gives such content a ten-unit window, and the scale is capped,
+  so the entity is visible at a sane scale and the boxes are real rectangles.
 - Re-exporting into a directory that already held a package left the previous run's
   files beside the new ones -- record shards (`texts.003.json`), deeper tile levels and
   their sidecars, sheets of layouts that no longer exist -- all valid-looking and none of

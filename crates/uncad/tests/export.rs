@@ -1429,3 +1429,79 @@ fn re_exporting_clears_the_previous_package_but_nothing_else() {
         b"keep"
     );
 }
+
+#[test]
+fn a_drawing_that_is_one_point_gets_a_window_it_can_be_seen_in() {
+    // The overview solves the padding and the scale against each other: a
+    // seed scale from the content size, `auto_padding` from that, then the
+    // scale that fits. For content with no size at all -- the corpus's
+    // Point.dwg, RAY.dwg and ConstructionLine.dwg, whose entities record a
+    // single base point -- the seed was ~1e12 px/unit, so "24 px of
+    // padding" came to 2e-11 units and the drawing was rendered into a
+    // 5e-11-unit window at 2.4e13 px/unit: every image blank, and every
+    // `world` box in tiles.json and the sidecars collapsing to zero size
+    // once it was rounded, so the affines no longer agreed with it.
+    for name in ["Point", "RAY", "ConstructionLine"] {
+        let path = format!(
+            "{}/../../lib/libredwg/test/test-data/2000/{name}.dwg",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let db = uncad::parse(&path).expect("corpus file must parse");
+        let tmp = TempDir::new(&format!("degenerate_{name}"));
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+
+        // The window is the ten-unit minimum around the content, plus the
+        // 2 % padding: about 10.5 units, so a 1092 px overview is ~104
+        // px/unit rather than the 2.4e13 the runaway padding produced.
+        let world = report.overview.world;
+        assert!(
+            (10.0..=12.0).contains(&world.width()) && (10.0..=12.0).contains(&world.height()),
+            "{name}: {world:?}"
+        );
+        assert!(
+            report.overview.ppu.is_finite() && (50.0..=200.0).contains(&report.overview.ppu),
+            "{name}: {} px/unit",
+            report.overview.ppu
+        );
+        // The picture shows the entity: a POINT is a filled dot, a RAY and
+        // an XLINE cross the window.
+        let png = std::fs::read(tmp.0.join("overview.png")).unwrap();
+        assert!(dark_pixels(&png) > 100, "{name}: a blank overview");
+
+        // The rounded world box is a real rectangle, and the sidecar's
+        // affine still maps that box's corner to the image's corner.
+        let tiles = read_json(&tmp.0.join("tiles.json"));
+        let mut checked = 0;
+        for entry in tiles["tiles"].as_array().unwrap() {
+            let Some(sidecar_path) = entry["sidecar"].as_str() else {
+                continue;
+            };
+            let sidecar = read_json(&tmp.0.join(sidecar_path));
+            let w: Vec<f64> = sidecar["world"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            assert!(w[2] > w[0] && w[3] > w[1], "{name}: {w:?}");
+            let a = sidecar["world_to_px"].as_array().unwrap();
+            let (sx, cx) = (a[0].as_f64().unwrap(), a[2].as_f64().unwrap());
+            let (sy, cy) = (a[4].as_f64().unwrap(), a[5].as_f64().unwrap());
+            // The upper-left corner of the world box is pixel (0, 0), up to
+            // the rounding of the box itself (luprec decimals at this
+            // scale: well under a pixel).
+            let (px, py) = (sx * w[0] + cx, sy * w[3] + cy);
+            assert!(px.abs() < 1.0 && py.abs() < 1.0, "{name}: ({px}, {py})");
+            checked += 1;
+        }
+        assert!(checked >= 1, "{name}: no tile was written");
+    }
+}

@@ -646,12 +646,22 @@ pub(crate) fn choose(extents: &[Extent], header: &Header, mode: CropMode) -> Cho
 
 /// Rule 3: the padding for `rect`, in drawing units: 2 % of its longer
 /// side, or 24 pixels at `px_per_unit` when that is more. A degenerate
-/// (zero-size) rectangle gets half a unit, or those 24 pixels.
+/// (zero-size) rectangle gets half a unit, or those 24 pixels when they
+/// are more -- never less, however large the scale: the scale a caller
+/// seeds from a zero-size rectangle is itself enormous (the overview and
+/// `to_png` both solve the padding and the scale against each other), so
+/// for a single POINT, coincident entities or the base point of a RAY the
+/// 24 pixels came to 1e-11 units and the image was a blank 1e-11-unit
+/// window at 1e13 px/unit, with every world box in the JSON collapsing to
+/// zero size when it was rounded.
 pub fn auto_padding(rect: &Rect, px_per_unit: Option<f64>) -> f64 {
     let l = rect.longer_side();
-    let by_pixels = px_per_unit.map(|s| 24.0 / s).unwrap_or(0.0);
+    let by_pixels = px_per_unit
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map(|s| 24.0 / s)
+        .unwrap_or(0.0);
     if l.is_nan() || l <= 0.0 {
-        return if by_pixels > 0.0 { by_pixels } else { 0.5 };
+        return by_pixels.max(0.5);
     }
     (0.02 * l).max(by_pixels)
 }
@@ -981,11 +991,14 @@ mod tests {
         // 24 px at 0.5 px/unit is 48 units, more than 2 %.
         assert_eq!(auto_padding(&rect, Some(0.5)), 48.0);
         assert_eq!(auto_padding(&rect, Some(10.0)), 20.0);
-        assert_eq!(auto_padding(&Rect::new(3.0, 3.0, 3.0, 3.0), None), 0.5);
-        assert_eq!(
-            auto_padding(&Rect::new(3.0, 3.0, 3.0, 3.0), Some(2.0)),
-            12.0
-        );
+        let point = Rect::new(3.0, 3.0, 3.0, 3.0);
+        assert_eq!(auto_padding(&point, None), 0.5);
+        assert_eq!(auto_padding(&point, Some(2.0)), 12.0);
+        // A scale seeded from the same zero-size rectangle is ~1e12, which
+        // would make 24 px a 2e-11-unit window: half a unit is the floor.
+        assert_eq!(auto_padding(&point, Some(1.05e12)), 0.5);
+        assert_eq!(auto_padding(&point, Some(f64::INFINITY)), 0.5);
+        assert_eq!(auto_padding(&point, Some(0.0)), 0.5, "no scale at all");
 
         // 1040 x 540 units at 1.5 px/unit = 1560 x 810 px, snapped up to
         // 1568 x 812; the world rectangle grows to 1045.333.. x 541.333..

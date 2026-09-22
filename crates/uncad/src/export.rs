@@ -2270,7 +2270,36 @@ struct OverviewFit {
     padding: f64,
 }
 
+/// The most pixels one drawing unit may become (see [`fit_overview`]).
+const MAX_PPU: f64 = 1e9;
+
+/// The smallest world window an image of degenerate content gets, in
+/// drawing units. Content with no size at all -- a lone POINT, coincident
+/// entities, the base points of RAY/XLINE, which is all those entities
+/// contribute -- gives the fit nothing to scale to. Half a unit of
+/// padding around it would put the scale in the thousands of pixels per
+/// unit, where the 1e6-unit line the renderer draws a RAY with reaches
+/// billions of device pixels and tiny-skia's scan converter gives up; ten
+/// units keeps it in the hundreds, and the point itself (drawn half a
+/// unit across) is still ~50 px wide on a 1092 px overview.
+const MIN_CONTENT_EXTENT: f64 = 10.0;
+
 fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> OverviewFit {
+    // Degenerate content first: a window around its centre, so the rest of
+    // the fit works on a rectangle with a size.
+    let grown;
+    let content = if content.longer_side().is_finite() && content.longer_side() > 0.0 {
+        content
+    } else {
+        let half = MIN_CONTENT_EXTENT / 2.0;
+        let (cx, cy) = if content.min_x.is_finite() && content.min_y.is_finite() {
+            (content.min_x, content.min_y)
+        } else {
+            (0.0, 0.0)
+        };
+        grown = Rect::new(cx - half, cy - half, cx + half, cy + half);
+        &grown
+    };
     let lattice = f64::from(profile.lattice.max(1));
     let edge_patches = (f64::from(profile.overview_edge) / lattice)
         .floor()
@@ -2287,6 +2316,18 @@ fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> Over
     let padding = padding.unwrap_or_else(|| crop::auto_padding(content, Some(seed_ppu)));
     let padded = content.padded(padding);
     let ppu = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
+    // Degenerate content (a single POINT, only RAY/XLINE base points, a
+    // caller that forced zero padding) leaves a zero-size window, and
+    // `1568 / 0` is infinite: `snap_to_lattice` would turn that into a
+    // u32::MAX canvas and the render would fail. The cap also keeps the
+    // scale of a drawing a millionth of a unit across representable; it
+    // never binds on a real one, since it takes a window under 1.6e-6
+    // units to reach it.
+    let ppu = if ppu.is_finite() && ppu > 0.0 {
+        ppu.min(MAX_PPU)
+    } else {
+        1.0
+    };
     let (rect, width, height) = crop::snap_to_lattice(&padded, ppu, profile.lattice);
     OverviewFit {
         rect,
