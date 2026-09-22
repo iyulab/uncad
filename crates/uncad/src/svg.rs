@@ -733,8 +733,11 @@ fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
 /// its entities under a nested transform, wrapped in a
 /// `<g transform="matrix(...)">`.
 ///
-/// ATTDEF children are skipped: an attribute *template* is not drawn, and the
-/// real values are separate top-level ATTRIB entities already rendered.
+/// ATTDEF children are skipped: an attribute *template* is not drawn. A
+/// top-level INSERT's real values are separate ATTRIB entities already
+/// rendered, but a *nested* INSERT's are drawn here, from its own
+/// `attribs` (the DWG shape) or as ATTRIB children of this block (the DXF
+/// shape), never twice.
 #[allow(clippy::too_many_arguments)]
 fn render_block_ref(
     owner_handle: &str,
@@ -779,6 +782,19 @@ fn render_block_ref(
     ctx.depth = parent_depth + 1;
     ctx.scale = cumulative_scale;
 
+    // An ATTRIB that is a child of this block (a DXF whose ATTRIB is owned
+    // by the block record) is drawn by the loop below; the same handle may
+    // also be linked into its INSERT's attribute chain, and must not be
+    // drawn twice -- two <text> elements with one id would also leave the
+    // export's metrics pass measuring whichever came last.
+    let attrib_children: HashSet<&str> = block
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Attrib(a) => Some(a.common.handle.as_str()),
+            _ => None,
+        })
+        .collect();
     let mut body_parts = Vec::new();
     for child in &block.entities {
         if matches!(child, Entity::Attdef(_)) {
@@ -786,6 +802,21 @@ fn render_block_ref(
         }
         if let Some(svg) = render_entity(child, ctx) {
             body_parts.push(svg);
+        }
+        // A nested INSERT's attribute values: they live on the INSERT (the
+        // DWG shape, and R2004+ DXF), where nothing else picks them up --
+        // only a top-level INSERT's attribs reach the entity list. Their
+        // coordinates are this block's, like the INSERT's insertion point,
+        // so they are drawn here and not inside the reference.
+        if let Entity::Insert(i) = child {
+            for a in &i.attribs {
+                if attrib_children.contains(a.common.handle.as_str()) {
+                    continue;
+                }
+                if let Some(svg) = render_entity(&Entity::Attrib(a.clone()), ctx) {
+                    body_parts.push(svg);
+                }
+            }
         }
     }
 

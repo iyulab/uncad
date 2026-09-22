@@ -573,6 +573,13 @@ fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
     for e in top {
         collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut out);
     }
+    // One text can be reached twice: a DXF whose ATTRIB is owned by the
+    // block record gives the containing block an ATTRIB child *and* (from
+    // R2004 on) links the same ATTRIB into the nested INSERT's `attribs`.
+    // Both paths mint the same id, which is also the one `<text>` the
+    // renderer draws, so the second is a duplicate.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    out.retain(|t| seen.insert(t.id.clone()));
     out
 }
 
@@ -714,10 +721,25 @@ fn collect_texts(
             };
             let child_affine = Affine::for_insert(i).then(affine);
             let child_prefix = id(&i.common.handle);
+            // A *nested* INSERT's attribute values hang off the INSERT
+            // itself and nothing else sees them: `convert.rs` duplicates
+            // only a top-level INSERT's attribs into the entity list, which
+            // is why the top level is left to that walk (`depth > 0`
+            // here). They are placed in the containing block's own frame,
+            // like the INSERT's insertion point, so they go through the
+            // parent affine and the current prefix -- the id the renderer
+            // draws them with.
+            if depth > 0 {
+                for a in &i.attribs {
+                    collect_texts(db, &Entity::Attrib(a.clone()), affine, prefix, depth, out);
+                }
+            }
             for child in &block.entities {
-                if matches!(child, Entity::Attdef(_) | Entity::Attrib(_)) {
-                    // Attribute values are the INSERT's own ATTRIBs, which
-                    // the top-level walk already sees.
+                // Only the attribute *template* is skipped. A block child
+                // that is an ATTRIB is the value LibreDWG builds from a DXF
+                // whose ATTRIB is owned by the block record: it is drawn,
+                // so it belongs in the records too.
+                if matches!(child, Entity::Attdef(_)) {
                     continue;
                 }
                 collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
@@ -832,6 +854,22 @@ impl Writer<'_> {
         self.write_bytes(rel, text.as_bytes(), kind)
     }
 
+    /// [`Writer::write_json`] without the indentation, for a file whose own
+    /// size is the thing being kept: a sidecar drops record rows until its
+    /// compact form fits [`SIDECAR_LIMIT`], so pretty-printing it afterwards
+    /// put a file three times the measured size on disk -- rows cut to
+    /// satisfy a limit the file then broke anyway. Record shards are written
+    /// compact for the same reason.
+    fn write_json_compact(
+        &mut self,
+        rel: &str,
+        value: &Value,
+        kind: &str,
+    ) -> Result<(), ExportError> {
+        let text = serde_json::to_string(value)?;
+        self.write_bytes(rel, text.as_bytes(), kind)
+    }
+
     /// Writes `records` (already sorted by id) as `name.json`, or as
     /// `name.NNN.json` shards under the size rule, and indexes them.
     fn write_records(
@@ -895,8 +933,12 @@ struct Tile {
     empty: bool,
 }
 
-/// Writes the package for `db` into `dir` (created if needed; existing
-/// files with the same names are overwritten).
+/// Writes the package for `db` into `dir` (created if needed). A previous
+/// uncad package in `dir` is cleared first -- every file its
+/// `manifest.json` listed, and the directories under `frames/` and
+/// `sheets/` that empties -- so a re-export with other options leaves no
+/// stale shards or tiles behind; nothing a manifest did not list is
+/// touched.
 pub fn export_package(
     db: &CadDatabase,
     dir: &Path,
@@ -908,6 +950,7 @@ pub fn export_package(
         path: dir.to_path_buf(),
         source,
     })?;
+    clear_previous_package(dir);
     let mut warnings: Vec<String> = Vec::new();
 
     // --- render once, decide the crop ---------------------------------
@@ -940,13 +983,12 @@ pub fn export_package(
     let visible: &[&Entity] = &shown;
     // Extents of what is drawn: the crop's exclusions are not, and would
     // otherwise make frames and tiles of their own.
-    let drawn_extents: Vec<Extent> = rendered
+    let mut drawn_extents: Vec<Extent> = rendered
         .extents
         .iter()
         .filter(|e| !excluded_handles.contains(e.handle.as_str()))
         .cloned()
         .collect();
-    let extents: &[Extent] = &drawn_extents;
 
     // --- overview: the whole crop, sized to the profile ---------------------
     let stroke_px = 1.25;
@@ -995,6 +1037,19 @@ pub fn export_package(
             "UnshapedGlyphs: {unshaped_texts} texts hold characters the bundled font lacks (drawn as boxes); Fonts::BundledAndSystem / --fonts bundled+system uses the host's fonts for them"
         ));
     }
+    // The extents the renderer measured hold `text::CHAR_ADVANCE`
+    // (0.8186 text heights) per character; the metrics pass above has the
+    // real glyph boxes. A Hangul syllable advances about 0.92 heights, so
+    // a long Korean note runs some 12 % past its estimate -- 200 units for
+    // a 100-syllable note at height 20 -- and the frames, the frame
+    // overviews and the tiles are all culled by these extents, while
+    // `texts.json` lists a text's tiles from the measured box. The tile
+    // the records named then showed no text at all. Widening each drawn
+    // part by the boxes of the texts it draws (the part is the top-level
+    // entity or INSERT, i.e. the first segment of a text's id) keeps the
+    // two in step, and never shrinks an estimate that was generous.
+    widen_extents_with_texts(&mut drawn_extents, &texts);
+    let extents: &[Extent] = &drawn_extents;
 
     // --- frames: the primary group and each detached group -----------------
     // Each tile rasterizes only the entities whose extent touches it (plus
@@ -1149,6 +1204,7 @@ pub fn export_package(
         .map(|e| (e.common().handle.as_str(), e.common().layer.as_str()))
         .collect();
     let mut sheet_reports: Vec<SheetReport> = Vec::new();
+    let mut sheet_dirs: BTreeSet<String> = BTreeSet::new();
     if options.sheets {
         for spec in sheet_specs(db) {
             let block = &db.tables.block_records[&spec.block];
@@ -1188,6 +1244,24 @@ pub fn export_package(
                 }
                 None => (crop::EMPTY_RECT, "empty"),
             };
+            // No paper size, no limits and nothing but point-like content (a
+            // lone POINT, a zero-length LINE, an empty TEXT): there is no
+            // rectangle to fit, and a sheet is fitted with zero padding, so
+            // the scale would come out infinite and the render fail with
+            // "render size is zero" -- aborting a package that is already
+            // half written. One unusable sheet is worth a warning, not the
+            // whole export.
+            let usable = [rect.min_x, rect.min_y, rect.max_x, rect.max_y]
+                .iter()
+                .all(|v| v.is_finite() && v.abs() < 1e15)
+                && (rect.width() > 0.0 || rect.height() > 0.0);
+            if !usable {
+                warnings.push(format!(
+                    "UnusableSheet: layout {} ({}) has no paper size, no limits and no usable content ({rect_source}); its sheet is skipped",
+                    spec.name, spec.block
+                ));
+                continue;
+            }
             // Every viewport of the block, hidden layer or not: a frame on
             // an off, frozen or non-plotting layer (the usual way to hide
             // the border) still shows its model window; only the border
@@ -1223,18 +1297,10 @@ pub fn export_package(
                 fit.width,
                 fit.height,
             )?;
-            let safe: String = spec
-                .name
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let png_path = format!("sheets/{safe}/overview.png");
+            let png_path = format!(
+                "sheets/{}/overview.png",
+                sheet_dir(&spec.name, &mut sheet_dirs)
+            );
             writer.write_bytes(&png_path, &bytes, "sheet")?;
             let overview_info = ImageInfo::new(
                 &format!("sheet:{}", spec.name),
@@ -1818,10 +1884,11 @@ pub fn export_package(
                     &dim_records,
                     &block_records,
                     &region_records,
+                    &geo_records,
                     &rounder,
                 );
                 let sidecar_path = img.png.replace(".png", ".json");
-                writer.write_json(&sidecar_path, &sidecar, "sidecar")?;
+                writer.write_json_compact(&sidecar_path, &sidecar, "sidecar")?;
                 entry["sidecar"] = json!(sidecar_path);
             }
             tiles_json.push(entry);
@@ -1942,7 +2009,13 @@ pub fn export_package(
         "paper_layouts": if sheet_reports.is_empty() { "none" } else { "composited" },
         "frames": frame_reports.len(),
     });
-    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, 2x zooms with 224 px overlap, row 0 at the top; report.json lists what was left out and why.";
+    // The tile and overlap numbers come from the profile in use, not from
+    // the prose: --profile claude-hires writes 1932 px tiles with 392 px of
+    // overlap, and the sentence used to say 224 whatever the levels said.
+    let guidance = format!(
+        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; report.json lists what was left out and why.",
+        profile.tile, profile.overlap
+    );
     writer.files.push(WrittenFile {
         path: "manifest.json".into(),
         bytes: None,
@@ -2011,6 +2084,91 @@ pub fn export_package(
         counts,
         warnings,
     })
+}
+
+/// Removes what a previous uncad package in `dir` left behind, so a second
+/// export with other options does not leave stale shards, tile PNGs and
+/// sidecars beside the new ones: they look valid (same schema, same record
+/// ids) and a consumer that walks the tree -- as the generated README.txt
+/// invites -- would mix two exports, following `parent`/`children` links
+/// into a pyramid the new manifest does not have.
+///
+/// Only the files the previous `manifest.json` lists are removed, and only
+/// when it is an uncad manifest: a directory holding anything else is left
+/// alone, and a listed path that is not a plain relative path inside `dir`
+/// is ignored. Directories under `frames/` and `sheets/` go when they are
+/// left empty. Every failure is ignored -- the write that follows reports
+/// what actually matters.
+fn clear_previous_package(dir: &Path) {
+    let Ok(text) = std::fs::read_to_string(dir.join("manifest.json")) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    let ours = manifest
+        .get("$schema")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.starts_with("uncad-package/"));
+    if !ours {
+        return;
+    }
+    let files = manifest.get("files").and_then(Value::as_array);
+    for file in files.into_iter().flatten() {
+        let Some(rel) = file.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let inside = !rel.is_empty()
+            && Path::new(rel)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if inside {
+            let _ = std::fs::remove_file(dir.join(rel));
+        }
+    }
+    for sub in ["frames", "sheets"] {
+        remove_empty_dirs(&dir.join(sub));
+    }
+}
+
+/// Removes `dir` and every directory under it that is empty once its own
+/// empty children are gone; a directory still holding a file stays (with
+/// everything above it).
+fn remove_empty_dirs(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            remove_empty_dirs(&entry.path());
+        }
+    }
+    // Fails, harmlessly, when anything is left in it.
+    let _ = std::fs::remove_dir(dir);
+}
+
+/// Grows every extent by the measured boxes of the texts its part draws.
+/// A text's id is `<handle>` at the top level and `<insert>/<child>`
+/// inside a block reference, and the renderer emits one part per top-level
+/// entity, so the first segment of the id names the extent to grow.
+/// Estimated boxes are left alone: they are what the extent already holds.
+fn widen_extents_with_texts(extents: &mut [Extent], texts: &[PlacedText]) {
+    let mut measured: std::collections::HashMap<&str, Rect> = std::collections::HashMap::new();
+    for t in texts {
+        if t.bbox_confidence != "measured" {
+            continue;
+        }
+        let handle = t.id.split('/').next().unwrap_or(t.id.as_str());
+        measured
+            .entry(handle)
+            .and_modify(|r| *r = r.union(&t.bbox))
+            .or_insert(t.bbox);
+    }
+    for e in extents.iter_mut() {
+        if let Some(box_of_texts) = measured.get(e.handle.as_str()) {
+            e.rect = e.rect.union(box_of_texts);
+        }
+    }
 }
 
 /// The metrics pre-pass: lays the text-bearing entities out once through
@@ -2163,7 +2321,71 @@ struct OverviewFit {
     padding: f64,
 }
 
+/// The directory one sheet's image goes in, under `sheets/`: the layout's
+/// name with every character outside `[A-Za-z0-9_-]` replaced by `_` (so
+/// the path is portable and an ASCII name stays readable), `sheet` when
+/// nothing is left of it, and `_2`, `_3`, ... in tab order when an earlier
+/// layout already took the name. `used` collects what has been handed out.
+///
+/// The suffix is what keeps two sheets apart: every Hangul syllable
+/// sanitises to `_`, so two three-syllable Korean names both became `___`
+/// and the second layout's PNG silently overwrote the first's while both
+/// `sheets.json` entries pointed at the one surviving file.
+fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let base = if safe.is_empty() {
+        "sheet".to_string()
+    } else {
+        safe
+    };
+    let mut candidate = base.clone();
+    let mut n = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{base}_{n}");
+        n += 1;
+    }
+    candidate
+}
+
+/// The most pixels one drawing unit may become (see [`fit_overview`]).
+const MAX_PPU: f64 = 1e9;
+
+/// The smallest world window an image of degenerate content gets, in
+/// drawing units. Content with no size at all -- a lone POINT, coincident
+/// entities, the base points of RAY/XLINE, which is all those entities
+/// contribute -- gives the fit nothing to scale to. Half a unit of
+/// padding around it would put the scale in the thousands of pixels per
+/// unit, where the 1e6-unit line the renderer draws a RAY with reaches
+/// billions of device pixels and tiny-skia's scan converter gives up; ten
+/// units keeps it in the hundreds, and the point itself (drawn half a
+/// unit across) is still ~50 px wide on a 1092 px overview.
+const MIN_CONTENT_EXTENT: f64 = 10.0;
+
 fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> OverviewFit {
+    // Degenerate content first: a window around its centre, so the rest of
+    // the fit works on a rectangle with a size.
+    let grown;
+    let content = if content.longer_side().is_finite() && content.longer_side() > 0.0 {
+        content
+    } else {
+        let half = MIN_CONTENT_EXTENT / 2.0;
+        let (cx, cy) = if content.min_x.is_finite() && content.min_y.is_finite() {
+            (content.min_x, content.min_y)
+        } else {
+            (0.0, 0.0)
+        };
+        grown = Rect::new(cx - half, cy - half, cx + half, cy + half);
+        &grown
+    };
     let lattice = f64::from(profile.lattice.max(1));
     let edge_patches = (f64::from(profile.overview_edge) / lattice)
         .floor()
@@ -2180,6 +2402,18 @@ fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> Over
     let padding = padding.unwrap_or_else(|| crop::auto_padding(content, Some(seed_ppu)));
     let padded = content.padded(padding);
     let ppu = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
+    // Degenerate content (a single POINT, only RAY/XLINE base points, a
+    // caller that forced zero padding) leaves a zero-size window, and
+    // `1568 / 0` is infinite: `snap_to_lattice` would turn that into a
+    // u32::MAX canvas and the render would fail. The cap also keeps the
+    // scale of a drawing a millionth of a unit across representable; it
+    // never binds on a real one, since it takes a window under 1.6e-6
+    // units to reach it.
+    let ppu = if ppu.is_finite() && ppu > 0.0 {
+        ppu.min(MAX_PPU)
+    } else {
+        1.0
+    };
     let (rect, width, height) = crop::snap_to_lattice(&padded, ppu, profile.lattice);
     OverviewFit {
         rect,
@@ -2489,6 +2723,7 @@ fn sidecar(
     dims: &[Record],
     blocks: &[Record],
     regions: &[Record],
+    geometry: &[Record],
     rounder: &Rounder,
 ) -> Value {
     let find = |z: u32, row: i64, col: i64| -> Option<String> {
@@ -2586,11 +2821,18 @@ fn sidecar(
             ])
         })
         .collect();
+    // Every record the tile draws, geometry and regions included: geometry
+    // is the bulk of a tile, and a tile full of walls used to report no
+    // layers at all, so filtering tiles by layer skipped it. Computed
+    // before the truncation loop, so the layer set stays complete even
+    // when rows are cut.
     let mut layers: BTreeSet<String> = BTreeSet::new();
     for rec in on_tile(texts, &tile.world)
         .iter()
         .chain(on_tile(dims, &tile.world).iter())
         .chain(on_tile(blocks, &tile.world).iter())
+        .chain(on_tile(regions, &tile.world).iter())
+        .chain(on_tile(geometry, &tile.world).iter())
     {
         if let Some(Value::String(l)) = rec.value.get("layer") {
             layers.insert(l.clone());
@@ -2862,6 +3104,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(depth_for(&[(0.01, 1)], 0.1, &capped), 2);
+    }
+
+    #[test]
+    fn sheet_directories_are_unique() {
+        let mut used = BTreeSet::new();
+        // Every Hangul syllable is outside [A-Za-z0-9_-], so both
+        // three-syllable names sanitise to "___" and the second one (in tab
+        // order) takes the suffix.
+        assert_eq!(sheet_dir("\u{d3c9}\u{ba74}\u{b3c4}", &mut used), "___");
+        assert_eq!(sheet_dir("\u{c785}\u{ba74}\u{b3c4}", &mut used), "____2");
+        assert_eq!(sheet_dir("Layout 1", &mut used), "Layout_1");
+        assert_eq!(sheet_dir("Layout_1", &mut used), "Layout_1_2");
+        assert_eq!(sheet_dir("Layout-1", &mut used), "Layout-1");
+        // Nothing survives sanitising: the placeholder, then its suffix.
+        assert_eq!(sheet_dir("", &mut used), "sheet");
+        assert_eq!(sheet_dir("", &mut used), "sheet_2");
+        assert_eq!(used.len(), 7, "every name got its own directory");
     }
 
     #[test]

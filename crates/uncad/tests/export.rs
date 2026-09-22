@@ -142,6 +142,95 @@ fn the_package_has_every_file_and_a_profile_sized_overview() {
 }
 
 #[test]
+fn every_world_box_in_the_package_is_the_documented_array() {
+    // docs/VLM_EXPORT_DESIGN.md section 3: "boxes are [x0, y0, x1, y1] in
+    // world units". The record bboxes, tiles.json and manifest.sheets[].rect
+    // always were; the manifest's overview/frames/crop and sheets.json went
+    // through serde's derive on `Rect` and came out as
+    // {"min_x": .., "min_y": .., "max_x": .., "max_y": ..}, so the same
+    // rectangle had two shapes in one package (a reader indexing
+    // manifest.overview.world[2] hit a KeyError).
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("boxes");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let sheets = read_json(&tmp.0.join("sheets.json"));
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let report_json = read_json(&tmp.0.join("report.json"));
+
+    // Every box, wherever it comes from, is four numbers.
+    let box_of = |value: &Value, what: &str| -> [f64; 4] {
+        let array = value
+            .as_array()
+            .unwrap_or_else(|| panic!("{what} is an array, got {value}"));
+        assert_eq!(array.len(), 4, "{what}: {value}");
+        let mut out = [0.0; 4];
+        for (slot, v) in out.iter_mut().zip(array) {
+            *slot = v.as_f64().unwrap_or_else(|| panic!("{what}: {value}"));
+        }
+        out
+    };
+    let overview = box_of(&manifest["overview"]["world"], "manifest.overview.world");
+    assert!(overview[2] > overview[0] && overview[3] > overview[1]);
+    // The array holds the same numbers the report's struct does.
+    let world = report.overview.world;
+    for (got, want) in overview
+        .iter()
+        .zip([world.min_x, world.min_y, world.max_x, world.max_y])
+    {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+    }
+    box_of(&manifest["crop"]["rect"], "manifest.crop.rect");
+    box_of(&manifest["crop"]["content"], "manifest.crop.content");
+    box_of(
+        &manifest["crop"]["header_extents"],
+        "manifest.crop.header_extents",
+    );
+    for excluded in manifest["crop"]["excluded"].as_array().unwrap() {
+        box_of(&excluded["rect"], "manifest.crop.excluded[].rect");
+    }
+    for excluded in report_json["excluded"].as_array().unwrap() {
+        box_of(&excluded["rect"], "report.excluded[].rect");
+    }
+    for frame in manifest["frames"].as_array().unwrap() {
+        box_of(&frame["content"], "manifest.frames[].content");
+        box_of(
+            &frame["overview"]["world"],
+            "manifest.frames[].overview.world",
+        );
+    }
+    // The same frame content in tiles.json has always been an array: the two
+    // now agree to the rounding tiles.json applies.
+    let content = box_of(&manifest["frames"][0]["content"], "frames[0].content");
+    let rounded = box_of(&tiles["frames"][0]["content"], "tiles.frames[0].content");
+    for (a, b) in content.iter().zip(rounded) {
+        assert!((a - b).abs() < 1e-3, "{a} vs {b}");
+    }
+    for sheet in sheets["sheets"].as_array().unwrap() {
+        box_of(&sheet["rect"], "sheets.json rect");
+        box_of(&sheet["overview"]["world"], "sheets.json overview.world");
+        for viewport in sheet["viewports"].as_array().unwrap() {
+            box_of(&viewport["frame"], "sheets.json viewports[].frame");
+        }
+    }
+    // manifest.sheets[].rect (rounded, always an array) and sheets.json's
+    // rect are the same rectangle.
+    let from_manifest = box_of(&manifest["sheets"][0]["rect"], "manifest.sheets[0].rect");
+    let from_sheets = box_of(&sheets["sheets"][0]["rect"], "sheets.json sheets[0].rect");
+    for (a, b) in from_manifest.iter().zip(from_sheets) {
+        assert!((a - b).abs() < 1e-3, "{a} vs {b}");
+    }
+}
+
+#[test]
 fn tiles_cover_the_levels_and_their_sidecars_round_trip() {
     let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
     let tmp = TempDir::new("tiles");
@@ -990,4 +1079,812 @@ fn a_drawing_far_from_the_origin_rasterizes_like_one_at_the_origin() {
             );
         }
     }
+}
+
+/// `count` small closed squares on a grid: `count` geometry records and
+/// `count` region records, enough of them on one tile to push its sidecar
+/// past the 32 KB budget.
+fn many_regions(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LwPolylineEntity, Point2D, Point3D};
+    let side = (count as f64).sqrt().ceil() as usize;
+    let mut entities = Vec::new();
+    for i in 0..count {
+        let (x, y) = ((i % side) as f64 * 10.0, (i / side) as f64 * 10.0);
+        entities.push(uncad::Entity::LwPolyline(LwPolylineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            vertices: vec![
+                Point2D { x, y },
+                Point2D { x: x + 6.0, y },
+                Point2D {
+                    x: x + 6.0,
+                    y: y + 6.0,
+                },
+                Point2D { x, y: y + 6.0 },
+            ],
+            closed: true,
+            bulges: Vec::new(),
+            widths: Vec::new(),
+            const_width: 0.0,
+            elevation: 0.0,
+            extrusion: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_dense_drawing_keeps_every_sidecar_under_the_32_kb_cap() {
+    // The trim loop measures the compact serialization against 32 KB, but
+    // the file used to be written with `to_string_pretty`, which puts every
+    // number of every [id, [x0,y0,x1,y1], value] row on its own line: the
+    // file on disk was about 3.3x the measured size, so rows were dropped
+    // (`records_truncated: true`) to satisfy a limit the file then broke
+    // threefold anyway.
+    let db = many_regions(6000);
+    let tmp = TempDir::new("dense");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(report.counts.regions, 6000);
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut checked = 0;
+    let mut truncated = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let file = tmp.0.join(path);
+        let bytes = std::fs::metadata(&file).unwrap().len();
+        assert!(bytes <= 32 * 1024, "{path} is {bytes} bytes");
+        let sidecar = read_json(&file);
+        // The rows that survived are still valid JSON, and the file says so
+        // when it had to cut any.
+        assert!(sidecar["records"]["regions"].is_array());
+        if sidecar["records_truncated"] == true {
+            truncated += 1;
+        }
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    assert!(
+        truncated >= 1,
+        "6000 regions on one level must overflow at least one sidecar"
+    );
+}
+
+#[test]
+fn a_sidecar_lists_the_layers_of_everything_on_its_tile() {
+    // `layers_present` chained only texts, dimensions and block instances,
+    // so a tile drawn from geometry alone reported none -- and geometry is
+    // the bulk of every tile. The design calls sidecars authoritative for
+    // "what is on this image", so the field has to cover the ink.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("layers");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    // What each tile shows, derived from the records' own `tiles` lists
+    // (the same membership test the sidecar uses, computed independently).
+    let mut expected: std::collections::BTreeMap<String, BTreeSet<String>> = Default::default();
+    let mut geometry_layers: BTreeSet<String> = BTreeSet::new();
+    for kind in ["texts", "dimensions", "geometry", "regions", "blocks"] {
+        let rows = if kind == "blocks" {
+            read_json(&tmp.0.join("blocks.json"))["instances"]
+                .as_array()
+                .unwrap()
+                .clone()
+        } else {
+            records(&tmp.0, kind)
+        };
+        for record in rows {
+            let layer = record["layer"].as_str().unwrap().to_string();
+            if kind == "geometry" {
+                geometry_layers.insert(layer.clone());
+            }
+            for tile in record["tiles"].as_array().unwrap() {
+                expected
+                    .entry(tile.as_str().unwrap().to_string())
+                    .or_default()
+                    .insert(layer.clone());
+            }
+        }
+    }
+    assert!(geometry_layers.len() > 1, "{geometry_layers:?}");
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let id = entry["id"].as_str().unwrap();
+        let sidecar = read_json(&tmp.0.join(path));
+        let listed: BTreeSet<String> = sidecar["layers_present"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            listed,
+            *expected.get(id).unwrap_or(&BTreeSet::new()),
+            "{id}: {listed:?}"
+        );
+        seen.extend(listed);
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    // Every layer that carries geometry reaches some sidecar; before the
+    // fix the geometry-only layers reached none.
+    for layer in &geometry_layers {
+        assert!(seen.contains(layer), "{layer} is on no sidecar: {seen:?}");
+    }
+}
+
+#[test]
+fn the_guidance_quotes_the_profile_in_use() {
+    // manifest.guidance told the reader "224 px overlap" whatever the
+    // profile was, while frames[].levels[].overlap_px said 392 for
+    // claude-hires: the prose an agent is told to read first contradicted
+    // the structured data it is meant to trust.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    for profile in [
+        Profile::CLAUDE,
+        Profile::CLAUDE_HIRES,
+        Profile::OPENAI_PATCH,
+    ] {
+        let tmp = TempDir::new(&format!("guidance_{}", profile.name));
+        // One level for the default profile (so the prose can be held
+        // against real `levels[]` numbers), none for the others: a
+        // 1932 px tile pyramid costs minutes and says nothing more here.
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                profile,
+                max_levels: u32::from(profile == Profile::CLAUDE),
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let manifest = read_json(&tmp.0.join("manifest.json"));
+        let guidance = manifest["guidance"].as_str().unwrap();
+        let sentence = format!("{} px with {} px overlap", profile.tile, profile.overlap);
+        assert!(guidance.contains(&sentence), "{}: {guidance}", profile.name);
+        // And it says what the levels say.
+        for level in &report.frames[0].levels {
+            assert_eq!(level.overlap_px, profile.overlap);
+            assert_eq!(level.tile_px, profile.tile);
+        }
+        // No other profile's numbers are quoted.
+        for other in [
+            Profile::CLAUDE,
+            Profile::CLAUDE_HIRES,
+            Profile::OPENAI_PATCH,
+        ] {
+            if other.overlap != profile.overlap {
+                assert!(
+                    !guidance.contains(&format!("{} px overlap", other.overlap)),
+                    "{}: {guidance}",
+                    profile.name
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn re_exporting_clears_the_previous_package_but_nothing_else() {
+    // A second export with other options used to leave the first run's
+    // files beside the new ones: deeper tile levels with sidecars whose
+    // `parent`/`children` describe a pyramid the new manifest does not
+    // have, and record shards (`texts.003.json`) holding ids the new
+    // `texts.json` also holds. Both look valid, so a consumer walking the
+    // tree -- which README.txt invites -- mixes two exports.
+    let db = labelled_grid(0.0);
+    let small = Profile {
+        name: "claude-small",
+        overview_edge: 784,
+        overview_patches: 784,
+        ..Profile::CLAUDE
+    };
+    let tmp = TempDir::new("reexport");
+    let first = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 2,
+            shard_kb: 4,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert!(first.frames[0].levels.len() == 2, "{:?}", first.frames);
+    assert!(tmp.0.join("frames/f0/tiles/z2").exists());
+    assert!(tmp.0.join("texts.001.json").exists(), "sharded");
+
+    // Something the export did not write: not ours to remove.
+    let sentinel = tmp.0.join("notes.txt");
+    std::fs::write(&sentinel, b"mine").unwrap();
+    let kept_tile = tmp.0.join("frames/f0/tiles/z2/keep.txt");
+    std::fs::write(&kept_tile, b"mine too").unwrap();
+
+    let second = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports again");
+    assert_eq!(second.frames[0].levels.len(), 1);
+
+    // Everything on disk is either the new package or the files placed by
+    // hand: no z2 tile, no stale shard.
+    let mut on_disk: BTreeSet<String> = BTreeSet::new();
+    let mut stack = vec![tmp.0.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                on_disk.insert(
+                    path.strip_prefix(&tmp.0)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    let listed: BTreeSet<String> = second.files.iter().map(|f| f.path.clone()).collect();
+    let extra: Vec<&String> = on_disk.difference(&listed).collect();
+    assert_eq!(
+        extra,
+        [
+            &"frames/f0/tiles/z2/keep.txt".to_string(),
+            &"notes.txt".to_string()
+        ],
+        "stale files: {extra:?}"
+    );
+    assert!(listed.iter().all(|p| on_disk.contains(p)), "{listed:?}");
+    assert!(
+        !on_disk.iter().any(|p| p.starts_with("texts.0")),
+        "{on_disk:?}"
+    );
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"mine");
+
+    // A directory that only held the old package's files is gone; one that
+    // still holds something stays.
+    assert!(tmp.0.join("frames/f0/tiles/z1").exists());
+    assert!(
+        tmp.0.join("frames/f0/tiles/z2").exists(),
+        "keep.txt is in it"
+    );
+    std::fs::remove_file(&kept_tile).unwrap();
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports a third time");
+    assert!(!tmp.0.join("frames/f0/tiles/z2").exists(), "now empty");
+
+    // A directory that is not an uncad package is never touched.
+    let foreign = TempDir::new("foreign");
+    std::fs::create_dir_all(&foreign.0).unwrap();
+    std::fs::write(foreign.0.join("manifest.json"), br#"{"schema":"other"}"#).unwrap();
+    std::fs::write(foreign.0.join("important.bin"), b"keep").unwrap();
+    export_package(
+        &db,
+        &foreign.0,
+        &ExportOptions {
+            max_levels: 0,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(
+        std::fs::read(foreign.0.join("important.bin")).unwrap(),
+        b"keep"
+    );
+}
+
+#[test]
+fn a_drawing_that_is_one_point_gets_a_window_it_can_be_seen_in() {
+    // The overview solves the padding and the scale against each other: a
+    // seed scale from the content size, `auto_padding` from that, then the
+    // scale that fits. For content with no size at all -- the corpus's
+    // Point.dwg, RAY.dwg and ConstructionLine.dwg, whose entities record a
+    // single base point -- the seed was ~1e12 px/unit, so "24 px of
+    // padding" came to 2e-11 units and the drawing was rendered into a
+    // 5e-11-unit window at 2.4e13 px/unit: every image blank, and every
+    // `world` box in tiles.json and the sidecars collapsing to zero size
+    // once it was rounded, so the affines no longer agreed with it.
+    for name in ["Point", "RAY", "ConstructionLine"] {
+        let path = format!(
+            "{}/../../lib/libredwg/test/test-data/2000/{name}.dwg",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let db = uncad::parse(&path).expect("corpus file must parse");
+        let tmp = TempDir::new(&format!("degenerate_{name}"));
+        let report = export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+
+        // The window is the ten-unit minimum around the content, plus the
+        // 2 % padding: about 10.5 units, so a 1092 px overview is ~104
+        // px/unit rather than the 2.4e13 the runaway padding produced.
+        let world = report.overview.world;
+        assert!(
+            (10.0..=12.0).contains(&world.width()) && (10.0..=12.0).contains(&world.height()),
+            "{name}: {world:?}"
+        );
+        assert!(
+            report.overview.ppu.is_finite() && (50.0..=200.0).contains(&report.overview.ppu),
+            "{name}: {} px/unit",
+            report.overview.ppu
+        );
+        // The picture shows the entity: a POINT is a filled dot, a RAY and
+        // an XLINE cross the window.
+        let png = std::fs::read(tmp.0.join("overview.png")).unwrap();
+        assert!(dark_pixels(&png) > 100, "{name}: a blank overview");
+
+        // The rounded world box is a real rectangle, and the sidecar's
+        // affine still maps that box's corner to the image's corner.
+        let tiles = read_json(&tmp.0.join("tiles.json"));
+        let mut checked = 0;
+        for entry in tiles["tiles"].as_array().unwrap() {
+            let Some(sidecar_path) = entry["sidecar"].as_str() else {
+                continue;
+            };
+            let sidecar = read_json(&tmp.0.join(sidecar_path));
+            let w: Vec<f64> = sidecar["world"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            assert!(w[2] > w[0] && w[3] > w[1], "{name}: {w:?}");
+            let a = sidecar["world_to_px"].as_array().unwrap();
+            let (sx, cx) = (a[0].as_f64().unwrap(), a[2].as_f64().unwrap());
+            let (sy, cy) = (a[4].as_f64().unwrap(), a[5].as_f64().unwrap());
+            // The upper-left corner of the world box is pixel (0, 0), up to
+            // the rounding of the box itself (luprec decimals at this
+            // scale: well under a pixel).
+            let (px, py) = (sx * w[0] + cx, sy * w[3] + cy);
+            assert!(px.abs() < 1.0 && py.abs() < 1.0, "{name}: ({px}, {py})");
+            checked += 1;
+        }
+        assert!(checked >= 1, "{name}: no tile was written");
+    }
+}
+
+/// A 3000 x 1000 frame with a centre line and one long Hangul note at
+/// (40, 510), height 20: 100 syllables, each advancing about 0.92 of the
+/// text height where the renderer's estimate allows 0.8186 (`CHAR_ADVANCE`
+/// = 0.6 em over the bundled font's 0.733 cap height), so the string runs
+/// some 200 units past the box the crop and the tile cull use.
+fn long_hangul_note() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let mut entities = Vec::new();
+    let corners = [
+        (0.0, 0.0, 3000.0, 0.0),
+        (3000.0, 0.0, 3000.0, 1000.0),
+        (3000.0, 1000.0, 0.0, 1000.0),
+        (0.0, 1000.0, 0.0, 0.0),
+        (0.0, 500.0, 3000.0, 500.0),
+    ];
+    for (n, (x0, y0, x1, y1)) in corners.into_iter().enumerate() {
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("L{n}"),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: x0,
+                y: y0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+        }));
+    }
+    let note = "\u{ac00}\u{b098}\u{b2e4}\u{b77c}".repeat(25);
+    entities.push(uncad::Entity::Text(TextEntity {
+        common: EntityCommon {
+            handle: "T".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point2D { x: 40.0, y: 510.0 },
+        text_height: 20.0,
+        text: note.clone(),
+        text_plain: note,
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    }));
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+/// Dark (< 128) pixels of an 8-bit RGB PNG inside `[x0, y0, x1, y1]`.
+fn dark_pixels_in(png: &[u8], area: [i64; 4]) -> usize {
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().expect("a frame size")];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let (w, h) = (info.width as i64, info.height as i64);
+    let mut count = 0;
+    for y in area[1].max(0)..area[3].min(h) {
+        for x in area[0].max(0)..area[2].min(w) {
+            if buf[((y * w + x) * 3) as usize] < 128 {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+#[test]
+fn a_tile_keeps_the_half_of_a_long_hangul_text_that_reaches_it() {
+    // Tile culling kept only the parts whose *extent* touched the tile, and
+    // the extents carry the renderer's 0.6-em-per-character estimate, while
+    // `texts.json` lists a text's tiles from its measured glyph box. A
+    // 40-syllable Korean note is ~50 % wider than the estimate, so the
+    // tile the record pointed at was drawn without it: the record said the
+    // text is there, the picture showed only the line.
+    let db = long_hangul_note();
+    let tmp = TempDir::new("hangul_tile");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            frame_gap: 1.0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let texts = records(&tmp.0, "texts");
+    let note = texts.iter().find(|t| t["id"] == "T").expect("the note");
+    assert_eq!(note["bbox_confidence"], "measured");
+    let b: Vec<f64> = note["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    // The renderer's estimate ends at 40 + 100 x (0.6 / 0.733) x 20 =
+    // 1677.2 (uncad::text::CHAR_ADVANCE heights per character); the shaped
+    // Hangul runs past it.
+    let estimate_end = 40.0 + 100.0 * (0.6 / 0.733) * 20.0;
+    assert!(
+        b[2] > estimate_end + 100.0,
+        "the measured box should be wider than {estimate_end}: {b:?}"
+    );
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let listed: BTreeSet<&str> = note["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t.as_str().unwrap())
+        .collect();
+    // A tile that starts past where the estimate ended but still inside the
+    // measured box: that is the one the cull used to empty.
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let world: Vec<f64> = entry["world"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let beyond_the_estimate = world[0] > estimate_end + 20.0;
+        let inside_the_text = world[0] < b[2] && world[1] < b[3] && world[3] > b[1];
+        if !(beyond_the_estimate && inside_the_text) {
+            continue;
+        }
+        let id = entry["id"].as_str().unwrap();
+        assert!(listed.contains(id), "texts.json lists {id}: {listed:?}");
+        let png_path = entry["png"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{id} empty"));
+        let png = std::fs::read(tmp.0.join(png_path)).unwrap();
+        // The text's band on this tile, from the record's own pixel box.
+        let area: Vec<i64> = note["px"][id]
+            .as_array()
+            .unwrap_or_else(|| panic!("{id} is not in the record's px map: {note}"))
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .collect();
+        let ink = dark_pixels_in(&png, [area[0], area[1], area[2], area[3]]);
+        assert!(ink > 200, "{id}: {ink} dark pixels in the text band");
+        checked += 1;
+    }
+    assert!(
+        checked >= 1,
+        "no tile starts past the estimate's end: the case is not exercised"
+    );
+}
+
+const NESTED_ATTRIB: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/nested_attrib_r2000.dxf"
+);
+
+#[test]
+fn a_nested_block_references_attribute_is_drawn_and_indexed() {
+    // The tag-inside-assembly pattern: block DOOR holds an INSERT of block
+    // TAG whose ATTRIB says NUM = D-101. `collect_texts` skipped every
+    // ATTRIB child of a block ("the top-level walk already sees them",
+    // which holds only for a top-level INSERT's own attribs) and never
+    // looked at a nested INSERT's `attribs` at all, so the value was in no
+    // record -- and in the DWG shape it was not even drawn. An agent asked
+    // "which door is D-101" could not find it.
+    let db = uncad::parse(NESTED_ATTRIB).expect("fixture must parse");
+    let tmp = TempDir::new("nested_attrib");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let texts = records(&tmp.0, "texts");
+    // DOOR is inserted at (100, 100) unrotated and unscaled and the ATTRIB
+    // sits at (21, 21) in DOOR's own frame, so the value is drawn at
+    // (121, 121) at height 2.5; its id is the INSERT's handle and the
+    // ATTRIB's, the same id the renderer gives the <text>.
+    let nested = texts
+        .iter()
+        .find(|t| t["id"] == "60/56")
+        .unwrap_or_else(|| panic!("the nested attribute: {texts:?}"));
+    assert_eq!(nested["text"], "D-101");
+    assert_eq!(nested["kind"], "ATTRIB");
+    assert_eq!(nested["tag"], "NUM");
+    let b: Vec<f64> = nested["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (120.5..122.5).contains(&b[0]) && (120.5..122.5).contains(&b[1]),
+        "{b:?}"
+    );
+    assert!((b[3] - b[1] - 2.5).abs() < 0.3, "cap height 2.5: {b:?}");
+    // The top-level attribute, which always worked, is still there once,
+    // and the nested one is not listed twice (the fixture's ATTRIB is a
+    // child of DOOR, and from R2004 on the same record is linked to the
+    // nested INSERT as well).
+    assert_eq!(texts.iter().filter(|t| t["text"] == "D-TOP").count(), 1);
+    assert_eq!(texts.iter().filter(|t| t["text"] == "D-101").count(), 1);
+
+    // strings.json finds it, and so does the picture: exactly one <text>.
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(
+        strings["strings"]["d-101"],
+        serde_json::json!(["60/56"]),
+        "{}",
+        strings["strings"]
+    );
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).unwrap();
+    assert_eq!(svg.matches("D-101").count(), 1, "drawn once");
+    assert!(svg.contains("id=\"60/56\""), "with the record's id");
+
+    // And the tile the record names really shows it.
+    let tile = nested["tiles"].as_array().unwrap()[0].as_str().unwrap();
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let entry = tiles["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == tile)
+        .expect("the tile");
+    let png = std::fs::read(tmp.0.join(entry["png"].as_str().unwrap())).unwrap();
+    let area: Vec<i64> = nested["px"][tile]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_i64().unwrap())
+        .collect();
+    assert!(
+        dark_pixels_in(&png, [area[0], area[1], area[2], area[3]]) > 20,
+        "{tile} shows no attribute text"
+    );
+}
+
+/// The same block nesting in the shape a DWG (and an R2004+ DXF) gives:
+/// the nested INSERT carries its ATTRIB in `attribs` and the block has no
+/// ATTRIB child at all. No R2000 DXF produces that, so it is built here.
+fn nested_attrib_dwg_shape() -> uncad::CadDatabase {
+    use uncad::model::{AttribEntity, EntityCommon, InsertEntity, LineEntity, Point2D, Point3D};
+    let common = |handle: &str| EntityCommon {
+        handle: handle.into(),
+        layer: "0".into(),
+        ..EntityCommon::default()
+    };
+    let line = |handle: &str, x1: f64, y1: f64| {
+        uncad::Entity::Line(LineEntity {
+            common: common(handle),
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+        })
+    };
+    let insert = |handle: &str, block: &str, x: f64, y: f64, attribs: Vec<AttribEntity>| {
+        uncad::Entity::Insert(InsertEntity {
+            common: common(handle),
+            block_name: block.into(),
+            insertion_point: Point3D { x, y, z: 0.0 },
+            scale: Point3D {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            },
+            rotation: 0.0,
+            extrusion: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+            attribs,
+        })
+    };
+    let value = AttribEntity {
+        common: common("56"),
+        start_point: Point2D { x: 21.0, y: 21.0 },
+        text_height: 2.5,
+        text: "D-101".into(),
+        text_plain: "D-101".into(),
+        rotation: 0.0,
+        tag: "NUM".into(),
+        invisible: false,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    };
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "TAG".into(),
+        uncad::tables::BlockRecord {
+            name: "TAG".into(),
+            entities: vec![line("42", 10.0, 0.0)],
+        },
+    );
+    tables.block_records.insert(
+        "DOOR".into(),
+        uncad::tables::BlockRecord {
+            name: "DOOR".into(),
+            entities: vec![
+                line("52", 40.0, 0.0),
+                line("53", 0.0, 40.0),
+                insert("55", "TAG", 20.0, 20.0, vec![value]),
+            ],
+        },
+    );
+    let model = vec![insert("60", "DOOR", 100.0, 100.0, Vec::new())];
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: model.clone(),
+        },
+    );
+    uncad::CadDatabase::new(model, tables)
+}
+
+#[test]
+fn a_nested_attribute_stored_on_the_insert_is_drawn_and_indexed_too() {
+    let db = nested_attrib_dwg_shape();
+    let tmp = TempDir::new("nested_attrib_dwg");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let texts = records(&tmp.0, "texts");
+    assert_eq!(texts.len(), 1, "{texts:?}");
+    assert_eq!(texts[0]["id"], "60/56");
+    assert_eq!(texts[0]["text"], "D-101");
+    // Same placement as the DXF shape: DOOR at (100, 100), the value at
+    // (21, 21) inside it.
+    let b: Vec<f64> = texts[0]["bbox"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (120.5..122.5).contains(&b[0]) && (120.5..122.5).contains(&b[1]),
+        "{b:?}"
+    );
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(strings["strings"]["d-101"], serde_json::json!(["60/56"]));
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).unwrap();
+    assert_eq!(svg.matches("D-101").count(), 1, "drawn once: {svg}");
 }

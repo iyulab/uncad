@@ -162,8 +162,11 @@ its 0.3.0 form. Known gaps:
   a usvg pre-pass over the drawing's texts with the bundled font
   (`bbox_confidence: "measured"`, the tight box of the glyph outlines;
   rotated texts get the axis-aligned box of the rotated outlines). The
-  crop and the frames still use the 0.6-em estimate, since the crop is
-  decided before anything is laid out. usvg and tiny-skia work in single
+  crop still uses the 0.6-em estimate, since it is decided before anything
+  is laid out; the frames and the tiles do not -- the measured boxes widen
+  the drawn extents before the frame grouping and the tile culling, so a
+  wide-glyph string (Hangul advances about a full em) is drawn on every
+  tile its record names. usvg and tiny-skia work in single
   precision, so the renderer writes its SVG relative to the drawing's own
   origin (the rounded median of its entities, `ToSvgResult::origin`,
   `ToPngResult::origin`) whenever the coordinates exceed 32768 units: a
@@ -182,7 +185,10 @@ its 0.3.0 form. Known gaps:
   and plot origin folded in), else the paper size from the plot settings
   (portrait size turned by the rotation code, the printable corner moved
   by the plot origin at the layout origin), else the paper entities'
-  extents; `sheets.json` says which (`rect_source`). The model is drawn
+  extents; `sheets.json` says which (`rect_source`). A layout that has
+  none of the three -- no paper size, no limits and nothing but point-like
+  content -- has no rectangle to draw on and is skipped with an
+  `UnusableSheet` warning rather than failing the export. The model is drawn
   through every viewport that is on, looks down the z axis and is not the
   sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
   centred exactly on its frame (a DWG stores no id; the rule held on every

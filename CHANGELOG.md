@@ -173,6 +173,69 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- The attribute values of a block reference nested inside another block -- a tag block
+  inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
+  `strings.json` listed only top-level attributes, so "which door is D-101" could not be
+  answered, and for DWG input (where the value hangs off the nested INSERT rather than
+  being a child of the block) the text was not even drawn. Both shapes are now collected
+  and rendered once each, under the id `<insert>/<attrib>`. New fixture
+  `nested_attrib_r2000.dxf`.
+- A long Hangul (or wide-glyph) text vanished from tiles it reaches: frames, frame
+  overviews and tiles are culled by the renderer's extents, which hold the 0.6-em
+  estimate, while `texts.json` lists a text's tiles from its measured glyph box -- so a
+  record said the text is on a tile the picture drew without it, and a detached group's
+  own frame could cut the string. The measured boxes now widen the drawn extents (per
+  top-level entity or INSERT) before the frames and the tile culling are computed.
+- A drawing whose whole content is one point -- a single POINT, coincident entities, or
+  only RAY/XLINE entities, which contribute just their base point -- was rendered into a
+  window 5e-11 units wide at 2.4e13 px/unit: every image blank, `crop.padding_units`
+  2e-11, and every `world` box in tiles.json and the sidecars collapsing to zero size
+  when it was rounded, so the affines no longer matched it. The padding of a zero-size
+  rectangle is now at least half a unit whatever scale it is seeded with (the plain PNG
+  path too), the package gives such content a ten-unit window, and the scale is capped,
+  so the entity is visible at a sane scale and the boxes are real rectangles.
+- Re-exporting into a directory that already held a package left the previous run's
+  files beside the new ones -- record shards (`texts.003.json`), deeper tile levels and
+  their sidecars, sheets of layouts that no longer exist -- all valid-looking and none of
+  them in the new `manifest.json`, so a consumer that walks the tree (as the generated
+  README.txt invites) mixed two exports. `export_package` now clears what the previous
+  `manifest.json` listed, and the `frames/`, `sheets/` directories that empties, before
+  it writes; a directory without an uncad manifest, and any file such a manifest does not
+  list, is left untouched.
+- A tile sidecar's `layers_present` listed only the layers of the texts, dimensions and
+  block instances on the tile, so a tile drawn from geometry alone -- the usual case --
+  reported no layers at all and an agent filtering tiles by layer skipped it. It now
+  covers every record the tile shows, geometry and regions included, and is computed
+  before the size trim so cutting rows never shortens the layer list.
+- `manifest.guidance` quoted "224 px overlap" whatever the profile was, contradicting
+  `frames[].levels[].overlap_px` (392 for `claude-hires`, 320 for `openai-patch`). The
+  sentence is built from the profile in use now and names the tile size as well.
+- Tile sidecars broke their own 32 KB cap: the trim loop measured the compact JSON but
+  the file was written pretty-printed, about 3.3x larger, so a dense drawing's sidecars
+  reached 100 KB *and* dropped a quarter of their record rows (`records_truncated: true`)
+  to satisfy a limit the file then exceeded threefold. Sidecars are written compact now,
+  like the record shards, so the measured and the written form are the same file.
+- A paper layout with no paper size, no limits and nothing but point-like content (a
+  lone POINT or a zero-length LINE in `*Paper_Space`, the R13/R14 and OBJECTS-less DXF
+  case) failed the whole export with `rendering failed: render size is zero`, leaving a
+  half-written directory with no manifest: the sheet was fitted with zero padding, so a
+  zero-size rectangle gave an infinite scale. Such a layout is skipped now with an
+  `UnusableSheet` warning naming it, and the rest of the package is written.
+- Two paper layouts whose names differ only outside `[A-Za-z0-9_-]` shared one sheet
+  image: the directory came from the sanitised name alone, so every all-Hangul name of
+  the same length (평면도 / 입면도, the usual Korean set) became `___`, the second layout's
+  `sheets/___/overview.png` overwrote the first's, both `sheets.json` entries pointed at
+  the survivor and `manifest.files` listed that path twice with two byte counts; an empty
+  layout name wrote `sheets//overview.png` into the manifest while the file landed
+  elsewhere. Sheet directories are unique now -- an empty name becomes `sheet`, a repeat
+  takes `_2`, `_3` in tab order -- so the manifest never lists a path twice.
+- The package wrote world rectangles in two shapes: `manifest.json`'s `overview.world`,
+  `frames[].content`, `crop.*` and everything in `sheets.json` came out of serde's derive
+  as `{"min_x": .., "min_y": .., "max_x": .., "max_y": ..}`, while tiles.json, every
+  sidecar `world`, every record `bbox` and `manifest.sheets[].rect` used the
+  `[x0, y0, x1, y1]` array the design documents -- the same layout's rectangle read one
+  way in the manifest and the other in `sheets.json`. `crop::Rect` serializes as that
+  array now, and reads both forms back, so an 0.3.0 document still loads.
 - Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
   points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
   stream order, so `line2_end` held the arc point and the sector probe lay on the line

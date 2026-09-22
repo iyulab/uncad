@@ -44,13 +44,19 @@ const HATCHED_VIEWPORT: &str = concat!(
     "/tests/fixtures/hatched_viewport_r2000.dxf"
 );
 
-const ALL: [&str; 6] = [
+const NESTED_ATTRIB: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/nested_attrib_r2000.dxf"
+);
+
+const ALL: [&str; 7] = [
     CP949,
     MIRRORED,
     DIMLFAC12,
     TWISTED_VIEWPORT,
     MIRRORED_BULGE,
     HATCHED_VIEWPORT,
+    NESTED_ATTRIB,
 ];
 
 fn parse(path: &str) -> uncad::CadDatabase {

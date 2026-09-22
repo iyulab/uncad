@@ -1,0 +1,378 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+ 70
+3
+  0
+BLOCK_RECORD
+  5
+1F
+  2
+*Model_Space
+ 70
+0
+  0
+BLOCK_RECORD
+  5
+40
+  2
+TAG
+ 70
+0
+  0
+BLOCK_RECORD
+  5
+50
+  2
+DOOR
+ 70
+0
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+41
+330
+40
+  8
+0
+100
+AcDbBlockBegin
+  2
+TAG
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+TAG
+  0
+LINE
+  5
+42
+330
+40
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+10.0
+ 21
+0.0
+ 31
+0.0
+  0
+ATTDEF
+  5
+43
+330
+40
+  8
+0
+100
+AcDbEntity
+100
+AcDbText
+ 10
+1.0
+ 20
+1.0
+ 30
+0.0
+ 40
+2.5
+  1
+D-000
+100
+AcDbAttributeDefinition
+  3
+Number
+  2
+NUM
+ 70
+0
+  0
+ENDBLK
+  5
+44
+330
+40
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+51
+330
+50
+  8
+0
+100
+AcDbBlockBegin
+  2
+DOOR
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+DOOR
+  0
+LINE
+  5
+52
+330
+50
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+40.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  5
+53
+330
+50
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+0.0
+ 21
+40.0
+ 31
+0.0
+  0
+INSERT
+  5
+55
+330
+50
+  8
+0
+100
+AcDbEntity
+100
+AcDbBlockReference
+ 66
+1
+  2
+TAG
+ 10
+20.0
+ 20
+20.0
+ 30
+0.0
+  0
+ATTRIB
+  5
+56
+330
+50
+  8
+0
+100
+AcDbEntity
+100
+AcDbText
+ 10
+21.0
+ 20
+21.0
+ 30
+0.0
+ 40
+2.5
+  1
+D-101
+100
+AcDbAttribute
+  2
+NUM
+ 70
+0
+  0
+SEQEND
+  5
+57
+330
+50
+  8
+0
+100
+AcDbEntity
+  0
+ENDBLK
+  5
+54
+330
+50
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+INSERT
+  5
+60
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbBlockReference
+  2
+DOOR
+ 10
+100.0
+ 20
+100.0
+ 30
+0.0
+  0
+INSERT
+  5
+61
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbBlockReference
+ 66
+1
+  2
+TAG
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  0
+ATTRIB
+  5
+62
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbText
+ 10
+1.0
+ 20
+1.0
+ 30
+0.0
+ 40
+2.5
+  1
+D-TOP
+100
+AcDbAttribute
+  2
+NUM
+ 70
+0
+  0
+SEQEND
+  5
+63
+330
+1F
+  8
+0
+100
+AcDbEntity
+  0
+ENDSEC
+  0
+EOF

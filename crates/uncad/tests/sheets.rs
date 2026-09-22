@@ -244,6 +244,147 @@ fn the_export_writes_one_sheet_per_paper_layout() {
     assert!(!quiet.files.iter().any(|f| f.path.starts_with("sheets")));
 }
 
+/// Three paper layouts whose names all sanitise to the same directory
+/// string: two three-syllable Hangul names (the usual Korean set) and an
+/// empty one. Each has its own paper block holding one line of its own
+/// length, so the three sheet images differ; the layouts' own limits give
+/// each sheet a rectangle of its own.
+fn colliding_layout_names() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D};
+    use uncad::tables::{BlockRecord, LayoutRecord, PlotSettings};
+
+    let line = |handle: &str, x1: f64, y1: f64| {
+        uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: handle.into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: 10.0,
+                y: 10.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+        })
+    };
+    let model = vec![line("10", 100.0, 50.0)];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        BlockRecord {
+            name: "*Model_Space".into(),
+            entities: model.clone(),
+        },
+    );
+    // 평면도 (plan), 입면도 (elevation) and a layout with no name at all.
+    for (n, name) in ["\u{d3c9}\u{ba74}\u{b3c4}", "\u{c785}\u{ba74}\u{b3c4}", ""]
+        .into_iter()
+        .enumerate()
+    {
+        let block = if n == 0 {
+            "*Paper_Space".to_string()
+        } else {
+            format!("*Paper_Space{}", n - 1)
+        };
+        let width = 100.0 + 40.0 * n as f64;
+        tables.block_records.insert(
+            block.clone(),
+            BlockRecord {
+                name: block.clone(),
+                entities: vec![line(&format!("2{n}"), width - 10.0, 60.0)],
+            },
+        );
+        tables.layouts.insert(
+            name.to_string(),
+            LayoutRecord {
+                name: name.to_string(),
+                tab_order: n as u16 + 1,
+                block_name: block,
+                limmin: Point2D { x: 0.0, y: 0.0 },
+                limmax: Point2D { x: width, y: 80.0 },
+                plot: PlotSettings::default(),
+                ..LayoutRecord::default()
+            },
+        );
+    }
+    uncad::CadDatabase::new(model, tables)
+}
+
+#[test]
+fn layouts_whose_names_collide_get_a_sheet_image_each() {
+    // Every Hangul syllable is outside [A-Za-z0-9_-], so both Korean names
+    // sanitise to "___" and the empty one to nothing: all three sheets used
+    // to write the same file, the first two images were lost, and
+    // manifest.files listed one path three times with three byte counts.
+    let db = colliding_layout_names();
+    let tmp = TempDir::new("collide");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(report.sheets.len(), 3);
+    let paths: Vec<&str> = report
+        .sheets
+        .iter()
+        .map(|s| s.overview.png.as_str())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "sheets/___/overview.png",
+            "sheets/____2/overview.png",
+            "sheets/sheet/overview.png"
+        ],
+        "the suffix goes to the later tab, the empty name to the placeholder"
+    );
+
+    // Every sheet's own file exists, with the size the manifest lists, and no
+    // path is listed twice.
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let files = manifest["files"].as_array().unwrap();
+    let listed: Vec<&str> = files.iter().map(|f| f["path"].as_str().unwrap()).collect();
+    let unique: std::collections::BTreeSet<&str> = listed.iter().copied().collect();
+    assert_eq!(listed.len(), unique.len(), "{listed:?}");
+    for file in files {
+        let path = tmp.0.join(file["path"].as_str().unwrap());
+        if let Some(bytes) = file["bytes"].as_u64() {
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().len(),
+                bytes,
+                "{}",
+                path.display()
+            );
+        }
+    }
+    // Each sheet is its own picture: the three paper blocks hold lines of
+    // different lengths on sheets of different widths.
+    let mut images: Vec<Vec<u8>> = Vec::new();
+    for sheet in &report.sheets {
+        let bytes = std::fs::read(tmp.0.join(&sheet.overview.png)).expect("the sheet image");
+        assert!(!images.contains(&bytes), "{} repeats", sheet.overview.png);
+        images.push(bytes);
+    }
+    // sheets.json says the same, one path per sheet.
+    let sheets = read_json(&tmp.0.join("sheets.json"));
+    let from_json: Vec<&str> = sheets["sheets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["overview"]["png"].as_str().unwrap())
+        .collect();
+    assert_eq!(from_json, paths);
+}
+
 #[test]
 fn the_model_is_composited_through_a_real_viewport() {
     let db = uncad::parse(TWISTED).expect("fixture must parse");
@@ -475,4 +616,108 @@ fn a_paper_hatch_keeps_its_own_pattern_on_the_composited_sheet() {
     // At 4 units apart and this scale there are 4 lines in 16 units.
     let full_rows = fractions.iter().filter(|f| **f > 0.9).count();
     assert!((3..=10).contains(&full_rows), "{full_rows} full rows");
+}
+
+/// A drawing whose paper space holds nothing but one POINT, and no LAYOUT
+/// objects at all -- the R13/R14 / OBJECTS-less DXF shape `sheet_specs`
+/// falls back for. The paper block's extents are a single point, so the
+/// sheet has no rectangle: no paper size, no limits, nothing to fit.
+fn paper_space_with_one_point() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D, PointEntity};
+    use uncad::tables::BlockRecord;
+
+    let model = vec![uncad::Entity::Line(LineEntity {
+        common: EntityCommon {
+            handle: "24".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        end_point: Point3D {
+            x: 100.0,
+            y: 50.0,
+            z: 0.0,
+        },
+    })];
+    let paper = vec![uncad::Entity::Point(PointEntity {
+        common: EntityCommon {
+            handle: "2A".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        position: Point3D {
+            x: 100.0,
+            y: 100.0,
+            z: 0.0,
+        },
+    })];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        BlockRecord {
+            name: "*Model_Space".into(),
+            entities: model.clone(),
+        },
+    );
+    tables.block_records.insert(
+        "*Paper_Space".into(),
+        BlockRecord {
+            name: "*Paper_Space".into(),
+            entities: paper,
+        },
+    );
+    uncad::CadDatabase::new(model, tables)
+}
+
+#[test]
+fn a_paper_layout_with_no_usable_rectangle_is_skipped_not_fatal() {
+    // The sheet rectangle falls through to the paper entities' extents, and
+    // a lone POINT's extent is a single point: fitting it with the zero
+    // padding a sheet uses divided by a zero width, so px-per-unit was
+    // infinite, `Pixmap::new` failed and the whole export died with
+    // "render size is zero" after the model overview and tiles had already
+    // been written.
+    let db = paper_space_with_one_point();
+    let tmp = TempDir::new("paper_point");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("a degenerate paper layout must not fail the export");
+    assert!(report.sheets.is_empty(), "{:?}", report.sheets);
+    assert_eq!(report.counts.sheets, 0);
+    let warning = report
+        .warnings
+        .iter()
+        .find(|w| w.starts_with("UnusableSheet"))
+        .unwrap_or_else(|| panic!("{:?}", report.warnings));
+    // The fallback names the layout after its block, without the star.
+    assert!(
+        warning.contains("Paper_Space") && warning.contains("entities"),
+        "{warning}"
+    );
+    // The rest of the package is there, and so is the warning.
+    assert!(tmp.0.join("manifest.json").exists());
+    assert!(!tmp.0.join("sheets").exists());
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["counts"]["sheets"], 0);
+    assert!(manifest["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w.as_str().unwrap().starts_with("UnusableSheet")));
+    let report_json = read_json(&tmp.0.join("report.json"));
+    assert!(report_json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w.as_str().unwrap().starts_with("UnusableSheet")));
 }
