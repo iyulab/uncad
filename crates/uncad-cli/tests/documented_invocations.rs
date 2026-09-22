@@ -371,6 +371,10 @@ fn help_exits_successfully_and_lists_the_options() {
     // the parser without being documented (or documented without a test).
     for flag in [
         "--output",
+        // Asserted against the binary in release_invariants.rs; listed here
+        // so the "every flag this file passes is documented" rule still
+        // covers it.
+        "--version",
         "--pretty",
         "--space",
         "--crop",
