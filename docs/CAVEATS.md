@@ -31,9 +31,17 @@ LIGHT. Details worth knowing:
   renders them.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
   as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
-- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
-  an approximation, not a reading of the B-rep. A solid whose ACIS data cannot be read or
-  converted is reported as unsupported.
+- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as wireframes -- the edges, not a
+  reading of the B-rep. A body that is *flat in the XY plane* is drawn in that plane,
+  exactly where the file puts it, which is the usual case for a REGION (it is built from a
+  closed 2D profile). A body with real depth is drawn through a fixed 30-degree isometric
+  projection, and that **moves it**: `(x, y, z) -> ((x - z) cos30, y + (x + z) sin30)`
+  scales x and shears y, so such a body's drawn position, size and shape -- and the `bbox`,
+  `tiles` and `px` its package record carries, which are measured from what is drawn -- are
+  in projection space, not world space. The record says `confidence: "estimated"`. Until
+  0.3.0 *every* body went through the projection, so a flat axis-aligned REGION came out as
+  a parallelogram of the wrong size, well away from the rest of the drawing. A solid whose
+  ACIS data cannot be read or converted is reported as unsupported.
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
@@ -472,17 +480,33 @@ constant:
 | `MAX_BLOCK_REF_DEPTH` | 20 | how deep block references may nest |
 | `MAX_BLOCK_REFS` | 100 000 | how many references one render expands in total (the *breadth* the depth cap cannot see) |
 | `MAX_SVG_BODY_BYTES` | 64 MiB | how large the emitted drawing body may grow -- the backstop behind the rest |
-| `MAX_ENTITY_SVG_BYTES` | 4 MiB | how much one top-level entity may draw before it is left out altogether |
+| `MAX_ENTITY_SVG_BYTES` | `MAX_SVG_BODY_BYTES` / 4 = 16 MiB | how much one top-level entity may draw before its block expansion is cut short |
 | `MAX_ENTITY_POINTS` | 100 000 | how many file-supplied points one entity may draw with |
 | `MAX_HATCH_TILE_SPAN` | 16x the boundary | how much larger than the shape it fills a HATCH pattern's tile may be |
-| `MAX_WORLD_COORDINATE` | 1e15 | the largest coordinate, radius or size an entity may be drawn with |
+| `MAX_WORLD_COORDINATE` | 1e15 | the largest value the rasterizer may be handed where its work grows with the number (an arc radius; an entity's measured box, which the viewBox is built from) |
 | `MAX_SUBENTITY_DEPTH` | 2 | how deep an owned-subentity walk may recurse on the way in (see the section below) |
 | `MAX_OWNED_SUBENTITIES` | 100 000 | how many subentities one such walk may hand back |
 
-Every cap engaging is *reported*, never silent: `ToSvgResult::limits` and
+Every cap **the renderer** applies is *reported*, never silent: `ToSvgResult::limits` and
 `ToPngResult::limits` carry a `LimitReport`, the CLI prints it as a warning, and a package
 puts it in `report.json` under `limits` and in `warnings`. The same drawing now renders in
 1.4 s to a 67 MB SVG saying it dropped 3 496 block references and 869 entities.
+
+A count on its own is not enough to act on, so `LimitReport::dropped` also *names* the
+entities -- handle, DXF type and which cap acted -- for the first 100 of them
+(`MAX_REPORTED_HANDLES`); the CLI's warning names the first five, and a package copies them
+into `report.json`'s `excluded` list beside the crop's own exclusions, so "what is missing
+from the picture and why" is one list. Until 0.3.0 shipped, three of the caps reported
+nothing at all, and a consumer auditing a package could not tell a dropped entity from one
+the file never held.
+
+Two caps in the table are *not* in `LimitReport`, and that is the one remaining gap:
+`MAX_SUBENTITY_DEPTH` and `MAX_OWNED_SUBENTITIES` bound the owned-subentity walk in
+`convert.rs`, which builds the model *before* any render, so there is no render for a
+render-time report to belong to. Both are reached only by damaged handle chains (one level
+of subentity nesting is what the format has, and no entity owns 100 000 children), so a
+real drawing never meets them; a corrupt one meets them silently. Carrying the counts out
+of conversion and into `CadDatabase` is the fix, and it is not done.
 
 Not every one of these is about memory. Two of them bound the *rasterizer's* work, which a
 finite number can run away with just as easily; both were found by the fuzz sweep after the
@@ -493,9 +517,15 @@ allocation caps landed, on drawings that produced a perfectly small SVG:
   derived from them. One fuzzed `example_2000.dwg` wrote a 590 KB SVG with a viewBox
   1.45e150 units wide and `stroke-width="5.2e149"`; `to_png` had not returned after five
   minutes. `MAX_WORLD_COORDINATE` is the bound `crop::Rect::is_sane` already applied to a
-  header's `$EXTMIN`/`$EXTMAX`, now applied to an entity's own coordinates too -- both as
-  written and after the block transform, since a corrupt block scale lands a sane
-  coordinate just as far out.
+  header's `$EXTMIN`/`$EXTMAX`, and it is applied to an entity's **measured box** -- after
+  the block transform, since a corrupt block scale lands a sane coordinate just as far out.
+  Such an entity is held out of the crop *decision* and listed in `report.json`'s
+  `excluded` as a `scale_outlier`; it keeps its records. It is deliberately not a screen on
+  the coordinate as written, which is what 0.3.0's first cut did: that deleted the entity
+  from the picture, from every record and from every report at once, where the crop's
+  outlier rule had already been drawing the same conclusion out loud. An entity a long way
+  from its neighbours is a drawing problem, and the crop is what answers it; the magnitude
+  bound is only there for what the rasterizer cannot take.
 - **A bulge of 1e-160 over a hundred-unit segment is an arc of radius 1e238.** The same
   drawing emitted `A 7.1e238 7.1e238 ...` between two points a few thousand units apart,
   and rasterizing that did not finish in five minutes at *any* image size -- 200 px
@@ -511,14 +541,25 @@ Three of the caps deserve their reasoning spelled out:
   is spread over 40 000 small parts, so each tile keeps a handful and `uncad export` peaks
   at 402 MB in 3.2 s; a fuzzed `example_2000.dwg` whose body was the same order of
   magnitude but held in a few huge parts peaked at **5.7 GB over 132 s**. So rendering one
-  part stops at `MAX_ENTITY_SVG_BYTES` -- which bounds the work -- and the part is then
-  dropped whole rather than shown half-drawn. The package excludes such an entity from its
-  *records* too, on the same rule the crop and the hidden-entity screen already follow:
-  records cover what the picture shows. That file now exports in 3.6 s at 344 MB, and its
-  package is 2.8 MB instead of 150 MB (it had been writing 200 000 text records -- the same
-  string repeated by the self-referencing block -- across 1 502 shard files). The
-  package's own text walk carries the expansion budget too, for the same
-  breadth-versus-depth reason.
+  part stops at `MAX_ENTITY_SVG_BYTES`, which bounds the work.
+
+  What happens *at* the cap took two tries. Dropping the part whole (0.3.0's first cut, at
+  a flat 4 MiB) made the cap the wrong shape: a drawing that wraps its content in one block
+  and places it once -- a bound XREF, an imported survey, a "whole floor" block -- is a
+  single top-level INSERT, so a per-*entity* cap was really a cap on the whole drawing, and
+  past about 65 000 short lines the picture came out empty with a warning that named no
+  handle. The cap is now a share of the document's budget (a quarter, 16 MiB, over 200 000
+  `<line>` elements from one entity), and reaching it **truncates** the expansion at the
+  next block boundary instead of deleting the part: the walk unwinds at an entity boundary,
+  so every enclosing `<g>` still closes and the part stays well-formed. The entity is
+  counted in `LimitReport::truncated_parts`, named in `LimitReport::dropped` under the
+  `entity_bytes` cap, and keeps its records -- it *is* in the picture, only not all of it.
+  The fuzzed file exports in a few seconds, and its package is a few MB instead of 150 MB
+  (it had been writing 200 000 text records -- the same string repeated by the
+  self-referencing block -- across 1 502 shard files). The package's own text walk carries
+  the expansion budget too, for the same breadth-versus-depth reason. The trade-off is
+  named: one truncated part is up to 16 MB of SVG that every tile touching it re-parses, so
+  a file crafted to produce one still costs a package more than a real drawing does.
 
 
 - **The output budget is what actually bounds the allocation.** It is checked before each
@@ -857,9 +898,17 @@ simplification as ignoring `HatchPatternLine.offset`'s parallel component.
 ## MLINESTYLE parsing (unverified)
 
 MLINE used to be approximated with a single centerline because MLINESTYLE was not parsed.
-Now the MLINE's `mlinestyle` handle is resolved, looked up in `Tables::mlinestyles`
-(MLINESTYLE name -> list of per-line offsets), and each vertex's
-`point + miter_direction * offset` gives a true offset polyline. `miter_direction` is a
+Now the MLINE's `mlinestyle` handle is resolved and looked up in `Tables::mlinestyles`
+(MLINESTYLE name -> list of per-line offsets), the offsets are scaled by the entity's own
+`MLSCALE` (`MLineEntity::scale`, DXF 40), and each vertex's
+`point + miter_direction * offset * scale` gives a true offset polyline. The scale is what
+turns *style* units into drawing units, and setting it is how MLINE is normally used: a
+200 mm wall is the STANDARD style (offsets +-0.5) at scale 200. Until 0.3.0 it was dropped,
+so every multi-line came out exactly one unit wide whatever the drawing said. The entity's
+`justification` (DXF 70) is still ignored -- the offsets are used as the style stores them,
+i.e. as if the justification were "zero". The extent an MLINE contributes is measured from
+the offset lines it draws, not from its centerline, so the crop, the frames and the
+package's `bbox` see the width of the wall. `miter_direction` is a
 vector LibreDWG has already computed with the miter angle applied, so this is one scalar
 multiply, no trigonometry. When the style cannot be found (empty handle, failed
 resolution) it is treated as a single `offset = 0.0`, which reproduces the old
