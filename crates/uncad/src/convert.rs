@@ -1119,20 +1119,14 @@ unsafe fn convert_entity(
                 Some(2) => LeaderAnnotation::Insert,
                 _ => LeaderAnnotation::Nothing,
             };
-            let annotation_id = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
-                entity_ptr,
-                "LEADER",
-                "associated_annotation",
-            )
-            .and_then(|r| {
-                if r.is_null() {
-                    return None;
-                }
-                // SAFETY: a non-null Dwg_Object_Ref owned by the live
-                // Dwg_Data this pass walks, same contract as reference().
-                let value = unsafe { (*r).absolute_ref };
-                (value != 0).then(|| EntityId::new(value))
-            });
+            let annotation_id = entity_reference(
+                dwg,
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                    entity_ptr,
+                    "LEADER",
+                    "associated_annotation",
+                ),
+            );
             Entity::Leader(LeaderEntity {
                 common,
                 vertices,
@@ -1465,6 +1459,43 @@ unsafe fn entity_identity(obj: *mut libredwg_sys::Dwg_Object) -> (EntityId, Ref<
 /// Where the IDs of handle-less entities live: above every possible handle
 /// value, so they can never collide with a handle-derived ID.
 const HANDLELESS_ID_BASE: u64 = 1 << 63;
+
+/// The reference ID of the entity a handle field points at.
+///
+/// Mints it through [`entity_identity`], the one scheme this backend has for
+/// naming an entity, so the ID a *reference* carries is the same one the
+/// entity it names carries. Deriving it from the handle value instead is a
+/// second scheme that agrees with the first only where a file has handles:
+/// a drawing that carries none (before R13) names its entities by their
+/// position in the object table, and a handle copied out of the reference
+/// would match nothing in such a file.
+///
+/// A reference the object table does not answer to keeps whatever value it
+/// carries (`absolute_ref`, else the relative handle the library never
+/// resolved -- the two rungs [`reference`] uses). That is a different fact
+/// from "the file names nothing", and the model's `Option` cannot yet tell
+/// the two apart, so the value is kept rather than dropped.
+fn entity_reference(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
+) -> Option<EntityId> {
+    let handle_ptr = handle_ptr?;
+    if handle_ptr.is_null() {
+        return None;
+    }
+    // SAFETY: a non-null Dwg_Object_Ref owned by the live Dwg_Data this
+    // conversion pass walks, the same contract reference() reads under.
+    let object = unsafe { referenced_object(dwg, handle_ptr) };
+    if !object.is_null() {
+        return Some(unsafe { entity_identity(object) }.0);
+    }
+    let (absolute_ref, handle_value) =
+        unsafe { ((*handle_ptr).absolute_ref, (*handle_ptr).handleref.value) };
+    if absolute_ref != 0 {
+        return Some(EntityId::new(absolute_ref));
+    }
+    (handle_value != 0).then(|| EntityId::new(handle_value))
+}
 
 /// Turns a handle field into the model's three-state reference: no field or
 /// a null handle is [`Ref::Absent`]; a handle the resolver turns into a name

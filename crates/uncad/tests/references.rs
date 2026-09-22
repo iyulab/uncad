@@ -6,7 +6,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use uncad::model::{Confidence, EntityCommon, EntityId, LineEntity, Origin, Point3D, Ref};
+use uncad::model::{
+    Confidence, EntityCommon, EntityId, LeaderAnnotation, LineEntity, Origin, Point3D, Ref,
+};
 use uncad::{CadDatabase, Entity};
 
 const CORPUS_DXF: &str = concat!(
@@ -227,5 +229,174 @@ fn pre_r13_layer_references_resolve_by_index_to_the_same_names_as_the_r2000_twin
     );
     for name in &old_names {
         assert!(old.tables.layers.contains_key(*name), "{name}");
+    }
+}
+
+const CORPUS_ROOT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data"
+);
+
+fn drawings_under(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("corpus directory should be readable") {
+        let path = entry.expect("corpus entry should be readable").path();
+        if path.is_dir() {
+            drawings_under(&path, out);
+        } else if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("dwg") || e.eq_ignore_ascii_case("dxf"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+fn corpus_drawings() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    drawings_under(Path::new(CORPUS_ROOT), &mut out);
+    out.sort();
+    out
+}
+
+/// DXF 340 on a LEADER names another entity of the *same* drawing, so the
+/// reference ID the model carries has to be one that drawing's entities
+/// answer to. An ID minted by any other route points at nothing, and a
+/// consumer cannot tell that from a leader that annotates nothing on
+/// purpose -- the two are the same `None`/`Some` shape.
+#[test]
+fn a_leader_annotation_id_names_an_entity_the_same_drawing_carries() {
+    let mut dangling: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    let mut leaders = 0usize;
+    for path in corpus_drawings() {
+        let Ok(db) = uncad::parse(&path) else {
+            continue;
+        };
+        let ids: std::collections::BTreeSet<EntityId> =
+            db.all_entities().map(|e| e.common().id).collect();
+        for entity in db.all_entities() {
+            let Entity::Leader(leader) = entity else {
+                continue;
+            };
+            leaders += 1;
+            let Some(id) = leader.annotation_id else {
+                continue;
+            };
+            checked += 1;
+            if !ids.contains(&id) {
+                dangling.push(format!("{}: {:#x}", path.display(), id.value()));
+            }
+        }
+    }
+    assert!(leaders > 0, "the corpus should hold at least one LEADER");
+    assert!(
+        checked > 0,
+        "{leaders} LEADERs, none of which carried an annotation reference"
+    );
+    assert!(
+        dangling.is_empty(),
+        "{} of {checked} annotation references name no entity of their own drawing:\n{}",
+        dangling.len(),
+        dangling.join("\n")
+    );
+}
+
+/// The file states the annotation twice: DXF 73 says what kind of thing the
+/// leader annotates, and DXF 340 names the entity. A reference ID read the
+/// wrong way still lands on *an* entity often enough for the previous test
+/// to pass, so this one checks the two statements agree.
+#[test]
+fn a_leader_annotation_reference_points_at_the_kind_of_entity_it_declares() {
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    for path in corpus_drawings() {
+        let Ok(db) = uncad::parse(&path) else {
+            continue;
+        };
+        let kinds: std::collections::BTreeMap<EntityId, &'static str> = db
+            .all_entities()
+            .map(|e| (e.common().id, entity_kind(e)))
+            .collect();
+        for entity in db.all_entities() {
+            let Entity::Leader(leader) = entity else {
+                continue;
+            };
+            let Some(id) = leader.annotation_id else {
+                continue;
+            };
+            let expected = match leader.annotation {
+                LeaderAnnotation::MText => "MText",
+                LeaderAnnotation::Tolerance => "Tolerance",
+                LeaderAnnotation::Insert => "Insert",
+                // The format's fallback: the file declares nothing, so
+                // there is nothing to agree with.
+                LeaderAnnotation::Nothing => continue,
+            };
+            checked += 1;
+            let found = kinds.get(&id).copied().unwrap_or("(no such entity)");
+            if found != expected {
+                disagreements.push(format!(
+                    "{}: leader declares {expected}, reference {:#x} is {found}",
+                    path.display(),
+                    id.value()
+                ));
+            }
+        }
+    }
+    assert!(
+        checked > 0,
+        "no leader in the corpus declares an annotation"
+    );
+    assert!(
+        disagreements.is_empty(),
+        "{} of {checked} leaders name an entity of another kind:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}
+
+/// The same drawing in both formats must yield the same reference IDs: an ID
+/// is minted from what the file says, and both files say the same thing.
+/// This is the pair that has a leader whose annotation reference is set.
+#[test]
+fn a_leader_annotation_id_is_the_same_read_as_dwg_and_as_its_dxf_twin() {
+    let dwg = annotation_ids_of(Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/2000/Leader.dwg"
+    )));
+    let dxf = annotation_ids_of(Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/2000/Leader.dxf"
+    )));
+    assert!(
+        !dwg.is_empty(),
+        "the twin should hold a leader with an annotation reference"
+    );
+    assert_eq!(dwg, dxf, "the two formats disagree on the reference IDs");
+}
+
+fn annotation_ids_of(path: &Path) -> Vec<(u64, Option<u64>)> {
+    let db = uncad::parse(path).expect("the twin parses");
+    let mut out: Vec<(u64, Option<u64>)> = db
+        .all_entities()
+        .filter_map(|e| match e {
+            Entity::Leader(l) => Some((e.common().id.value(), l.annotation_id.map(|i| i.value()))),
+            _ => None,
+        })
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn entity_kind(entity: &Entity) -> &'static str {
+    match entity {
+        Entity::MText(_) => "MText",
+        Entity::Text(_) => "Text",
+        Entity::Tolerance(_) => "Tolerance",
+        Entity::Insert(_) => "Insert",
+        Entity::Leader(_) => "Leader",
+        _ => "other",
     }
 }
