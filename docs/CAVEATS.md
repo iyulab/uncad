@@ -286,6 +286,17 @@ The R2007+ DXF case that this crate now refuses was the large-scale version of "
 Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
 the model still says which it was.
 
+**A known deviation, in DXF only.** The three states are about what the *file* points with,
+and a DXF INSERT points with a name (group code 2), not a handle -- so an INSERT naming a
+block the file never defines is a reference that exists and answers to nothing: unresolved,
+carrying that name. This crate reports it as *absent* instead, and cannot do better: the
+vendored library's DXF importer looks the name up in its block table and, when the lookup
+fails, only warns -- the name it read is never stored on the entity, so nothing downstream of
+that importer can recover it. `tests/golden.rs` therefore applies one documented deviation to
+the G10 case, and a second test asserts the deviation is still needed, so the day the name
+survives the read the suite says so. DWG files are unaffected: there a reference is a handle,
+and a handle that answers to nothing is already reported unresolved.
+
 Two cases carry no handle at all and are told apart by the drawing's version. Before R13 a
 drawing points at its tables by *index*, not by handle; those references are looked up by
 index in the table (LibreDWG's `dwg_handle_name` does the matching), and an index the table

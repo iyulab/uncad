@@ -46,7 +46,8 @@
         "true_color": null
       },
       "block_name": {
-        "type": "ABSENT"
+        "type": "UNRESOLVED",
+        "data": "MISSING"
       },
       "insertion_point": {
         "x": 20.0,
@@ -119,7 +120,8 @@
               "true_color": null
             },
             "block_name": {
-              "type": "ABSENT"
+              "type": "UNRESOLVED",
+              "data": "MISSING"
             },
             "insertion_point": {
               "x": 20.0,
