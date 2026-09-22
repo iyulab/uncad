@@ -210,6 +210,12 @@ uncad_dwg_codepage (const Dwg_Data *dwg)
 }
 
 int
+uncad_dwg_from_dxf (const Dwg_Data *dwg)
+{
+  return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
+}
+
+int
 uncad_dwg_is_tu (const Dwg_Data *dwg)
 {
   return (dwg && IS_FROM_TU_DWG (dwg)) ? 1 : 0;

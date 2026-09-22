@@ -150,6 +150,32 @@ LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
 extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
+## Hidden entities are left out of the picture (since 0.3.0)
+
+A DWG carries entities nobody sees: layers switched off or frozen, layers
+marked "do not plot", AutoCAD's own `DEFPOINTS` layer (dimension definition
+points), and entities with their own invisible flag (DXF 60). 0.2.0 drew all
+of them. The renderer now skips them -- inside blocks too -- and counts them
+in `ToSvgResult::hidden`; `ToSvgOptions::include_hidden` (CLI
+`--include-hidden`) draws them at 50 % opacity instead. The rule is one
+function, `visibility::hidden_reason`, and the JSON still lists every
+entity: it is the model, not the picture.
+
+Two limits of the layer state, both inherited from how LibreDWG reads:
+
+- **The plot flag is only trusted from R2000+ DWG files.** A DXF's group 290
+  is optional (AutoCAD omits it on plotting layers), and LibreDWG's reader
+  leaves an omitted 290 and `290 = 0` looking the same, so every DXF layer
+  reads as plotting. R13/R14 DWG files store no plot flag at all. `DEFPOINTS`
+  is hidden by name, which covers the common case.
+- **Lineweights are unknown where the file stores none:** R13/R14 files, and
+  a DXF layer without group 370 (which LibreDWG leaves at code 0, i.e.
+  0.00 mm -- reported as unknown rather than as the thinnest weight).
+
+Not modelled: per-viewport frozen layers (VIEWPORT's `frozen_layers`), layer
+overrides in layouts, and xref layer state. Locked layers are drawn, as in
+AutoCAD. Linetypes and lineweights are read but not rendered (0.4.0).
+
 ## Coordinates are world; the OCS is applied on read (since 0.3.0)
 
 DXF stores several 2D entity types in their own object coordinate system

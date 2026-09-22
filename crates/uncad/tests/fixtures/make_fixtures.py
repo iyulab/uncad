@@ -276,6 +276,53 @@ def twisted_viewport(variant="full"):
     return hdr + pre + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+def hidden_layers():
+    """Every way an entity can be hidden: a LINE on each of the layers below
+    (one per 10 units of y), plus an invisible LINE (DXF 60 = 1) and a
+    0.50 mm DASHED one (370 = 50, 6 = DASHED, 48 = 2.0) on VISIBLE."""
+    hdr = header(INSUNITS=(70, 4))
+    # (name, colour, DXF 70 flag, DXF 290 plot flag or None to omit)
+    layers = [
+        (b"0", 7, 0, None),
+        (b"VISIBLE", 1, 0, None),
+        (b"OFF", -3, 0, None),      # negative colour: the layer is off
+        (b"FROZEN", 4, 1, None),    # 70 bit 1: frozen
+        (b"NOPLOT", 5, 0, 0),       # 290 = 0: not plotted
+        (b"Defpoints", 7, 0, 0),    # AutoCAD's own non-plotting layer
+        (b"LOCKED", 6, 4, None),    # 70 bit 4: locked (still drawn)
+    ]
+    body = pairs((0, "TABLE"), (2, "LTYPE"), (70, 2))
+    body += pairs(
+        (0, "LTYPE"), (5, "14"), (100, "AcDbSymbolTableRecord"), (100, "AcDbLinetypeTableRecord"),
+        (2, "Continuous"), (70, 0), (3, "Solid line"), (72, 65), (73, 0), (40, 0.0),
+    )
+    body += pairs(
+        (0, "LTYPE"), (5, "15"), (100, "AcDbSymbolTableRecord"), (100, "AcDbLinetypeTableRecord"),
+        (2, "DASHED"), (70, 0), (3, "Dashed __ __ __"), (72, 65), (73, 2), (40, 0.75),
+        (49, 0.5), (74, 0), (49, -0.25), (74, 0),
+    )
+    body += pair(0, "ENDTAB")
+    body += pairs((0, "TABLE"), (2, "LAYER"), (70, len(layers)))
+    for name, color, flag, plot in layers:
+        body += pairs((0, "LAYER"), (2, name), (70, flag), (62, color), (6, "Continuous"))
+        if plot is not None:
+            body += pair(290, plot)
+    body += pair(0, "ENDTAB")
+    tbl = section("TABLES", body)
+    ents = b""
+    for i, (name, _color, _flag, _plot) in enumerate(layers):
+        ents += line(0, 10 * i, 100, 10 * i, layer=name)
+    ents += entity(
+        "LINE", b"VISIBLE", (100, "AcDbEntity"), (60, 1), (100, "AcDbLine"),
+        (10, 0.0), (20, 100.0), (30, 0.0), (11, 100.0), (21, 100.0), (31, 0.0),
+    )
+    ents += entity(
+        "LINE", b"VISIBLE", (100, "AcDbEntity"), (6, "DASHED"), (370, 50), (48, 2.0), (100, "AcDbLine"),
+        (10, 0.0), (20, 110.0), (30, 0.0), (11, 100.0), (21, 110.0), (31, 0.0),
+    )
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -286,6 +333,8 @@ if __name__ == "__main__":
         write("dimlfac12_r2000.dxf", dimlfac12("full"))
     if which in ("all", "viewport"):
         write("twisted_viewport_r2000.dxf", twisted_viewport("full"))
+    if which in ("all", "hidden"):
+        write("hidden_layers_r2000.dxf", hidden_layers())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

@@ -102,6 +102,8 @@ pub struct ToPngResult {
     /// Pixels per drawing unit: `pixel = (world - viewBox origin) * this`.
     pub px_per_unit: f64,
     pub unsupported_types: Vec<String>,
+    /// Entities hidden by the drawing -- see [`crate::ToSvgResult::hidden`].
+    pub hidden: usize,
 }
 
 #[derive(Debug)]
@@ -196,6 +198,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         view_box,
         px_per_unit,
         unsupported_types: rendered.unsupported_types(),
+        hidden: rendered.hidden,
     })
 }
 

@@ -169,6 +169,7 @@ mod tests {
             LayerRecord {
                 name: name.to_string(),
                 color_index,
+                ..LayerRecord::default()
             },
         );
         Tables {

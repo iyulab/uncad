@@ -223,6 +223,30 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     edges
 }
 
+/// The entity's linetype name. R2000+ files store `ltype_flags` (0 BYLAYER,
+/// 1 BYBLOCK, 2 CONTINUOUS, 3 "a handle follows"); R13/R14 and the DXF
+/// reader store the handle alone. A handle wins when there is one.
+///
+/// # Safety
+/// `dwg` must be the live `Dwg_Data` that owns `entity_ptr`.
+unsafe fn entity_linetype(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> String {
+    if let Some(name) = get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "ltype")
+        .filter(|h| !h.is_null())
+        .and_then(|h| resolve_handle_name(dwg, h))
+    {
+        return name;
+    }
+    match get_common_field::<u8>(entity_ptr, "ltype_flags").unwrap_or(0) {
+        1 => "BYBLOCK",
+        2 => "CONTINUOUS",
+        _ => "BYLAYER",
+    }
+    .to_string()
+}
+
 /// An entity's stored OCS normal (`extrusion`, DXF 210), normalized; the
 /// world z axis when absent, zero or unreadable.
 fn read_extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
@@ -426,11 +450,26 @@ unsafe fn convert_entity(
         .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
         .unwrap_or_default();
     let (color_index, true_color) = entity_color(entity_ptr);
+    let source = unsafe { crate::header::source(dwg) };
+    let invisible = get_common_field::<u16>(entity_ptr, "invisible").unwrap_or(0) != 0;
+    // R13/R14 entities store no lineweight; LibreDWG leaves the code at 0,
+    // which would read as 0.00 mm.
+    let lineweight_mm = get_common_field::<u8>(entity_ptr, "linewt")
+        .filter(|_| source.r2000_plus)
+        .and_then(crate::visibility::lineweight_mm);
+    let ltype_scale = get_common_field::<f64>(entity_ptr, "ltype_scale")
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
+    let linetype = unsafe { entity_linetype(dwg, entity_ptr) };
     let common = EntityCommon {
         handle,
         layer,
         color_index,
         true_color,
+        invisible,
+        lineweight_mm,
+        linetype,
+        ltype_scale,
     };
 
     Some(match fixedtype {

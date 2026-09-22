@@ -18,6 +18,50 @@ pub struct LayerRecord {
     /// back a raw `256` "no palette match" sentinel for some real files -- see
     /// [`resolve_layer_color_index`] for the recovery applied first.
     pub color_index: i16,
+    /// Switched on. Off = the DWG's own bit, or a negative `color_index`
+    /// (how a DXF says it). Since 0.3.0; the defaults below make 0.2.0 JSON
+    /// load as "everything shown".
+    #[serde(default = "yes")]
+    pub on: bool,
+    #[serde(default)]
+    pub frozen: bool,
+    /// Locked layers are still drawn; reported for completeness.
+    #[serde(default)]
+    pub locked: bool,
+    /// The "plot this layer" flag. Read from R2000+ DWG files; a DXF's group
+    /// 290 is optional and LibreDWG's reader leaves it indistinguishable
+    /// from an absent one, so DXF layers (and R13/R14) always read `true`.
+    /// `DEFPOINTS` is hidden by name regardless -- see
+    /// [`crate::visibility::hidden_reason`].
+    #[serde(default = "yes")]
+    pub plot: bool,
+    /// The layer's lineweight in millimetres; `None` for the default (and
+    /// from R13/R14 files, which store none, or a DXF that omits group 370).
+    #[serde(default)]
+    pub lineweight_mm: Option<f64>,
+    /// The layer's LTYPE name; empty when unresolvable.
+    #[serde(default)]
+    pub linetype: String,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for LayerRecord {
+    /// An unnamed layer with colour 7, on, thawed, unlocked and plotting.
+    fn default() -> Self {
+        LayerRecord {
+            name: String::new(),
+            color_index: 7,
+            on: true,
+            frozen: false,
+            locked: false,
+            plot: true,
+            lineweight_mm: None,
+            linetype: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -101,6 +145,7 @@ pub struct Tables {
 /// `libredwg_sys` types into the public surface.
 pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    let source = unsafe { crate::header::source(dwg) };
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
@@ -119,7 +164,7 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
         if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LAYER {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(record) = convert_layer(object_ptr) {
+                if let Some(record) = convert_layer(dwg, object_ptr, source) {
                     layers.insert(record.name.clone(), record);
                 }
             }
@@ -261,11 +306,56 @@ fn convert_mlinestyle(object_ptr: *mut c_void) -> Option<(String, Vec<f64>)> {
     Some((name, offsets))
 }
 
-fn convert_layer(object_ptr: *mut c_void) -> Option<LayerRecord> {
+fn convert_layer(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    object_ptr: *mut c_void,
+    source: crate::header::Source,
+) -> Option<LayerRecord> {
     let name = crate::dynapi::get_utf8_field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
     let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
-    Some(LayerRecord { name, color_index })
+    let bit = |field: &str| get_field::<u8>(object_ptr, "LAYER", field).unwrap_or(0) != 0;
+    // R2000+ DWG: the decoder splits `flag0` into these bits, plot flag
+    // included. R13/R14 store the first four as bits of their own and no
+    // plot flag. LibreDWG's DXF reader applies the DWG bit layout to group
+    // 70 (bit 2 -> off, bit 4 -> frozen_in_new, bit 8 -> locked), so on
+    // that path the DXF layout is read from the raw flag instead: 1 frozen,
+    // 2 frozen in new viewports, 4 locked; "off" is a negative group 62,
+    // and an absent 290 cannot be told from a 0.
+    let (on, frozen, locked) = if source.from_dxf {
+        let flag = get_field::<u8>(object_ptr, "LAYER", "flag").unwrap_or(0);
+        (color.index >= 0, flag & 1 != 0, flag & 4 != 0)
+    } else {
+        (
+            !bit("off") && color.index >= 0,
+            bit("frozen"),
+            bit("locked"),
+        )
+    };
+    let plot = if source.r2000_plus && !source.from_dxf {
+        bit("plotflag")
+    } else {
+        true
+    };
+    // The lineweight code is only meaningful from R2000 on; a DXF layer
+    // without group 370 reads as code 0 (0.00 mm), which is left unknown.
+    let lineweight_mm = get_field::<u8>(object_ptr, "LAYER", "linewt")
+        .filter(|code| source.r2000_plus && !(source.from_dxf && *code == 0))
+        .and_then(crate::visibility::lineweight_mm);
+    let linetype = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYER", "ltype")
+        .filter(|h| !h.is_null())
+        .and_then(|h| crate::dynapi::resolve_handle_name(dwg, h))
+        .unwrap_or_default();
+    Some(LayerRecord {
+        name,
+        color_index,
+        on,
+        frozen,
+        locked,
+        plot,
+        lineweight_mm,
+        linetype,
+    })
 }
 
 /// Recovers a usable ACI index from a LAYER's raw `Dwg_Color` when LibreDWG

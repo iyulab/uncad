@@ -40,6 +40,39 @@ pub struct EntityCommon {
     /// always holds *something*, so the method is what decides whether the
     /// entity really opted into a direct RGB color.
     pub true_color: Option<u32>,
+    /// The entity's own invisible flag (DXF 60). Since 0.3.0; see
+    /// [`crate::visibility`] for what hides an entity.
+    #[serde(default)]
+    pub invisible: bool,
+    /// Lineweight in millimetres when the entity sets one (DXF 370);
+    /// `None` for BYLAYER, BYBLOCK and the default, and always `None` from
+    /// R13/R14 files, which store none. Since 0.3.0.
+    #[serde(default)]
+    pub lineweight_mm: Option<f64>,
+    /// Linetype: an LTYPE name (`Continuous`, `DASHED`, ...) or `BYLAYER`
+    /// / `BYBLOCK`. Since 0.3.0. Nothing renders linetypes yet.
+    #[serde(default)]
+    pub linetype: String,
+    /// Linetype scale (DXF 48); 1 when unset. Since 0.3.0.
+    #[serde(default = "one")]
+    pub ltype_scale: f64,
+}
+
+impl Default for EntityCommon {
+    /// An entity on no layer with BYLAYER colour, visible, with every
+    /// property at its "unset" value.
+    fn default() -> Self {
+        EntityCommon {
+            handle: String::new(),
+            layer: String::new(),
+            color_index: 256,
+            true_color: None,
+            invisible: false,
+            lineweight_mm: None,
+            linetype: String::new(),
+            ltype_scale: 1.0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

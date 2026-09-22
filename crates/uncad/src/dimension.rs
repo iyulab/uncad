@@ -488,8 +488,7 @@ mod tests {
             common: crate::model::EntityCommon {
                 handle: "1".into(),
                 layer: "0".into(),
-                color_index: 256,
-                true_color: None,
+                ..Default::default()
             },
             block_name: "*D1".into(),
             geometry: DimensionGeometry::Aligned {

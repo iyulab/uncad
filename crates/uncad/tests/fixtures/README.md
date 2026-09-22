@@ -27,6 +27,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `mirrored_ocs_r2000.dxf` | 925 | 7 | Closed LWPOLYLINE with extrusion (0,0,-1), an open one with a bulge, mirrored CIRCLE/ARC/TEXT |
 | `dimlfac12_r2000.dxf` | 1304 | 9 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 1359 | 11 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field |
+| `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
 
 ## cp949_r2000.dxf
 
@@ -95,6 +96,30 @@ right answer came out for the wrong reason; `closed` now reads bit 512
 group 70 on 11 polylines). Handle 21 (`flag = 16`) is the one that proves
 bit 1 is not "closed". A closed polyline *without* an extrusion (in-memory
 `flag = 512` exactly) is not in this file; the corpus test covers that case.
+
+## hidden_layers_r2000.dxf
+
+HEADER: `$INSUNITS 4`. TABLES: an LTYPE table (`Continuous`, `DASHED`) and
+a LAYER table:
+
+| Layer | DXF 62 | DXF 70 | DXF 290 | State |
+|---|---|---|---|---|
+| `0` | 7 | 0 | omitted | on |
+| `VISIBLE` | 1 | 0 | omitted | on |
+| `OFF` | -3 | 0 | omitted | off (negative colour) |
+| `FROZEN` | 4 | 1 | omitted | frozen |
+| `NOPLOT` | 5 | 0 | 0 | non-plotting -- **reads as plotting**: LibreDWG's DXF reader cannot tell an omitted 290 from a 0, so `plot` is only trusted from R2000+ DWG files |
+| `Defpoints` | 7 | 0 | 0 | hidden by name |
+| `LOCKED` | 6 | 4 | omitted | locked, still drawn |
+
+ENTITIES: one LINE per layer, in table order, from `(0, 10 i)` to
+`(100, 10 i)`; then on `VISIBLE` a LINE with `60 = 1` (invisible) at
+y = 100 and a LINE with `6 DASHED`, `370 = 50` (0.50 mm) and `48 = 2.0` at
+y = 110. `tests/visibility.rs` asserts the layer records, each entity's
+`hidden_reason` (off, frozen, defpoints, invisible; the `NOPLOT` line is
+shown, see above), the entity's `lineweight_mm` / `linetype` /
+`ltype_scale`, and that the renderer draws 5 of the 9 lines (all 9 with
+`include_hidden`, the hidden four at 50 % opacity).
 
 ## dimlfac12_r2000.dxf
 

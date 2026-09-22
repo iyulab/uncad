@@ -10,6 +10,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- Visibility (`uncad::visibility`): `hidden_reason(common, tables)` says why the drawing
+  does not show an entity -- its own invisible flag, the `DEFPOINTS` layer, a layer that
+  is off, frozen or non-plotting -- and `lineweight_mm` decodes the lineweight codes.
+  `LayerRecord` gains `on`, `frozen`, `locked`, `plot`, `lineweight_mm` and `linetype`;
+  `EntityCommon` gains `invisible`, `lineweight_mm`, `linetype` and `ltype_scale`. The
+  renderer leaves hidden entities out (block contents included) and reports how many in
+  `ToSvgResult::hidden` / `ToPngResult::hidden`; `ToSvgOptions::include_hidden` (CLI
+  `--include-hidden`) draws them at 50 % opacity instead. A layer's plot flag is trusted
+  from R2000+ DWG files only: LibreDWG's DXF reader cannot tell an omitted group 290 from
+  a cleared one, so DXF layers always read as plotting (`docs/CAVEATS.md`).
 - Polyline geometry (`uncad::geom`): `ocs_to_wcs` (the DXF arbitrary-axis algorithm),
   `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
   `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
@@ -118,6 +128,10 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Changed (breaking)
 
+- Hidden entities are no longer drawn. 0.2.0 rendered every entity in the space,
+  including those on layers switched off or frozen, dimension definition points on
+  `DEFPOINTS` and entities with the invisible flag -- what AutoCAD's screen and plots
+  leave out. `include_hidden` restores them, faded.
 - Coordinates are world coordinates. Entities DXF stores in their own OCS -- CIRCLE and
   ARC centres, LWPOLYLINE/POLYLINE_2D vertices, TEXT/ATTRIB anchors, INSERT insertion
   points, SOLID corners -- are transformed on read; 0.2.0 reported the stored OCS values

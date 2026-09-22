@@ -28,6 +28,8 @@ SVG/PNG options:
                                 all   = everything, in one document
   --no-trim                   keep outlying coordinates in the viewBox instead
                                 of trimming to the drawing's main cluster
+  --include-hidden            draw hidden entities (layers off, frozen or
+                                non-plotting, DEFPOINTS, invisible) at 50 %
 
 PNG options:
   --fit <px>                  longest side of the image in pixels (default: 1568,
@@ -53,6 +55,7 @@ struct Args {
     output: Option<String>,
     space: String,
     outlier_trim: bool,
+    include_hidden: bool,
     fit: Option<String>,
     ppu: Option<String>,
     scale: Option<String>,
@@ -69,6 +72,7 @@ fn parse_args(argv: &[String]) -> Args {
         output: None,
         space: "model".to_string(),
         outlier_trim: true,
+        include_hidden: false,
         fit: None,
         ppu: None,
         scale: None,
@@ -92,6 +96,7 @@ fn parse_args(argv: &[String]) -> Args {
                 }
             }
             "--no-trim" => args.outlier_trim = false,
+            "--include-hidden" => args.include_hidden = true,
             "--fit" => {
                 i += 1;
                 args.fit = argv.get(i).cloned();
@@ -167,7 +172,7 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let unsupported = match extension.as_str() {
+    let (unsupported, hidden) = match extension.as_str() {
         "json" => {
             let json = db
                 .to_json(ToJsonOptions {
@@ -175,17 +180,17 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, json.as_bytes())?;
-            Vec::new()
+            (Vec::new(), 0)
         }
         "svg" => {
             let result = db.to_svg(svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
-            result.unsupported_types
+            (result.unsupported_types, result.hidden)
         }
         "png" => {
             let result = db.to_png(png_options(args)?).map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
-            result.unsupported_types
+            (result.unsupported_types, result.hidden)
         }
         other => {
             return Err(format!(
@@ -199,6 +204,12 @@ fn run(args: &Args) -> Result<(), String> {
         eprintln!(
             "warning: left out of the image, unsupported entity types: {}",
             unsupported.join(", ")
+        );
+    }
+    if hidden > 0 && !args.include_hidden {
+        eprintln!(
+            "note: {hidden} hidden entities left out (layers off, frozen or non-plotting, \
+             DEFPOINTS, invisible); --include-hidden draws them at 50 %"
         );
     }
     Ok(())
@@ -228,6 +239,7 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
     Ok(ToSvgOptions {
         space: parse_space(&args.space)?,
         outlier_trim: args.outlier_trim,
+        include_hidden: args.include_hidden,
         ..Default::default()
     })
 }

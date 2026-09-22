@@ -69,6 +69,11 @@ int uncad_dwg_version(const Dwg_Data *dwg);
 int uncad_dwg_from_version(const Dwg_Data *dwg);
 unsigned int uncad_dwg_codepage(const Dwg_Data *dwg);
 
+/* 1 when the data came from DXF text (LibreDWG's DWG_OPTS_INDXF flag on
+ * `dwg->opts`), 0 for a DWG or a NULL `dwg`. Some fields mean something
+ * else on that path (a LAYER's plot flag, for one). */
+int uncad_dwg_from_dxf(const Dwg_Data *dwg);
+
 /* LibreDWG's own IS_FROM_TU_DWG(dwg) rule (src/bits.h): 1 when the strings
  * dynapi hands out are already UTF-8 (converted from the R2007+ UTF-16
  * storage), 0 when they are the file's raw 8-bit code-page bytes -- which

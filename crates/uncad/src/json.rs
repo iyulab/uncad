@@ -31,6 +31,12 @@
 //!   real DXF name in its `type_name` field.
 //! - Points are objects (`{"x":..,"y":..}` / `{"x":..,"y":..,"z":..}`); angles
 //!   are radians, as in the model.
+//! - Visibility (since 0.3.0): `tables.layers[..]` carry `on`, `frozen`,
+//!   `locked`, `plot`, `lineweight_mm` and `linetype`; every entity's
+//!   `common` carries `invisible`, `lineweight_mm`, `linetype` and
+//!   `ltype_scale`. The JSON lists hidden entities like any other -- it is
+//!   the model, not the picture -- and [`crate::visibility::hidden_reason`]
+//!   says which ones the renderer leaves out.
 //! - Coordinates are world coordinates. Entities DXF stores in an object
 //!   coordinate system (CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB,
 //!   INSERT, SOLID) are transformed on read and carry their `extrusion`
@@ -124,6 +130,10 @@ mod tests {
             layer: "0".to_string(),
             color_index: 256,
             true_color: Some(0x12_34_56),
+            invisible: false,
+            lineweight_mm: Some(0.35),
+            linetype: "DASHED".to_string(),
+            ltype_scale: 2.0,
         }
     }
 
@@ -548,6 +558,9 @@ mod tests {
             LayerRecord {
                 name: "0".to_string(),
                 color_index: 7,
+                frozen: true,
+                linetype: "Continuous".to_string(),
+                ..LayerRecord::default()
             },
         );
         let mut mlinestyles = BTreeMap::new();

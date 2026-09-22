@@ -50,6 +50,11 @@ pub struct ToSvgOptions {
     pub stroke_width: Option<f64>,
     pub space: Space,
     pub outlier_trim: bool,
+    /// Draw the entities the drawing hides (layers off, frozen or
+    /// non-plotting, DEFPOINTS, invisible entities -- see
+    /// [`crate::visibility`]) at 50 % opacity instead of leaving them out.
+    /// Default `false`. Since 0.3.0.
+    pub include_hidden: bool,
 }
 
 impl Default for ToSvgOptions {
@@ -59,6 +64,7 @@ impl Default for ToSvgOptions {
             stroke_width: None,
             space: Space::Model,
             outlier_trim: true,
+            include_hidden: false,
         }
     }
 }
@@ -71,6 +77,10 @@ pub struct ToSvgResult {
     /// DXF names of entity types this renderer had nothing to draw for,
     /// sorted.
     pub unsupported_types: Vec<String>,
+    /// How many entities were hidden (drawn faded with
+    /// [`ToSvgOptions::include_hidden`], left out otherwise), block contents
+    /// included. Since 0.3.0.
+    pub hidden: usize,
 }
 
 /// An SVG `viewBox`, in SVG coordinates: `x`/`y` are the top-left corner and
@@ -201,6 +211,10 @@ struct Ctx<'a> {
     /// block at every level can still fan out combinatorially before the depth
     /// cap is ever reached.
     block_ref_budget: u32,
+    /// [`ToSvgOptions::include_hidden`].
+    include_hidden: bool,
+    /// Entities [`render_entity`] found hidden.
+    hidden: usize,
 }
 
 impl<'a> Ctx<'a> {
@@ -221,6 +235,8 @@ impl<'a> Ctx<'a> {
             defs: Vec::new(),
             next_def_id: 0,
             block_ref_budget: BLOCK_REF_BUDGET,
+            include_hidden: false,
+            hidden: 0,
         }
     }
 
@@ -634,6 +650,18 @@ fn render_block_ref(
 /// while `consider` separately tracks world-space bounds through that same
 /// transform.
 fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
+    if crate::visibility::hidden_reason(e.common(), ctx.tables).is_some() {
+        ctx.hidden += 1;
+        if !ctx.include_hidden {
+            return None;
+        }
+        return render_shown_entity(e, ctx).map(|svg| format!("<g opacity=\"0.5\">{svg}</g>"));
+    }
+    render_shown_entity(e, ctx)
+}
+
+/// [`render_entity`] once visibility is settled.
+fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
     let color = resolve_entity_color(e.common(), ctx);
     match e {
         Entity::Line(l) => {
@@ -1123,6 +1151,7 @@ pub(crate) struct Rendered {
     defs: Vec<String>,
     pub(crate) view_box: ViewBox,
     unsupported: HashSet<String>,
+    pub(crate) hidden: usize,
 }
 
 impl Rendered {
@@ -1146,6 +1175,7 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
     let mut body: Vec<String> = Vec::new();
 
     let mut ctx = Ctx::new(&db.tables);
+    ctx.include_hidden = options.include_hidden;
     for e in select_entities_for_space(db, options.space) {
         ctx.reset_entity_bounds();
         if let Some(svg) = render_entity(e, &mut ctx) {
@@ -1192,6 +1222,7 @@ pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
         defs: ctx.defs,
         view_box,
         unsupported: ctx.unsupported,
+        hidden: ctx.hidden,
     }
 }
 
@@ -1235,6 +1266,7 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
         svg: assemble(&rendered, stroke_width),
         view_box: rendered.view_box,
         unsupported_types: rendered.unsupported_types(),
+        hidden: rendered.hidden,
     }
 }
 
@@ -1260,7 +1292,7 @@ mod tests {
             handle: String::new(),
             layer: String::new(),
             color_index: 0,
-            true_color: None,
+            ..EntityCommon::default()
         };
         let children: Vec<Entity> = (0..5)
             .map(|i| {

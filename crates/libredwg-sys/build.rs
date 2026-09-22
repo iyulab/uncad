@@ -201,6 +201,7 @@ fn main() {
         .allowlist_function("uncad_dwg_read_bytes")
         .allowlist_function("uncad_dxf_read_bytes")
         .allowlist_function("uncad_dwg_version")
+        .allowlist_function("uncad_dwg_from_dxf")
         .allowlist_function("uncad_dwg_from_version")
         .allowlist_function("uncad_dwg_codepage")
         .allowlist_function("uncad_dwg_is_tu")

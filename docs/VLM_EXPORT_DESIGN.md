@@ -449,8 +449,11 @@ DIMSTYLE formatter with DIMPOST/DIMRND/DIMDSEP and XDATA overrides stays in
 with OCS -> WCS, segments, length, signed area, arc-aware bounds and a
 self-intersection check; the OCS applied to CIRCLE, ARC, LWPOLYLINE,
 POLYLINE_2D, TEXT, ATTRIB, INSERT and SOLID -- HATCH boundaries and the
-DIMENSION text point are still stored-frame). Everything else below is
-still open.
+DIMENSION text point are still stored-frame); **P5** is in (`visibility.rs`
+with `hidden_reason` and the lineweight table, layer on/frozen/locked/plot/
+lineweight/linetype, entity invisible/lineweight/linetype/ltype_scale, the
+renderer skipping hidden entities with `include_hidden` fading them, hidden
+counts in the results and the CLI). Everything else below is still open.
 
 | Release | Phase | Files |
 |---|---|---|

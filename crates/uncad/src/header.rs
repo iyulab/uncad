@@ -138,6 +138,29 @@ pub struct Header {
     pub clayer: String,
 }
 
+/// Where the data came from, for the few fields whose meaning depends on
+/// it: R13/R14 files store no lineweights, and LibreDWG's DXF reader cannot
+/// tell an absent LAYER plot flag (group 290) from a cleared one.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Source {
+    pub from_dxf: bool,
+    pub r2000_plus: bool,
+}
+
+/// # Safety
+/// `dwg` must point at a `Dwg_Data` a successful read filled in.
+pub(crate) unsafe fn source(dwg: *mut libredwg_sys::Dwg_Data) -> Source {
+    // SAFETY: the shims only read two header fields of a live Dwg_Data.
+    let version = unsafe { libredwg_sys::uncad_dwg_version(dwg) };
+    let from_dxf = unsafe { libredwg_sys::uncad_dwg_from_dxf(dwg) } != 0;
+    #[allow(clippy::unnecessary_cast)]
+    let r2000_plus = version >= libredwg_sys::DWG_VERSION_TYPE_R_2000 as i32;
+    Source {
+        from_dxf,
+        r2000_plus,
+    }
+}
+
 /// Reads the header out of a live `Dwg_Data`.
 ///
 /// # Safety
