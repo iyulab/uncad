@@ -2461,3 +2461,76 @@ fn every_string_the_picture_draws_is_a_text_record_and_a_strings_key() {
     assert!(kinds.contains("TOLERANCE"), "{kinds:?}");
 }
 
+/// `count` short LINEs on a 500-column grid: the cheapest entity there is,
+/// so that what a timing test measures is the pass over the records rather
+/// than the rasterizer.
+fn many_lines(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D};
+    let mut entities = Vec::with_capacity(count);
+    for i in 0..count {
+        let (x, y) = ((i % 500) as f64 * 2.0, (i / 500) as f64 * 2.0);
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D { x, y, z: 0.0 },
+            end_point: Point3D {
+                x: x + 1.0,
+                y,
+                z: 0.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn record_building_does_not_grow_with_the_square_of_the_entity_count() {
+    // Every record looked its entity's extent up with a linear scan over
+    // all of them, so the pass cost O(N^2): a generated 100 000-LINE
+    // drawing spent 59 s in the export phase where 25 000 spent 8.6 s --
+    // four times the entities, seven times the time -- and the same
+    // 100 000 take 12 s through the map the tiles are already culled with.
+    //
+    // Only a clock can see a change that alters no output, so the test
+    // measures the shape rather than a duration: four times the entities
+    // may cost at most `LIMIT` times the time. Measured both ways on this
+    // very drawing (twice each), the scan lands at 7.3x and the map at
+    // 2.9x, so 5.5 separates them with room for a loaded machine in either
+    // direction.
+    const LIMIT: f64 = 5.5;
+    let time_of = |count: usize| -> f64 {
+        let db = many_lines(count);
+        let tmp = TempDir::new(&format!("scale{count}"));
+        let started = std::time::Instant::now();
+        export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        started.elapsed().as_secs_f64()
+    };
+    // Warm the font atlas and the allocator on a size neither run measures.
+    time_of(500);
+    let small = time_of(12_500);
+    let big = time_of(50_000);
+    assert!(
+        big <= small * LIMIT,
+        "50 000 entities took {big:.2}s against {small:.2}s for 12 500 ({:.1}x)",
+        big / small
+    );
+}

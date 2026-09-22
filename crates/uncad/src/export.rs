@@ -1514,9 +1514,12 @@ pub fn export_package(
     let tiles_for =
         |bbox: &Rect| -> Vec<String> { images_for(bbox).iter().map(|i| i.id.clone()).collect() };
 
-    let extent_of = |handle: &str| -> Option<Rect> {
-        extents.iter().find(|e| e.handle == handle).map(|e| e.rect)
-    };
+    // The same map the tiles are culled with, built above. A linear `find`
+    // over every visible entity's extent, once per record, made building the
+    // dimension, geometry and block records quadratic in entity count: a
+    // generated 100k-LINE drawing took 128 s where 25k took 9.7 s (4x the
+    // entities, 13x the time). The lookup is O(1) and returns the same rect.
+    let extent_of = |handle: &str| -> Option<Rect> { extent_of_handle.get(handle).copied() };
 
     // texts
     let mut text_records: Vec<Record> = texts
