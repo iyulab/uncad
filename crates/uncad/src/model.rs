@@ -193,9 +193,17 @@ impl LwPolylineEntity {
 
     /// The area the polyline encloses (an open one is closed by a straight
     /// segment, its last vertex's bulge ignored), arcs included; `None`
-    /// unless it has three or more vertices.
+    /// when the shape cannot enclose anything.
+    ///
+    /// Three vertices are the fewest that can bound a region with straight
+    /// edges, but a *closed* two-vertex one can: that is what AutoCAD's
+    /// DONUT command writes, two bulges of 1 being a full circle. Before
+    /// 0.3.0 those reported no area and got no region record at all --
+    /// 100 of the 227 closed polylines in `AutoCADSamples3.dwg` are exactly
+    /// this shape.
     pub fn area(&self) -> Option<f64> {
-        (self.vertices.len() >= 3).then(|| self.signed_area().abs())
+        let enclosing = self.vertices.len() >= 3 || (self.closed && self.vertices.len() == 2);
+        enclosing.then(|| self.signed_area().abs())
     }
 
     /// [`area`](Self::area) with its sign: positive for a counter-clockwise
@@ -925,15 +933,23 @@ pub struct MLineVertex {
 
 /// An MLINE is really a set of parallel offset lines (wall-style multi-line).
 /// The per-line offsets live in the referenced MLINESTYLE object, resolved
-/// against [`crate::tables::Tables::mlinestyles`] at render time: when the
-/// lookup succeeds one polyline is drawn per style line, and when it fails
-/// rendering falls back to a single centerline.
+/// against [`crate::tables::Tables::mlinestyles`] at render time and scaled
+/// by this entity's own [`scale`](Self::scale): when the lookup succeeds
+/// one polyline is drawn per style line, and when it fails rendering falls
+/// back to a single centerline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MLineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<MLineVertex>,
     pub closed: bool,
     pub mlinestyle_name: String,
+    /// DXF 40, the entity's own `MLSCALE`. The style's offsets are in
+    /// *style* units and this is what turns them into drawing units: a
+    /// 200 mm wall is the STANDARD style (offsets +-0.5) drawn at scale
+    /// 200, so ignoring it draws every multi-line one unit wide whatever
+    /// the drawing says. 1.0 when the file stores none. Since 0.3.0.
+    #[serde(default = "one")]
+    pub scale: f64,
 }
 
 /// WIPEOUT's clip boundary, resolved to 2D points in the entity's own local

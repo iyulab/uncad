@@ -1646,11 +1646,19 @@ fn convert_mline(
         get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MLINE", "mlinestyle")
             .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
             .unwrap_or_default();
+    // DXF 40 / `Dwg_Entity_MLINE.scale` (dwg.h): the MLINESTYLE's offsets
+    // are in style units and this is what turns them into drawing units.
+    // A file that stores no scale means 1.0, and a stored 0 would collapse
+    // every element onto the centerline, so both fall back to 1.0.
+    let scale = get_field::<f64>(entity_ptr, "MLINE", "scale")
+        .filter(|s| s.is_finite() && *s != 0.0)
+        .unwrap_or(1.0);
     MLineEntity {
         common,
         vertices,
         closed: flags & MLINE_CLOSED_FLAG != 0,
         mlinestyle_name,
+        scale,
     }
 }
 

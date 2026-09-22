@@ -429,7 +429,14 @@ pub fn polyline_signed_area(vertices: &[Point2D], bulges: &[f64], closed: bool) 
             }
         }
     }
-    if segments.len() < 3 {
+    // Three straight segments are the fewest that can enclose anything --
+    // but two *arcs* can. A closed two-vertex polyline with bulges is
+    // exactly what AutoCAD's DONUT command writes, and two bulges of 1
+    // describe a full circle. The shoelace terms of such a shape cancel to
+    // zero, so what is left is the two circular-segment terms, which are
+    // its area. Fewer than three segments with no arc among them still
+    // encloses nothing.
+    if segments.len() < 3 && !segments.iter().any(|s| matches!(s, Segment::Arc { .. })) {
         return 0.0;
     }
     let mut area = 0.0;
@@ -913,5 +920,48 @@ mod tests {
         let (min_x, min_y, max_x, max_y) = turned.bounds();
         assert!(close(min_x, -10.0) && close(max_x, 0.0), "{min_x} {max_x}");
         assert!(close(min_y, -20.0) && close(max_y, 20.0), "{min_y} {max_y}");
+    }
+
+    #[test]
+    fn a_closed_two_vertex_bulged_polyline_encloses_its_real_area() {
+        // AutoCAD's DONUT: two vertices 100 apart with bulges of 1 each is
+        // a circle of radius 50, so the area is pi * 50^2 = 7853.981634 and
+        // the perimeter is 2 * pi * 50 = 314.159265. Both numbers come from
+        // the circle, not from this crate. The guard used to be a flat
+        // "fewer than three segments encloses nothing", which is true of
+        // straight edges and false of arcs.
+        let verts = [p(0.0, 0.0), p(100.0, 0.0)];
+        let bulges = [1.0, 1.0];
+        let area = polyline_area(&verts, &bulges, true);
+        assert!(
+            close(area, std::f64::consts::PI * 2500.0),
+            "area came out {area}"
+        );
+        assert!(
+            close(
+                polyline_length(&verts, &bulges, true),
+                std::f64::consts::TAU * 50.0
+            ),
+            "perimeter"
+        );
+        // Orientation still reads: two negative bulges trace the same
+        // circle clockwise.
+        assert!(polyline_signed_area(&verts, &bulges, true) > 0.0);
+        assert!(polyline_signed_area(&verts, &[-1.0, -1.0], true) < 0.0);
+
+        // Two *straight* segments still enclose nothing -- there and back
+        // along the same line.
+        assert!(close(polyline_area(&verts, &[0.0, 0.0], true), 0.0));
+    }
+
+    #[test]
+    fn a_half_donut_is_half_the_circle() {
+        // One bulge of 1, one of 0: a semicircle closed by its diameter,
+        // pi * 50^2 / 2 = 3926.990817.
+        let area = polyline_area(&[p(0.0, 0.0), p(100.0, 0.0)], &[1.0, 0.0], true);
+        assert!(
+            close(area, std::f64::consts::PI * 1250.0),
+            "area came out {area}"
+        );
     }
 }

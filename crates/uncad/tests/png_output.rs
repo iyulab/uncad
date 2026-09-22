@@ -424,3 +424,73 @@ fn a_rasterizer_panic_comes_back_as_an_error_instead_of_killing_the_process() {
         Err(other) => panic!("unexpected error: {other}"),
     }
 }
+
+#[test]
+fn a_point_is_visible_at_a_scale_where_a_half_unit_dot_is_not() {
+    use uncad::model::{EntityCommon, LineEntity, Point3D, PointEntity};
+    // W28. At 0.2 px/unit -- an ordinary scale for a 4000-unit plan on a
+    // 800 px image -- the old half-unit POINT dot was 0.1 px across and
+    // antialiased away to nothing -- while the package went on publishing that
+    // entity's tiles and pixel box, pointing a reader at pure white. The
+    // cross is sized in stroke widths instead, so it is the same 5 px
+    // whatever the drawing's scale.
+    //
+    // The expected count is arithmetic, not a measurement: a 5 x 1.25 px
+    // arm each way is about 12 px of ink, so "more than 4 pixels that are
+    // not white" is a floor no sub-pixel dot can reach and no 5 px cross
+    // can miss.
+    let common = |handle: &str| EntityCommon {
+        handle: handle.into(),
+        layer: "0".into(),
+        ..EntityCommon::default()
+    };
+    let entities = vec![
+        uncad::Entity::Line(LineEntity {
+            common: common("L"),
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 4000.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }),
+        uncad::Entity::Point(PointEntity {
+            common: common("P"),
+            position: Point3D {
+                x: 2000.0,
+                y: 1000.0,
+                z: 0.0,
+            },
+        }),
+    ];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    let db = uncad::CadDatabase::new(entities, tables);
+
+    let png = db
+        .to_png(ToPngOptions {
+            size: PngSize::PxPerUnit(0.2),
+            ..Default::default()
+        })
+        .expect("rasterizes");
+    let img = decode(&png.png);
+    assert_eq!(png.px_per_unit, 0.2);
+
+    // Count the ink in the top half only, which the LINE does not reach.
+    let n = img.color_type.samples();
+    let ink = (0..img.height / 2)
+        .flat_map(|y| (0..img.width).map(move |x| (x, y)))
+        .filter(|(x, y)| img.pixel(*x, *y)[..n.min(3)].iter().any(|c| *c < 250))
+        .count();
+    assert!(ink > 4, "the POINT rasterized to {ink} non-white pixels");
+}

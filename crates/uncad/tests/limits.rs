@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use uncad::limits::{
-    MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
+    Cap, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
     MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
 };
 use uncad::model::{
@@ -176,14 +176,15 @@ fn a_block_record_corrupted_into_referencing_itself_renders_bounded_and_says_so(
 // --- the caps, one at a time -------------------------------------------
 
 #[test]
-fn a_block_that_references_itself_is_left_out_of_the_picture() {
+fn a_block_that_references_itself_is_cut_short_and_named() {
     // The shape the corrupted file above happens to produce, built by hand
     // so the cap is tested without depending on any one file: a block that
     // both draws something and references itself several times, so every
     // level of the walk adds to the document. Rendering stops at
-    // MAX_ENTITY_SVG_BYTES, which bounds the work, and the half-drawn part
-    // is then left out whole -- one entity covering the whole picture is
-    // not a picture, and a package would re-parse it for every tile.
+    // MAX_ENTITY_SVG_BYTES, which is what bounds the work; what it drew by
+    // then is kept, and the part is reported as truncated. It used to be
+    // dropped whole, which turned any drawing that is one INSERT of one
+    // large block into a blank page (see the test below).
     let mut children: Vec<Entity> = (0..40).map(|i| line("C", i as f64, 0.0)).collect();
     children.extend((0..8).map(|i| insert("I", "R", i as f64)));
     let drawing = db(
@@ -196,18 +197,72 @@ fn a_block_that_references_itself_is_left_out_of_the_picture() {
     let elapsed = started.elapsed();
 
     assert_eq!(
-        result.limits.oversized_parts, 1,
-        "the runaway block reference should have been left out: {:?}",
+        result.limits.truncated_parts, 1,
+        "the runaway block reference should have been cut short: {:?}",
         result.limits
     );
+    // And *named*: a count alone leaves a consumer unable to tell which
+    // entity the picture is missing part of.
     assert!(
-        result.svg.len() < MAX_ENTITY_SVG_BYTES,
+        result
+            .limits
+            .dropped
+            .iter()
+            .any(|d| d.handle == "T" && d.cap == Cap::EntityBytes),
+        "{:?}",
+        result.limits.dropped
+    );
+    assert!(
+        result.svg.len() < MAX_ENTITY_SVG_BYTES + SLACK,
         "the document grew to {} bytes",
         result.svg.len()
     );
     assert!(
         result.svg.contains("<line "),
         "the rest of the drawing must still be drawn"
+    );
+    assert!(elapsed.as_secs() < 120, "took {elapsed:?}");
+}
+
+/// How many `<line>` elements a block of this many lines must produce for
+/// the drawing to have rendered at all.
+const ONE_BIG_BLOCK: usize = 90_000;
+
+#[test]
+fn a_drawing_that_is_one_insert_of_one_big_block_renders_whole() {
+    // W0. A bound XREF, an imported survey or a "whole floor" block is a
+    // single top-level INSERT, so a flat per-*entity* byte cap was really a
+    // cap on the whole drawing: past about 65 000 short lines the picture
+    // came out empty, with a warning that named no handle. 90 000 lines is
+    // ~5.8 MB of body -- over the old 4 MiB, under the quarter of the
+    // document budget the cap is now -- so every one of them must be
+    // drawn, and nothing may be reported as missing.
+    let children: Vec<Entity> = (0..ONE_BIG_BLOCK)
+        .map(|i| line("C", (i % 300) as f64 * 2.0, (i / 300) as f64 * 2.0))
+        .collect();
+    let drawing = db(
+        vec![insert("T", "PLAN", 0.0)],
+        vec![block("PLAN", children)],
+    );
+
+    let started = Instant::now();
+    let result = drawing.to_svg(ToSvgOptions::default());
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        result.svg.matches("<line ").count(),
+        ONE_BIG_BLOCK,
+        "every line the block holds must be in the picture"
+    );
+    assert!(
+        !result.limits.engaged(),
+        "nothing was left out, so nothing should be reported: {:?}",
+        result.limits
+    );
+    assert!(
+        result.svg.len() > 4 * 1024 * 1024,
+        "the part is {} bytes -- under the old flat cap, so this test would          have passed before the fix too",
+        result.svg.len()
     );
     assert!(elapsed.as_secs() < 120, "took {elapsed:?}");
 }
@@ -231,7 +286,7 @@ fn many_ordinary_entities_still_stop_at_the_whole_documents_budget() {
     let elapsed = started.elapsed();
 
     assert_eq!(
-        result.limits.oversized_parts, 0,
+        result.limits.truncated_parts, 0,
         "no single part is oversized here: {:?}",
         result.limits
     );
@@ -239,6 +294,16 @@ fn many_ordinary_entities_still_stop_at_the_whole_documents_budget() {
         result.limits.entities_dropped > 0,
         "the document budget is what should have stopped this: {:?}",
         result.limits
+    );
+    // And the handles are named, so a package can list them as excluded.
+    assert!(
+        result
+            .limits
+            .dropped
+            .iter()
+            .any(|d| d.cap == Cap::DocumentBytes),
+        "{:?}",
+        result.limits.dropped
     );
     assert!(
         result.svg.len() < MAX_SVG_BODY_BYTES + SLACK,
@@ -472,6 +537,108 @@ fn an_entity_at_an_absurd_coordinate_does_not_drag_the_viewbox_with_it() {
         1,
         "the entity with the absurd endpoint should not be drawn"
     );
+    // W1: and it is *said*. Until 0.3.0 shipped, the entity was screened
+    // out before it was ever measured, so it appeared in no image, no
+    // record and no report -- a consumer auditing "what was left out and
+    // why" could only conclude the file never held it.
+    let excluded: Vec<&str> = result
+        .crop
+        .excluded
+        .iter()
+        .map(|e| e.handle.as_str())
+        .collect();
+    assert_eq!(excluded, vec!["FAR"], "{:?}", result.crop.excluded);
+}
+
+#[test]
+fn a_far_away_entity_is_listed_as_an_outlier_rather_than_deleted() {
+    // W1, the shape the reviewer's fixture had: two sane lines, one LINE
+    // reaching 1e20 and a CIRCLE of radius 1e16. Both absurd entities are
+    // measured, both are named in the crop's exclusions, and the crop is
+    // the two sane lines' own 10 x 1 box.
+    let drawing = db(
+        vec![
+            Entity::Line(LineEntity {
+                common: common("D1"),
+                start_point: xyz(0.0, 0.0),
+                end_point: xyz(10.0, 0.0),
+            }),
+            Entity::Line(LineEntity {
+                common: common("D2"),
+                start_point: xyz(0.0, 1.0),
+                end_point: xyz(10.0, 1.0),
+            }),
+            Entity::Line(LineEntity {
+                common: common("D3"),
+                start_point: xyz(0.0, 2.0),
+                end_point: xyz(1e20, 2.0),
+            }),
+            Entity::Circle(uncad::model::CircleEntity {
+                common: common("D4"),
+                center: Point3D {
+                    x: 5.0,
+                    y: 5.0,
+                    z: 0.0,
+                },
+                radius: 1e16,
+                extrusion: Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+            }),
+        ],
+        Vec::new(),
+    );
+    let result = drawing.to_svg(ToSvgOptions::default());
+
+    let mut excluded: Vec<&str> = result
+        .crop
+        .excluded
+        .iter()
+        .map(|e| e.handle.as_str())
+        .collect();
+    excluded.sort_unstable();
+    assert_eq!(excluded, vec!["D3", "D4"], "{:?}", result.crop.excluded);
+    // The sane pair is the picture, and their two lines are what it draws.
+    assert_eq!(result.svg.matches("<line ").count(), 2);
+    assert!(result.view_box.width < 100.0, "{:?}", result.view_box);
+}
+
+#[test]
+fn an_entity_whose_coordinates_are_not_numbers_is_counted_and_named() {
+    // W1's other half: a coordinate that is not a number cannot be drawn
+    // at all (`NaN` is not in SVG's `<number>` grammar), so the entity is
+    // left out -- but the report has to say so, with the handle, or the
+    // package's `excluded` list is a lie by omission.
+    let drawing = db(
+        vec![
+            line("OK", 0.0, 0.0),
+            Entity::Line(LineEntity {
+                common: common("NAN"),
+                start_point: xyz(0.0, 0.0),
+                end_point: xyz(f64::NAN, 1.0),
+            }),
+        ],
+        Vec::new(),
+    );
+    let result = drawing.to_svg(ToSvgOptions::default());
+
+    assert_eq!(result.limits.unreadable_entities, 1, "{:?}", result.limits);
+    assert_eq!(
+        result.limits.dropped,
+        vec![uncad::limits::Dropped {
+            handle: "NAN".to_string(),
+            type_name: "LINE".to_string(),
+            cap: Cap::NotANumber,
+        }]
+    );
+    assert!(result
+        .limits
+        .summary()
+        .expect("engaged")
+        .contains("handles NAN"));
+    assert_eq!(result.svg.matches("<line ").count(), 1);
 }
 
 #[test]

@@ -115,11 +115,21 @@ section 4).
   with an optional `why`; `numeric` carries `tol`.
 - Every record lists `tiles: [...]` and `px: {"ov": [...], "f0/z1/r02_c00": [...]}`.
 
-LINE:
+LINE. `from`/`to` are the plan projection (every box and every pixel map in the
+package is planar), but `length` is the length the *file* holds -- the 3D
+distance -- so a line that rises does not publish its plan length as `exact`.
+When it does rise, `length_plan` (the key POLYLINE_3D uses for the same
+quantity) and `dz` are written beside it, and they are the only thing in an
+otherwise planar record that says so; a line in the plane carries neither.
 
 ```json
 {"id":"2F3A","type":"LINE","layer":"A-WALL","space":"model","from":[120.5,48.0],"to":[240.5,48.0],
  "length":120.0,"unit":"mm","confidence":"exact","bbox":[120.5,48.0,240.5,48.0],"tiles":["f0/z1/r02_c00"]}
+```
+
+```json
+{"id":"2F3B","type":"LINE","layer":"A-ROOF","from":[0.0,50.0],"to":[300.0,50.0],
+ "length":500.0,"length_plan":300.0,"dz":400.0,"unit":"mm","confidence":"exact"}
 ```
 
 Closed LWPOLYLINE with one 90-degree arc. The bulge on vertex i applies to the
@@ -465,8 +475,10 @@ fonts loaded once, `ViewBox` + `px_per_unit` in every result, RAY/XLINE clipped
 to each document's viewBox instead of a fixed 1e6-unit segment, and the bundled
 `Uncad Sans` with `font-family` on every `<text>` -- shipped as a plain
 `include_bytes!`, not behind the `bundled-fonts` cargo feature the table in
-section 7 proposes) -- still open in P1: pixel-sized symbols (POINT is a
-half-unit dot, arrowheads a fixed 2.5 units, dashes `4,2` user units);
+section 7 proposes) -- POINT now draws the table's 5 px cross, sized through the
+same `@@SW@@` placeholder as the strokes, so it is the same size whatever the
+drawing's scale; still open in P1: the other pixel-sized symbols (arrowheads a
+fixed 2.5 units, dashes `4,2` user units);
 **P2 done** (`uncad::text`
 decoder with all three stack separators and the `%%` codes, `text_plain` on
 every text type, TEXT/ATTRIB justification fields and ATTRIB `tag`, MTEXT

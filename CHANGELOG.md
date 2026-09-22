@@ -11,11 +11,22 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 ### Added
 
 - `uncad::limits`: the renderer's robustness caps (`MAX_BLOCK_REF_DEPTH`,
-  `MAX_BLOCK_REFS`, `MAX_SVG_BODY_BYTES`, `MAX_ENTITY_POINTS`, `MAX_HATCH_TILE_SPAN`) in
+  `MAX_BLOCK_REFS`, `MAX_SVG_BODY_BYTES`, `MAX_ENTITY_SVG_BYTES`, `MAX_ENTITY_POINTS`,
+  `MAX_WORLD_COORDINATE`, `MAX_HATCH_TILE_SPAN`) in
   one documented place, and `LimitReport`, which says what they took away from a render.
   It is carried by `ToSvgResult::limits` and `ToPngResult::limits`, printed by the CLI as
   a warning, and written into a package's `report.json` under `limits` (and as a
   `warnings` entry). Empty for every well-formed drawing.
+- `LimitReport::dropped`: which entities a cap acted on, not only how many -- a
+  `Vec<uncad::limits::Dropped>` of handle, DXF type and `Cap`
+  (`entity_points`/`document_bytes`/`entity_bytes`/`block_refs`/`hatch_tile`/`not_a_number`),
+  capped at `MAX_REPORTED_HANDLES` (100) entries. The CLI's warning names the first five,
+  and a package lists them in `report.json`'s `excluded` beside the crop's own
+  exclusions, so what is missing from the picture is one list.
+- `MLineEntity::scale`: the MLINE's own `MLSCALE` (DXF 40), which the MLINESTYLE offsets
+  are multiplied by. 1.0 when the file stores none.
+- A LINE's geometry record carries `length_plan` and `dz` when the line leaves the XY
+  plane.
 - `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
   (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
   `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
@@ -320,6 +331,57 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   against the INSERT's layer (`uncad::color::effective_layer`), and a text record inside a
   block names that layer too. The model still stores the layer the file gives, because the
   same block definition is placed by many references on many layers.
+- A drawing whose content is one block placed once rendered as a blank page. The 4 MiB
+  per-entity output cap treated a single top-level INSERT -- a bound XREF, an imported
+  survey, a "whole floor" block -- as one runaway entity and dropped it whole, so past
+  about 65 000 short lines `uncad drawing.dxf -o out.svg` wrote a 151-byte SVG, the PNG
+  was blank and a package reported `geometry: 0`; the warning named no handle, and
+  `report.json`'s `excluded` stayed empty. The cap is now a share of the document's
+  budget (`MAX_SVG_BODY_BYTES / 4` = 16 MiB, over 200 000 `<line>` elements from one
+  entity), and reaching it truncates the block expansion at the next block boundary
+  instead of deleting the part -- counted in `LimitReport::truncated_parts` (was
+  `oversized_parts`, which meant "dropped whole") and named in `LimitReport::dropped`.
+  A 90 000-line block renders whole again; a self-referencing one is still stopped.
+- Three of the nine documented caps dropped content with no report at all. The two that
+  are the renderer's now count and name what they took (`LimitReport::dropped`), and a
+  coordinate at or above `MAX_WORLD_COORDINATE` no longer deletes its entity: the entity
+  is measured, keeps its records and is listed in `report.json`'s `excluded` as a
+  `scale_outlier`, which is what the crop's outlier rule had been doing for the same
+  situation all along. An entity carrying a coordinate that is not a number at all still
+  cannot be drawn, but is now counted in `LimitReport::unreadable_entities` and named.
+  (`MAX_SUBENTITY_DEPTH` and `MAX_OWNED_SUBENTITIES` bound the conversion walk, before
+  any render, and are still not counted -- see `docs/CAVEATS.md`.)
+- A planar REGION or 3DSOLID was drawn through the isometric projection, which both
+  scales x and shears y, so a flat axis-aligned body landed away from the rest of the
+  drawing as a parallelogram of the wrong size -- and its package record's `bbox`,
+  `tiles` and `px` were in projection space while every other record's were in world
+  space. A body flat in the XY plane is now drawn in that plane; only a body with real
+  depth is projected, and `docs/CAVEATS.md` says what that costs. TS1.dwg's REGION 227
+  now records `bbox [28.49267, 7.835223, 31.490931, 10.833484]`, the rectangle the file
+  holds, instead of `[24.675376, 22.081558, 27.271946, 26.578949]`.
+- MLINE ignored its own `MLSCALE`, so every multi-line was drawn exactly one unit wide:
+  a 200 mm wall (the STANDARD style's +-0.5 offsets at scale 200) came out 1 unit across
+  in the picture. The style's offsets are now scaled by the entity's, and the extent an
+  MLINE contributes is measured from the offset lines it draws rather than from its
+  centerline, so the crop and the record's `bbox` see the width of the wall.
+- A LINE's `length` in `geometry.json` was the plan projection published with
+  `confidence: "exact"`, while `from`/`to` drop z -- so a rafter from (0,50,0) to
+  (300,50,400) reported 300 where the drawing says 500, with nothing in the record to
+  catch it. `length` is the 3D length; `length_plan` and `dz` are written beside it when
+  the line leaves the plane.
+- A closed two-vertex bulged polyline -- what AutoCAD's DONUT command writes, and 100 of
+  the 227 closed polylines in `AutoCADSamples3.dwg` -- reported no `area`, no
+  `orientation` and no `simple`, and got no entry in `regions.json`, while its record
+  still said `closed: true` with `confidence: "exact"`. Two arcs enclose an area just as
+  three straight edges do: `polyline_signed_area`, `LwPolylineEntity::area` and the
+  region record all accept it now (bulges of 1 over a 100-unit chord give pi * 50^2 =
+  7853.98163397).
+- A POINT was drawn as a half-*drawing-unit* dot, which is sub-pixel below about 2 px per
+  unit -- so on an ordinary plan it antialiased away to nothing while the package went on
+  publishing that entity's `tiles` and `px` boxes, pointing a reader at pure white. It is
+  now the 5 px cross `docs/VLM_EXPORT_DESIGN.md`'s rendering table asks for, sized through
+  the same `@@SW@@` stroke-width placeholder, so it is the same size at every scale and
+  inside every scaled block.
 - Not fixed, newly measured and documented: one changed byte in a class name makes
   LibreDWG's own DXF reader peak at 11.3 GB on a 143 KB file -- and succeed. It is below
   the FFI boundary, so nothing in this crate can refuse it; see `docs/CAVEATS.md`, "A
