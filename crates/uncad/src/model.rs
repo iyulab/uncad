@@ -369,12 +369,140 @@ pub struct AttdefEntity {
     pub tag: String,
 }
 
+/// A paper-space viewport: a window on the model, `width` x `height` paper
+/// units around `center` on the sheet, showing `view_size` model units of
+/// height around `view_center` (in the view's own coordinates, i.e. the
+/// world translated by `-view_target` and turned by `twist`). The view
+/// fields are stored from R2000 on; an R13/R14 viewport carries zeros and
+/// is a frame only. Since 0.3.0 everything but `center`/`width`/`height`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ViewportEntity {
     pub common: EntityCommon,
+    /// Paper coordinates.
     pub center: Point3D,
     pub width: f64,
     pub height: f64,
+    /// DXF 12, VIEWCTR: the view's centre in display coordinates.
+    #[serde(default)]
+    pub view_center: Point2D,
+    /// DXF 45, VIEWSIZE: the model height the frame shows.
+    #[serde(default)]
+    pub view_size: f64,
+    /// DXF 17, the world point the display coordinates are measured from.
+    #[serde(default)]
+    pub view_target: Point3D,
+    /// DXF 16, VIEWDIR; `(0,0,1)` is a plan view.
+    #[serde(default = "world_z")]
+    pub view_direction: Point3D,
+    /// DXF 51, VIEWTWIST, in radians (LibreDWG converts the DXF's degrees).
+    #[serde(default)]
+    pub twist: f64,
+    #[serde(default)]
+    pub lens_length: f64,
+    /// DXF 90; bit 0x20000 means the viewport is off.
+    #[serde(default)]
+    pub status_flag: u32,
+    /// Whether the viewport shows its model window (DXF 68 / the status
+    /// flag).
+    #[serde(default = "yes")]
+    pub on: bool,
+    /// DXF 69; 1 marks the sheet's overall viewport in a DXF (a DWG stores
+    /// no id and LibreDWG numbers them in block order).
+    #[serde(default)]
+    pub id: u16,
+    /// Layers frozen in this viewport only.
+    #[serde(default)]
+    pub frozen_layers: Vec<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl ViewportEntity {
+    /// Whether the view looks straight down the world z axis.
+    pub fn is_plan(&self) -> bool {
+        let d = self.view_direction;
+        d.x.abs() < 1e-9 && d.y.abs() < 1e-9 && d.z > 0.0
+    }
+
+    /// Paper units per model unit (`height / view_size`), when stored.
+    pub fn scale(&self) -> Option<f64> {
+        (self.view_size > 0.0 && self.height > 0.0).then(|| self.height / self.view_size)
+    }
+
+    /// Whether this is the sheet's overall viewport (the one framing the
+    /// whole paper): the DXF says so with id 1, and a DWG's shows the view
+    /// at scale 1 centred exactly on its frame.
+    pub fn is_overall(&self) -> bool {
+        if self.id == 1 {
+            return true;
+        }
+        let tol = 1e-6 * self.height.abs().max(1.0);
+        (self.view_size - self.height).abs() < tol
+            && (self.view_center.x - self.center.x).abs() < tol
+            && (self.view_center.y - self.center.y).abs() < tol
+            && self.twist.abs() < 1e-9
+    }
+
+    /// A model (world) point on the sheet, in paper units:
+    /// `C + s (R(twist) (p - T) - V)` -- the convention ezdxf uses (a
+    /// positive twist turns the picture counter-clockwise); AutoCAD's own
+    /// sign has not been checked against a plotted sheet.
+    pub fn model_to_paper(&self, p: Point2D) -> Option<Point2D> {
+        let s = self.scale()?;
+        let (c, sn) = (self.twist.cos(), self.twist.sin());
+        let (dx, dy) = (p.x - self.view_target.x, p.y - self.view_target.y);
+        let (rx, ry) = (c * dx - sn * dy, sn * dx + c * dy);
+        Some(Point2D {
+            x: self.center.x + s * (rx - self.view_center.x),
+            y: self.center.y + s * (ry - self.view_center.y),
+        })
+    }
+
+    /// The inverse of [`model_to_paper`](Self::model_to_paper).
+    pub fn paper_to_model(&self, p: Point2D) -> Option<Point2D> {
+        let s = self.scale()?;
+        let (vx, vy) = (
+            self.view_center.x + (p.x - self.center.x) / s,
+            self.view_center.y + (p.y - self.center.y) / s,
+        );
+        let (c, sn) = (self.twist.cos(), self.twist.sin());
+        Some(Point2D {
+            x: self.view_target.x + c * vx + sn * vy,
+            y: self.view_target.y - sn * vx + c * vy,
+        })
+    }
+
+    /// The world corners of the model window the frame shows, in frame
+    /// order (lower-left, lower-right, upper-right, upper-left on the
+    /// sheet), when the view is stored.
+    pub fn model_window(&self) -> Option<[Point2D; 4]> {
+        let (hw, hh) = (self.width / 2.0, self.height / 2.0);
+        let corners = [
+            Point2D {
+                x: self.center.x - hw,
+                y: self.center.y - hh,
+            },
+            Point2D {
+                x: self.center.x + hw,
+                y: self.center.y - hh,
+            },
+            Point2D {
+                x: self.center.x + hw,
+                y: self.center.y + hh,
+            },
+            Point2D {
+                x: self.center.x - hw,
+                y: self.center.y + hh,
+            },
+        ];
+        let mut out = [Point2D { x: 0.0, y: 0.0 }; 4];
+        for (i, c) in corners.iter().enumerate() {
+            out[i] = self.paper_to_model(*c)?;
+        }
+        Some(out)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

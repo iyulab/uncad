@@ -92,5 +92,8 @@ test`'s wall clock.
 - **Frames** are checked structurally (`tests/export.rs`: two islands of
   lines become two frames with their own overviews and tiles) and by eye on
   the samples; whether the 5 % gap splits real drawings the way a reader
-  would is not measured. **Paper layouts** (design section 4, step 10) are
-  not exported, so nothing evaluates them.
+  would is not measured. **Paper layouts** are checked on `example_2000.dwg`
+  (two Letter sheets, overall viewports left alone) and on the twisted
+  viewport fixture (the model line composited at scale 2 and 30 degrees,
+  pixels sampled on and off the line); the twist sign has no AutoCAD
+  reference plot to compare against.

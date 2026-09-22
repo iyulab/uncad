@@ -169,12 +169,23 @@ its 0.3.0 form. Known gaps:
   content on the tile; a dense drawing whose every entity touches every
   tile still costs `tiles x content`. Tiles of a level render in parallel;
   `--max-tiles` (400) and `--max-levels` (5) bound the total.
+- **Sheets are plan views composited by rule.** The sheet is the paper size
+  from the layout's plot settings (portrait size turned by the rotation
+  code, printable corner at the origin, as AutoCAD lays it out), else the
+  layout's limits, else the paper entities' extents. The model is drawn
+  through every viewport that is on, looks down the z axis and is not the
+  sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
+  centred exactly on its frame (a DWG stores no id; the rule held on every
+  corpus file). The twist sign follows ezdxf (a positive twist turns the
+  picture counter-clockwise) and has not been checked against a plotted
+  sheet; perspective and non-plan views are frames only; R13/R14 files
+  store no view fields at all. Paper-space texts and geometry are drawn but
+  not listed in the records, and sheets get an overview only, no tiles.
 - **Frames follow proximity, not meaning.** Entities within 5 % of the crop
   diagonal of each other (`--frame-gap`) are one group; a detached group
   with 20 entities or a text becomes a frame. Two details drawn close
   together share a frame, and a title block touching the plan joins it.
-  Model space only: paper layouts are not exported (design section 4,
-  step 10).
+  Frames are model space only; the sheets above are the paper side.
 - Text is rendered with the bundled `Uncad Sans` (a Noto Sans KR subset:
   Latin, Greek, the 2350 KS X 1001 Hangul syllables, CAD symbols -- see
   `crates/uncad/fonts/README.md`), the same on every machine. Hanja, the

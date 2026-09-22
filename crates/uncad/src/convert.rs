@@ -731,11 +731,46 @@ unsafe fn convert_entity(
             let center = get_field::<Point3D>(entity_ptr, "VIEWPORT", "center")?;
             let width = get_field::<f64>(entity_ptr, "VIEWPORT", "width")?;
             let height = get_field::<f64>(entity_ptr, "VIEWPORT", "height")?;
+            let status_flag = get_field::<u32>(entity_ptr, "VIEWPORT", "status_flag").unwrap_or(0);
+            let on_off = get_field::<u16>(entity_ptr, "VIEWPORT", "on_off").unwrap_or(1);
+            // A DWG stores no on/off or id: LibreDWG synthesises them in
+            // block order, and the status flag's 0x20000 bit is the real
+            // "off". A DXF states both (68: 0 = off; 69: 1 = overall).
+            let on = if source.from_dxf {
+                on_off != 0
+            } else {
+                status_flag & 0x20000 == 0
+            };
+            let frozen_layers: Vec<String> =
+                get_array_field::<u32, *mut libredwg_sys::Dwg_Object_Ref>(
+                    entity_ptr,
+                    "VIEWPORT",
+                    "num_frozen_layers",
+                    "frozen_layers",
+                )
+                .into_iter()
+                .filter(|h| !h.is_null())
+                .filter_map(|h| resolve_handle_name(dwg, h))
+                .collect();
             Entity::Viewport(ViewportEntity {
                 common,
                 center,
                 width,
                 height,
+                view_center: get_field::<Point2D>(entity_ptr, "VIEWPORT", "VIEWCTR")
+                    .unwrap_or_default(),
+                view_size: get_field::<f64>(entity_ptr, "VIEWPORT", "VIEWSIZE").unwrap_or(0.0),
+                view_target: get_field::<Point3D>(entity_ptr, "VIEWPORT", "view_target")
+                    .unwrap_or_default(),
+                view_direction: get_field::<Point3D>(entity_ptr, "VIEWPORT", "VIEWDIR")
+                    .filter(|d| d.x != 0.0 || d.y != 0.0 || d.z != 0.0)
+                    .unwrap_or(crate::geom::WORLD_Z),
+                twist: get_field::<f64>(entity_ptr, "VIEWPORT", "VIEWTWIST").unwrap_or(0.0),
+                lens_length: get_field::<f64>(entity_ptr, "VIEWPORT", "LENSLENGTH").unwrap_or(0.0),
+                status_flag,
+                on,
+                id: get_field::<u16>(entity_ptr, "VIEWPORT", "id").unwrap_or(0),
+                frozen_layers,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DFACE => {

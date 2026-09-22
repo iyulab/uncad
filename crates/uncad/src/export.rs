@@ -154,6 +154,8 @@ pub struct ExportOptions {
     pub max_frames: usize,
     /// The fonts text is shaped and drawn with. Default [`Fonts::Bundled`].
     pub fonts: Fonts,
+    /// Write `sheets.json` and one image per paper layout. Default `true`.
+    pub sheets: bool,
 }
 
 impl Default for ExportOptions {
@@ -173,6 +175,7 @@ impl Default for ExportOptions {
             min_frame_entities: 20,
             max_frames: 8,
             fonts: Fonts::Bundled,
+            sheets: true,
         }
     }
 }
@@ -310,6 +313,47 @@ pub struct FrameReport {
     pub height_classes: Vec<HeightClass>,
 }
 
+/// A viewport on a sheet, as `sheets.json` lists it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SheetViewport {
+    pub handle: String,
+    pub id: u16,
+    pub on: bool,
+    /// The sheet's own frame (the paper), never composited.
+    pub overall: bool,
+    /// Whether the model was drawn through it.
+    pub composited: bool,
+    /// The frame on the sheet, paper units.
+    pub frame: Rect,
+    /// Paper units per model unit.
+    pub scale: Option<f64>,
+    pub twist_deg: f64,
+    /// World corners of the model window (lower-left, lower-right,
+    /// upper-right, upper-left on the sheet).
+    pub model_window: Option<[[f64; 2]; 4]>,
+    pub frozen_layers: Vec<String>,
+}
+
+/// One paper layout: its sheet, its viewports and its image.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SheetReport {
+    pub name: String,
+    pub tab_order: u16,
+    pub block: String,
+    /// `mm`, `in` or `px` -- the layout's paper unit.
+    pub units: String,
+    /// The plot settings, when the file has a LAYOUT for this sheet.
+    pub plot: Option<crate::tables::PlotSettings>,
+    /// The sheet rectangle in paper units and where it came from:
+    /// `paper_size` (the plot settings), `limits` (LIMMIN/LIMMAX) or
+    /// `entities` (the paper entities' extents).
+    pub rect: Rect,
+    pub rect_source: String,
+    pub overview: ImageInfo,
+    pub viewports: Vec<SheetViewport>,
+    pub entities: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WrittenFile {
     pub path: String,
@@ -331,6 +375,7 @@ pub struct Counts {
     pub excluded: usize,
     pub tiles: usize,
     pub frames: usize,
+    pub sheets: usize,
 }
 
 /// What [`export_package`] wrote.
@@ -342,6 +387,8 @@ pub struct ExportReport {
     pub overview: ImageInfo,
     /// The frames, `f0` first.
     pub frames: Vec<FrameReport>,
+    /// The paper layouts, in tab order.
+    pub sheets: Vec<SheetReport>,
     pub crop: CropReport,
     pub counts: Counts,
     pub warnings: Vec<String>,
@@ -823,7 +870,7 @@ pub fn export_package(
 
     // --- overview: the whole crop, sized to the profile ---------------------
     let stroke_px = 1.25;
-    let fit = fit_overview(&content, &profile);
+    let fit = fit_overview(&content, &profile, None);
     if fit.width.max(fit.height) < 200 {
         warnings.push(format!(
             "TinyOverview: the overview is only {} x {} px; the drawing's aspect leaves little of the patch budget",
@@ -1011,6 +1058,131 @@ pub fn export_package(
                     tile.height,
                 ));
             }
+        }
+    }
+
+    // --- sheets: one image per paper layout -----------------------------------
+    let layer_of: std::collections::HashMap<&str, &str> = visible
+        .iter()
+        .map(|e| (e.common().handle.as_str(), e.common().layer.as_str()))
+        .collect();
+    let mut sheet_reports: Vec<SheetReport> = Vec::new();
+    if options.sheets {
+        for spec in sheet_specs(db) {
+            let block = &db.tables.block_records[&spec.block];
+            let paper_entities: Vec<&Entity> = block
+                .entities
+                .iter()
+                .filter(|e| hidden_reason(e.common(), &db.tables).is_none())
+                .collect();
+            let paper_rendered = svg::render_selected(
+                db,
+                paper_entities.clone(),
+                ToSvgOptions {
+                    crop: CropMode::Raw,
+                    padding: Some(0.0),
+                    include_hidden: options.include_hidden,
+                    ..Default::default()
+                },
+            );
+            let (rect, rect_source) = match spec.plot.as_ref().and_then(|p| p.sheet_rect()) {
+                Some(r) => (r, "paper_size"),
+                None if spec.limmax.x > spec.limmin.x && spec.limmax.y > spec.limmin.y => (
+                    Rect::new(spec.limmin.x, spec.limmin.y, spec.limmax.x, spec.limmax.y),
+                    "limits",
+                ),
+                None if paper_rendered.choice.content.is_some() => {
+                    (paper_rendered.choice.rect, "entities")
+                }
+                None => (crop::EMPTY_RECT, "empty"),
+            };
+            let viewports: Vec<&crate::model::ViewportEntity> = paper_entities
+                .iter()
+                .filter_map(|e| match e {
+                    Entity::Viewport(v) => Some(v),
+                    _ => None,
+                })
+                .collect();
+            let composited: Vec<&crate::model::ViewportEntity> = viewports
+                .iter()
+                .copied()
+                .filter(|v| v.on && !v.is_overall() && v.is_plan() && v.scale().is_some())
+                .collect();
+            let fit = fit_overview(&rect, &profile, Some(0.0));
+            let view_box = ViewBox::from_world(&fit.rect);
+            let svg_text = svg::assemble_sheet(
+                &paper_rendered,
+                &rendered,
+                &composited,
+                &extent_of_handle,
+                &layer_of,
+                &view_box,
+                stroke_px / fit.ppu,
+            );
+            let bytes = png::render_region(
+                &png::parse_tree(&svg_text, options.fonts)?,
+                fit.ppu,
+                (0.0, 0.0),
+                fit.width,
+                fit.height,
+            )?;
+            let safe: String = spec
+                .name
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let png_path = format!("sheets/{safe}/overview.png");
+            writer.write_bytes(&png_path, &bytes, "sheet")?;
+            let overview_info = ImageInfo::new(
+                &format!("sheet:{}", spec.name),
+                &png_path,
+                fit.rect,
+                fit.ppu,
+                fit.width,
+                fit.height,
+            );
+            let vp_reports: Vec<SheetViewport> = viewports
+                .iter()
+                .map(|v| SheetViewport {
+                    handle: v.common.handle.clone(),
+                    id: v.id,
+                    on: v.on,
+                    overall: v.is_overall(),
+                    composited: composited
+                        .iter()
+                        .any(|c| c.common.handle == v.common.handle),
+                    frame: Rect::new(
+                        v.center.x - v.width / 2.0,
+                        v.center.y - v.height / 2.0,
+                        v.center.x + v.width / 2.0,
+                        v.center.y + v.height / 2.0,
+                    ),
+                    scale: v.scale(),
+                    twist_deg: v.twist.to_degrees(),
+                    model_window: v
+                        .model_window()
+                        .map(|w| w.map(|p| [rounder.coord(p.x), rounder.coord(p.y)])),
+                    frozen_layers: v.frozen_layers.clone(),
+                })
+                .collect();
+            sheet_reports.push(SheetReport {
+                name: spec.name.clone(),
+                tab_order: spec.tab_order,
+                block: spec.block.clone(),
+                units: spec.units.clone(),
+                plot: spec.plot.clone(),
+                rect,
+                rect_source: rect_source.to_string(),
+                overview: overview_info,
+                viewports: vp_reports,
+                entities: paper_entities.len(),
+            });
         }
     }
 
@@ -1514,6 +1686,14 @@ pub fn export_package(
         "strings": strings,
     });
     writer.write_json("strings.json", &strings_value, "strings")?;
+    if options.sheets {
+        let sheets_value = json!({
+            "$schema": SCHEMA,
+            "twist_convention": "model_to_paper = C + s (R(twist) (p - T) - V), a positive twist turning the picture counter-clockwise (ezdxf's rule; not checked against a plotted sheet)",
+            "sheets": sheet_reports,
+        });
+        writer.write_json("sheets.json", &sheets_value, "sheets")?;
+    }
 
     // sidecars and tiles.json
     let mut tiles_json: Vec<Value> = Vec::new();
@@ -1630,6 +1810,7 @@ pub fn export_package(
         excluded: crop_report.excluded.len(),
         tiles: written_total,
         frames: frame_reports.len(),
+        sheets: sheet_reports.len(),
     };
     let hidden_top_level: usize = hidden_by_reason.values().sum();
     // Written after the manifest (its timings would change the byte count
@@ -1659,7 +1840,7 @@ pub fn export_package(
         "areas": "exact",
         "text_boxes": if measured > 0 { "measured" } else if texts.is_empty() { "none" } else { "estimated" },
         "fonts": match options.fonts { Fonts::Bundled => "bundled", Fonts::BundledAndSystem => "bundled+system" },
-        "paper_layouts": "none",
+        "paper_layouts": if sheet_reports.is_empty() { "none" } else { "composited" },
         "frames": frame_reports.len(),
     });
     let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, 2x zooms with 224 px overlap, row 0 at the top; report.json lists what was left out and why.";
@@ -1687,6 +1868,7 @@ pub fn export_package(
         "overview": overview,
         "frames": frame_reports,
         "frames_dropped": dropped,
+        "sheets": sheet_reports.iter().map(|s| json!({"name": s.name, "tab_order": s.tab_order, "png": s.overview.png, "px": s.overview.px, "rect": rounder.rect(&s.rect), "units": s.units, "viewports": s.viewports.len()})).collect::<Vec<_>>(),
         "legibility": { "target_px": options.target_text_px, "per_frame": frame_reports.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "reached": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
         "counts": counts,
         "capabilities": capabilities,
@@ -1703,7 +1885,7 @@ pub fn export_package(
         }
     })?;
     let readme = format!(
-        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window; sheets/<layout>/overview.png\n  6. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
     );
     std::fs::write(dir.join("README.txt"), readme.as_bytes()).map_err(|source| {
@@ -1723,6 +1905,7 @@ pub fn export_package(
         files: writer.files,
         overview,
         frames: frame_reports,
+        sheets: sheet_reports,
         crop: crop_report,
         counts,
         warnings,
@@ -1809,6 +1992,62 @@ fn collect_text_boxes(
     }
 }
 
+/// A paper layout to export.
+struct SheetSpec {
+    name: String,
+    tab_order: u16,
+    block: String,
+    units: String,
+    plot: Option<crate::tables::PlotSettings>,
+    limmin: Point2D,
+    limmax: Point2D,
+}
+
+/// The paper layouts of `db`, in tab order: the LAYOUT objects whose block
+/// exists, or -- for a file without them (R13/R14, a DXF without an
+/// OBJECTS section) -- every paper-space block with entities.
+fn sheet_specs(db: &CadDatabase) -> Vec<SheetSpec> {
+    let mut specs: Vec<SheetSpec> = db
+        .tables
+        .layouts
+        .values()
+        .filter(|l| l.tab_order > 0 && db.tables.block_records.contains_key(&l.block_name))
+        .map(|l| SheetSpec {
+            name: l.name.clone(),
+            tab_order: l.tab_order,
+            block: l.block_name.clone(),
+            units: match l.plot.paper_units {
+                0 => "in",
+                2 => "px",
+                _ => "mm",
+            }
+            .to_string(),
+            plot: Some(l.plot.clone()),
+            limmin: l.limmin,
+            limmax: l.limmax,
+        })
+        .collect();
+    if specs.is_empty() {
+        let mut tab = 1;
+        for (name, block) in &db.tables.block_records {
+            if name.to_uppercase().starts_with("*PAPER_SPACE") && !block.entities.is_empty() {
+                specs.push(SheetSpec {
+                    name: name.trim_start_matches('*').to_string(),
+                    tab_order: tab,
+                    block: name.clone(),
+                    units: db.header.units.name.clone(),
+                    plot: None,
+                    limmin: Point2D { x: 0.0, y: 0.0 },
+                    limmax: Point2D { x: 0.0, y: 0.0 },
+                });
+                tab += 1;
+            }
+        }
+    }
+    specs.sort_by(|a, b| a.tab_order.cmp(&b.tab_order).then(a.name.cmp(&b.name)));
+    specs
+}
+
 /// An overview fitted to the profile: the pixel size within both the edge
 /// and the patch budget, the world rectangle (padded and lattice-snapped)
 /// and the scale.
@@ -1820,7 +2059,7 @@ struct OverviewFit {
     padding: f64,
 }
 
-fn fit_overview(content: &Rect, profile: &Profile) -> OverviewFit {
+fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> OverviewFit {
     let lattice = f64::from(profile.lattice.max(1));
     let edge_patches = (f64::from(profile.overview_edge) / lattice)
         .floor()
@@ -1834,7 +2073,7 @@ fn fit_overview(content: &Rect, profile: &Profile) -> OverviewFit {
         .min((pw / aspect).ceil())
         .max(1.0);
     let seed_ppu = (pw * lattice / (1.04 * w)).min(ph * lattice / (1.04 * h));
-    let padding = crop::auto_padding(content, Some(seed_ppu));
+    let padding = padding.unwrap_or_else(|| crop::auto_padding(content, Some(seed_ppu)));
     let padded = content.padded(padding);
     let ppu = (pw * lattice / padded.width()).min(ph * lattice / padded.height());
     let (rect, width, height) = crop::snap_to_lattice(&padded, ppu, profile.lattice);
@@ -1869,7 +2108,7 @@ fn build_frame(
     tile_budget: &mut usize,
     warnings: &mut Vec<String>,
 ) -> FrameBuild {
-    let fit = fit_overview(&content, profile);
+    let fit = fit_overview(&content, profile, None);
     let overview = reuse.unwrap_or_else(|| {
         ImageInfo::new(
             &format!("{id}/ov"),

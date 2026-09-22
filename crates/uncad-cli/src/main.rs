@@ -72,6 +72,7 @@ Export options (uncad export):
   --min-frame-entities <n>    a detached group needs this many entities, or one
                                 text, to become a frame (default: 20)
   --max-frames <n>            frames written at most (default: 8)
+  --no-sheets                 skip sheets.json and the paper-layout images
   --svg                       also write drawing.svg
   --full                      also write entities.json (the whole model)
   (--crop, --include-hidden apply too)
@@ -375,6 +376,7 @@ fn run_export(argv: &[String]) -> Result<(), String> {
             }
             "--svg" => options.svg = true,
             "--full" => options.full = true,
+            "--no-sheets" => options.sheets = false,
             _ => {}
         }
         i += 1;
@@ -383,13 +385,14 @@ fn run_export(argv: &[String]) -> Result<(), String> {
     let report = uncad::export::export_package(&db, Path::new(output), &options)
         .map_err(|e| e.to_string())?;
     println!(
-        "wrote: {} ({} files; overview {}x{} px; {} tiles in {} frames; {} texts, {} dimensions, {} geometry, {} regions, {} block instances)",
+        "wrote: {} ({} files; overview {}x{} px; {} tiles in {} frames; {} sheets; {} texts, {} dimensions, {} geometry, {} regions, {} block instances)",
         report.dir.display(),
         report.files.len(),
         report.overview.px[0],
         report.overview.px[1],
         report.counts.tiles,
         report.frames.len(),
+        report.sheets.len(),
         report.counts.texts,
         report.counts.dimensions,
         report.counts.geometry,

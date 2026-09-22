@@ -131,6 +131,13 @@ char *uncad_tv_to_utf8(const Dwg_Data *dwg, const char *s);
  */
 char *uncad_entity_tv_to_utf8(const void *entity, const char *s);
 
+/* Any string pointer read straight out of `dwg`'s structures (a T/TV field
+ * of an embedded struct dynapi cannot reach through utf8text, say): the
+ * UTF-16 a R2007+ DWG stores is converted with bit_convert_TU, anything
+ * else goes through uncad_tv_to_utf8. NULL in, NULL out. Free with
+ * uncad_free_string. */
+char *uncad_dwg_string_to_utf8(const Dwg_Data *dwg, const char *s);
+
 void uncad_free_string(char *s);
 
 /* One leader-line's vertices from a MULTILEADER, flattened into a single

@@ -265,6 +265,16 @@ mod tests {
                 center: p3(0.0, 0.0, 0.0),
                 width: 10.0,
                 height: 5.0,
+                view_center: p2(0.0, 0.0),
+                view_size: 0.0,
+                view_target: p3(0.0, 0.0, 0.0),
+                view_direction: p3(0.0, 0.0, 1.0),
+                twist: 0.0,
+                lens_length: 0.0,
+                status_flag: 0,
+                on: true,
+                id: 0,
+                frozen_layers: vec![],
             }),
             Entity::Face3D(Face3DEntity {
                 common: c.clone(),
@@ -573,6 +583,7 @@ mod tests {
                 block_records,
                 mlinestyles,
                 dimstyles: BTreeMap::new(),
+                layouts: BTreeMap::new(),
             },
         };
 

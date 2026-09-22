@@ -389,6 +389,106 @@ fn codepage_to_utf8(entity: *const c_void, raw: *const std::os::raw::c_char) -> 
     owned_utf8(converted, raw)
 }
 
+/// Reads a field of a struct embedded in an object -- LAYOUT's
+/// `plotsettings` (a `Dwg_Object_PLOTSETTINGS`), say -- by adding the
+/// embedded struct's offset from the parent's dynapi table and reading the
+/// field through the embedded type's own table
+/// (`dwg_dynapi_subclass_value`, a plain copy of `size` bytes).
+///
+/// `object` must be a live pointer to a `dxfname` object; `sub_field` is
+/// the parent's field holding the struct, `sub_dxfname` the struct's dynapi
+/// name (`"PLOTSETTINGS"`), `field` the field inside it.
+pub fn get_sub_field<T: Copy>(
+    object: *mut c_void,
+    dxfname: &str,
+    sub_field: &str,
+    sub_dxfname: &str,
+    field: &str,
+) -> Option<T> {
+    if object.is_null() {
+        return None;
+    }
+    let c_dxfname = CString::new(dxfname).expect("dxfname has no interior NUL");
+    let c_sub_field = CString::new(sub_field).expect("field name has no interior NUL");
+    // SAFETY: pure name -> descriptor lookups, no write through any pointer.
+    let sub_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_dxfname.as_ptr(), c_sub_field.as_ptr()) };
+    if sub_desc.is_null() {
+        return None;
+    }
+    let offset = unsafe { (*sub_desc).offset } as usize;
+    let c_sub_dxfname = CString::new(sub_dxfname).expect("dxfname has no interior NUL");
+    let c_field = CString::new(field).expect("field name has no interior NUL");
+    let field_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_sub_dxfname.as_ptr(), c_field.as_ptr()) };
+    if field_desc.is_null() {
+        return None;
+    }
+    if !field_write_size_matches::<T>(unsafe { &*field_desc }, sub_dxfname, field) {
+        return None;
+    }
+    // dwg_dynapi_subclass_value wants the "Dwg_Object_<NAME>" spelling (it
+    // strips the prefix and falls back to the entity table).
+    let c_subclass =
+        CString::new(format!("Dwg_Object_{sub_dxfname}")).expect("dxfname has no interior NUL");
+    let mut out = MaybeUninit::<T>::uninit();
+    let mut fp: libredwg_sys::Dwg_DYNAPI_field = Default::default();
+    // SAFETY: `object` is a live `dxfname` object (caller contract), so
+    // `object + offset` is its embedded struct, and the size check above
+    // confirms dynapi writes exactly `size_of::<T>()` bytes into `out`.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_subclass_value(
+            object.cast::<u8>().add(offset).cast::<c_void>(),
+            c_subclass.as_ptr(),
+            c_field.as_ptr(),
+            out.as_mut_ptr().cast::<c_void>(),
+            &mut fp,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    // SAFETY: dynapi reported success and wrote size_of::<T>() bytes.
+    Some(unsafe { out.assume_init() })
+}
+
+/// [`get_sub_field`] for a text field: the raw stored pointer, decoded
+/// through the shim (code page, or UTF-16 for a R2007+ DWG).
+///
+/// # Safety
+/// `dwg` must be the live `Dwg_Data` owning `object`.
+pub unsafe fn get_sub_utf8_field(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    object: *mut c_void,
+    dxfname: &str,
+    sub_field: &str,
+    sub_dxfname: &str,
+    field: &str,
+) -> Option<String> {
+    let raw = get_sub_field::<*const std::os::raw::c_char>(
+        object,
+        dxfname,
+        sub_field,
+        sub_dxfname,
+        field,
+    )?;
+    if raw.is_null() {
+        return None;
+    }
+    // SAFETY: raw points into the live Dwg_Data (caller contract); the shim
+    // reads it and allocates its result.
+    let converted = unsafe { libredwg_sys::uncad_dwg_string_to_utf8(dwg, raw) };
+    if converted.is_null() {
+        return None;
+    }
+    // SAFETY: a fresh NUL-terminated buffer that is ours to free.
+    let owned = unsafe { CStr::from_ptr(converted) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { libredwg_sys::uncad_free_string(converted) };
+    Some(owned)
+}
+
 /// Reads a text field (BITCODE_T/TV/TU) as a UTF-8 `String`, via
 /// `dwg_dynapi_entity_utf8text`. Returns `None` if the field doesn't exist
 /// or is a null string.

@@ -1287,12 +1287,22 @@ impl Rendered {
 /// Renders every selected entity, measures each visible one's extent and
 /// decides the crop ([`crate::crop`]), leaving the stroke width unresolved.
 pub(crate) fn render(db: &CadDatabase, options: ToSvgOptions) -> Rendered {
+    render_selected(db, select_entities_for_space(db, options.space), options)
+}
+
+/// [`render`] over an explicit entity list (a layout's paper-space block,
+/// say) instead of the options' space.
+pub(crate) fn render_selected(
+    db: &CadDatabase,
+    selected: Vec<&Entity>,
+    options: ToSvgOptions,
+) -> Rendered {
     let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<(String, String)> = Vec::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
-    for e in select_entities_for_space(db, options.space) {
+    for e in selected {
         // A hidden entity never affects the crop, drawn faded or not.
         let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
         ctx.reset_entity_bounds();
@@ -1387,6 +1397,131 @@ pub(crate) fn assemble_subset(
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
         vb.x, vb.y, vb.width, vb.height
+    )
+}
+
+/// Multiplies every `@@SW@@<scale>@@` stroke placeholder in `fragment` by
+/// `factor`: a model fragment placed inside a viewport scaled by `s` keeps
+/// its pixel-constant stroke when its placeholders carry `s` too.
+fn scale_stroke_placeholders(fragment: &str, factor: f64) -> String {
+    let mut out = String::with_capacity(fragment.len());
+    let mut rest = fragment;
+    while let Some(start) = rest.find("@@SW@@") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + "@@SW@@".len()..];
+        match after.find("@@") {
+            Some(end) => {
+                let scale: f64 = after[..end].parse().unwrap_or(1.0);
+                out.push_str(&stroke_width_placeholder(scale * factor));
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A paper layout as one SVG document: the sheet's own entities (`paper`),
+/// and for every viewport in `viewports` the model (`model`'s fragments,
+/// those whose extent touches the viewport's model window and whose layer
+/// is not frozen in it) clipped to the viewport's frame and transformed
+/// with [`ViewportEntity::model_to_paper`]. `view_box` is the sheet.
+pub(crate) fn assemble_sheet(
+    paper: &Rendered,
+    model: &Rendered,
+    viewports: &[&crate::model::ViewportEntity],
+    model_extents: &std::collections::HashMap<&str, Rect>,
+    model_layers: &std::collections::HashMap<&str, &str>,
+    view_box: &ViewBox,
+    effective_stroke_width: f64,
+) -> String {
+    let mut body = String::new();
+    for (_, svg) in &paper.parts {
+        body.push_str(svg);
+        body.push_str("\n  ");
+    }
+    for vp in viewports {
+        let Some(scale) = vp.scale() else { continue };
+        let Some(window) = vp.model_window() else {
+            continue;
+        };
+        let window_rect = window.iter().fold(
+            Rect::new(
+                f64::INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NEG_INFINITY,
+            ),
+            |r, p| {
+                Rect::new(
+                    r.min_x.min(p.x),
+                    r.min_y.min(p.y),
+                    r.max_x.max(p.x),
+                    r.max_y.max(p.y),
+                )
+            },
+        );
+        // model -> paper, in SVG (y-down) coordinates: X = a x + c y + e,
+        // Y = b x + d y + f with the paper's y flipped like the model's.
+        let (co, si) = (vp.twist.cos(), vp.twist.sin());
+        let (tx, ty) = (vp.view_target.x, vp.view_target.y);
+        let (vx, vy) = (vp.view_center.x, vp.view_center.y);
+        let (cx, cy) = (vp.center.x, vp.center.y);
+        let a = scale * co;
+        let b = -scale * si;
+        let c = scale * si;
+        let d = scale * co;
+        let e = cx - scale * (co * tx - si * ty) - scale * vx;
+        let f = -cy + scale * (si * tx + co * ty) + scale * vy;
+        let handle = escape_xml(&vp.common.handle);
+        let _ = write!(
+            body,
+            "<clipPath id=\"vp-{handle}\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath>\n  <g clip-path=\"url(#vp-{handle})\"><g transform=\"matrix({} {} {} {} {} {})\" stroke-width=\"{}\">\n  ",
+            clean(cx - vp.width / 2.0),
+            neg(cy + vp.height / 2.0),
+            clean(vp.width),
+            clean(vp.height),
+            clean(a),
+            clean(b),
+            clean(c),
+            clean(d),
+            clean(e),
+            clean(f),
+            stroke_width_placeholder(scale)
+        );
+        for (h, svg) in &model.parts {
+            if let Some(layer) = model_layers.get(h.as_str()) {
+                if vp.frozen_layers.iter().any(|f| f == layer) {
+                    continue;
+                }
+            }
+            if model_extents
+                .get(h.as_str())
+                .is_some_and(|r| !r.intersects(&window_rect))
+            {
+                continue;
+            }
+            body.push_str(&scale_stroke_placeholders(svg, scale));
+            body.push_str("\n  ");
+        }
+        body.push_str("</g></g>\n  ");
+    }
+    let resolved_body = resolve_stroke_widths(&body, effective_stroke_width);
+    let mut defs: Vec<&str> = paper.defs.iter().map(String::as_str).collect();
+    defs.extend(model.defs.iter().map(String::as_str));
+    let defs_block = if defs.is_empty() {
+        String::new()
+    } else {
+        let resolved_defs = resolve_stroke_widths(&defs.join("\n  "), effective_stroke_width);
+        format!("<defs>\n  {resolved_defs}\n</defs>\n  ")
+    };
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" stroke=\"black\" stroke-width=\"{effective_stroke_width}\">\n  {defs_block}{resolved_body}\n</svg>",
+        view_box.x, view_box.y, view_box.width, view_box.height
     )
 }
 

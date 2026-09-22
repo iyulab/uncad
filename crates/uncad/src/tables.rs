@@ -2,8 +2,8 @@
 //! against: LAYER, BLOCK_RECORD, MLINESTYLE and DIMSTYLE.
 
 use crate::convert::owned_entities;
-use crate::dynapi::{get_array_field, get_field};
-use crate::model::Entity;
+use crate::dynapi::{get_array_field, get_field, get_sub_field, get_sub_utf8_field};
+use crate::model::{Entity, Point2D, Point3D};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -109,6 +109,106 @@ pub struct DimStyleRecord {
     pub dimfrac: u16,
 }
 
+/// A layout's plot settings (DXF `AcDbPlotSettings`): the sheet of paper a
+/// layout is set up to print on. Widths are millimetres whatever
+/// `paper_units` says (that is how the file stores them); `rotation` is
+/// the DXF code (0 none, 1 = 90 degrees counter-clockwise, 2 = upside
+/// down, 3 = 90 degrees clockwise), so the sheet is landscape for 1 and 3
+/// of a portrait size. Since 0.3.0.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct PlotSettings {
+    /// DXF 1, the page setup name (usually empty).
+    pub page_setup: String,
+    /// DXF 2, the printer or plot configuration (`none_device`, a `.pc3`).
+    pub printer: String,
+    /// DXF 4, the paper size name (`ISO_A4_(210.00_x_297.00_MM)`).
+    pub paper_name: String,
+    /// DXF 44/45, the physical (portrait) size in millimetres; 0 when no
+    /// page setup exists.
+    pub paper_width_mm: f64,
+    pub paper_height_mm: f64,
+    /// DXF 40-43: left, bottom, right, top unprintable margins, millimetres.
+    pub margins_mm: [f64; 4],
+    /// DXF 46/47, millimetres.
+    pub plot_origin: Point2D,
+    /// DXF 72: 0 inches, 1 millimetres, 2 pixels -- the layout's paper unit.
+    pub paper_units: u16,
+    /// DXF 73, see above.
+    pub rotation: u16,
+    /// DXF 74: 0 last screen display, 1 extents, 2 limits, 3 view, 4
+    /// window, 5 the layout.
+    pub plot_type: u16,
+    /// DXF 142 / 143: paper units per drawing unit of the custom scale.
+    pub scale: f64,
+    /// DXF 75 / 147: the standard scale code and its factor.
+    pub std_scale_type: u16,
+    pub std_scale_factor: f64,
+    /// DXF 70.
+    pub flags: u16,
+    /// DXF 7, the plot style table (`.ctb`).
+    pub style_sheet: String,
+}
+
+impl PlotSettings {
+    /// One millimetre in the layout's paper units (25.4 mm to the inch;
+    /// pixels are treated as millimetres).
+    pub fn mm_to_paper(&self) -> f64 {
+        if self.paper_units == 0 {
+            1.0 / 25.4
+        } else {
+            1.0
+        }
+    }
+
+    /// The sheet as it lies on the layout, in paper units: the printable
+    /// area's lower-left corner at the origin (how AutoCAD places it), so
+    /// the sheet runs from `(-left, -bottom)` to `(width - left, height -
+    /// bottom)` with the physical size turned by `rotation`. `None` without
+    /// a paper size.
+    pub fn sheet_rect(&self) -> Option<crate::crop::Rect> {
+        if !(self.paper_width_mm > 0.0 && self.paper_height_mm > 0.0) {
+            return None;
+        }
+        let k = self.mm_to_paper();
+        let (w, h) = if self.rotation == 1 || self.rotation == 3 {
+            (self.paper_height_mm, self.paper_width_mm)
+        } else {
+            (self.paper_width_mm, self.paper_height_mm)
+        };
+        let [left, bottom, _, _] = self.margins_mm;
+        Some(crate::crop::Rect::new(
+            -left * k,
+            -bottom * k,
+            (w - left) * k,
+            (h - bottom) * k,
+        ))
+    }
+}
+
+/// A LAYOUT: a model or paper tab, the block it draws and its plot
+/// settings. Since 0.3.0.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LayoutRecord {
+    pub name: String,
+    /// DXF 71: 0 is the Model tab.
+    pub tab_order: u16,
+    /// DXF 70: 1 PSLTSCALE, 2 LIMCHECK.
+    pub flags: u16,
+    /// The `block_records` key this layout draws (`*Model_Space`,
+    /// `*Paper_Space`, `*Paper_Space0`, ...); empty when unresolvable.
+    pub block_name: String,
+    /// DXF 10 / 11, the drawing limits in the layout's units.
+    pub limmin: Point2D,
+    pub limmax: Point2D,
+    /// DXF 14 / 15; `None` while AutoCAD has never computed them (the file
+    /// holds +-1e20).
+    pub extmin: Option<Point3D>,
+    pub extmax: Option<Point3D>,
+    /// DXF 331, the handle of the viewport last active in this layout.
+    pub active_viewport: Option<String>,
+    pub plot: PlotSettings,
+}
+
 /// The maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
 /// therefore `to_json()`'s key order -- is deterministic: the same input
 /// file serializes to the same bytes on every run and every machine.
@@ -132,6 +232,12 @@ pub struct Tables {
     /// document loads with an empty map).
     #[serde(default)]
     pub dimstyles: BTreeMap<String, DimStyleRecord>,
+    /// Layout name -> record, every LAYOUT object (the Model tab included).
+    /// Files older than R2000 and DXF files without an OBJECTS section have
+    /// none; the paper-space blocks are still in `block_records`. Since
+    /// 0.3.0.
+    #[serde(default)]
+    pub layouts: BTreeMap<String, LayoutRecord>,
 }
 
 /// # Safety
@@ -150,6 +256,7 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
     let mut dimstyles = BTreeMap::new();
+    let mut layouts = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -176,6 +283,13 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
                     block_records.insert(name.clone(), BlockRecord { name, entities });
                 }
             }
+        } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LAYOUT {
+            let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
+            if !object_ptr.is_null() {
+                if let Some(record) = unsafe { convert_layout(dwg, object_ptr) } {
+                    layouts.insert(record.name.clone(), record);
+                }
+            }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINESTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
@@ -198,6 +312,7 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
         block_records,
         mlinestyles,
         dimstyles,
+        layouts,
     }
 }
 
@@ -355,6 +470,106 @@ fn convert_layer(
         plot,
         lineweight_mm,
         linetype,
+    })
+}
+
+/// Reads a LAYOUT object and its embedded plot settings.
+///
+/// # Safety
+/// `dwg` must be the live `Dwg_Data` owning `object_ptr`, a LAYOUT's
+/// type-specific struct pointer.
+unsafe fn convert_layout(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    object_ptr: *mut c_void,
+) -> Option<LayoutRecord> {
+    let name = crate::dynapi::get_utf8_field(object_ptr, "LAYOUT", "layout_name")?;
+    let block_name =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYOUT", "block_header")
+            .and_then(resolve_block_name)
+            .unwrap_or_default();
+    let active_viewport =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYOUT", "active_viewport")
+            .filter(|h| !h.is_null())
+            .map(|h| {
+                // SAFETY: a live Dwg_Object_Ref of this Dwg_Data.
+                let absolute = unsafe { (*h).absolute_ref };
+                format!("{absolute:X}")
+            })
+            .filter(|h| h != "0");
+    let ext = |field: &str| {
+        get_field::<Point3D>(object_ptr, "LAYOUT", field).filter(|p| {
+            [p.x, p.y, p.z]
+                .iter()
+                .all(|v| v.is_finite() && v.abs() < 1e20)
+        })
+    };
+    let sub = |field: &str| {
+        get_sub_field::<f64>(object_ptr, "LAYOUT", "plotsettings", "PLOTSETTINGS", field)
+            .unwrap_or(0.0)
+    };
+    let sub_u16 = |field: &str| {
+        get_sub_field::<u16>(object_ptr, "LAYOUT", "plotsettings", "PLOTSETTINGS", field)
+            .unwrap_or(0)
+    };
+    let sub_text = |field: &str| {
+        // SAFETY: dwg owns object_ptr (this function's contract).
+        unsafe {
+            get_sub_utf8_field(
+                dwg,
+                object_ptr,
+                "LAYOUT",
+                "plotsettings",
+                "PLOTSETTINGS",
+                field,
+            )
+        }
+        .unwrap_or_default()
+    };
+    let (paper_units_num, drawing_units) = (sub("paper_units"), sub("drawing_units"));
+    let plot = PlotSettings {
+        page_setup: sub_text("printer_cfg_file"),
+        printer: sub_text("paper_size"),
+        paper_name: sub_text("canonical_media_name"),
+        paper_width_mm: sub("paper_width"),
+        paper_height_mm: sub("paper_height"),
+        margins_mm: [
+            sub("left_margin"),
+            sub("bottom_margin"),
+            sub("right_margin"),
+            sub("top_margin"),
+        ],
+        plot_origin: get_sub_field::<Point2D>(
+            object_ptr,
+            "LAYOUT",
+            "plotsettings",
+            "PLOTSETTINGS",
+            "plot_origin",
+        )
+        .unwrap_or_default(),
+        paper_units: sub_u16("plot_paper_unit"),
+        rotation: sub_u16("plot_rotation_mode"),
+        plot_type: sub_u16("plot_type"),
+        scale: if drawing_units > 0.0 && paper_units_num > 0.0 {
+            paper_units_num / drawing_units
+        } else {
+            1.0
+        },
+        std_scale_type: sub_u16("std_scale_type"),
+        std_scale_factor: sub("std_scale_factor"),
+        flags: sub_u16("plot_flags"),
+        style_sheet: sub_text("stylesheet"),
+    };
+    Some(LayoutRecord {
+        name,
+        tab_order: get_field::<u16>(object_ptr, "LAYOUT", "tab_order").unwrap_or(0),
+        flags: get_field::<u16>(object_ptr, "LAYOUT", "layout_flags").unwrap_or(0),
+        block_name,
+        limmin: get_field::<Point2D>(object_ptr, "LAYOUT", "LIMMIN").unwrap_or_default(),
+        limmax: get_field::<Point2D>(object_ptr, "LAYOUT", "LIMMAX").unwrap_or_default(),
+        extmin: ext("EXTMIN"),
+        extmax: ext("EXTMAX"),
+        active_viewport,
+        plot,
     })
 }
 

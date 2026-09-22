@@ -215,6 +215,16 @@ uncad_dwg_from_dxf (const Dwg_Data *dwg)
   return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
 }
 
+char *
+uncad_dwg_string_to_utf8 (const Dwg_Data *dwg, const char *s)
+{
+  if (!s)
+    return NULL;
+  if (dwg && IS_FROM_TU_DWG (dwg))
+    return bit_convert_TU ((BITCODE_TU)s);
+  return uncad_tv_to_utf8 (dwg, s);
+}
+
 int
 uncad_dwg_is_tu (const Dwg_Data *dwg)
 {

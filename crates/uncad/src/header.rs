@@ -136,6 +136,13 @@ pub struct Header {
     pub textsize: f64,
     /// `$CLAYER`: the current layer's name; empty if unresolvable.
     pub clayer: String,
+    /// `"dwg"` or `"dxf"`: what the bytes were. Since 0.3.0.
+    #[serde(default = "dwg_format")]
+    pub format: String,
+}
+
+fn dwg_format() -> String {
+    "dwg".to_string()
 }
 
 /// Where the data came from, for the few fields whose meaning depends on
@@ -223,6 +230,11 @@ pub(crate) unsafe fn convert_header(dwg: *mut libredwg_sys::Dwg_Data) -> Header 
         ltscale: f64_var("LTSCALE"),
         textsize: f64_var("TEXTSIZE"),
         clayer,
+        format: if unsafe { libredwg_sys::uncad_dwg_from_dxf(dwg) } != 0 {
+            "dxf".to_string()
+        } else {
+            "dwg".to_string()
+        },
     }
 }
 
