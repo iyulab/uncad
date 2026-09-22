@@ -898,7 +898,16 @@ unsafe fn convert_entity(
                     extension1: point(p13),
                     extension2: point(p14),
                     radial: point(p15),
-                    arc: point(p16),
+                    arc: point(p16).or_else(|| {
+                        // An arc-length dimension's group 16 is its first
+                        // leader point, and it has one only when it says so.
+                        let has_leader = kind == Some(DimensionKind::ArcLength)
+                            && get_field::<u8>(entity_ptr, dxfname, "has_leader")
+                                .is_some_and(|v| v != 0);
+                        has_leader
+                            .then(|| get_point3d(entity_ptr, dxfname, "leader1_pt"))
+                            .flatten()
+                    }),
                 },
                 // Group 50 is the measured angle only for a rotated linear
                 // dimension; the other subtypes do not write it, and the
@@ -1574,11 +1583,14 @@ fn dimension_point_fields(
             None,
             None,
         ),
+        // Group 16 here is the first leader point, which the format writes
+        // only when the dimension has a leader at all (group 71) -- the
+        // field is there either way, holding zeros when it does not.
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => (
             Some("xline1_pt"),
             Some("xline2_pt"),
             Some("center_pt"),
-            Some("leader1_pt"),
+            None,
         ),
         _ => (None, None, None, None),
     }

@@ -1,0 +1,1520 @@
+{
+  "entities": [
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 298,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12A"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D1"
+      },
+      "kind": "ROTATED",
+      "measurement": 120.0,
+      "text_override": {
+        "type": "MEASURED"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": -15.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 0.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 299,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12B"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D2"
+      },
+      "kind": "ROTATED",
+      "measurement": 120.0,
+      "text_override": {
+        "type": "MEASURED"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": 55.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 40.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 40.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 40.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 300,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12C"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D3"
+      },
+      "kind": "ROTATED",
+      "measurement": 120.0,
+      "text_override": {
+        "type": "SUPPRESSED"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": 95.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 80.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 80.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 80.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 301,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12D"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D4"
+      },
+      "kind": "ROTATED",
+      "measurement": 120.0,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "125"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": 135.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 120.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 120.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 120.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 302,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12E"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D5"
+      },
+      "kind": "ROTATED",
+      "measurement": null,
+      "text_override": {
+        "type": "MEASURED"
+      },
+      "definition_point": {
+        "x": 0.0,
+        "y": 175.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 160.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 160.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 160.0,
+          "z": 0.0
+        },
+        "radial": null,
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "UNRESOLVED",
+        "data": "NOT-DECLARED"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 303,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "12F"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D6"
+      },
+      "kind": "DIAMETER",
+      "measurement": 20.0,
+      "text_override": {
+        "type": "LITERAL",
+        "data": "%%C20"
+      },
+      "definition_point": {
+        "x": 60.0,
+        "y": 200.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 70.0,
+        "y": 200.0
+      },
+      "points": {
+        "extension1": null,
+        "extension2": null,
+        "radial": {
+          "x": 80.0,
+          "y": 200.0,
+          "z": 0.0
+        },
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    },
+    {
+      "type": "DIMENSION",
+      "common": {
+        "id": 304,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "130"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "DIMS"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "*D7"
+      },
+      "kind": "ARC_LENGTH",
+      "measurement": 133.5,
+      "text_override": {
+        "type": "MEASURED"
+      },
+      "definition_point": {
+        "x": 60.0,
+        "y": 260.0,
+        "z": 0.0
+      },
+      "text_midpoint": {
+        "x": 60.0,
+        "y": 240.0
+      },
+      "points": {
+        "extension1": {
+          "x": 0.0,
+          "y": 240.0,
+          "z": 0.0
+        },
+        "extension2": {
+          "x": 120.0,
+          "y": 240.0,
+          "z": 0.0
+        },
+        "radial": {
+          "x": 60.0,
+          "y": 220.0,
+          "z": 0.0
+        },
+        "arc": null
+      },
+      "rotation": 0.0,
+      "text_rotation": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ISO-25"
+      }
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7
+      },
+      "DIMS": {
+        "name": "DIMS",
+        "color_index": 3
+      }
+    },
+    "block_records": {
+      "*D1": {
+        "name": "*D1",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": -15.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": -15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 0.0,
+              "y": -15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 263,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "107"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 120.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": -15.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": -14.0
+            },
+            "text_height": 2.5,
+            "text": "<>",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D2": {
+        "name": "*D2",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 55.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 55.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 268,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10C"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 40.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 0.0,
+              "y": 55.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 269,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 120.0,
+              "y": 40.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 55.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 270,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 56.0
+            },
+            "text_height": 2.5,
+            "text": "",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D3": {
+        "name": "*D3",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 273,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "111"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 95.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 95.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 274,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "112"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 80.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 0.0,
+              "y": 95.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 275,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "113"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 120.0,
+              "y": 80.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 95.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 276,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "114"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 96.0
+            },
+            "text_height": 2.5,
+            "text": " ",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D4": {
+        "name": "*D4",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 279,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "117"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 135.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 135.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 280,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "118"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 120.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 0.0,
+              "y": 135.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 281,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "119"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 120.0,
+              "y": 120.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 135.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 282,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11A"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 136.0
+            },
+            "text_height": 2.5,
+            "text": "125",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D5": {
+        "name": "*D5",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 285,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 175.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 175.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 286,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 160.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 0.0,
+              "y": 175.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "LINE",
+            "common": {
+              "id": 287,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "11F"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 120.0,
+              "y": 160.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 175.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 288,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "120"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 176.0
+            },
+            "text_height": 2.5,
+            "text": "<>",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D6": {
+        "name": "*D6",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 291,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "123"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 200.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 80.0,
+              "y": 200.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 292,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "124"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 70.0,
+              "y": 201.0
+            },
+            "text_height": 2.5,
+            "text": "%%C20",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*D7": {
+        "name": "*D7",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 295,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "127"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 240.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 120.0,
+              "y": 240.0,
+              "z": 0.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 296,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "128"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 60.0,
+              "y": 240.0
+            },
+            "text_height": 2.5,
+            "text": "<>",
+            "rotation": 0.0
+          }
+        ]
+      },
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 298,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12A"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D1"
+            },
+            "kind": "ROTATED",
+            "measurement": 120.0,
+            "text_override": {
+              "type": "MEASURED"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": -15.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 0.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 299,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D2"
+            },
+            "kind": "ROTATED",
+            "measurement": 120.0,
+            "text_override": {
+              "type": "MEASURED"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": 55.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 40.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 40.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 40.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 300,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12C"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D3"
+            },
+            "kind": "ROTATED",
+            "measurement": 120.0,
+            "text_override": {
+              "type": "SUPPRESSED"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": 95.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 80.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 80.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 80.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 301,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D4"
+            },
+            "kind": "ROTATED",
+            "measurement": 120.0,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "125"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": 135.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 120.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 120.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 120.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 302,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D5"
+            },
+            "kind": "ROTATED",
+            "measurement": null,
+            "text_override": {
+              "type": "MEASURED"
+            },
+            "definition_point": {
+              "x": 0.0,
+              "y": 175.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 160.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 160.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 160.0,
+                "z": 0.0
+              },
+              "radial": null,
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "UNRESOLVED",
+              "data": "NOT-DECLARED"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 303,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "12F"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D6"
+            },
+            "kind": "DIAMETER",
+            "measurement": 20.0,
+            "text_override": {
+              "type": "LITERAL",
+              "data": "%%C20"
+            },
+            "definition_point": {
+              "x": 60.0,
+              "y": 200.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 70.0,
+              "y": 200.0
+            },
+            "points": {
+              "extension1": null,
+              "extension2": null,
+              "radial": {
+                "x": 80.0,
+                "y": 200.0,
+                "z": 0.0
+              },
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          },
+          {
+            "type": "DIMENSION",
+            "common": {
+              "id": 304,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "130"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "DIMS"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "*D7"
+            },
+            "kind": "ARC_LENGTH",
+            "measurement": 133.5,
+            "text_override": {
+              "type": "MEASURED"
+            },
+            "definition_point": {
+              "x": 60.0,
+              "y": 260.0,
+              "z": 0.0
+            },
+            "text_midpoint": {
+              "x": 60.0,
+              "y": 240.0
+            },
+            "points": {
+              "extension1": {
+                "x": 0.0,
+                "y": 240.0,
+                "z": 0.0
+              },
+              "extension2": {
+                "x": 120.0,
+                "y": 240.0,
+                "z": 0.0
+              },
+              "radial": {
+                "x": 60.0,
+                "y": 220.0,
+                "z": 0.0
+              },
+              "arc": null
+            },
+            "rotation": 0.0,
+            "text_rotation": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ISO-25"
+            }
+          }
+        ]
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": []
+      }
+    },
+    "dim_styles": {
+      "ISO-25": {
+        "name": "ISO-25",
+        "post": "<>mm",
+        "scale": null,
+        "length_factor": null,
+        "tolerances": null,
+        "limits": null,
+        "tolerance_upper": null,
+        "tolerance_lower": null,
+        "decimal_places": 2,
+        "tolerance_decimal_places": null,
+        "text_height": 2.5
+      }
+    },
+    "mlinestyles": {}
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}

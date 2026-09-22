@@ -287,15 +287,16 @@ Rendering treats absent and unresolved alike (no layer color to look up, no bloc
 the model still says which it was.
 
 **A known deviation, in DXF only.** The three states are about what the *file* points with,
-and a DXF INSERT points with a name (group code 2), not a handle -- so an INSERT naming a
-block the file never defines is a reference that exists and answers to nothing: unresolved,
-carrying that name. This crate reports it as *absent* instead, and cannot do better: the
-vendored library's DXF importer looks the name up in its block table and, when the lookup
-fails, only warns -- the name it read is never stored on the entity, so nothing downstream of
-that importer can recover it. `tests/golden.rs` therefore applies one documented deviation to
-the G10 case, and a second test asserts the deviation is still needed, so the day the name
-survives the read the suite says so. DWG files are unaffected: there a reference is a handle,
-and a handle that answers to nothing is already reported unresolved.
+and a DXF entity points at a table entry by name -- an INSERT at its block (group 2), a
+dimension at its style (group 3) -- not by handle. So naming an entry the file never declares
+is a reference that exists and answers to nothing: unresolved, carrying that name. This crate
+reports those as *absent* instead, and cannot do better: the vendored library's DXF importer
+looks each name up in its table and, when the lookup fails, only warns -- the name it read is
+never stored on the entity, so nothing downstream of that importer can recover it.
+`tests/golden.rs` applies one documented deviation over both cases the golden set carries (an
+undefined block in G10, an undeclared style in G5), and a test asserts the deviation is still
+needed, so the day a name survives the read the suite says so. DWG files are unaffected: there
+a reference is a handle, and a handle that answers to nothing is already reported unresolved.
 
 Two cases carry no handle at all and are told apart by the drawing's version. Before R13 a
 drawing points at its tables by *index*, not by handle; those references are looked up by
