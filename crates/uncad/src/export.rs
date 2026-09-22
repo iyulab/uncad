@@ -1861,9 +1861,11 @@ pub fn export_package(
     writer.write_json("drawing.json", &drawing_value, "drawing")?;
 
     // optional whole-model files
+    let mut svg_origin: Option<[f64; 2]> = None;
     if options.svg {
         let doc = db.to_svg(svg_options);
         writer.write_bytes("drawing.svg", doc.svg.as_bytes(), "svg")?;
+        svg_origin = Some(doc.origin);
     }
     if options.full {
         let text = db.to_json(ToJsonOptions { pretty: false })?;
@@ -1950,6 +1952,8 @@ pub fn export_package(
         },
         "units": writer.units,
         "crop": crop_report,
+        // drawing.svg's user units are world minus this (null without it).
+        "svg_origin": svg_origin,
         "overview": overview,
         "frames": frame_reports,
         "frames_dropped": dropped,

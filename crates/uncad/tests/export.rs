@@ -112,6 +112,7 @@ fn the_package_has_every_file_and_a_profile_sized_overview() {
     assert_eq!(manifest["$schema"], "uncad-package/1");
     assert_eq!(manifest["profile"], "claude");
     assert_eq!(manifest["source"]["name"], Value::Null);
+    assert_eq!(manifest["svg_origin"], Value::Null, "no drawing.svg");
     assert_eq!(manifest["units"]["name"], db.header.units.name);
     assert_eq!(manifest["crop"]["source"], "content");
     assert_eq!(manifest["crop"]["excluded"].as_array().unwrap().len(), 2);
@@ -318,6 +319,8 @@ fn the_export_is_deterministic_and_options_are_honoured() {
     let manifest = read_json(&a.0.join("manifest.json"));
     assert_eq!(manifest["source"]["name"], "example_2000.dwg");
     assert!(manifest["shard_index"].as_array().unwrap().len() > 5);
+    // drawing.svg reads in world units for a drawing near the origin.
+    assert_eq!(manifest["svg_origin"], serde_json::json!([0.0, 0.0]));
 
     for file in &ra.files {
         if file.path == "report.json" {

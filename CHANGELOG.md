@@ -187,8 +187,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   rounded per-axis median of its entities' reference points, used only when it exceeds
   32768 units, so every drawing near the origin keeps its SVG byte for byte -- and
   reports it as `ToSvgResult::origin` / `ToPngResult::origin` (SVG user units = world
-  minus origin; `view_box` and every JSON record stay in world units). A composited
-  sheet folds the model's and the paper's origins into the viewport matrix.
+  minus origin; `view_box` and every JSON record stay in world units); the package's
+  `manifest.json` carries `drawing.svg`'s origin as `svg_origin`. A composited sheet
+  folds the model's and the paper's origins into the viewport matrix.
 - On a composited sheet the paper's and the model's hatch pattern definitions shared ids
   (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
   legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's
