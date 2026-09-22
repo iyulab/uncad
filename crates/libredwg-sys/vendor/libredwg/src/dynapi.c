@@ -14744,7 +14744,12 @@ static const struct _name_subclasses dwg_name_subclasses[] = {
   { "VBA_PROJECT", {"AcDbObject", "AcDbVbaProject", NULL, NULL, NULL, NULL, NULL, NULL} },
   { "VERTEX_2D", {"AcDbEntity", "AcDbVertex", "AcDb2dVertex", NULL, NULL, NULL, NULL, NULL} },
   { "VERTEX_3D", {"AcDbEntity", "AcDbVertex", "AcDb3dPolylineVertex", NULL, NULL, NULL, NULL, NULL} },
-  { "VERTEX_MESH", {"AcDbEntity", "AcDbVertex", "AcDbPolyFaceMeshVertex", NULL, NULL, NULL, NULL, NULL} },
+  /* uncad local patch: "AcDbPolygonMeshVertex" added -- see in_dxf.c's
+     VERTEX_2D upgrade chain and docs/CAVEATS.md. It is the subclass marker
+     AutoCAD writes on a polygon mesh's vertices, i.e. exactly what a
+     VERTEX_MESH is; without it dwg_has_subclass() rejects the object and the
+     DXF reader fails the whole file. */
+  { "VERTEX_MESH", {"AcDbEntity", "AcDbVertex", "AcDbPolyFaceMeshVertex", "AcDbPolygonMeshVertex", NULL, NULL, NULL, NULL} },
   { "VERTEX_PFACE", {"AcDbEntity", "AcDbVertex", "AcDbPolyFaceMeshVertex", NULL, NULL, NULL, NULL, NULL} },
   { "VERTEX_PFACE_FACE", {"AcDbEntity", "AcDbFaceRecord", NULL, NULL, NULL, NULL, NULL, NULL} },
   { "VIEW", {"AcDbSymbolTableRecord", "AcDbViewTableRecord", NULL, NULL, NULL, NULL, NULL, NULL} },

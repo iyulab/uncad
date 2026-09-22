@@ -1,0 +1,634 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  5
+30
+330
+1F
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+1000.0
+ 21
+0.0
+ 31
+0.0
+  0
+POLYLINE
+  5
+31
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbPolyFaceMesh
+ 66
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+64
+ 71
+8
+ 72
+2
+  0
+VERTEX
+  5
+32
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+192
+  0
+VERTEX
+  5
+33
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+10.0
+ 20
+0.0
+ 30
+0.0
+ 70
+192
+  0
+VERTEX
+  5
+34
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+10.0
+ 20
+10.0
+ 30
+0.0
+ 70
+192
+  0
+VERTEX
+  5
+35
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+0.0
+ 20
+10.0
+ 30
+0.0
+ 70
+192
+  0
+VERTEX
+  5
+36
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+10.0
+ 70
+192
+  0
+VERTEX
+  5
+37
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+10.0
+ 20
+0.0
+ 30
+10.0
+ 70
+192
+  0
+VERTEX
+  5
+38
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+10.0
+ 20
+10.0
+ 30
+10.0
+ 70
+192
+  0
+VERTEX
+  5
+39
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolyFaceMeshVertex
+ 10
+0.0
+ 20
+10.0
+ 30
+10.0
+ 70
+192
+  0
+VERTEX
+  5
+3A
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbFaceRecord
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+128
+ 71
+1
+ 72
+2
+ 73
+3
+ 74
+4
+  0
+VERTEX
+  5
+3B
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbFaceRecord
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+128
+ 71
+5
+ 72
+6
+ 73
+7
+ 74
+8
+  0
+SEQEND
+  5
+3C
+330
+31
+  8
+0
+100
+AcDbEntity
+  0
+POLYLINE
+  5
+50
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbPolygonMesh
+ 66
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+16
+ 71
+3
+ 72
+4
+  0
+VERTEX
+  5
+51
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+52
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+0.0
+ 20
+5.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+53
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+0.0
+ 20
+10.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+54
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+0.0
+ 20
+15.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+55
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+10.0
+ 20
+0.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+56
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+10.0
+ 20
+5.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+57
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+10.0
+ 20
+10.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+58
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+10.0
+ 20
+15.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+59
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+20.0
+ 20
+0.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+5A
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+20.0
+ 20
+5.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+5B
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+20.0
+ 20
+10.0
+ 30
+0.0
+ 70
+64
+  0
+VERTEX
+  5
+5C
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDbPolygonMeshVertex
+ 10
+20.0
+ 20
+15.0
+ 30
+0.0
+ 70
+64
+  0
+SEQEND
+  5
+60
+330
+50
+  8
+0
+100
+AcDbEntity
+  0
+ENDSEC
+  0
+EOF

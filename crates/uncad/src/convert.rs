@@ -37,6 +37,13 @@ const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 /// `Dwg_Entity_POLYLINE_2D.flag`: "1: closed").
 const POLYLINE_CLOSED_FLAG: u8 = 1;
 
+/// POLYLINE_MESH.flag bit 1: the grid wraps in M ("closed polygon mesh in
+/// the M direction", DXF group 70).
+const POLYLINE_MESH_CLOSED_M_FLAG: u16 = 1;
+
+/// POLYLINE_MESH.flag bit 32: the grid wraps in N.
+const POLYLINE_MESH_CLOSED_N_FLAG: u16 = 32;
+
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
 
@@ -113,6 +120,18 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> 
 /// and by every block's own entry in [`crate::tables::Tables::block_records`],
 /// so the two stay in sync as entity types are added.
 ///
+/// A polyline's VERTEX_* records are skipped: they are structural
+/// subentities of the POLYLINE that owns them, read from *its* chain (see
+/// [`polyline_subentities`]), not drawing content of the block. That is
+/// exactly the contract LibreDWG documents for `get_next_owned_entity`
+/// ("Not subentities: ATTRIB, VERTEX") and what its R13-R2000 branch
+/// implements -- but its R2004+ branch just indexes `BLOCK_HEADER.entities[]`,
+/// which the DXF reader fills with every object between the BLOCK and the
+/// ENDBLK. So before 0.3.0 an R2004+ DXF reported each polyline's vertices as
+/// top-level `Entity::Unknown` values: nine "entities" for one polyface mesh,
+/// counted in the CLI summary, named in `report.json`'s unsupported list and
+/// present in `block_records["*Model_Space"].entities`.
+///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `block_obj` was obtained from;
 /// `block_obj` must be a valid, non-null `BLOCK_HEADER` object.
@@ -123,51 +142,133 @@ pub(crate) unsafe fn owned_entities(
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
-        if let Some(entity) = unsafe { convert_entity(dwg, owned, 0) } {
-            entities.push(entity);
+        let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(owned) }
+            as libredwg_sys::DWG_OBJECT_TYPE;
+        if !is_polyline_vertex(fixedtype) {
+            if let Some(entity) = unsafe { convert_entity(dwg, owned, 0) } {
+                entities.push(entity);
+            }
         }
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
     }
     entities
 }
 
-/// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
-/// returns into an owned `Vec`, then frees its buffer.
+/// True for the five VERTEX_* subentity types an old-style POLYLINE owns.
+/// Matches the list LibreDWG's own `get_next_owned_entity` skips over ("Not
+/// subentities: ATTRIB, VERTEX", dwg.c).
+fn is_polyline_vertex(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> bool {
+    matches!(
+        fixedtype,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE
+    )
+}
+
+/// Every subentity an old-style POLYLINE owns, in order.
 ///
-/// Those dedicated C functions are used rather than a generic owned-subentity
-/// walk because their traversal is version-dependent (pre-R2004 files chain
-/// `first_vertex..last_vertex` through the raw object list). A generic walk was
-/// tried and over-collected a vertex on a real file.
+/// Walks the owned-subentity chain (`get_first`/`get_next_owned_subentity`,
+/// dwg.c) rather than calling LibreDWG's own
+/// `dwg_object_polyline_{2,3}d_get_points`, because those are short by one on
+/// every R13/R14/R2000 file: for `version < R_2004` both the point and the
+/// count accessor walk `first_vertex..last_vertex` as
+/// `do { ... } while ((vobj = dwg_next_object (vobj)) && vobj != vlast);`
+/// (dwg_api.c), whose condition ends the loop *before* the body ever sees
+/// `vlast`. They return N-1 points, and the last vertex of every such
+/// polyline was dropped -- from the picture, from `length`/`area`, and,
+/// because the bulges were already read from this chain and so came back N
+/// long, from the bulge list too (the length mismatch cleared every bulge,
+/// which turned a two-vertex arc into a point). `get_next_owned_subentity`
+/// stops *at* `last_vertex` and yields all N; for R2004+ it indexes the
+/// `vertex[]` array by `num_owned`, the same source the accessors use there.
+///
+/// Pre-R13 files fill neither `first_vertex` nor `vertex[]`, so that chain is
+/// empty for them and the fallback is the scan LibreDWG's own pre-R13 branch
+/// uses: forward through the object list, which is where a pre-R13 polyline's
+/// vertices physically are, stopping at the first object that is not a VERTEX
+/// (the SEQEND, in a well-formed file).
+///
+/// Both walks are bounded against a chain a damaged handle turned into a ring
+/// (see [`crate::limits::MAX_OWNED_SUBENTITIES`]).
 ///
 /// # Safety
-/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object matching the
-/// accessors passed in, and `T` must have the same layout as the
-/// `dwg_point_2d`/`dwg_point_3d` they return.
-unsafe fn read_polyline_points<P, T: Copy>(
+/// `obj` must be a valid, non-null `POLYLINE_2D`/`POLYLINE_3D`/
+/// `POLYLINE_PFACE`/`POLYLINE_MESH` `Dwg_Object`.
+unsafe fn polyline_subentities(
     obj: *mut libredwg_sys::Dwg_Object,
-    get_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> *mut P,
-    get_num_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> u32,
-) -> Vec<T> {
-    let mut error = 0i32;
-    let points_ptr = unsafe { get_points(obj, &mut error) };
-    let num_points = unsafe { get_num_points(obj, &mut error) };
-    if points_ptr.is_null() || num_points == 0 {
-        return Vec::new();
+) -> Vec<*mut libredwg_sys::Dwg_Object> {
+    let mut subs = Vec::new();
+    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+    let mut walked = 0usize;
+    while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
+        walked += 1;
+        subs.push(sub);
+        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
     }
-    // SAFETY: on success the accessor calloc's exactly num_points entries of
-    // the layout T mirrors; copied out here before the buffer is freed.
-    let points =
-        unsafe { std::slice::from_raw_parts(points_ptr.cast::<T>(), num_points as usize) }.to_vec();
-    unsafe { libc::free(points_ptr.cast()) };
-    points
+    if !subs.is_empty() {
+        return subs;
+    }
+    let mut next = unsafe { libredwg_sys::dwg_next_object(obj) };
+    while !next.is_null() && subs.len() < crate::limits::MAX_OWNED_SUBENTITIES {
+        let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(next) }
+            as libredwg_sys::DWG_OBJECT_TYPE;
+        if !is_polyline_vertex(fixedtype) {
+            break;
+        }
+        subs.push(next);
+        next = unsafe { libredwg_sys::dwg_next_object(next) };
+    }
+    subs
+}
+
+/// The vertices of `vertex_type` an old-style POLYLINE owns, in order, each
+/// with its bulge (0.0 for a vertex type that has no `bulge` field).
+///
+/// # Safety
+/// `obj` must be a valid, non-null POLYLINE `Dwg_Object` per
+/// [`polyline_subentities`], and `vertex_dxfname` must be the dynapi name of
+/// `vertex_type`.
+unsafe fn polyline_vertices(
+    obj: *mut libredwg_sys::Dwg_Object,
+    vertex_type: libredwg_sys::DWG_OBJECT_TYPE,
+    vertex_dxfname: &str,
+) -> Vec<(Point3D, f64)> {
+    let mut vertices = Vec::new();
+    for sub in unsafe { polyline_subentities(obj) } {
+        let sub_fixedtype =
+            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
+        if sub_fixedtype != vertex_type {
+            continue;
+        }
+        let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
+        if let Some(point) = get_field::<Point3D>(sub_entity_ptr, vertex_dxfname, "point") {
+            // VERTEX_3D and the mesh vertex types carry no `bulge`, and the
+            // dynapi lookup simply fails for them.
+            let bulge = get_field::<f64>(sub_entity_ptr, vertex_dxfname, "bulge").unwrap_or(0.0);
+            vertices.push((point, bulge));
+        }
+    }
+    vertices
 }
 
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
-/// `VERTEX_PFACE` (vertex positions, in order) and `VERTEX_PFACE_FACE` (up to
-/// 4 vertex indices per face, 1-based, negative meaning "invisible edge" --
-/// the sign carries no other meaning, so it is just dropped) subentities
-/// directly; LibreDWG's own accessor for this type is documented as not
-/// implemented.
+/// subentities directly -- vertex positions, in order, then `VERTEX_PFACE_FACE`
+/// (up to 4 vertex indices per face, 1-based, negative meaning "invisible
+/// edge" -- the sign carries no other meaning, so it is just dropped);
+/// LibreDWG's own accessor for this type is documented as not implemented.
+///
+/// A position vertex is a `VERTEX_PFACE` *or* a `VERTEX_MESH`. Both mean the
+/// same thing inside a POLYLINE_PFACE's own chain, and the DXF reader hands
+/// back the second one for a polyface whose `AcDbPolyFaceMeshVertex` records
+/// name the block record as their owner rather than the POLYLINE: `in_dxf.c`
+/// picks between the two types by looking the VERTEX's own group 330 up and
+/// asking whether it is a POLYLINE_PFACE, and falls back to VERTEX_MESH when
+/// it is not. ezdxf writes exactly that shape (and `audit()` passes it), so
+/// before 0.3.0 a DXF polyface mesh found no positions at all and drew
+/// nothing.
 ///
 /// Face records may be interleaved with vertex records, so indices are only
 /// resolved once the whole chain has been walked. Faces referencing an
@@ -179,29 +280,29 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     let mut positions = Vec::new();
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
-    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    // A damaged handle can make this chain a ring; the walk is bounded so
-    // it ends either way (see [`crate::limits::MAX_OWNED_SUBENTITIES`]).
-    let mut walked = 0usize;
-    while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
-        walked += 1;
+    for sub in unsafe { polyline_subentities(obj) } {
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
-        if !sub_entity_ptr.is_null() {
-            if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE {
-                if let Some(p) = get_field::<Point3D>(sub_entity_ptr, "VERTEX_PFACE", "point") {
-                    positions.push(p);
-                }
-            } else if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE {
-                if let Some(vertind) =
-                    get_field::<[i16; 4]>(sub_entity_ptr, "VERTEX_PFACE_FACE", "vertind")
-                {
-                    faces.push(vertind);
-                }
+        if sub_entity_ptr.is_null() {
+            continue;
+        }
+        let vertex_dxfname = match sub_fixedtype {
+            libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE => Some("VERTEX_PFACE"),
+            libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH => Some("VERTEX_MESH"),
+            _ => None,
+        };
+        if let Some(dxfname) = vertex_dxfname {
+            if let Some(p) = get_field::<Point3D>(sub_entity_ptr, dxfname, "point") {
+                positions.push(p);
+            }
+        } else if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE {
+            if let Some(vertind) =
+                get_field::<[i16; 4]>(sub_entity_ptr, "VERTEX_PFACE_FACE", "vertind")
+            {
+                faces.push(vertind);
             }
         }
-        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
     }
 
     let mut edges = Vec::new();
@@ -222,6 +323,55 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
             if let (Some(&pa), Some(&pb)) = (positions.get(a), positions.get(b)) {
                 edges.push([pa, pb]);
             }
+        }
+    }
+    edges
+}
+
+/// Resolves a POLYLINE_MESH ("polygon mesh") into the wireframe of its grid:
+/// `m` rows by `n` columns of VERTEX_MESH subentities, stored row-major, with
+/// one edge between every pair of grid neighbours. `flag` bit 1 wraps the grid
+/// in M and bit 32 in N (`dwg.spec`'s POLYLINE_MESH group 70), which adds the
+/// closing row/column of edges.
+///
+/// An open `m` by `n` grid has `n * (m - 1) + m * (n - 1)` edges. No edges are
+/// produced unless exactly `m * n` vertices were found: a smooth-surface mesh
+/// stores spline control points alongside the approximated ones, and guessing
+/// a grid shape that the counts do not support would draw a lie.
+///
+/// # Safety
+/// `obj` must be a valid, non-null `POLYLINE_MESH` `Dwg_Object`.
+unsafe fn polyline_mesh_wireframe(
+    obj: *mut libredwg_sys::Dwg_Object,
+    m: usize,
+    n: usize,
+    flag: u16,
+) -> Vec<[Point3D; 2]> {
+    let positions: Vec<Point3D> = unsafe {
+        polyline_vertices(
+            obj,
+            libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH,
+            "VERTEX_MESH",
+        )
+    }
+    .into_iter()
+    .map(|(point, _no_bulge)| point)
+    .collect();
+    if m < 2 || n < 2 || positions.len() != m.saturating_mul(n) {
+        return Vec::new();
+    }
+    let closed_m = flag & POLYLINE_MESH_CLOSED_M_FLAG != 0;
+    let closed_n = flag & POLYLINE_MESH_CLOSED_N_FLAG != 0;
+    let mut edges = Vec::new();
+    // Down each column, then along each row.
+    for i in 0..if closed_m { m } else { m - 1 } {
+        for j in 0..n {
+            edges.push([positions[i * n + j], positions[((i + 1) % m) * n + j]]);
+        }
+    }
+    for row in positions.chunks_exact(n) {
+        for j in 0..if closed_n { n } else { n - 1 } {
+            edges.push([row[j], row[(j + 1) % n]]);
         }
     }
     edges
@@ -270,29 +420,6 @@ fn mirror_bulges(bulges: &mut [f64], extrusion: Point3D) {
             *b = -*b;
         }
     }
-}
-
-/// The bulge of every VERTEX_2D a POLYLINE_2D owns, in order.
-///
-/// # Safety
-/// `obj` must be a valid, non-null `POLYLINE_2D` `Dwg_Object`.
-unsafe fn polyline_2d_bulges(obj: *mut libredwg_sys::Dwg_Object) -> Vec<f64> {
-    let mut bulges = Vec::new();
-    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    // Bounded against a chain a damaged handle turned into a ring (see
-    // [`crate::limits::MAX_OWNED_SUBENTITIES`]).
-    let mut walked = 0usize;
-    while !sub.is_null() && walked < crate::limits::MAX_OWNED_SUBENTITIES {
-        walked += 1;
-        let sub_fixedtype =
-            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
-        if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D {
-            let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
-            bulges.push(get_field::<f64>(sub_entity_ptr, "VERTEX_2D", "bulge").unwrap_or(0.0));
-        }
-        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
-    }
-    bulges
 }
 
 /// The justification and style fields TEXT and ATTRIB share (same dynapi
@@ -901,15 +1028,18 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
-            // SAFETY: obj is a POLYLINE_3D per fixedtype, and Point3D mirrors
-            // dwg_point_3d's layout.
+            // SAFETY: obj is a POLYLINE_3D per fixedtype, and the subentities
+            // it owns are VERTEX_3D.
             let vertices: Vec<Point3D> = unsafe {
-                read_polyline_points(
+                polyline_vertices(
                     obj,
-                    libredwg_sys::dwg_object_polyline_3d_get_points,
-                    libredwg_sys::dwg_object_polyline_3d_get_numpoints,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D,
+                    "VERTEX_3D",
                 )
-            };
+            }
+            .into_iter()
+            .map(|(point, _no_bulge)| point)
+            .collect();
             // POLYLINE_3D.flag is BITCODE_RC (1 byte), unlike LWPOLYLINE's
             // BITCODE_BS (2 bytes) -- same closed-bit convention, different
             // underlying C width.
@@ -921,28 +1051,38 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // SAFETY: obj is a POLYLINE_2D per fixedtype, and Point2D mirrors
-            // dwg_point_2d's layout.
-            let vertices: Vec<Point2D> = unsafe {
-                read_polyline_points(
+            // SAFETY: obj is a POLYLINE_2D per fixedtype, and the subentities
+            // it owns are VERTEX_2D, each carrying its own point and bulge.
+            let owned = unsafe {
+                polyline_vertices(
                     obj,
-                    libredwg_sys::dwg_object_polyline_2d_get_points,
-                    libredwg_sys::dwg_object_polyline_2d_get_numpoints,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D,
+                    "VERTEX_2D",
                 )
             };
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
             let extrusion = read_extrusion(entity_ptr, "POLYLINE_2D");
             let elevation = get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0);
-            // Bulges live on the owned VERTEX_2D subentities, which the
-            // point accessor above flattens away.
-            let mut bulges: Vec<f64> = unsafe { polyline_2d_bulges(obj) };
-            if bulges.len() != vertices.len() || bulges.iter().all(|b| *b == 0.0) {
+            // A VERTEX_2D's stored point is 3D, but its z is the polyline's
+            // own elevation repeated; the OCS transform below takes that from
+            // the POLYLINE_2D field, as the DXF does.
+            let mut bulges: Vec<f64> = owned.iter().map(|(_, bulge)| *bulge).collect();
+            if bulges.iter().all(|b| *b == 0.0) {
                 bulges.clear();
             }
             mirror_bulges(&mut bulges, extrusion);
-            let vertices = vertices
+            let vertices = owned
                 .iter()
-                .map(|v| crate::geom::ocs_to_wcs_2d(*v, elevation, extrusion))
+                .map(|(point, _)| {
+                    crate::geom::ocs_to_wcs_2d(
+                        Point2D {
+                            x: point.x,
+                            y: point.y,
+                        },
+                        elevation,
+                        extrusion,
+                    )
+                })
                 .collect();
             Entity::Polyline2D(LwPolylineEntity {
                 common,
@@ -1192,6 +1332,20 @@ unsafe fn convert_entity(
             // chain.
             let wireframe_edges = unsafe { polyline_pface_wireframe(obj) };
             Entity::PolylinePFace(Solid3DEntity {
+                common,
+                wireframe_edges,
+            })
+        }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_MESH => {
+            let m = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_m_verts").unwrap_or(0);
+            let n = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_n_verts").unwrap_or(0);
+            let flag = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "flag").unwrap_or(0);
+            // SAFETY: obj is a valid, non-null POLYLINE_MESH Dwg_Object*
+            // (matching fixedtype); the helper only walks its owned-subentity
+            // chain.
+            let wireframe_edges =
+                unsafe { polyline_mesh_wireframe(obj, usize::from(m), usize::from(n), flag) };
+            Entity::PolylineMesh(Solid3DEntity {
                 common,
                 wireframe_edges,
             })
@@ -1517,15 +1671,75 @@ fn dimension_dxfname(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> &'static str {
     }
 }
 
+/// `Dwg_Color.flag` bit: an inline 24-bit RGB follows in `rgb`. The *only*
+/// statement an R2004+ DWG entity makes about a true colour -- `bit_read_ENC`
+/// (bits.c), which is what `common_entity_data.spec` uses from R2004a on,
+/// reads `rgb` under this bit and never assigns `method` at all.
+const COLOR_FLAG_INLINE_RGB: u16 = 0x80;
+
+/// `Dwg_Color.flag` bit: a DBCOLOR object handle follows *instead of* an
+/// inline RGB. That object is not converted, so there is no colour to report
+/// and whatever `rgb` holds is not it.
+const COLOR_FLAG_COLOR_HANDLE: u16 = 0x40;
+
 /// Reads the common `color` (`Dwg_Color`) field and splits it into
 /// `(color_index, true_color)` per [`EntityCommon`].
 fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
     let Some(color) = get_common_field::<libredwg_sys::Dwg_Color>(entity_ptr, "color") else {
         return (256, None); // no color field at all -- BYLAYER default
     };
-    let true_color = (color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
-        .then_some(color.rgb & 0xff_ffff);
-    (color.index, true_color)
+    split_entity_color(color.index, color.flag, color.method, color.rgb)
+}
+
+/// Decides whether a `Dwg_Color` read off an *entity* really states a direct
+/// RGB, from the three fields the two readers fill differently. Until 0.3.0
+/// this tested `method == DWG_COLOR_METHOD_TRUECOLOR` alone, which was wrong
+/// in both directions:
+///
+/// * **DWG, R2004+** -- `bit_read_ENC` puts the 420 value in `rgb` under
+///   `flag & 0x80` and leaves `method` at 0, so a real true colour was
+///   dropped and every entity in every corpus DWG reported `None`.
+/// * **DXF** -- `dxf_set_CMC_index` (in_dxf.c) answers a plain group 62 with
+///   `method = 0xc3` and an `rgb` *synthesised* from LibreDWG's own copy of
+///   the ACI palette, so an entity that states only an index was reported as
+///   carrying an RGB the file never wrote. A real group 420 instead takes the
+///   `color.method = value >> 24` path, which is 0 for a plain 24-bit value.
+///
+/// Two cases stay indistinguishable from the fields available and are
+/// reported as "no true colour", which renders identically either way: a
+/// group 420 of pure black (`rgb` 0 is also what an untouched field holds),
+/// and a group 420 that repeats the entity's own ACI colour exactly.
+fn split_entity_color(
+    index: i16,
+    flag: u16,
+    method: libredwg_sys::Dwg_Color_Method,
+    rgb: u32,
+) -> (i16, Option<u32>) {
+    let rgb24 = rgb & 0xff_ffff;
+    if flag & COLOR_FLAG_COLOR_HANDLE != 0 {
+        return (index, None);
+    }
+    if flag & COLOR_FLAG_INLINE_RGB != 0 {
+        return (index, Some(rgb24));
+    }
+    // The DXF reader's method byte. VOID (0) is a plain 24-bit group 420;
+    // ACI (0xc2) and TRUECOLOR (0xc3) are a pre-tagged one -- except that
+    // 0xc2 with no RGB is how it spells BYLAYER and 0xc3 with the palette's
+    // own entry is how it spells a plain group 62.
+    let tagged_rgb = matches!(
+        method,
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID
+            | libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI
+            | libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR
+    );
+    let from_palette = usize::try_from(index)
+        .ok()
+        .and_then(|i| crate::color::ACI_PALETTE.get(i))
+        .is_some_and(|&packed| packed == rgb24);
+    (
+        index,
+        (tagged_rgb && rgb24 != 0 && !from_palette).then_some(rgb24),
+    )
 }
 
 /// # Safety
@@ -1555,6 +1769,92 @@ unsafe fn dxfname(obj: *mut libredwg_sys::Dwg_Object) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const VOID: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID;
+    const BYLAYER: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_BYLAYER;
+    const BYBLOCK: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_BYBLOCK;
+    const ACI: libredwg_sys::Dwg_Color_Method = libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI;
+    const TRUECOLOR: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR;
+
+    /// Each case below is the `(index, flag, method, rgb)` LibreDWG leaves in
+    /// `Dwg_Color` for one way of writing a colour, read off the reader that
+    /// writes it: `bit_read_ENC` / `common_entity_data.spec` for the DWG
+    /// rows and `dxf_set_CMC_index` / the group-420 arm of the common-entity
+    /// loop in `in_dxf.c` for the DXF ones.
+    #[test]
+    fn split_entity_color_follows_what_each_reader_actually_stores() {
+        // --- R2004+ DWG (bit_read_ENC): flag 0x80 says an RGB follows, and
+        // nothing ever sets `method` on this path. The pre-0.3.0 test
+        // (method == TRUECOLOR) made this case report None, which is why no
+        // entity in any corpus DWG carried a true colour.
+        assert_eq!(
+            split_entity_color(256, 0x80, VOID, 0x00_ff7f),
+            (256, Some(0x00_ff7f))
+        );
+        // The stored BL may carry a method byte of its own; only the low 24
+        // bits are the colour (which is what the DXF writer emits for 420).
+        assert_eq!(
+            split_entity_color(256, 0x80, VOID, 0xc200_ff7f),
+            (256, Some(0x00_ff7f))
+        );
+        // flag 0x40 is a DBCOLOR handle *instead of* an inline RGB (the spec
+        // reads one or the other), and that object is not converted.
+        assert_eq!(split_entity_color(256, 0xc0, VOID, 0x00_ff7f), (256, None));
+        // Plain BYLAYER: no flag bits, rgb zeroed by the decoder.
+        assert_eq!(split_entity_color(256, 0, VOID, 0), (256, None));
+
+        // --- DXF group 62 only (dxf_set_CMC_index): method 0xc3 with `rgb`
+        // synthesised from LibreDWG's ACI palette. ACI 1 is 0xff0000.
+        assert_eq!(
+            split_entity_color(1, 0, TRUECOLOR, 0xc300_0000 | 0xff_0000),
+            (1, None),
+            "an index-only entity states no RGB"
+        );
+        // ... and the same for BYLAYER / BYBLOCK / none, which that function
+        // spells with an empty rgb.
+        assert_eq!(
+            split_entity_color(256, 0, ACI, 0xc200_0000),
+            (256, None),
+            "0xc2 with no RGB is how the DXF reader spells BYLAYER"
+        );
+        assert_eq!(split_entity_color(0, 0, BYBLOCK, 0xc100_0000), (0, None));
+        assert_eq!(
+            split_entity_color(256, 0, BYLAYER, 0xc000_0000),
+            (256, None)
+        );
+
+        // --- DXF group 420. The common-entity arm stores the value verbatim
+        // and takes the method from its top byte, so a plain 24-bit RGB
+        // arrives with method 0 and a pre-tagged one with 0xc2 or 0xc3.
+        // 65407 == 0x00ff7f is the reviewer's (0, 255, 127).
+        assert_eq!(
+            split_entity_color(256, 0, VOID, 65407),
+            (256, Some(0x00_ff7f))
+        );
+        assert_eq!(
+            split_entity_color(3, 0, ACI, 0xc200_ff7f),
+            (3, Some(0x00_ff7f)),
+            "a 420 override wins over the entity's own group 62"
+        );
+        assert_eq!(
+            split_entity_color(3, 0, TRUECOLOR, 0xc300_ff7f),
+            (3, Some(0x00_ff7f))
+        );
+        // Group 420 of 257 is the reader's "none": method 0xc8, rgb 0.
+        assert_eq!(
+            split_entity_color(
+                256,
+                0,
+                libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_NONE,
+                0xc800_0000
+            ),
+            (256, None)
+        );
+    }
 
     #[test]
     fn mirror_bulges_negates_every_bulge_under_a_mirrored_ocs_only() {

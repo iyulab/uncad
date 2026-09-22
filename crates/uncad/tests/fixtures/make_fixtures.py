@@ -70,13 +70,61 @@ def text(value, x, y, height=2.5, layer=b"0", extrusion=None, handle=None, owner
     return entity("TEXT", layer, *g, handle=handle, owner=owner)
 
 
-def line(x1, y1, x2, y2, layer=b"0", handle=None, owner=None, paper=False):
+def line(x1, y1, x2, y2, layer=b"0", handle=None, owner=None, paper=False,
+         color=None, true_color=None):
+    """A LINE. `color` is the DXF 62 ACI index (0 BYBLOCK, 256 BYLAYER) and
+    `true_color` the DXF 420 packed RGB, written in that order -- which is
+    the order AutoCAD writes them and the one LibreDWG's reader needs, since
+    a later 62 overwrites the colour a 420 stored."""
+    color_groups = []
+    if color is not None:
+        color_groups.append((62, color))
+    if true_color is not None:
+        color_groups.append((420, true_color))
     return entity(
-        "LINE", layer,
+        "LINE", layer, *color_groups,
         (10, float(x1)), (20, float(y1)), (30, 0.0),
         (11, float(x2)), (21, float(y2)), (31, 0.0),
         handle=handle, owner=owner, paper=paper,
     )
+
+
+def polyline(subclass, vertex_subclass, vertices, groups=(), vertex_flag=None,
+             layer=b"0", handle=None, owner=None, vertex_handles=(), seqend=None,
+             vertex_owner=None, faces=()):
+    """An old-style POLYLINE with its VERTEX chain and SEQEND -- the shape
+    every DXF uses for a 2D/3D polyline, a polyface mesh and a polygon mesh
+    (they differ only in the two subclass markers and the group 70 flags).
+
+    `vertices` are (x, y, z) or (x, y, z, bulge); `faces` are extra VERTEX
+    records holding 1-based vertex indices (`AcDbFaceRecord`, group 71-74).
+    `vertex_owner` is what the VERTEX records name in group 330: AutoCAD
+    writes the POLYLINE's own handle there, ezdxf writes the block record,
+    and LibreDWG's DXF reader picks a polyface vertex's *type* from it."""
+    g = [(100, "AcDbEntity"), (100, subclass), (66, 1),
+         (10, 0.0), (20, 0.0), (30, 0.0)]
+    g += list(groups)
+    out = entity("POLYLINE", layer, *g, handle=handle, owner=owner)
+    vowner = vertex_owner if vertex_owner is not None else handle
+    for i, v in enumerate(vertices):
+        vg = [(100, "AcDbEntity"), (100, "AcDbVertex"), (100, vertex_subclass),
+              (10, float(v[0])), (20, float(v[1])), (30, float(v[2]))]
+        if len(v) > 3:
+            vg.append((42, float(v[3])))
+        if vertex_flag is not None:
+            vg.append((70, vertex_flag))
+        out += entity("VERTEX", layer, *vg,
+                      handle=vertex_handles[i] if vertex_handles else None,
+                      owner=vowner)
+    for i, face in enumerate(faces):
+        fg = [(100, "AcDbEntity"), (100, "AcDbFaceRecord"),
+              (10, 0.0), (20, 0.0), (30, 0.0), (70, 128)]
+        fg += [(71 + j, int(idx)) for j, idx in enumerate(face)]
+        out += entity("VERTEX", layer, *fg,
+                      handle=vertex_handles[len(vertices) + i] if vertex_handles else None,
+                      owner=vowner)
+    out += entity("SEQEND", layer, (100, "AcDbEntity"), handle=seqend, owner=handle)
+    return out
 
 
 def lwpolyline(points, closed, extrusion=None, bulges=None, layer=b"0",
@@ -560,16 +608,16 @@ def attrib(tag, value, x, y, height, handle, owner):
     )
 
 
-def insert(name, x, y, handle, owner, attribs=None, seqend=None):
+def insert(name, x, y, handle, owner, attribs=None, seqend=None, layer=b"0"):
     """An INSERT, with its ATTRIB chain (DXF 66 = 1) and SEQEND when given."""
     groups = [(100, "AcDbEntity"), (100, "AcDbBlockReference")]
     if attribs:
         groups.append((66, 1))
     groups += [(2, name), (10, float(x)), (20, float(y)), (30, 0.0)]
-    out = entity("INSERT", b"0", *groups, handle=handle, owner=owner)
+    out = entity("INSERT", layer, *groups, handle=handle, owner=owner)
     if attribs:
         out += attribs
-        out += entity("SEQEND", b"0", (100, "AcDbEntity"), handle=seqend, owner=owner)
+        out += entity("SEQEND", layer, (100, "AcDbEntity"), handle=seqend, owner=owner)
     return out
 
 
@@ -862,6 +910,142 @@ def infinite_lines():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+
+# --------------------------------------------------------------- fixture 14
+def polyline_vertices():
+    """The three old-style POLYLINEs whose last vertex LibreDWG's own
+    `dwg_object_polyline_{2,3}d_get_points` drops on every R13/R14/R2000
+    file (its `first_vertex..last_vertex` loop ends before `last_vertex`).
+
+    | handle | entity | vertices | what it pins |
+    |---|---|---|---|
+    | 30 | closed `POLYLINE_2D` | (0,0) (100,0) (100,100) (0,100) | a 100 x 100 square: area 10000, perimeter 400 -- a triangle if the 4th vertex is lost |
+    | 35 | `POLYLINE_2D` | (0,1000) bulge 1.0, (100,1000) | one semicircular segment: length pi * 50, gone entirely if either the vertex or the bulge list is lost |
+    | 39 | `POLYLINE_3D` | (0,0,0) (10,0,0) (10,10,0) (0,10,5) (0,0,5) | 5 vertices ending above the start, so the last one is the only vertex with both y = 0 and z = 5 |
+
+    The VERTEX records name the POLYLINE in group 330, as AutoCAD writes
+    them (the polyface fixture uses the other shape)."""
+    hdr = header(INSUNITS=(70, 4))
+    tbl = tables()
+    square = polyline(
+        "AcDb2dPolyline", "AcDb2dVertex",
+        [(0, 0, 0), (100, 0, 0), (100, 100, 0), (0, 100, 0)],
+        groups=[(70, 1)], vertex_flag=0,
+        handle="30", owner="1F", vertex_handles=("31", "32", "33", "34"), seqend="3A",
+    )
+    arc = polyline(
+        "AcDb2dPolyline", "AcDb2dVertex",
+        [(0, 1000, 0, 1.0), (100, 1000, 0)],
+        vertex_flag=0,
+        handle="35", owner="1F", vertex_handles=("36", "37"), seqend="38",
+    )
+    p3d = polyline(
+        "AcDb3dPolyline", "AcDb3dPolylineVertex",
+        [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 5), (0, 0, 5)],
+        groups=[(70, 8)], vertex_flag=32,
+        handle="39", owner="1F",
+        vertex_handles=("3B", "3C", "3D", "3E", "3F"), seqend="40",
+    )
+    return hdr + tbl + section("ENTITIES", square + arc + p3d) + pair(0, "EOF")
+
+
+# --------------------------------------------------------------- fixture 15
+def entity_truecolor():
+    """The four ways a DXF entity can state its colour, on one layer whose
+    own ACI is 3 (`00ff00`), so each entity's rendered colour says which
+    field was read.
+
+    | handle | groups | `color_index` | `true_color` |
+    |---|---|---|---|
+    | 30 | 420 only | 256 | `0x00ff7f` |
+    | 31 | 62 only | 1 | none -- an index is not an RGB |
+    | 32 | 62 then 420 | 1 | `0x0000ff` |
+    | 33 | neither | 256 | none |
+
+    65407 is `0x00ff7f` and 255 is `0x0000ff`; both are written as the plain
+    24-bit decimal a DXF carries, with no method byte."""
+    hdr = header(INSUNITS=(70, 4))
+    tbl = tables(layers=((b"0", 7), (b"GREEN", 3)))
+    ents = (
+        line(0, 0, 100, 0, layer=b"GREEN", handle="30", owner="1F", true_color=65407)
+        + line(0, 10, 100, 10, layer=b"GREEN", handle="31", owner="1F", color=1)
+        + line(0, 20, 100, 20, layer=b"GREEN", handle="32", owner="1F", color=1,
+               true_color=255)
+        + line(0, 30, 100, 30, layer=b"GREEN", handle="33", owner="1F")
+    )
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
+# --------------------------------------------------------------- fixture 16
+def polyface_mesh():
+    """A polyface mesh and a polygon mesh next to an ordinary LINE, written
+    the way ezdxf and several exporters do: the VERTEX records name the
+    *block record* in group 330, not the POLYLINE.
+
+    That shape is what made LibreDWG reject the whole file (a polygon mesh's
+    `AcDbPolygonMeshVertex` marker matched no known subclass, which is a
+    critical error) and what makes it type a polyface's vertices VERTEX_MESH
+    rather than VERTEX_PFACE. The LINE is the control: it must survive.
+
+    | handle | entity | what it pins |
+    |---|---|---|
+    | 30 | `LINE` (0,0)-(1000,0) | the rest of the file survives whatever the meshes do |
+    | 31 | `POLYLINE_PFACE` | 8 vertices (two 10 x 10 squares, at z 0 and z 10), 2 quad faces -> 8 wireframe edges |
+    | 50 | `POLYLINE_MESH` | an open 3 (M) by 4 (N) grid at (i*10, j*5, 0) -> 4*(3-1) + 3*(4-1) = 17 edges |
+
+    Neither mesh's VERTEX records may appear in the entity list."""
+    hdr = header(INSUNITS=(70, 4))
+    tbl = tables()
+    pface_vertices = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0),
+                      (0, 0, 10), (10, 0, 10), (10, 10, 10), (0, 10, 10)]
+    pface = polyline(
+        "AcDbPolyFaceMesh", "AcDbPolyFaceMeshVertex", pface_vertices,
+        groups=[(70, 64), (71, 8), (72, 2)], vertex_flag=192,
+        handle="31", owner="1F", vertex_owner="1F",
+        vertex_handles=("32", "33", "34", "35", "36", "37", "38", "39", "3A", "3B"),
+        seqend="3C", faces=((1, 2, 3, 4), (5, 6, 7, 8)),
+    )
+    grid = [(i * 10, j * 5, 0) for i in range(3) for j in range(4)]
+    mesh = polyline(
+        "AcDbPolygonMesh", "AcDbPolygonMeshVertex", grid,
+        groups=[(70, 16), (71, 3), (72, 4)], vertex_flag=64,
+        handle="50", owner="1F", vertex_owner="1F",
+        vertex_handles=tuple("%X" % h for h in range(0x51, 0x51 + len(grid))),
+        seqend="60",
+    )
+    ents = line(0, 0, 1000, 0, handle="30", owner="1F") + pface + mesh
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
+# --------------------------------------------------------------- fixture 17
+def block_layer0():
+    """AutoCAD's layer-0-in-a-block rule: geometry drawn on layer 0 inside a
+    block definition is placed on the layer of the reference that inserts it.
+
+    Block `SYM` is inserted once, on layer `RED` (ACI 1), with its own
+    colour BYLAYER. Layer `BLUE` is ACI 5 and layer `0` is ACI 7 (black on
+    a white page), so every child's rendered colour names the layer it
+    resolved against.
+
+    | handle | child | layer | colour | drawn |
+    |---|---|---|---|---|
+    | 42 | `LINE` (0,0)-(10,0) | 0 | BYLAYER | `#ff0000` -- the INSERT's layer, not layer 0's black |
+    | 43 | `LINE` (0,2)-(10,2) | 0 | BYBLOCK | `#ff0000` -- the INSERT's own resolved colour |
+    | 44 | `LINE` (0,4)-(10,4) | BLUE | BYLAYER | `#0000ff` -- a named layer inside a block is used as stored |
+    | 45 | `TEXT` "L0" | 0 | BYLAYER | its text record's layer is `RED` |
+    """
+    hdr = header(INSUNITS=(70, 4))
+    pre = tables(layers=((b"0", 7), (b"RED", 1), (b"BLUE", 5)),
+                 block_records=(("1F", "*Model_Space"), ("40", "SYM")))
+    body = (line(0, 0, 10, 0, handle="42", owner="40", color=256)
+            + line(0, 2, 10, 2, handle="43", owner="40", color=0)
+            + line(0, 4, 10, 4, layer=b"BLUE", handle="44", owner="40", color=256)
+            + text("L0", 0, 6, height=2.5, handle="45", owner="40"))
+    pre += section("BLOCKS", block("SYM", "40", ("41", "46"), body=body))
+    ents = insert("SYM", 0, 0, "50", "1F", layer=b"RED")
+    return hdr + pre + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -890,6 +1074,14 @@ if __name__ == "__main__":
         write("nested_attrib_r2000.dxf", nested_attrib())
     if which in ("all", "infinite-lines"):
         write("infinite_lines_r2000.dxf", infinite_lines())
+    if which in ("all", "polyline-vertices"):
+        write("polyline_vertices_r2000.dxf", polyline_vertices())
+    if which in ("all", "entity-truecolor"):
+        write("entity_truecolor_r2000.dxf", entity_truecolor())
+    if which in ("all", "polyface-mesh"):
+        write("polyface_mesh_r2000.dxf", polyface_mesh())
+    if which in ("all", "block-layer0"):
+        write("block_layer0_r2000.dxf", block_layer0())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

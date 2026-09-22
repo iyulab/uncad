@@ -27,7 +27,7 @@ mod format;
 mod hatch;
 mod infinite;
 
-use crate::color::{contrast_on_white, resolve_color, DEFAULT_COLOR};
+use crate::color::{contrast_on_white, effective_layer, resolve_color_in_block, DEFAULT_COLOR};
 use crate::dynapi::{Point2D, Point3D};
 use crate::limits::{
     LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
@@ -309,6 +309,12 @@ struct Ctx<'a> {
     depth: u32,
     scale: f64,
     inherited_color: String,
+    /// The layer of the innermost enclosing block reference, `None` at the
+    /// top level: what a child on layer 0 resolves its BYLAYER properties
+    /// against (see [`crate::color::effective_layer`]). Already the
+    /// *effective* layer of that reference, so a layer-0 block nested inside
+    /// a layer-0 block still ends at the outermost reference's layer.
+    inherited_layer: Option<String>,
     /// `"<insert>/"` chain of the block references being rendered, so a
     /// text inside a block gets the id the export's records use.
     id_prefix: String,
@@ -369,6 +375,7 @@ impl<'a> Ctx<'a> {
             depth: 0,
             scale: 1.0,
             inherited_color: DEFAULT_COLOR.to_string(),
+            inherited_layer: None,
             id_prefix: String::new(),
             transform: Transform::identity(),
             frame: Frame::default(),
@@ -829,12 +836,13 @@ fn mline_offset_points(vertices: &[MLineVertex], offset: f64) -> Vec<Point2D> {
 /// The entity's colour as drawn: AutoCAD's precedence rules, then darkened
 /// if it would not read on the white page (`contrast_on_white`).
 fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
-    contrast_on_white(&resolve_color(
+    contrast_on_white(&resolve_color_in_block(
         common.color_index,
         common.true_color,
         &common.layer,
         ctx.tables,
         &ctx.inherited_color,
+        ctx.inherited_layer.as_deref(),
     ))
 }
 
@@ -858,6 +866,7 @@ fn render_block_ref(
     y_scale: f64,
     rotation: f64,
     color: &str,
+    layer: &str,
     ctx: &mut Ctx,
 ) -> String {
     let Some(block) = ctx.tables.block_records.get(block_name) else {
@@ -904,6 +913,11 @@ fn render_block_ref(
     let parent_depth = ctx.depth;
     let parent_scale = ctx.scale;
     let parent_inherited = std::mem::replace(&mut ctx.inherited_color, color.to_string());
+    // The reference's own *effective* layer, so a layer-0 child resolves
+    // against the layer the reference is really on -- which for a nested
+    // reference that is itself on layer 0 is the outer reference's layer.
+    let child_layer = effective_layer(layer, ctx.inherited_layer.as_deref()).to_string();
+    let parent_inherited_layer = ctx.inherited_layer.replace(child_layer);
     let child_prefix = format!("{}{owner_handle}/", ctx.id_prefix);
     let parent_prefix = std::mem::replace(&mut ctx.id_prefix, child_prefix);
     // Which point of the block's own space the interior is written about.
@@ -997,6 +1011,7 @@ fn render_block_ref(
     ctx.depth = parent_depth;
     ctx.scale = parent_scale;
     ctx.inherited_color = parent_inherited;
+    ctx.inherited_layer = parent_inherited_layer;
     ctx.id_prefix = parent_prefix;
     ctx.frame = parent_frame;
 
@@ -1083,7 +1098,7 @@ fn drawn_point_count(e: &Entity) -> usize {
         Entity::Wipeout(w) => w.boundary.len(),
         Entity::Solid3D(s) => s.wireframe_edges.len(),
         Entity::Region(r) => r.wireframe_edges.len(),
-        Entity::PolylinePFace(p) => p.wireframe_edges.len(),
+        Entity::PolylinePFace(p) | Entity::PolylineMesh(p) => p.wireframe_edges.len(),
         Entity::Hatch(h) => h
             .boundary_paths
             .iter()
@@ -1553,6 +1568,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 i.scale.y,
                 rotation,
                 &color,
+                &i.common.layer,
                 ctx,
             ))
         }
@@ -1567,6 +1583,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             a.scale.y,
             a.rotation,
             &color,
+            &a.common.layer,
             ctx,
         )),
         Entity::Dimension(d) => {
@@ -1582,6 +1599,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 1.0,
                 0.0,
                 &color,
+                &d.common.layer,
                 ctx,
             );
             if svg.is_empty() {
@@ -1648,6 +1666,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
         Entity::Region(r) => render_wireframe_entity(&r.wireframe_edges, "REGION", &color, ctx),
         Entity::PolylinePFace(p) => {
             render_wireframe_entity(&p.wireframe_edges, "POLYLINE_PFACE", &color, ctx)
+        }
+        Entity::PolylineMesh(p) => {
+            render_wireframe_entity(&p.wireframe_edges, "POLYLINE_MESH", &color, ctx)
         }
         Entity::Hatch(h) => hatch::render_hatch(h, &color, ctx),
         Entity::Leader(l) => {
@@ -1893,7 +1914,7 @@ fn reference_point(e: &Entity) -> Option<Point2D> {
         Entity::Spline(s) => p3(s.fit_points.first().or(s.control_points.first())?),
         Entity::Solid3D(s) => p3(&s.wireframe_edges.first()?[0]),
         Entity::Region(r) => p3(&r.wireframe_edges.first()?[0]),
-        Entity::PolylinePFace(p) => p3(&p.wireframe_edges.first()?[0]),
+        Entity::PolylinePFace(p) | Entity::PolylineMesh(p) => p3(&p.wireframe_edges.first()?[0]),
         Entity::Hatch(h) => match h.boundary_paths.first()? {
             crate::model::HatchBoundaryPath::Polyline(v) => *v.first()?,
             crate::model::HatchBoundaryPath::Edges(edges) => match edges.first()? {
@@ -2387,6 +2408,7 @@ mod tests {
             1.0,
             0.0,
             DEFAULT_COLOR,
+            "0",
             &mut ctx,
         );
         assert!(

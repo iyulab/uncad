@@ -5,8 +5,8 @@
 `parse()`/`to_svg()` support: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT, SOLID,
 RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
 VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
-LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
-LIGHT. Details worth knowing:
+LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, POLYLINE_MESH, TOLERANCE, ACAD_TABLE,
+WIPEOUT and LIGHT. Details worth knowing:
 
 - **DIMENSION** folds all 8 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
   RADIUS, ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including
@@ -31,9 +31,15 @@ LIGHT. Details worth knowing:
   renders them.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
   as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
-- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
-  an approximation, not a reading of the B-rep. A solid whose ACIS data cannot be read or
-  converted is reported as unsupported.
+- **3DSOLID**, **REGION**, **POLYLINE_PFACE** and **POLYLINE_MESH** render as isometric
+  wireframes, which is an approximation, not a reading of the B-rep. A solid whose ACIS
+  data cannot be read or converted is reported as unsupported.
+- **POLYLINE_MESH** ("polygon mesh", since 0.3.0) draws the grid lines of its `m` by `n`
+  vertex grid, wrapped where group 70's bit 1 (closed in M) or bit 32 (closed in N) says
+  so. It draws nothing unless exactly `m * n` vertices were found: a smooth-surface mesh
+  (`curve_type` non-zero) stores spline control points alongside the approximated ones,
+  and a grid guessed from counts that do not add up would be a lie. The surface itself is
+  not shaded or hidden-line-removed -- same approximation as the other wireframes.
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
@@ -46,7 +52,7 @@ correctly as `ACAD_PROXY_ENTITY`.
 
 **Not converted yet, although they do carry geometry:** MINSERT (a block reference
 repeated on a row/column grid), TRACE (a filled quadrilateral, the same shape as SOLID),
-POLYLINE_MESH with its VERTEX_MESH vertices, SHAPE, BODY and OLEFRAME/OLE2FRAME. They are
+SHAPE, BODY and OLEFRAME/OLE2FRAME. They are
 read and counted, but nothing is drawn for them, so a drawing whose grid of columns is one
 MINSERT loses that grid from the picture. They are scheduled for a later release (see the
 roadmap in `docs/VLM_EXPORT_DESIGN.md`).
@@ -110,6 +116,13 @@ face) subentity chain is walked with `get_first_owned_subentity`, and each face'
 become wireframe edges -- rendered through the same isometric path as REGION, a polyface
 mesh being just as inherently 3D as an ACIS solid's wireframe.
 
+A DXF-read polyface's position vertices may come back typed `VERTEX_MESH` instead of
+`VERTEX_PFACE`, so both are accepted inside a POLYLINE_PFACE's own chain. `in_dxf.c`
+chooses between the two by resolving the VERTEX's group 330 and asking whether it names a
+POLYLINE_PFACE; a file that points a vertex's owner at the *block record* instead -- which
+is what ezdxf writes, and `ezdxf.audit()` passes it -- gets the VERTEX_MESH fallback. Until
+0.3.0 that made every such polyface mesh draw nothing.
+
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text). It carries
 `text_plain` (`text::decode_text(text_value)`) next to the raw `text_value`, so the
 `%%c`/`%%d`/`%%p`/`%%%`/`%%nnn` codes are decoded like any other text; the GD&T
@@ -157,6 +170,34 @@ around.
 A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
+
+Two DXF-only defects that *were* patched are recorded under "Local patches to the vendored
+LibreDWG" below: a polygon mesh made the reader refuse the whole file, and an entity
+carrying both a true colour and a transparency had the two swapped. The per-entity
+degradation this section describes -- a type dropping out, or arriving as
+`Entity::Unknown` -- is what a DXF should cost; a whole-file refusal was not.
+
+**An old-style POLYLINE's vertices are read from the owned-subentity chain, not from
+LibreDWG's accessors.** `dwg_object_polyline_{2,3}d_get_points` and their `..._numpoints`
+siblings walk `first_vertex .. last_vertex` as
+`do { ... } while ((vobj = dwg_next_object (vobj)) && vobj != vlast);` for any file below
+R2004, and that condition ends the loop before the body ever reaches `vlast`: they return
+N-1 points on every R13, R14 and R2000 file, DWG and DXF alike. `get_next_owned_subentity`
+stops *at* `last_vertex` and yields all N, so `convert::polyline_vertices` walks that
+chain and reads each VERTEX's point and bulge together. Pre-R13 files fill neither
+`first_vertex` nor `vertex[]`, so for them the chain is empty and the walk falls back to
+the object list -- forward from the POLYLINE to the first object that is not a VERTEX,
+which is what LibreDWG's own pre-R13 branch does. Measured against the shipped reference
+DXF of `test-data/2000/PolyLine3D.dwg` (6 VERTEX records, where uncad used to report 5);
+`crates/uncad/tests/fixtures/polyline_vertices_r2000.dxf` is the regression.
+
+**A polyline's VERTEX records are skipped in the block-owned entity walk.** LibreDWG
+documents `get_next_owned_entity` as returning entities and "not subentities: ATTRIB,
+VERTEX", and its R13-R2000 branch does skip them -- but its R2004+ branch indexes
+`BLOCK_HEADER.entities[]`, which the DXF reader fills with every object between the BLOCK
+and the ENDBLK, vertices included. `convert::owned_entities` filters the five VERTEX_*
+types itself, so one polyface mesh is one entity rather than nine, in `db.entities`, in
+`tables.block_records`, in the CLI counts and in `report.json`'s unsupported list.
 
 **DXF parse time grows faster than the file does.** Reading a DXF costs roughly the square
 of its entity count, so sizes that are unremarkable for a real drawing take minutes. On
@@ -556,8 +597,9 @@ The walk now stops at the first subentity whose type is not ATTRIB (an INSERT ow
 else, and LibreDWG's own R2000 walker uses the same condition to terminate), and is bounded
 besides by `limits::MAX_SUBENTITY_DEPTH` (2) and `limits::MAX_OWNED_SUBENTITIES` (100 000)
 -- the second against a chain damage has turned into a *ring*, which is not recursion but a
-loop that never ends. The other two owned-subentity walks (`polyline_pface_wireframe`,
-`polyline_2d_bulges`) carry the same length bound. `crates/uncad/tests/corrupt_dwg.rs` is
+loop that never ends. The polyline walk (`polyline_subentities`, shared by the vertex and
+the polyface readers) carries the same length bound, on both its owned-subentity chain and
+its pre-R13 object-list fallback. `crates/uncad/tests/corrupt_dwg.rs` is
 the regression.
 
 **A null dereference below the boundary is still reachable from here.**
@@ -635,6 +677,74 @@ cyan), but **never compared against an actual AutoCAD screen** -- unlike this pr
 other color bugs, this one was verified by plausibility rather than by reference. It also
 inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
 happens not to match the palette is misread as a small ACI index.
+
+## Entity colors: which field means "this entity states an RGB"
+
+`EntityCommon::true_color` is not `Dwg_Color.rgb`, and not "`method` is TRUECOLOR"
+either. `Dwg_Color` always holds *something* in `rgb`, and the two readers fill the struct
+differently enough that a single test is wrong in both directions. What each one really
+does (`convert::split_entity_color` is the single place that knows):
+
+| written as | reader | `flag` | `method` | `rgb` |
+|---|---|---|---|---|
+| R2004+ DWG, true colour | `bit_read_ENC` (bits.c) | `0x80` | never set | the value |
+| R2004+ DWG, DBCOLOR reference | `bit_read_ENC` | `0x40` | never set | not the colour |
+| R13-R2000 DWG | `bit_read_CMC` | 0 | 0 | 0 -- no true colour exists before R2004 |
+| DXF group 62 alone | `dxf_set_CMC_index` (in_dxf.c) | 0 | `0xc3` | **synthesised** from LibreDWG's ACI palette |
+| DXF group 62, BYLAYER/BYBLOCK/none | `dxf_set_CMC_index` | 0 | `0xc2`/`0xc1`/`0xc8` | the method byte alone |
+| DXF group 420 | the common-entity loop | 0 | the value's top byte (0 for a plain 24-bit RGB) | the value |
+
+So the old `method == DWG_COLOR_METHOD_TRUECOLOR` test dropped every real group 420 and
+every R2004+ DWG true colour (no entity in the 105 corpus DWGs or the 7 AutoCAD samples
+ever reported one), while reporting an RGB for every DXF entity that stated only an index.
+
+Two cases stay indistinguishable from the fields available, and are reported as "no true
+colour" -- which renders identically either way: a group 420 of pure black (`rgb` 0 is
+also what an untouched field holds), and a group 420 that repeats the entity's own ACI
+colour exactly. `crates/uncad/tests/fixtures/entity_truecolor_r2000.dxf` pins the four
+shapes a DXF can write.
+
+## The ACI palette is the vendored one, and the contrast rule still merges two greys
+
+`color::ACI_PALETTE` is `rgb_palette[256]` from
+`crates/libredwg-sys/vendor/libredwg/src/dwg.c`, transcribed as hex. Until 0.3.0 it was a
+formula-generated approximation -- the pure hues and every multiple of 10 were right and
+the shades between them were a linear ramp -- which differed from AutoCAD at 222 of the
+255 real indices. The grey ramp is the clearest case: 250-254 read
+`333333 5B5B5B 848484 ADADAD D6D6D6`, an exact interpolation from `0x33` to `0xFF`, where
+AutoCAD has `333333 505050 696969 828282 BEBEBE`.
+
+Using LibreDWG's own table also settles a second inconsistency: `in_dxf.c` resolves a DXF
+group 62 through `dwg_rgb_palette_index()`, so an index LibreDWG expanded and an index
+this crate expands now agree byte for byte.
+
+**Still merged:** the white-page contrast rule (`contrast_on_white`) scales any colour
+brighter than `MAX_LUMINANCE_ON_WHITE` down to exactly that luminance, so every grey from
+`#737373` up renders as `#737373`. ACI 8 (`#414141`) is now distinct, but ACI 9
+(`#808080`) and ACI 254 (`#BEBEBE`) still come out the same in an image. The JSON and
+`resolve_color` keep the file's own colours; only the rendered image is affected.
+
+## Layer 0 inside a block takes the layer of the reference
+
+AutoCAD's rule: geometry created on layer 0 in a block *definition* is placed on the layer
+of the block *reference* when the block is inserted, and resolves its BYLAYER colour
+against that layer. Drawing a symbol on layer 0 so it picks up the insert layer is the
+standard idiom -- 377 of the 813 INSERTs in one AutoCAD sample rely on it -- and until
+0.3.0 every such child rendered in layer 0's own colour (black).
+
+This is deliberately a *render-time* resolution, not something `convert.rs` bakes into the
+model: one block definition is placed by many INSERTs on many layers, so "the layer of
+this entity" only has an answer per reference. `EntityCommon::layer` keeps what the file
+stores, `color::effective_layer` is the one place that says what layer 0 means in context,
+and `svg::Ctx::inherited_layer` carries the enclosing reference's *effective* layer down,
+so a layer-0 block nested in a layer-0 block still ends at the outermost reference's
+layer. The export's text records name the same effective layer, so the records and the
+picture agree. `crates/uncad/tests/fixtures/block_layer0_r2000.dxf` is the regression.
+
+Not resolved this way: **visibility**. `visibility::hidden_reason` still asks about the
+entity's own layer, so a layer-0 child is not hidden by freezing the INSERT's layer -- in
+practice the INSERT itself is hidden first, and nothing inside a hidden reference is
+walked. Linetype and lineweight are not inherited either; nothing renders them yet.
 
 ## Fixed: pre-R2007 and DXF text lost every non-ASCII character
 
@@ -723,10 +833,10 @@ has the same shape and the same absence of anything this crate can do about it.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it now carries two local patches. Both are marked
+`docs/ARCHITECTURE.md`, "Build"), and it now carries four local patches. Each is marked
 in the source with an `uncad local patch` comment saying why.
 **`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
-these two patches is part of any submodule update.**
+these patches is part of any submodule update.**
 
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
@@ -752,6 +862,28 @@ these two patches is part of any submodule update.**
   TDINDWG/TDUSRTIMER *duration* longer than a day now caps its hour at 23 (a `LOG_TRACE`
   line this crate never enables, and `strftime` cannot print a larger hour anyway).
   `crates/uncad/tests/corrupt_dwg.rs` is the regression.
+- **`src/in_dxf.c` and `src/dynapi.c`** -- a polygon mesh's vertices carry the subclass
+  marker `AcDbPolygonMeshVertex`, which appeared nowhere in LibreDWG: the VERTEX_2D
+  upgrade chain in `in_dxf.c` knows `AcDb3dPolylineVertex`, `AcDbPolyFaceMeshVertex` and
+  `AcDbFaceRecord` only, and `dwg_name_subclasses[]` does not list it either. The object
+  stayed a VERTEX_2D, failed the "is this subclass allowed in this object" check and took
+  `goto invalid_dxf` -- `DWG_ERR_INVALIDDWG`, a *critical* error, so **the whole file was
+  refused**. One POLYLINE written by REVSURF, RULESURF, EDGESURF or `ezdxf.add_polymesh()`
+  cost every other entity in the DXF. The patch adds the missing spelling to the upgrade
+  chain (to VERTEX_MESH, which is where the neighbouring branch already sends a polygon
+  mesh's vertices) and to VERTEX_MESH's subclass list.
+  `crates/uncad/tests/fixtures/polyface_mesh_r2000.dxf` is the regression.
+- **`src/common_entity_data.spec`** -- for an R2004+ entity whose ENC flag has both `0x80`
+  (an inline RGB follows) and `0x20` (a transparency follows), the spec read the two BLs
+  in the wrong order, so the colour landed in `alpha_raw` and the transparency in `rgb`.
+  LibreDWG's own standalone `bit_read_ENC` (`src/bits.c`) already reads rgb first; only
+  this spec, and the encoder that shares it, had them the other way round. Measured on
+  `test-data/2004/HatchG.dwg`, whose HATCH `29F` (flag `0xa0`) sits inside LWPOLYLINE
+  `28D` (flag `0x80`, one BL, unambiguous): with alpha first the HATCH read
+  `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
+  `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
+  flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
+  the two bits set there is a single BL and the order cannot matter.
 
 ## Fixed: a path with non-ASCII characters could not be opened on Windows
 
@@ -917,21 +1049,22 @@ layout" covers where a new test belongs. The counts below are what
 `cargo test --workspace -- --list` reports at 0.3.0; regenerate them from that command
 rather than editing them by hand.
 
-`cargo test --workspace` runs 340 tests (339 of them by default; `corpus_sweep` is
-listed but `#[ignore]`d). 145 of them are `uncad` unit tests, by module:
+`cargo test --workspace` runs 346 tests (345 of them by default; `corpus_sweep` is
+listed but `#[ignore]`d). 147 of them are `uncad` unit tests, by module:
 `svg*.rs` 50 -- `svg.rs` 21 (HATCH edge approximation, stroke-width substitution,
 block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation,
 non-finite coordinate defense, block-reference recursion blowup), `svg/infinite.rs` 16
 (clipping a RAY and an XLINE to a viewBox: the four edges, a line that misses the window,
 the direction a RAY keeps, the block matrix folded in), `svg/format.rs` 7 (number and
 string formatting) and `svg/hatch.rs` 6 (pattern and gradient fills) --
-`color.rs` 13 (ACI/BYLAYER resolution, the white-background normalization and the
-gradient helper `tint_toward_white`), `geom.rs` 11 (OCS to world, bulge arcs, polyline
+`color.rs` 14 (ACI/BYLAYER resolution against the vendored palette, the
+white-background normalization and the gradient helper `tint_toward_white`), `geom.rs` 11 (OCS to world, bulge arcs, polyline
 length/area/bounds, the bounded arc-bounds walk, `is_sane_angle`), `dimension.rs` 10
 (the formatter, the DIMSTYLE zero rule, the measurement sentinel), `crop.rs` 9 (the
 outlier rules, the header candidate, padding, lattice snap, `detached_groups`),
-`text.rs` 8 (the `%%` and `\S` decoders, the 0.6-em box estimate), `convert.rs` 7 (HATCH
-gradient color resolution, stop ordering, `gradient_name` classification), `export.rs` 7,
+`text.rs` 8 (the `%%` and `\S` decoders, the 0.6-em box estimate), `convert.rs` 8 (HATCH
+gradient color resolution, stop ordering, `gradient_name` classification, and which
+`Dwg_Color` fields mean "this entity states an RGB"), `export.rs` 7,
 `json.rs` 6, `acis.rs` 6 (SAT record
 parsing, pointer resolution, wireframe extraction), `png.rs` 5 (SVG -> PNG size, scaling,
 errors, the bundled face's cap height, plus the `circle.dwg` pipeline),
@@ -942,7 +1075,7 @@ them genuinely useful regression guards: whether `crop::outliers` sets aside the
 INSERT and nothing else, or whether `parse_sat_records` really stops at the
 `End-of-ACIS-data` marker, is decidable without a DWG file at all.
 
-**Real-file tests**: 149 across the 23 integration files in `crates/uncad/tests/`, plus
+**Real-file tests**: 153 across the 23 integration files in `crates/uncad/tests/`, plus
 45 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
 `parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
 (`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
@@ -975,8 +1108,8 @@ asserting a bound or a screened entity, never a crash),
 `entities` and in `tables.block_records`) and `corpus_sweep.rs` (1, `#[ignore]`d: parses
 and renders all 208 corpus files and fails on any panic -- `docs/EVAL.md` records what it
 found). The other four run against this project's own committed DXF fixtures
-(`crates/uncad/tests/fixtures/`, 13 files written by `make_fixtures.py`): `fixtures.rs`
-(14), `block_transforms.rs` (4), `sheets_compositing.rs` (4) and `control_chars.rs` (2).
+(`crates/uncad/tests/fixtures/`, 17 files written by `make_fixtures.py`): `fixtures.rs`
+(18), `block_transforms.rs` (4), `sheets_compositing.rs` (4) and `control_chars.rs` (2).
 `uncad-cli`'s `tests/documented_invocations.rs` (45) runs every call the README and
 `--help` document against the real binary -- the `export` subcommand and each of its
 options included -- and the parser's refusals (an unknown option, a second positional, a
