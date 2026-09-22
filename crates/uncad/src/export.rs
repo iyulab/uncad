@@ -1204,6 +1204,7 @@ pub fn export_package(
         .map(|e| (e.common().handle.as_str(), e.common().layer.as_str()))
         .collect();
     let mut sheet_reports: Vec<SheetReport> = Vec::new();
+    let mut sheet_dirs: BTreeSet<String> = BTreeSet::new();
     if options.sheets {
         for spec in sheet_specs(db) {
             let block = &db.tables.block_records[&spec.block];
@@ -1296,18 +1297,10 @@ pub fn export_package(
                 fit.width,
                 fit.height,
             )?;
-            let safe: String = spec
-                .name
-                .chars()
-                .map(|c| {
-                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                        c
-                    } else {
-                        '_'
-                    }
-                })
-                .collect();
-            let png_path = format!("sheets/{safe}/overview.png");
+            let png_path = format!(
+                "sheets/{}/overview.png",
+                sheet_dir(&spec.name, &mut sheet_dirs)
+            );
             writer.write_bytes(&png_path, &bytes, "sheet")?;
             let overview_info = ImageInfo::new(
                 &format!("sheet:{}", spec.name),
@@ -2328,6 +2321,41 @@ struct OverviewFit {
     padding: f64,
 }
 
+/// The directory one sheet's image goes in, under `sheets/`: the layout's
+/// name with every character outside `[A-Za-z0-9_-]` replaced by `_` (so
+/// the path is portable and an ASCII name stays readable), `sheet` when
+/// nothing is left of it, and `_2`, `_3`, ... in tab order when an earlier
+/// layout already took the name. `used` collects what has been handed out.
+///
+/// The suffix is what keeps two sheets apart: every Hangul syllable
+/// sanitises to `_`, so two three-syllable Korean names both became `___`
+/// and the second layout's PNG silently overwrote the first's while both
+/// `sheets.json` entries pointed at the one surviving file.
+fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
+    let safe: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let base = if safe.is_empty() {
+        "sheet".to_string()
+    } else {
+        safe
+    };
+    let mut candidate = base.clone();
+    let mut n = 2;
+    while !used.insert(candidate.clone()) {
+        candidate = format!("{base}_{n}");
+        n += 1;
+    }
+    candidate
+}
+
 /// The most pixels one drawing unit may become (see [`fit_overview`]).
 const MAX_PPU: f64 = 1e9;
 
@@ -3076,6 +3104,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(depth_for(&[(0.01, 1)], 0.1, &capped), 2);
+    }
+
+    #[test]
+    fn sheet_directories_are_unique() {
+        let mut used = BTreeSet::new();
+        // Every Hangul syllable is outside [A-Za-z0-9_-], so both
+        // three-syllable names sanitise to "___" and the second one (in tab
+        // order) takes the suffix.
+        assert_eq!(sheet_dir("\u{d3c9}\u{ba74}\u{b3c4}", &mut used), "___");
+        assert_eq!(sheet_dir("\u{c785}\u{ba74}\u{b3c4}", &mut used), "____2");
+        assert_eq!(sheet_dir("Layout 1", &mut used), "Layout_1");
+        assert_eq!(sheet_dir("Layout_1", &mut used), "Layout_1_2");
+        assert_eq!(sheet_dir("Layout-1", &mut used), "Layout-1");
+        // Nothing survives sanitising: the placeholder, then its suffix.
+        assert_eq!(sheet_dir("", &mut used), "sheet");
+        assert_eq!(sheet_dir("", &mut used), "sheet_2");
+        assert_eq!(used.len(), 7, "every name got its own directory");
     }
 
     #[test]
