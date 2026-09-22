@@ -33,20 +33,16 @@ Source: https://github.com/notofonts/noto-cjk/raw/main/Sans/SubsetOTF/KR/NotoSan
 (`uv venv venv && uv pip install --python venv/Scripts/python.exe fonttools brotli`).
 
 ```text
-mkdir subset
-python tools/gen_unicodes.py                        # writes subset/unicodes.txt (2365 lines)
-copy subset\unicodes.txt tools\unicodes.txt         # where the checked-in copy lives
+python tools/gen_unicodes.py                        # rewrites tools/unicodes.txt (2365 lines)
 set PYTHONUTF8=1
 pyftsubset NotoSansKR-Regular.otf --unicodes-file=tools/unicodes.txt \
     --output-file=NotoSansKR-Regular-sub.otf --name-IDs='*' --notdef-outline --layout-features=''
 python tools/rename.py NotoSansKR-Regular-sub.otf UncadSans-Regular.otf "Uncad Sans" UncadSans-Regular
 ```
 
-`gen_unicodes.py` hard-codes `subset/unicodes.txt` as its output path, a
-leftover from the scratch directory the font was first built in: the
-directory has to exist or the script raises `FileNotFoundError`, and the
-copy it produces is byte-identical to the `tools/unicodes.txt` checked in
-here, which is the file `pyftsubset` reads.
+`gen_unicodes.py` writes next to itself, whatever directory it is run
+from, so it rewrites the `tools/unicodes.txt` checked in here -- the file
+`pyftsubset` reads -- and the rewrite is byte for byte the same file.
 
 `--layout-features=''` drops kerning and the other GSUB/GPOS tables (16 KB
 of kerning would keep glyph spacing identical to full Noto; the metrics
