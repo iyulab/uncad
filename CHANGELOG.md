@@ -185,6 +185,15 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   door swing lost its far half: `--crop raw` cut it off, `blocks.json` boxes were short
   and the tiles the swing crossed were rendered blank. All four corners are measured
   now (conservative by up to sqrt 2 at 45 degrees, never short).
+- Text was drawn 27 % too small: the CAD text height (the height of the capitals) was
+  used as the SVG em size. TEXT, ATTRIB, MTEXT, TOLERANCE and dimension labels are now
+  drawn at `font-size = height / 0.733`, the bundled face's cap-height ratio
+  (`png::BUNDLED_CAP_HEIGHT`, from the font's OS/2 table), so a height-2.5 label has
+  2.5-unit capitals; the justification offsets are one height for top and half for
+  middle. MTEXT baselines are spaced 5/3 of the height (AutoCAD's single spacing, and
+  what the extents estimate already assumed) instead of 1.2. `texts.json` records keep
+  the drawing's `height`; their measured boxes reflect the larger glyphs, and the 0.6-em
+  estimate (`text::CHAR_ADVANCE`) scales with the font size.
 - A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
   `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
   MTEXT already was.

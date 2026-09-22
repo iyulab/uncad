@@ -293,11 +293,16 @@ as if it were upright.
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
 group-11 direction vector, since 0.3.0; it was a fixed `0` before, which mis-placed the
 74-97 rotated MTEXTs found per sample drawing. Justified TEXT/ATTRIB is anchored at its
-alignment point with SVG `text-anchor`, and MTEXT at its attachment point, but the vertical
-offsets (a cap height of 0.72 em, a descender of 0.2 em) and the glyph widths come from the
-renderer's font, not from AutoCAD's SHX fonts, so the extent of a string is approximate
-even though its anchor is exact. MTEXT word-wrapping at `rect_width` is not performed:
-a paragraph is one line until `\P`.
+alignment point with SVG `text-anchor`, and MTEXT at its attachment point. The CAD text
+height is the height of the capitals, so a text is drawn at `font-size = height / 0.733`
+(the bundled face's cap-height ratio, `png::BUNDLED_CAP_HEIGHT`) and its capitals come
+out the drawing's height; before this the height was used as the em and every label was
+27 % too small. The vertical offsets (one text height for top, half for middle, a
+0.2 em descender for bottom) and the glyph widths still come from the renderer's font,
+not from AutoCAD's SHX fonts, so the extent of a string is approximate even though its
+anchor is exact. MTEXT baselines are 5/3 of the text height apart (AutoCAD's single
+spacing) times the line spacing factor. MTEXT word-wrapping at `rect_width` is not
+performed: a paragraph is one line until `\P`.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 

@@ -452,6 +452,17 @@ fn dashed_outline(pts: &[Point2D], color: &str, dash: &str) -> String {
     )
 }
 
+/// The `font-size` a CAD text height is drawn at: the height is the cap
+/// height, so the em is larger by the bundled face's cap-height ratio.
+fn font_size(height: f64) -> f64 {
+    height / crate::png::BUNDLED_CAP_HEIGHT
+}
+
+/// How far the baseline sits above a text's bottom, in text heights (cap
+/// heights): the assumed descender of the em, scaled to the em the text is
+/// drawn at.
+const DESCENDER_DROP: f64 = crate::png::BUNDLED_DESCENDER / crate::png::BUNDLED_CAP_HEIGHT;
+
 /// Where a single-line text is anchored and how: the SVG `text-anchor`, the
 /// world-space anchor point, and how far (in text heights) the baseline sits
 /// below the anchor in SVG's y-down space.
@@ -464,10 +475,11 @@ struct TextAnchor {
 /// AutoCAD's justification rules, approximated with SVG's `text-anchor` and a
 /// baseline offset: horizontal 1/4 = middle, 2 = end, 3 (aligned) and 5 (fit)
 /// are drawn centered between the two points; vertical 1 bottom raises the
-/// baseline by a descender, 2 middle and 4 (middle-center) drop it by roughly
-/// half a cap height, 3 top by a cap height. Glyph widths come from the
-/// renderer's font, not AutoCAD's, so the extent is an approximation; the
-/// anchor point itself is exact.
+/// baseline by a descender, 2 middle and 4 (middle-center) drop it by half
+/// a cap height, 3 top by a cap height. The text height *is* the cap height
+/// (the em is scaled so, see [`font_size`]), so those drops are 0.5 and 1
+/// text heights. Glyph widths come from the renderer's font, not AutoCAD's,
+/// so the extent is an approximation; the anchor point itself is exact.
 fn text_anchor(
     start: Point2D,
     alignment: Option<Point2D>,
@@ -494,12 +506,12 @@ fn text_anchor(
         _ => (align, "start"),
     };
     let baseline_drop = if horizontal == 4 {
-        0.36
+        0.5
     } else {
         match vertical {
-            1 => -0.2,
-            2 => 0.36,
-            3 => 0.72,
+            1 => -DESCENDER_DROP,
+            2 => 0.5,
+            3 => 1.0,
             _ => 0.0,
         }
     };
@@ -527,8 +539,9 @@ fn effective_text_height(stored: f64) -> f64 {
 /// `id` is the entity's package id (`handle`, or `insert/handle` inside a
 /// block reference): the export's metrics pre-pass finds the shaped text
 /// by it, and every `<text>` names the bundled family so an SVG consumer
-/// with the font gets the same glyphs. `height` is the stored text height;
-/// a stored 0 is drawn at [`effective_text_height`]'s fallback.
+/// with the font gets the same glyphs. `height` is the stored text height
+/// (the cap height; the em follows from [`font_size`]); a stored 0 is
+/// drawn at [`effective_text_height`]'s fallback.
 fn text_element(
     id: &str,
     anchor: &TextAnchor,
@@ -548,8 +561,9 @@ fn text_element(
         format!(" text-anchor=\"{}\"", anchor.anchor)
     };
     format!(
-        "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{height}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{}</text>",
+        "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{}</text>",
         escape_xml(id),
+        font_size(height),
         crate::png::BUNDLED_FONT_FAMILY,
         rotate_transform_attr(rotation, x, y),
         escape_xml(text)
@@ -940,11 +954,15 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             } else {
                 m.line_spacing_factor
             };
-            let line_height = text_height * line_spacing_factor * 1.2;
+            // AutoCAD's single ("3-on-5") spacing: 5/3 of the text height
+            // between baselines, the same rule `estimate_mtext_box` uses.
+            let line_height = text_height * line_spacing_factor * crate::text::LINE_SPACING;
             // The attachment point is a corner or edge of the text block
             // (DXF 71, 1 = top-left ... 9 = bottom-right): columns pick the
             // SVG anchor, rows where the first baseline sits relative to the
-            // insertion point (a cap height is ~0.72 em, a descender ~0.2).
+            // insertion point. The text height is the cap height, so the
+            // first baseline is one height below the block's top and the
+            // block ends at the last baseline (descenders hang below it).
             let column = (m.attachment.clamp(1, 9) - 1) % 3;
             let row = (m.attachment.clamp(1, 9) - 1) / 3;
             let anchor_attr = match column {
@@ -954,9 +972,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             };
             let block_height = line_height * (lines.len() as f64 - 1.0) + text_height;
             let first_baseline_drop = match row {
-                0 => 0.72 * text_height,
-                1 => 0.72 * text_height - block_height / 2.0,
-                _ => 0.72 * text_height - block_height + 0.2 * text_height,
+                0 => text_height,
+                1 => text_height - block_height / 2.0,
+                _ => text_height - block_height + DESCENDER_DROP * text_height,
             };
             let (x, y) = (m.insertion_point.x, neg(m.insertion_point.y));
             let mut tspans = String::new();
@@ -973,8 +991,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 );
             }
             Some(format!(
-                "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{text_height}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
+                "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
                 escape_xml(&ctx.text_id(&m.common.handle)),
+                font_size(text_height),
                 crate::png::BUNDLED_FONT_FAMILY,
                 rotate_transform_attr(m.rotation, x, y)
             ))
@@ -1682,12 +1701,38 @@ mod tests {
             let svg = text_element("T", &anchor, stored, 0.0, "#000000", "ZERO");
             assert!(!svg.contains("font-size=\"0\""), "{svg}");
             assert!(
-                svg.contains(&format!("font-size=\"{}\"", effective_text_height(1.0))),
+                svg.contains(&format!("font-size=\"{}\"", font_size(1.0))),
                 "{svg}"
             );
         }
         assert_eq!(effective_text_height(2.5), 2.5);
         assert_eq!(effective_text_height(0.0), 1.0);
+    }
+
+    #[test]
+    fn text_is_drawn_with_capitals_the_size_of_the_cad_height() {
+        // A height-2 TEXT: the em is 2 / 0.733 = 2.7285 so the capitals
+        // (0.733 em in the bundled face) come out exactly 2 units tall. A
+        // top-aligned one (vertical 3) has its baseline one cap height, i.e.
+        // one text height, below the anchor; middle half of that; bottom a
+        // descender (0.2 em = 0.2729 heights) above it.
+        let at = Point2D { x: 0.0, y: 10.0 };
+        let plain = text_element("T", &text_anchor(at, None, 0, 0), 2.0, 0.0, "#000", "A");
+        assert!(
+            plain.contains(&format!("font-size=\"{}\"", 2.0 / 0.733)),
+            "{plain}"
+        );
+        assert!(plain.contains(" y=\"-10\""), "{plain}");
+        let top = text_element("T", &text_anchor(at, Some(at), 0, 3), 2.0, 0.0, "#000", "A");
+        assert!(top.contains(" y=\"-8\""), "{top}");
+        let middle = text_element("T", &text_anchor(at, Some(at), 0, 2), 2.0, 0.0, "#000", "A");
+        assert!(middle.contains(" y=\"-9\""), "{middle}");
+        let bottom = text_element("T", &text_anchor(at, Some(at), 0, 1), 2.0, 0.0, "#000", "A");
+        let expected_y = -10.0 - 2.0 * 0.2 / 0.733;
+        assert!(
+            bottom.contains(&format!(" y=\"{expected_y}\"")),
+            "{bottom} vs {expected_y}"
+        );
     }
 
     #[test]

@@ -251,10 +251,21 @@ fn push_stack(out: &mut DecodedText, plain: &mut String, body: &str) {
 
 // --- text boxes ---------------------------------------------------------
 
-/// Estimated world box of a TEXT/ATTRIB: 0.6 em per character (the
-/// renderer's own guess; glyph metrics refine it later), placed by its
-/// alignment (DXF 72 / 73) and rotated about its anchor. The renderer's
-/// extents and the export's records both use this.
+/// The advance the estimates assume per character, in text heights: 0.6 em
+/// of the font size the renderer draws at, which is the CAD height (the cap
+/// height) over the bundled face's cap-height ratio -- 0.6 / 0.733 = 0.8186
+/// heights.
+pub const CHAR_ADVANCE: f64 = 0.6 / crate::png::BUNDLED_CAP_HEIGHT;
+
+/// AutoCAD's single line spacing for MTEXT (and the multi-line estimate):
+/// 5/3 of the text height from one baseline to the next.
+pub const LINE_SPACING: f64 = 5.0 / 3.0;
+
+/// Estimated world box of a TEXT/ATTRIB: [`CHAR_ADVANCE`] heights per
+/// character (the renderer's own guess; glyph metrics refine it later),
+/// one text height tall per line (the cap height; descenders are not
+/// counted), placed by its alignment (DXF 72 / 73) and rotated about its
+/// anchor. The renderer's extents and the export's records both use this.
 pub fn estimate_text_box(
     anchor: crate::model::Point2D,
     height: f64,
@@ -271,8 +282,8 @@ pub fn estimate_text_box(
         .max()
         .unwrap_or(0)
         .max(1) as f64;
-    let width = 0.6 * height * width_factor.abs().max(0.1) * chars;
-    let total_height = height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0);
+    let width = CHAR_ADVANCE * height * width_factor.abs().max(0.1) * chars;
+    let total_height = height * (1.0 + (lines.len().max(1) - 1) as f64 * LINE_SPACING);
     let (x0, x1) = match h_align {
         1 | 3 | 4 | 5 => (-width / 2.0, width / 2.0),
         2 => (-width, 0.0),
@@ -307,12 +318,12 @@ pub fn estimate_mtext_box(
     let width = if extents_width > 0.0 {
         extents_width
     } else {
-        0.6 * height * chars
+        CHAR_ADVANCE * height * chars
     };
     let total_height = if extents_height > 0.0 {
         extents_height
     } else {
-        height * (1.0 + (lines.len().max(1) - 1) as f64 * 5.0 / 3.0)
+        height * (1.0 + (lines.len().max(1) - 1) as f64 * LINE_SPACING)
     };
     let column = (attachment.clamp(1, 9) - 1) % 3;
     let row = (attachment.clamp(1, 9) - 1) / 3;
@@ -363,26 +374,35 @@ mod tests {
     #[test]
     fn text_boxes_follow_alignment_and_rotation() {
         let anchor = Point2D { x: 10.0, y: 20.0 };
+        // Four characters of height 2: 4 x 0.6 em at font-size 2 / 0.733,
+        // i.e. 4 x 0.6 x 2 / 0.733 = 6.5484 wide, one cap height (2) tall.
+        let width: f64 = 4.0 * 0.6 * 2.0 / 0.733;
+        assert!((width - 6.548431).abs() < 1e-6, "{width}");
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
         // Left/baseline: from the anchor to the right and up.
         let b = estimate_text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 0, 0);
-        assert_eq!(
-            (b.min_x, b.min_y, b.max_x, b.max_y),
-            (10.0, 20.0, 14.8, 22.0)
+        assert!(
+            close(b.min_x, 10.0)
+                && close(b.min_y, 20.0)
+                && close(b.max_x, 10.0 + width)
+                && close(b.max_y, 22.0),
+            "{b:?}"
         );
         // Middle-centre.
         let b = estimate_text_box(anchor, 2.0, 0.0, "ABCD", 1.0, 4, 0);
-        assert!((b.min_x - 7.6).abs() < 1e-9 && (b.max_x - 12.4).abs() < 1e-9);
-        assert!((b.min_y - 19.0).abs() < 1e-9 && (b.max_y - 21.0).abs() < 1e-9);
-        // Rotated 90 degrees: the width goes up.
+        assert!(close(b.min_x, 10.0 - width / 2.0) && close(b.max_x, 10.0 + width / 2.0));
+        assert!(close(b.min_y, 19.0) && close(b.max_y, 21.0));
+        // Rotated 90 degrees: the width goes up, the height to the left.
         let b = estimate_text_box(anchor, 2.0, std::f64::consts::FRAC_PI_2, "ABCD", 1.0, 0, 0);
+        assert!(close(b.max_y, 20.0 + width) && close(b.min_x, 8.0), "{b:?}");
+        // MTEXT top-left attachment hangs below the anchor: two lines are
+        // 1 + 5/3 heights = 5.333 tall.
+        let b = estimate_mtext_box(anchor, 2.0, 0.0, "AB\nCD", 1, 0.0, 0.0);
         assert!(
-            (b.max_y - 24.8).abs() < 1e-9 && (b.min_x - 8.0).abs() < 1e-9,
+            close(b.max_y, 20.0) && close(b.min_y, 20.0 - 2.0 * (1.0 + 5.0 / 3.0)),
             "{b:?}"
         );
-        // MTEXT top-left attachment hangs below the anchor.
-        let b = estimate_mtext_box(anchor, 2.0, 0.0, "AB\nCD", 1, 0.0, 0.0);
-        assert!((b.max_y - 20.0).abs() < 1e-9 && b.min_y < 16.0, "{b:?}");
-        assert!((b.max_x - 12.4).abs() < 1e-9);
+        assert!(close(b.max_x, 10.0 + width / 2.0));
     }
 
     fn plain_mtext(raw: &str) -> String {

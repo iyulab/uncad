@@ -341,6 +341,21 @@ pub enum Fonts {
 /// The family name the bundled font is registered under.
 pub const BUNDLED_FONT_FAMILY: &str = "Uncad Sans";
 
+/// The bundled face's cap height as a fraction of its em: OS/2
+/// `sCapHeight` 733 over `head.unitsPerEm` 1000 in
+/// `fonts/UncadSans-Regular.otf` (read from the font's own tables; the
+/// unit test below checks the value against the embedded bytes). CAD text
+/// height is the height of the capitals, not the em, so the renderer draws
+/// a text of height `h` at `font-size = h / BUNDLED_CAP_HEIGHT` and the
+/// estimates in [`crate::text`] scale their per-character advance the same
+/// way.
+pub const BUNDLED_CAP_HEIGHT: f64 = 0.733;
+
+/// The descender the renderer assumes below the baseline, as a fraction of
+/// the em (a Latin `p`/`g` in the bundled face, not the deeper CJK
+/// descender the `hhea` table carries).
+pub const BUNDLED_DESCENDER: f64 = 0.2;
+
 static UNCAD_SANS: &[u8] = include_bytes!("../fonts/UncadSans-Regular.otf");
 
 pub(crate) fn parse_tree(svg_text: &str, fonts: Fonts) -> Result<usvg::Tree, PngError> {
@@ -408,6 +423,37 @@ fn encode_rgb8(pixmap: &tiny_skia::Pixmap) -> Result<Vec<u8>, PngError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One table of an OpenType font: its bytes, found through the table
+    /// directory at the start of the file (a 12-byte header, then 16-byte
+    /// records of tag, checksum, offset, length).
+    fn otf_table<'a>(font: &'a [u8], tag: &[u8; 4]) -> &'a [u8] {
+        let count = u16::from_be_bytes([font[4], font[5]]) as usize;
+        (0..count)
+            .map(|i| &font[12 + 16 * i..12 + 16 * (i + 1)])
+            .find(|record| &record[..4] == tag)
+            .map(|record| {
+                let offset = u32::from_be_bytes(record[8..12].try_into().unwrap()) as usize;
+                let length = u32::from_be_bytes(record[12..16].try_into().unwrap()) as usize;
+                &font[offset..offset + length]
+            })
+            .unwrap_or_else(|| panic!("the font has a {} table", String::from_utf8_lossy(tag)))
+    }
+
+    #[test]
+    fn the_cap_height_constant_is_the_bundled_fonts_own() {
+        // head.unitsPerEm sits at offset 18; OS/2 sCapHeight at offset 88
+        // (version 2+; the field exists since version 2).
+        let head = otf_table(UNCAD_SANS, b"head");
+        let upem = f64::from(u16::from_be_bytes([head[18], head[19]]));
+        let os2 = otf_table(UNCAD_SANS, b"OS/2");
+        let version = u16::from_be_bytes([os2[0], os2[1]]);
+        assert!(version >= 2, "OS/2 version {version} has no sCapHeight");
+        let cap = f64::from(i16::from_be_bytes([os2[88], os2[89]]));
+        assert_eq!(upem, 1000.0);
+        assert_eq!(cap, 733.0);
+        assert!((cap / upem - BUNDLED_CAP_HEIGHT).abs() < 1e-12);
+    }
 
     /// Decodes just the IHDR chunk's width/height (bytes 16..24 of any
     /// PNG) rather than pulling in an image-decoding dependency purely for

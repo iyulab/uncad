@@ -563,8 +563,10 @@ fn text_boxes_are_measured_with_the_bundled_font_and_gaps_are_reported() {
     assert!(texts
         .iter()
         .all(|t| t["bbox_confidence"] == "measured" && t["font_ok"] == true));
-    // "도면" at height 2.5: two syllables about 2 units wide each, a box
-    // a little taller than the height (ascender to descender).
+    // "도면" at height 2.5 is drawn at font-size 2.5 / 0.733 = 3.41 (the
+    // CAD height is the cap height): two syllables of roughly 0.85 em
+    // each, so about 5.8 units wide, and a Hangul glyph is about 0.88 em
+    // tall, so about 3 units -- taller than the 2.5 of a capital.
     let domyeon = texts.iter().find(|t| t["id"] == "23").expect("TEXT 23");
     assert_eq!(domyeon["text"], "\u{b3c4}\u{ba74}");
     let b = domyeon["bbox"].as_array().unwrap();
@@ -573,7 +575,7 @@ fn text_boxes_are_measured_with_the_bundled_font_and_gaps_are_reported() {
         b[3].as_f64().unwrap() - b[1].as_f64().unwrap(),
     );
     assert!(
-        (3.5..5.5).contains(&w) && (1.8..2.8).contains(&h),
+        (4.8..7.5).contains(&w) && (2.5..3.8).contains(&h),
         "{w} x {h}"
     );
     let manifest = read_json(&tmp.0.join("manifest.json"));
@@ -685,5 +687,130 @@ fn a_very_wide_drawing_raises_the_tiny_overview_warning() {
             .any(|w| w.starts_with("TinyOverview")),
         "{:?}",
         report.warnings
+    );
+}
+
+/// A capital-only TEXT of height 2 and a three-line capital-only MTEXT of
+/// height 2.5 attached at its top-left corner, over a line.
+fn capitals() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, MTextEntity, Point2D, Point3D, TextEntity};
+    let entities = vec![
+        uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: "L".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 100.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }),
+        uncad::Entity::Text(TextEntity {
+            common: EntityCommon {
+                handle: "T".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point2D { x: 10.0, y: 10.0 },
+            text_height: 2.0,
+            text: "HIH".into(),
+            text_plain: "HIH".into(),
+            rotation: 0.0,
+            horizontal_alignment: 0,
+            vertical_alignment: 0,
+            alignment_point: None,
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            style: String::new(),
+        }),
+        uncad::Entity::MText(MTextEntity {
+            common: EntityCommon {
+                handle: "M".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            insertion_point: Point3D {
+                x: 10.0,
+                y: 40.0,
+                z: 0.0,
+            },
+            text: r"H\PH\PH".into(),
+            text_plain: "H\nH\nH".into(),
+            text_height: 2.5,
+            rotation: 0.0,
+            line_spacing_factor: 1.0,
+            attachment: 1,
+            rect_width: 0.0,
+            extents_width: 0.0,
+            extents_height: 0.0,
+            x_axis_dir: Point3D {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            style: String::new(),
+        }),
+    ];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn capitals_are_drawn_as_tall_as_the_cad_text_height() {
+    let tmp = TempDir::new("capitals");
+    export_package(
+        &capitals(),
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let texts = records(&tmp.0, "texts");
+    let bbox = |id: &str| -> [f64; 4] {
+        let t = texts.iter().find(|t| t["id"] == id).expect(id);
+        assert_eq!(t["bbox_confidence"], "measured");
+        let b = t["bbox"].as_array().unwrap();
+        [
+            b[0].as_f64().unwrap(),
+            b[1].as_f64().unwrap(),
+            b[2].as_f64().unwrap(),
+            b[3].as_f64().unwrap(),
+        ]
+    };
+    // The CAD height is the height of the capitals: "HIH" at height 2
+    // measures 2 units from baseline to cap top (glyph outlines, so exact
+    // to the font's rounding), sitting on its baseline at y = 10.
+    let t = bbox("T");
+    assert!((t[3] - t[1] - 2.0).abs() < 0.05, "{t:?}");
+    assert!((t[1] - 10.0).abs() < 0.05, "{t:?}");
+    // The record keeps the drawing's height.
+    let record = texts.iter().find(|t| t["id"] == "T").unwrap();
+    assert_eq!(record["height"], 2.0);
+    // Three lines of height 2.5 at AutoCAD's 5/3 spacing: the first cap
+    // top at the insertion point (top attachment), baselines 4.1667 apart,
+    // so the block runs from y = 40 down to the last baseline at
+    // 40 - 2.5 - 2 x 4.1667 = 29.1667, i.e. 10.833 tall -- the same
+    // 2.5 x (1 + 2 x 5/3) that estimate_mtext_box gives.
+    let m = bbox("M");
+    assert!((m[3] - 40.0).abs() < 0.05, "{m:?}");
+    assert!(
+        (m[3] - m[1] - 2.5 * (1.0 + 2.0 * 5.0 / 3.0)).abs() < 0.05,
+        "{m:?}"
     );
 }
