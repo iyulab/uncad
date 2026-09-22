@@ -1194,6 +1194,163 @@ fn many_regions(count: usize) -> uncad::CadDatabase {
     uncad::CadDatabase::new(entities, tables)
 }
 
+/// A drawing 0.004 x 0.003 units across -- a jewellery detail, a PCB pad,
+/// anything drawn in inches and dimensioned in thousandths.
+fn sub_millimetre_drawing() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let (w, h) = (0.004, 0.003);
+    let mut entities = Vec::new();
+    let mut handle = 0x100u32;
+    let line = |x1: f64, y1: f64, x2: f64, y2: f64, handle: &mut u32| {
+        let e = uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("{handle:X}"),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: x1,
+                y: y1,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: x2,
+                y: y2,
+                z: 0.0,
+            },
+        });
+        *handle += 1;
+        e
+    };
+    entities.push(line(0.0, 0.0, w, 0.0, &mut handle));
+    entities.push(line(w, 0.0, w, h, &mut handle));
+    entities.push(line(w, h, 0.0, h, &mut handle));
+    entities.push(line(0.0, h, 0.0, 0.0, &mut handle));
+    for i in 1..12 {
+        let y = h * f64::from(i) / 12.0;
+        entities.push(line(0.0, y, w, y, &mut handle));
+    }
+    entities.push(uncad::Entity::Text(TextEntity {
+        common: EntityCommon {
+            handle: "TXT".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point2D {
+            x: w * 0.1,
+            y: h * 0.5,
+        },
+        text_height: 1e-5,
+        text: "0.004".into(),
+        text_plain: "0.004".into(),
+        rotation: 0.0,
+        horizontal_alignment: 0,
+        vertical_alignment: 0,
+        alignment_point: None,
+        width_factor: 1.0,
+        oblique_angle: 0.0,
+        style: String::new(),
+    }));
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+/// The world rectangles used to be rounded to `$LUPREC` decimals alone
+/// (3 at the least). On a drawing four thousandths of a unit wide that is
+/// coarser than the whole drawing: every tile rectangle came out as the
+/// same `[0.0, 0.0, 0.004, 0.003]`, so a consumer could not tell two tiles
+/// apart and the `world` printed beside `world_to_px` described a
+/// different rectangle from the one the affine maps.
+#[test]
+fn a_sub_millimetre_drawing_keeps_its_tile_rectangles_apart() {
+    let db = sub_millimetre_drawing();
+    let tmp = TempDir::new("tiny");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            sheets: false,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert!(
+        report.overview.world.width() < 0.01,
+        "the drawing is a few thousandths of a unit across: {:?}",
+        report.overview.world
+    );
+    // One level is a canvas twice the overview's edge, which is several
+    // tiles wide: enough rectangles to tell apart.
+    let deepest = report.frames[0].z_max;
+    assert_eq!(deepest, 1);
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let entries = tiles["tiles"].as_array().unwrap();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut checked = 0;
+    for entry in entries {
+        let Some(sidecar_path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        if entry["z"].as_u64() != Some(u64::from(deepest)) {
+            continue;
+        }
+        // No two tiles of a level may print the same rectangle.
+        assert!(
+            seen.insert(entry["world"].to_string()),
+            "two tiles share the rectangle {}: {}",
+            entry["world"],
+            entry["id"]
+        );
+        // The rectangle and the affine beside it have to agree: the
+        // rounded corners must land on the image's own corners, to well
+        // under a pixel.
+        let sidecar = read_json(&tmp.0.join(sidecar_path));
+        assert_eq!(sidecar["world"], entry["world"], "{}", entry["id"]);
+        let world: Vec<f64> = sidecar["world"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let w2p: Vec<f64> = sidecar["world_to_px"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let px = sidecar["px"].as_array().unwrap();
+        let (pw, ph) = (px[0].as_f64().unwrap(), px[1].as_f64().unwrap());
+        // px = a x + c, py = e y + f (b and d are zero: no rotation).
+        let corners = [
+            (w2p[0] * world[0] + w2p[2], 0.0),
+            (w2p[0] * world[2] + w2p[2], pw),
+            (w2p[4] * world[3] + w2p[5], 0.0),
+            (w2p[4] * world[1] + w2p[5], ph),
+        ];
+        for (got, want) in corners {
+            assert!(
+                (got - want).abs() < 0.01,
+                "{}: the rounded world maps to {got} px, not {want} (world {world:?}, affine {w2p:?})",
+                entry["id"]
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked > 1,
+        "the deepest level should hold more than one tile to compare"
+    );
+}
+
 #[test]
 fn a_dense_drawing_keeps_every_sidecar_under_the_32_kb_cap() {
     // The trim loop measures the compact serialization against 32 KB, but

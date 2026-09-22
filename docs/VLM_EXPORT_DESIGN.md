@@ -98,8 +98,12 @@ evaluation harness, not estimated.
   `"<dim>/T"` for a dimension's cached text; `"<handle>#r3c4"` for MINSERT
   cells. Image ids: `ov`, `f0/z2/r03_c05`, `sheet:Layout1`, `w:<8hex>`.
 - Points are `[x, y]` arrays rounded to `max(LUPREC, 3)` decimals, derived
-  values to `LUPREC + 2`; angles in degrees; pixels are integers; boxes are
-  `[x0, y0, x1, y1]` in world units.
+  values to two more. `LUPREC` is a display setting, so the decimals also have
+  a floor from the package's own scale: enough that one unit in the last place
+  is a thousandth of a pixel at the deepest level the package can reach
+  (0.3.0; without it every tile rectangle of a drawing a few thousandths of a
+  unit across printed the same numbers). Angles are in degrees; pixels are
+  integers; boxes are `[x0, y0, x1, y1]` in world units.
 - `confidence` in `{exact, stored, numeric, cached, estimated, unavailable}`
   with an optional `why`; `numeric` carries `tol`.
 - Every record lists `tiles: [...]` and `px: {"ov": [...], "f0/z1/r02_c00": [...]}`.

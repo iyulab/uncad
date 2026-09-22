@@ -227,6 +227,17 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Every tile rectangle of a small drawing was the same rectangle. The world boxes in
+  `tiles.json`, the sidecars and the records were rounded to `$LUPREC` decimals (3 at
+  the least), which says how precisely the drawing's units are *displayed* and nothing
+  about how far the package zooms into them: on a drawing four thousandths of a unit
+  across -- a jewellery detail, a PCB pad -- all 30 tiles of a level printed
+  `[0, 0, 0.004, 0.003]`, and the `world` a consumer read described a rectangle 48 px
+  away from the one the `world_to_px` beside it maps. The decimals now have a floor
+  taken from the scale: enough that one unit in the last place is a thousandth of a
+  pixel at the deepest level the package can reach. A drawing of ordinary size is drawn
+  at a fraction of a pixel per unit, so its floor is the three or four decimals it was
+  already written with.
 - `--output`, the long form of `-o`, appeared in neither `--help` nor the README, so the
   only documented spelling was `-o`. Both now list it, in both commands.
 - A panic inside the rasterizer took the process with it. tiny-skia's scan converter

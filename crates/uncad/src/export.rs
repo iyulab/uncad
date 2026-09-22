@@ -816,6 +816,35 @@ impl Rounder {
     }
 }
 
+/// The decimals a world coordinate is written with: `$LUPREC` (clamped to
+/// 3..=12), but never fewer than the package's own scale needs.
+///
+/// `$LUPREC` says how precisely the drawing's units are *displayed*; it
+/// says nothing about how far the package zooms into them. A drawing a few
+/// thousandths of a unit across is drawn at hundreds of thousands of pixels
+/// per unit, where LUPREC's three or four decimals put every tile rectangle
+/// of a frame on the same numbers: the `world` a consumer reads is then a
+/// different rectangle from the one the tile shows, and the affine beside
+/// it maps to the wrong pixels.
+///
+/// The floor is the scale's. `deepest_ppu` is the finest scale the package
+/// may reach -- the overview's, doubled once per zoom level -- and the
+/// coordinate carries three decimals beyond one pixel there, so one unit in
+/// the last place is a thousandth of a pixel. The three (rather than, say,
+/// one) also cover a detached frame drawn up to a hundred times finer than
+/// the whole crop, which gets its own `fit_overview` and so its own scale.
+/// A drawing of ordinary size is drawn at a fraction of a pixel per unit, so
+/// its floor is the three or four decimals `$LUPREC` usually asks for
+/// anyway.
+fn coord_decimals(luprec: u16, deepest_ppu: f64) -> u16 {
+    let from_scale = if deepest_ppu.is_finite() && deepest_ppu > 0.0 {
+        (deepest_ppu.log10().ceil() + 3.0).clamp(3.0, 12.0) as u16
+    } else {
+        3
+    };
+    luprec.clamp(3, 12).max(from_scale)
+}
+
 /// Sorts handles numerically (they are hex), then lexically.
 fn id_key(id: &str) -> (u64, String) {
     let first = id.split('/').next().unwrap_or(id);
@@ -1047,9 +1076,15 @@ pub fn export_package(
     let padding = fit.padding;
 
     // --- records: texts, dimensions, geometry, regions, blocks ---------
+    // `max_levels` bounds the zoom (`build_frame` stops at `z_max`), so
+    // `fit.ppu` doubled that often is the finest scale any image can have.
+    let levels = i32::try_from(options.max_levels)
+        .unwrap_or(i32::MAX)
+        .min(64);
+    let coords = coord_decimals(db.header.luprec, fit.ppu * 2f64.powi(levels));
     let rounder = Rounder {
-        coords: db.header.luprec.clamp(3, 12),
-        derived: db.header.luprec.clamp(3, 12) + 2,
+        coords,
+        derived: coords + 2,
     };
     let unit = db.header.units.name.clone();
     let mut texts = placed_texts(db, visible);
@@ -3157,6 +3192,28 @@ mod tests {
         assert_eq!(sheet_dir("", &mut used), "sheet");
         assert_eq!(sheet_dir("", &mut used), "sheet_2");
         assert_eq!(used.len(), 7, "every name got its own directory");
+    }
+
+    #[test]
+    fn coordinate_decimals_never_fall_below_the_scale() {
+        // An ordinary drawing: a 10 000-unit plan on a 1568 px overview is
+        // about 0.15 px/unit, 4.8 at the deepest of five levels, so four
+        // decimals put one ulp at 5e-4 px -- the precision such a drawing
+        // is stored with anyway.
+        assert_eq!(coord_decimals(0, 4.8), 4);
+        assert_eq!(coord_decimals(4, 4.8), 4);
+        assert_eq!(coord_decimals(8, 4.8), 8, "a precise drawing keeps its 8");
+        // A drawing 0.004 units across: 273 000 px/unit on the overview,
+        // 8.7e6 at z5. Three or four decimals put every tile rectangle on
+        // the same numbers; 10 keep one ulp at a thousandth of a pixel.
+        assert_eq!(coord_decimals(4, 8.7e6), 10);
+        assert!(10f64.powi(-10) * 8.7e6 < 1e-3);
+        // Clamped at both ends, and a scale that is not a number at all
+        // (a degenerate fit) falls back to the LUPREC floor.
+        assert_eq!(coord_decimals(99, 4.8), 12);
+        assert_eq!(coord_decimals(4, 1e30), 12);
+        assert_eq!(coord_decimals(4, f64::NAN), 4);
+        assert_eq!(coord_decimals(4, 0.0), 4);
     }
 
     #[test]
