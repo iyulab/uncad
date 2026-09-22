@@ -1,0 +1,7 @@
+2018 helix: ours 0, theirs 1
+2013 helix: ours 0, theirs 1
+2010 helix: ours 0, theirs 1
+2007 helix: ours 0, theirs 1
+2004 helix: ours 0, theirs 1
+2000 helix: ours 0, theirs 1
+2000 table: ours 0, theirs 1

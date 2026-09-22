@@ -281,3 +281,177 @@ fn second_reader_layers(path: &Path) -> Option<Vec<String>> {
             .collect(),
     )
 }
+
+/// What each reader finds, entity type by entity type.
+///
+/// Two readers that open the same files and report the same *number* of
+/// entities can still disagree about what those entities are: cycle after
+/// cycle, the defects worth finding have been a type read as its neighbour,
+/// not a type missed. So the comparison is pinned at type granularity.
+///
+/// Names are normalized into one vocabulary first, because the two models
+/// split the same format differently. Families the two genuinely carve up
+/// differently are named in `NOT_COMPARED` and left out rather than forced
+/// into a mapping that would invent an agreement or a disagreement.
+const NOT_COMPARED: &[&str] = &[
+    // Polyline is one DXF entity that both models split, but not along the
+    // same seams (2D/3D/lightweight/mesh/pface). Comparing the pieces would
+    // measure the split, not the reading.
+    "polyline",
+    // Block begin/end markers: one model carries them as entities, the other
+    // as the shape of its block table.
+    "block", // Owned sub-entities, reached differently by each model.
+    "attrib", "seqend",
+    // Whatever each reader could not place. Not comparable by construction:
+    // the same unsupported entity lands in a differently-named bucket.
+    "unknown",
+];
+
+fn ours_kind(entity: &uncad::Entity) -> &'static str {
+    use uncad::Entity as E;
+    match entity {
+        E::Line(_) => "line",
+        E::Circle(_) => "circle",
+        E::Arc(_) => "arc",
+        E::Point(_) => "point",
+        E::Ellipse(_) => "ellipse",
+        E::Text(_) => "text",
+        E::MText(_) => "mtext",
+        E::Spline(_) => "spline",
+        E::Dimension(_) => "dimension",
+        E::Hatch(_) => "hatch",
+        E::Solid(_) => "solid",
+        E::Trace(_) => "trace",
+        E::Face3D(_) => "face3d",
+        E::Insert(_) => "insert",
+        E::Ray(_) => "ray",
+        E::XLine(_) => "xline",
+        E::Viewport(_) => "viewport",
+        E::Leader(_) => "leader",
+        E::MultiLeader(_) => "multileader",
+        E::MLine(_) => "mline",
+        E::Solid3D(_) => "solid3d",
+        E::Region(_) => "region",
+        E::Tolerance(_) => "tolerance",
+        E::AcadTable(_) => "table",
+        E::Wipeout(_) => "wipeout",
+        E::Light(_) => "light",
+        E::Attrib(_) | E::Attdef(_) => "attrib",
+        E::LwPolyline(_) | E::Polyline2D(_) | E::Polyline3D(_) | E::PolylinePFace(_) => "polyline",
+        E::Unknown { .. } => "unknown",
+    }
+}
+
+fn theirs_kind(entity: &acadrust::EntityType) -> &'static str {
+    use acadrust::EntityType as E;
+    match entity {
+        E::Line(_) => "line",
+        E::Circle(_) => "circle",
+        E::Arc(_) => "arc",
+        E::Point(_) => "point",
+        E::Ellipse(_) => "ellipse",
+        E::Text(_) => "text",
+        E::MText(_) => "mtext",
+        E::Spline(_) => "spline",
+        E::Helix(_) => "helix",
+        E::Dimension(_) => "dimension",
+        E::Hatch(_) => "hatch",
+        // TRACE and SOLID share a geometry and a struct here, told apart by
+        // a flag rather than by a variant -- so the flag is what to read.
+        E::Solid(solid) => {
+            if solid.is_trace {
+                "trace"
+            } else {
+                "solid"
+            }
+        }
+        E::Face3D(_) => "face3d",
+        E::Insert(_) => "insert",
+        E::Ray(_) => "ray",
+        E::XLine(_) => "xline",
+        E::Viewport(_) => "viewport",
+        E::Leader(_) => "leader",
+        E::MultiLeader(_) => "multileader",
+        E::MLine(_) => "mline",
+        E::Solid3D(_) => "solid3d",
+        E::Region(_) => "region",
+        E::Tolerance(_) => "tolerance",
+        E::Table(_) => "table",
+        E::Wipeout(_) => "wipeout",
+        E::Light(_) => "light",
+        E::AttributeEntity(_) | E::AttributeDefinition(_) => "attrib",
+        E::Block(_) | E::BlockEnd(_) => "block",
+        E::Seqend(_) => "seqend",
+        E::Polyline(_)
+        | E::Polyline2D(_)
+        | E::Polyline3D(_)
+        | E::LwPolyline(_)
+        | E::PolygonMesh(_)
+        | E::PolyfaceMesh(_) => "polyline",
+        _ => "unknown",
+    }
+}
+
+#[test]
+fn what_each_reader_finds_per_entity_type_is_what_it_was_when_last_measured() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut report = String::new();
+    for version in VERSIONS {
+        let mut ours_total: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut theirs_total: BTreeMap<&str, usize> = BTreeMap::new();
+        for path in drawings_for(version) {
+            if let Ok(db) = uncad::parse(&path) {
+                let mut seen = BTreeSet::new();
+                for entity in db.all_entities() {
+                    if seen.insert(entity.common().id) {
+                        *ours_total.entry(ours_kind(entity)).or_default() += 1;
+                    }
+                }
+            }
+            if let Ok(mut reader) = acadrust::DwgReader::from_file(&path) {
+                if let Ok(document) = reader.read() {
+                    for entity in document.entities() {
+                        *theirs_total.entry(theirs_kind(entity)).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let kinds: BTreeSet<&str> = ours_total
+            .keys()
+            .chain(theirs_total.keys())
+            .copied()
+            .filter(|kind| !NOT_COMPARED.contains(kind))
+            .collect();
+        for kind in kinds {
+            let ours = ours_total.get(kind).copied().unwrap_or(0);
+            let theirs = theirs_total.get(kind).copied().unwrap_or(0);
+            if ours != theirs {
+                report.push_str(&format!("{version} {kind}: ours {ours}, theirs {theirs}\n"));
+            }
+        }
+    }
+    // What the pinned file holds, and why each line is there:
+    //
+    // - `helix` in every version: the second reader models HELIX; this
+    //   crate's model has no such entity, so it reports one as unknown,
+    //   carrying the type name. Nothing is claimed falsely -- the entity is
+    //   simply not covered, and the file records where coverage stops.
+    // - `table` in one drawing: this crate reports that entity as unknown
+    //   under the name its engine gives an unrecognized class, while the
+    //   second reader reads it as a table. Which reading is right has not
+    //   been measured; the disagreement is recorded, not resolved.
+    //
+    // Both are of one shape: a place where one reader says "unknown" and the
+    // other gives a name. That is the shape worth watching, because the
+    // opposite -- both naming it, differently -- is a defect in one of them.
+    let pinned = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/second-reader-types.txt"
+    ))
+    .unwrap_or_default();
+    assert_eq!(
+        report.trim(),
+        pinned.trim(),
+        "\nthe two readers' per-type disagreement moved; measured now:\n{report}"
+    );
+}
