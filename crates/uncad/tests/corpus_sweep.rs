@@ -198,7 +198,11 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
         .filter(|((_, field, _), _)| *field == "layer")
         .map(|(_, n)| n)
         .sum();
-    assert_eq!(layers, 64_697);
+    // 64,697 before the attribute-chain fix: 36 more entities (all ATTDEFs in
+    // blocks with several of them, in the R2000 and R13/R14 files) are read
+    // now that this crate walks the R13..R2000 block chain itself instead of
+    // through the library's walker, which skipped them.
+    assert_eq!(layers, 64_733);
 
     // --- ACIS edges that could not be read (the SAB-to-SAT texts whose
     // pointers run past their records) and block references that drew nothing.

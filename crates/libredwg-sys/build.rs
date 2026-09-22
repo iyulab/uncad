@@ -194,6 +194,13 @@ fn main() {
         .allowlist_function("uncad_3dsolid_sab_to_sat_text")
         .allowlist_function("uncad_free_sat_text")
         .allowlist_function("uncad_dwg_is_pre_r13")
+        .allowlist_function("uncad_dwg_is_r13_to_r2000")
+        // The R13..R2000 entity chain is walked by this crate's consumer
+        // itself (see uncad_shim.h, uncad_dwg_is_r13_to_r2000): the next
+        // link, and a handle -> object lookup for links the DXF importer
+        // left unresolved.
+        .allowlist_function("dwg_next_entity")
+        .allowlist_function("dwg_resolve_handle")
         // Resolves a table reference to the entry's name by index for
         // pre-R13 drawings (their references carry no handle), and by handle
         // otherwise.

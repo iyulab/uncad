@@ -30,6 +30,20 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- **Closed LWPOLYLINEs are closed.** The `closed` field read bit 1 of the entity's `flag`,
+  which in the library's LWPOLYLINE layout means "has extrusion"; closed is bit 512. Not one
+  of the corpus's 1,137 LWPOLYLINEs had ever been reported closed, so every closed outline
+  rendered as an open polyline. POLYLINE_2D/3D were unaffected (their bit 1 is closed).
+- **Every attribute definition in a block, and every attribute value on an INSERT, is
+  read** in R13..R2000 drawings. The library's chain walkers skip ATTDEF as if it were a
+  sub-entity (all but the last were lost) and read an unresolved `first_attrib` pointer
+  after a DXF import (an imported INSERT had no attributes at all). This crate now walks
+  both chains itself for that version band; see `docs/CAVEATS.md`, "Attributes". Measured:
+  36 more entities across the corpus, all in blocks with several ATTDEFs. The top-level
+  copies of an INSERT's attributes now follow the INSERT, in file order (they preceded it).
+- `tests/golden.rs` reads the first synthetic golden case (`tests/golden/g1.dxf`, written by
+  the `uncad-model` golden writer from a spec) and requires the model to come back exactly as
+  the spec states. It is what caught the two defects above.
 - Table references in pre-R13 drawings (R1.4 to R12) resolve. Such a drawing points at its
   LAYER and BLOCK tables by index rather than by handle, and every one of those references
   used to come back `Unresolved("0")` even though the tables themselves were read: 304 layer

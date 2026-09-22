@@ -26,13 +26,18 @@ use uncad_model::model::{
 };
 use uncad_model::model::{Point2D, Point3D};
 
-/// The polyline `flag` bit checked for "closed", shared by LWPOLYLINE,
-/// POLYLINE_2D and POLYLINE_3D. `dwg.h`'s own field comment documents bit 512
-/// instead, but bit 1 is the standard DXF group-70 convention and is what
-/// matches observed rendering; there is no independently verified ground truth
-/// to settle which reading is right, so this follows the DXF convention rather
-/// than "correcting" it. See `docs/CAVEATS.md`.
+/// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
+/// as in DXF group 70 and as `dwg.h` documents for `Dwg_Entity_POLYLINE_2D`.
 const POLYLINE_CLOSED_FLAG: u16 = 1;
+
+/// The `flag` bit that means "closed" on LWPOLYLINE: **512**, not 1. The
+/// library stores LWPOLYLINE's flag in its DWG layout, where bit 1 means
+/// "has extrusion" and 512 means closed (`dwg.h`, `Dwg_Entity_LWPOLYLINE`);
+/// its DXF importer maps group 70 bit 1 onto 512 accordingly. Reading bit 1
+/// here reported every closed LWPOLYLINE as open -- across the whole corpus
+/// (1,137 of them) not one came back closed. Caught by a synthetic drawing
+/// whose spec said "closed" and whose outline came back as an open polyline.
+const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
@@ -90,14 +95,20 @@ pub unsafe fn convert_entities(dwg: *mut libredwg_sys::Dwg_Data) -> Vec<Entity> 
         }
 
         // Each INSERT's attribs are duplicated as top-level Entity::Attrib
-        // entries because that is what rendering draws. Deliberately here and
-        // not inside owned_entities(): a block record's own entity list must
-        // not carry the duplication (see crate::tables::BlockRecord).
+        // entries because that is what rendering draws -- after the INSERT,
+        // in file order (the ATTRIBs follow their INSERT in the file).
+        // Deliberately here and not inside owned_entities(): a block
+        // record's own entity list must not carry the duplication (see
+        // uncad_model::tables::BlockRecord).
         for entity in unsafe { owned_entities(dwg, block_obj) } {
-            if let Entity::Insert(insert) = &entity {
-                entities.extend(insert.attribs.iter().cloned().map(Entity::Attrib));
-            }
+            let attribs: Vec<Entity> = match &entity {
+                Entity::Insert(insert) => {
+                    insert.attribs.iter().cloned().map(Entity::Attrib).collect()
+                }
+                _ => Vec::new(),
+            };
             entities.push(entity);
+            entities.extend(attribs);
         }
     }
 
@@ -117,6 +128,9 @@ pub(crate) unsafe fn owned_entities(
     dwg: *mut libredwg_sys::Dwg_Data,
     block_obj: *mut libredwg_sys::Dwg_Object,
 ) -> Vec<Entity> {
+    if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
+        return unsafe { chained_block_entities(dwg, block_obj) };
+    }
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
@@ -126,6 +140,163 @@ pub(crate) unsafe fn owned_entities(
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
     }
     entities
+}
+
+/// The object a handle reference points at: the pointer the reference
+/// already carries, or a lookup by handle when it carries none -- which is
+/// the state the DXF importer leaves `first_attrib`/`last_attrib` in.
+///
+/// # Safety
+/// `dwg` must be live, and `reference` either null or a valid
+/// `Dwg_Object_Ref` belonging to it.
+unsafe fn referenced_object(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    reference: *mut libredwg_sys::Dwg_Object_Ref,
+) -> *mut libredwg_sys::Dwg_Object {
+    if reference.is_null() {
+        return std::ptr::null_mut();
+    }
+    let reference = unsafe { &*reference };
+    if !reference.obj.is_null() {
+        // bindgen names the pointee differently in the two declarations
+        // (`_dwg_object` here, the opaque `Dwg_Object` blob elsewhere); it is
+        // the same C struct.
+        return reference.obj.cast();
+    }
+    if reference.absolute_ref == 0 {
+        return std::ptr::null_mut();
+    }
+    unsafe { libredwg_sys::dwg_resolve_handle(dwg, reference.absolute_ref) }.cast()
+}
+
+/// `true` for the entity kinds that belong to another entity (an INSERT's
+/// attributes, a polyline's vertices, the SEQEND that closes either) rather
+/// than to the block that owns that entity. They sit in the block's chain,
+/// so a chain walk has to step over them. ATTDEF is *not* one of these: an
+/// attribute definition is an ordinary block-owned entity.
+fn is_sub_entity(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> bool {
+    matches!(
+        fixedtype,
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE
+            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND
+    )
+}
+
+/// The entities of a block in an R13..R2000 drawing, where the library links
+/// them as a `first_entity` .. `last_entity` chain through each entity's
+/// `next_entity`.
+///
+/// This crate walks the chain itself instead of calling the library's
+/// `get_next_owned_entity`, because that walker treats ATTDEF as a
+/// sub-entity and skips it -- every attribute definition in a block
+/// definition but the last was lost, with no diagnostic. Measured on a
+/// synthetic R2000 DXF with three ATTDEFs in one block: one came back.
+///
+/// # Safety
+/// Same contract as [`owned_entities`].
+unsafe fn chained_block_entities(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    block_obj: *mut libredwg_sys::Dwg_Object,
+) -> Vec<Entity> {
+    let mut entities = Vec::new();
+    let header_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(block_obj) };
+    let first =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(header_ptr, "BLOCK_HEADER", "first_entity")
+            .unwrap_or(std::ptr::null_mut());
+    let last =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(header_ptr, "BLOCK_HEADER", "last_entity")
+            .unwrap_or(std::ptr::null_mut());
+    let last_obj = unsafe { referenced_object(dwg, last) };
+    let mut obj = unsafe { referenced_object(dwg, first) };
+
+    // The chain is data from the file; a cycle in it must not hang the
+    // parse. No chain can be longer than the object table.
+    let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    let mut steps = 0;
+    while !obj.is_null() && steps <= max_steps {
+        steps += 1;
+        let fixedtype =
+            unsafe { libredwg_sys::dwg_object_get_fixedtype(obj) } as libredwg_sys::DWG_OBJECT_TYPE;
+        if !is_sub_entity(fixedtype) {
+            if let Some(entity) = unsafe { convert_entity(dwg, obj) } {
+                entities.push(entity);
+            }
+        }
+        if obj == last_obj {
+            break;
+        }
+        obj = unsafe { libredwg_sys::dwg_next_entity(obj) };
+    }
+    entities
+}
+
+/// An INSERT's attributes in an R13..R2000 drawing, walked here rather than
+/// through the library's `get_first_owned_subentity`.
+///
+/// Two sources, tried in order. The `attribs[]` array (`num_owned` long) is
+/// what the DXF importer fills correctly; its `first_attrib`/`last_attrib`
+/// links are not usable after an import (measured: `first_attrib` with a zero
+/// handle and no object, `last_attrib` pointing at an unrelated object), and
+/// the library's walker reads `first_attrib->obj` without resolving it, so
+/// every attribute of an imported INSERT was lost. A drawing decoded from
+/// DWG carries the chain and no array, so the chain is the fallback.
+///
+/// # Safety
+/// `dwg` must be live and `entity_ptr` the type-specific struct pointer of a
+/// valid INSERT object of it.
+unsafe fn chained_insert_attribs(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Vec<AttribEntity> {
+    let mut attribs = Vec::new();
+    let owned = get_array_field::<u32, *mut libredwg_sys::Dwg_Object_Ref>(
+        entity_ptr,
+        "INSERT",
+        "num_owned",
+        "attribs",
+    );
+    if !owned.is_empty() {
+        for reference in owned {
+            let sub = unsafe { referenced_object(dwg, reference) };
+            if sub.is_null() {
+                continue;
+            }
+            if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+                attribs.push(attrib);
+            }
+        }
+        return attribs;
+    }
+    let first =
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "INSERT", "first_attrib")
+            .unwrap_or(std::ptr::null_mut());
+    let last = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "INSERT", "last_attrib")
+        .unwrap_or(std::ptr::null_mut());
+    let last_obj = unsafe { referenced_object(dwg, last) };
+    let mut sub = unsafe { referenced_object(dwg, first) };
+    let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    let mut steps = 0;
+    while !sub.is_null() && steps <= max_steps {
+        steps += 1;
+        let fixedtype =
+            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
+        if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB {
+            break;
+        }
+        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+            attribs.push(attrib);
+        }
+        if sub == last_obj {
+            break;
+        }
+        sub = unsafe { libredwg_sys::dwg_next_entity(sub) };
+    }
+    attribs
 }
 
 /// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
@@ -374,7 +545,7 @@ unsafe fn convert_entity(
             Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
-                closed: flag & POLYLINE_CLOSED_FLAG != 0,
+                closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -498,17 +669,25 @@ unsafe fn convert_entity(
             let rotation = get_field::<f64>(entity_ptr, "INSERT", "rotation").unwrap_or(0.0);
 
             // ATTRIBs are owned by the INSERT itself -- a separate ownership
-            // relationship from BLOCK_HEADER -> entity, walked from the
-            // INSERT's own Dwg_Object rather than from entity_ptr (which is
-            // the type-specific struct dynapi needs, a different pointer).
-            let mut attribs = Vec::new();
-            let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-            while !sub.is_null() {
-                if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
-                    attribs.push(attrib);
+            // relationship from BLOCK_HEADER -> entity. R13..R2000 chains
+            // them and the library's own walker cannot follow a chain the
+            // DXF importer built (see chained_insert_attribs); from R2004 on
+            // they are an owned array the library resolves correctly, walked
+            // from the INSERT's own Dwg_Object rather than from entity_ptr
+            // (the type-specific struct dynapi needs, a different pointer).
+            let attribs = if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
+                unsafe { chained_insert_attribs(dwg, entity_ptr) }
+            } else {
+                let mut attribs = Vec::new();
+                let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+                while !sub.is_null() {
+                    if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, sub) } {
+                        attribs.push(attrib);
+                    }
+                    sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
                 }
-                sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
-            }
+                attribs
+            };
 
             Entity::Insert(InsertEntity {
                 common,

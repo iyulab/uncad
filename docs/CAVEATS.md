@@ -250,11 +250,36 @@ all in pre-R13 files). Every MLINE style resolves.
 
 ## The polyline "closed" flag
 
-`dwg.h`'s field comment documents bit 512 of `flag` as "closed", but the rendering logic
-checks bit 1 (`flag & 1`), the standard DXF group-70 convention -- see the
-`POLYLINE_CLOSED_FLAG` constant in `crates/uncad/src/convert.rs`. With no AutoCAD
-reference available to settle which reading is correct, the DXF convention was kept rather
-than "corrected" on a guess.
+Two layouts, one field name. POLYLINE_2D/3D keep DXF's convention (bit 1 of `flag` is
+"closed"). LWPOLYLINE's `flag` is stored in its DWG layout, where bit 1 is "has
+extrusion" and **512** is "closed" (`dwg.h`, `Dwg_Entity_LWPOLYLINE`); the library's DXF
+importer maps group 70 bit 1 onto 512. This crate read bit 1 for LWPOLYLINE too until a
+synthetic drawing whose outline was declared closed came back open -- and a count over the
+corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported closed. The two
+constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
+carry the distinction.
+
+## Attributes: the block chain and the INSERT chain are walked here, not by the library
+
+In R13..R2000 drawings the library links a block's entities as a `first_entity` ..
+`last_entity` chain and an INSERT's attributes as `first_attrib` .. `last_attrib`. Its own
+walkers have two gaps, both silent:
+
+- `get_next_owned_entity` skips ATTDEF as if it were a sub-entity. Every attribute
+  definition in a block definition but the last was lost (the last survives only because
+  the walker stops before skipping `last_entity`).
+- `get_first_owned_subentity` reads `first_attrib->obj` without resolving the handle. After
+  a DXF import that pointer is NULL (and the `first_attrib` handle itself is zero), so an
+  imported INSERT reported no attributes at all. The importer does fill the `attribs[]`
+  array correctly.
+
+`convert.rs` walks both chains itself for that version band (`chained_block_entities`,
+`chained_insert_attribs`: the array when it is present, the chain otherwise), through the
+library's exported `dwg_next_entity` and `dwg_resolve_handle`; from R2004 on the library's
+array-based walkers are used as before. Measured on the corpus, the fix adds 36 entities to
+the 64,697 layer references the sweep test pins (blocks with several ATTDEFs in the R2000
+and R13/R14 files). The two gaps are reported upstream; `tests/attributes.rs` pins the
+behaviour with a self-written R2000 DXF.
 
 ## MTEXT rotation is always 0
 

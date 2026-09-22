@@ -118,6 +118,19 @@ void uncad_free_sat_text(char *text);
  */
 int uncad_dwg_is_pre_r13(const Dwg_Data *dwg);
 
+/* 1 when `dwg->header.version` is in R13 .. R2000 inclusive, 0 otherwise or
+ * when `dwg` is NULL.
+ *
+ * That is the version band in which the library links a block's entities
+ * (and an INSERT's attributes) as a prev/next chain rather than an owned
+ * array, and in which its own chain walkers have two gaps the Rust side
+ * has to step around: `get_next_owned_entity` skips ATTDEF as if it were a
+ * sub-entity, and `get_first_owned_subentity` reads `first_attrib->obj`
+ * without resolving it, which is NULL after a DXF import. Reads `version`
+ * (the target version), the same field those walkers branch on.
+ */
+int uncad_dwg_is_r13_to_r2000(const Dwg_Data *dwg);
+
 #ifdef __cplusplus
 }
 #endif

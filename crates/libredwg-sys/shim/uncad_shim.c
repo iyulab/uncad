@@ -178,3 +178,11 @@ uncad_dwg_is_pre_r13 (const Dwg_Data *dwg)
     v = dwg->header.version;
   return v < R_13;
 }
+
+int
+uncad_dwg_is_r13_to_r2000 (const Dwg_Data *dwg)
+{
+  if (!dwg)
+    return 0;
+  return R_13b1 <= dwg->header.version && dwg->header.version <= R_2000;
+}
