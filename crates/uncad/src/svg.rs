@@ -291,6 +291,7 @@ fn compose(parent: &Transform, child: &Transform) -> Transform {
 
 use crate::limits::{
     LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES,
+    MAX_WORLD_COORDINATE,
 };
 
 struct Ctx<'a> {
@@ -397,8 +398,10 @@ impl<'a> Ctx<'a> {
     /// Records one *local* coordinate pair, applying the current (possibly
     /// block-nested) transform first.
     ///
-    /// Non-finite results (from a malformed source file or a degenerate
-    /// transform) are dropped rather than recorded: letting `Infinity` into the
+    /// Results that are not finite, or larger than
+    /// [`MAX_WORLD_COORDINATE`] (from a malformed source file or a
+    /// degenerate transform), are dropped rather than recorded: letting
+    /// `Infinity` into the
     /// running bounds can pin both the min and the max to `Infinity` (the
     /// min-side update never fires because `Infinity < Infinity` is false),
     /// and the box's diagonal then computes as `NaN`, which panics the
@@ -406,7 +409,12 @@ impl<'a> Ctx<'a> {
     /// a degenerate point.
     fn consider(&mut self, local_x: f64, local_y: f64) {
         let (x, y) = self.transform.apply(local_x, local_y);
-        if !x.is_finite() || !y.is_finite() {
+        // The same screen `finite` applies to a coordinate as written, but
+        // on the value *after* the block transform: a sane coordinate under
+        // a corrupt block scale lands just as far out, and the bounds are
+        // what the viewBox (and so every length derived from it) is built
+        // from. See [`MAX_WORLD_COORDINATE`].
+        if !finite([x, y]) {
             return;
         }
         if x < self.ent_min_x {
@@ -497,7 +505,8 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
     out
 }
 
-/// Whether every one of these values is a real number.
+/// Whether every one of these values is a real number the renderer can draw
+/// with -- finite, and below [`MAX_WORLD_COORDINATE`] in magnitude.
 ///
 /// The entity-level screen for coordinates, radii and sizes: an arm that
 /// returns `None` here leaves the entity undrawn, which is the honest
@@ -506,8 +515,15 @@ fn resolve_stroke_widths(body: &str, effective_stroke_width: f64) -> String {
 /// which is in SVG's `<number>` grammar. [`format::clean`] is the backstop
 /// underneath for anything not screened here; this is what keeps a bogus
 /// entity from being *drawn* at the fallback value.
+///
+/// The magnitude half of the test matters just as much and is easier to
+/// miss: 1e150 is finite, and one entity carrying it takes the measured
+/// extents, the viewBox and every length derived from them with it -- see
+/// [`MAX_WORLD_COORDINATE`], which is the bound [`crate::crop::Rect::is_sane`]
+/// already held a header's extents to.
 fn finite<const N: usize>(vals: [f64; N]) -> bool {
-    vals.iter().all(|v| v.is_finite())
+    vals.iter()
+        .all(|v| v.is_finite() && v.abs() < MAX_WORLD_COORDINATE)
 }
 
 /// The points of `pts` that can be drawn at all. One corrupt vertex does not
@@ -557,6 +573,18 @@ fn bulged_polyline_element(
                 let _ = write!(d, " L {} {}", frame.x(to.x), frame.y(to.y));
             }
             crate::geom::Segment::Arc { to, bulge, arc, .. } => {
+                // A bulge of 1e-160 over a hundred-unit segment is an arc of
+                // radius 1e238. An `A` command carrying that hands the
+                // rasterizer an arc-to-bezier conversion whose scale has
+                // nothing to do with the segment's -- a fuzzed
+                // `example_2000.dwg` with one such vertex had not finished
+                // rasterizing after five minutes, at any image size. A
+                // radius that large *is* a straight line, so it is drawn as
+                // one. See [`MAX_WORLD_COORDINATE`].
+                if !finite([arc.radius]) {
+                    let _ = write!(d, " L {} {}", frame.x(to.x), frame.y(to.y));
+                    continue;
+                }
                 let large = u8::from(bulge.abs() > 1.0);
                 let sweep = u8::from(*bulge < 0.0);
                 let _ = write!(

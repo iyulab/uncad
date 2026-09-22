@@ -243,6 +243,17 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   the POLYLINE subentity walks carry the same length bound. See `docs/CAVEATS.md`, which
   also records the unchecked null dereference this exposed in the vendored
   `get_next_owned_subentity`, left in place as a below-the-boundary fix.
+- A corrupt drawing could make the *rasterizer* run for minutes on a small SVG. Two
+  finite-but-absurd numbers did it, both found by re-running the fuzz sweep after the
+  allocation caps landed. A coordinate of 1e150 is finite, and one entity carrying it
+  dragged the measured extents, the viewBox (1.45e150 units wide) and the automatic
+  stroke width (5.2e149) with it; an entity's coordinates are now held to
+  `limits::MAX_WORLD_COORDINATE` (1e15), the bound `crop::Rect::is_sane` already applied
+  to a header's `$EXTMIN`/`$EXTMAX`, both as written and after the block transform. And a
+  bulge of 1e-160 over a hundred-unit segment is an arc of radius 1e238, which the same
+  drawing emitted as an SVG `A` command; rasterizing it did not finish in five minutes at
+  any image size, 200 px included. A radius that large is a straight line and is now drawn
+  as one. The drawing rasterizes in 0.46 s.
 - A corrupt drawing could make the *renderer* attempt a multi-gigabyte allocation and
   abort the process on the failure. One flipped byte of `example_2000.dwg` (offset
   130005) redirects a block record's owned-entity chain so the block holds eight INSERTs
@@ -256,8 +267,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   may be (16x -- a corrupt spacing of 1e12 over a ten-unit boundary asks resvg for a
   pixmap 1e11 pixels on a side). The same drawing now renders in 1.4 s. No corpus file
   and none of the seven AutoCAD samples engages any cap: their documents are unchanged
-  byte for byte. See `docs/CAVEATS.md`, "Every number the renderer turns into an
-  allocation is capped".
+  byte for byte. See `docs/CAVEATS.md`, "Every number the renderer takes from the file
+  is bounded".
 - A DXF of R2007 or later resolved no layer name and no block reference. Every entity
   whose layer name was longer than one character came back with `layer: ""`, and every
   INSERT with `block_name: ""`, so the renderer drew nothing for any block reference,

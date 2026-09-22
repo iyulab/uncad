@@ -9,7 +9,10 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use uncad::limits::{MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES};
+use uncad::limits::{
+    MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES,
+    MAX_WORLD_COORDINATE,
+};
 use uncad::model::{
     Entity, EntityCommon, HatchBoundaryPath, HatchEntity, HatchPatternLine, InsertEntity,
     LineEntity, LwPolylineEntity, Point2D, Point3D,
@@ -385,6 +388,81 @@ fn a_hatch_the_cap_dropped_still_rasterizes_quickly() {
     let elapsed = started.elapsed();
 
     assert_eq!(png.limits.hatch_patterns_dropped, 1);
+    assert!(!png.png.is_empty());
+    assert!(elapsed.as_secs() < 30, "took {elapsed:?}");
+}
+
+#[test]
+fn an_entity_at_an_absurd_coordinate_does_not_drag_the_viewbox_with_it() {
+    // 1e150 is finite, so nothing about the number itself says no. What it
+    // does say no to is everything derived from the extents: a fuzzed
+    // `example_2000.dwg` with one such vertex produced a viewBox 1.45e150
+    // units wide and a stroke width of 5e149 to match.
+    let drawing = db(
+        vec![
+            line("NEAR", 0.0, 0.0),
+            Entity::Line(LineEntity {
+                common: common("FAR"),
+                start_point: xyz(0.0, 0.0),
+                end_point: xyz(1e150, 1e150),
+            }),
+        ],
+        Vec::new(),
+    );
+    let result = drawing.to_svg(ToSvgOptions::default());
+
+    assert!(
+        result.view_box.width < MAX_WORLD_COORDINATE,
+        "the viewBox is {} units wide",
+        result.view_box.width
+    );
+    assert!(
+        result.view_box.width < 100.0,
+        "the sane line is 1 unit long; the viewBox came out {} wide",
+        result.view_box.width
+    );
+    assert_eq!(
+        result.svg.matches("<line ").count(),
+        1,
+        "the entity with the absurd endpoint should not be drawn"
+    );
+}
+
+#[test]
+fn a_bulge_that_makes_an_arc_of_absurd_radius_is_drawn_as_a_line() {
+    // A bulge is tan(theta/4), so a bulge of 1e-160 over a hundred-unit
+    // segment is an arc of radius ~1e238. Handing that to the rasterizer as
+    // an SVG `A` command is what made one fuzzed drawing take longer than
+    // five minutes to rasterize at *any* image size, 200 px included.
+    let drawing = db(
+        vec![Entity::LwPolyline(LwPolylineEntity {
+            common: common("P"),
+            vertices: vec![xy(0.0, 0.0), xy(100.0, 0.0), xy(100.0, 50.0)],
+            closed: false,
+            bulges: vec![1e-160, 0.0, 0.0],
+            widths: Vec::new(),
+            const_width: 0.0,
+            elevation: 0.0,
+            extrusion: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
+        })],
+        Vec::new(),
+    );
+
+    let svg = drawing.to_svg(ToSvgOptions::default()).svg;
+    assert!(
+        !svg.contains(" A "),
+        "an arc of that radius is a straight line: {svg}"
+    );
+
+    let started = Instant::now();
+    let png = drawing
+        .to_png(uncad::ToPngOptions::default())
+        .expect("it rasterizes");
+    let elapsed = started.elapsed();
     assert!(!png.png.is_empty());
     assert!(elapsed.as_secs() < 30, "took {elapsed:?}");
 }

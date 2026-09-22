@@ -68,6 +68,23 @@ pub const MAX_OWNED_SUBENTITIES: usize = 100_000;
 /// string plus the copy a `String` makes when it grows -- around 200 MB.
 pub const MAX_SVG_BODY_BYTES: usize = 64 * 1024 * 1024;
 
+/// The largest world coordinate, radius or size the renderer will draw
+/// with.
+///
+/// `f64::is_finite` is not the line: 1e150 is a perfectly finite number,
+/// and one entity carrying it drags the measured extents -- and so the
+/// viewBox, the automatic stroke width and every length the rasterizer
+/// derives from them -- up with it. A fuzzed `example_2000.dwg` did exactly
+/// that: a 590 KB SVG with a viewBox 1.45e150 units wide, whose dashed
+/// strokes then asked tiny-skia's dasher for ~1e149 dashes. `to_png` had
+/// not returned after five minutes.
+///
+/// The bound is the one [`crate::crop::Rect::is_sane`] already applies to a
+/// header's `$EXTMIN`/`$EXTMAX`, so an entity and a header extent are now
+/// held to the same standard. No real drawing comes near it -- the Earth's
+/// circumference in micrometres is 4e13.
+pub const MAX_WORLD_COORDINATE: f64 = 1e15;
+
 /// How many points one entity may contribute to the picture.
 ///
 /// A polyline's vertex count, a spline's control points, a hatch boundary's

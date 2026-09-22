@@ -449,7 +449,7 @@ angle made the arc-bounds walk (`geom::BulgeArc::bounds`, one step per quarter t
 spin forever -- `to_svg`, `to_png` and `export_package` never returned. That walk is now
 bounded at four quarter crossings by construction, which is all any arc can have.
 
-## Every number the renderer turns into an allocation is capped (since 0.3.0)
+## Every number the renderer takes from the file is bounded (since 0.3.0)
 
 A coordinate that is `NaN` costs one undrawn entity (the section above). A *count* that is
 wrong costs the process: it becomes an allocation size or a loop bound, and nothing in the
@@ -471,13 +471,34 @@ constant:
 | `MAX_SVG_BODY_BYTES` | 64 MiB | how large the emitted drawing body may grow -- the backstop behind the rest |
 | `MAX_ENTITY_POINTS` | 100 000 | how many file-supplied points one entity may draw with |
 | `MAX_HATCH_TILE_SPAN` | 16x the boundary | how much larger than the shape it fills a HATCH pattern's tile may be |
+| `MAX_WORLD_COORDINATE` | 1e15 | the largest coordinate, radius or size an entity may be drawn with |
+| `MAX_SUBENTITY_DEPTH` | 2 | how deep an owned-subentity walk may recurse on the way in (see the section below) |
+| `MAX_OWNED_SUBENTITIES` | 100 000 | how many subentities one such walk may hand back |
 
 Every cap engaging is *reported*, never silent: `ToSvgResult::limits` and
 `ToPngResult::limits` carry a `LimitReport`, the CLI prints it as a warning, and a package
 puts it in `report.json` under `limits` and in `warnings`. The same drawing now renders in
 1.4 s to a 67 MB SVG saying it dropped 3 496 block references and 869 entities.
 
-Two of these deserve their reasoning spelled out:
+Not every one of these is about memory. Two of them bound the *rasterizer's* work, which a
+finite number can run away with just as easily; both were found by the fuzz sweep after the
+allocation caps landed, on drawings that produced a perfectly small SVG:
+
+- **A coordinate of 1e150 is finite,** and one entity carrying it takes the measured
+  extents with it -- and so the viewBox, the automatic stroke width and every length
+  derived from them. One fuzzed `example_2000.dwg` wrote a 590 KB SVG with a viewBox
+  1.45e150 units wide and `stroke-width="5.2e149"`; `to_png` had not returned after five
+  minutes. `MAX_WORLD_COORDINATE` is the bound `crop::Rect::is_sane` already applied to a
+  header's `$EXTMIN`/`$EXTMAX`, now applied to an entity's own coordinates too -- both as
+  written and after the block transform, since a corrupt block scale lands a sane
+  coordinate just as far out.
+- **A bulge of 1e-160 over a hundred-unit segment is an arc of radius 1e238.** The same
+  drawing emitted `A 7.1e238 7.1e238 ...` between two points a few thousand units apart,
+  and rasterizing that did not finish in five minutes at *any* image size -- 200 px
+  included, so it was the arc-to-bezier conversion and not the pixel count. A radius that
+  large is a straight line, and is now drawn as one. (This was 0.46 s after the fix.)
+
+Two of the caps deserve their reasoning spelled out:
 
 - **The output budget is what actually bounds the allocation.** It is checked before each
   entity, at every level of the block walk, so exhausting it unwinds the whole walk rather
@@ -658,7 +679,7 @@ attacker-controlled offsets and lengths, so treat the risk as still present.
 
 The sweep also found that a corrupt drawing could make the *renderer* (not the parser)
 attempt a multi-gigabyte allocation and abort on the failure. That one was above the FFI
-boundary and is fixed -- see "Every number the renderer turns into an allocation is capped"
+boundary and is fixed -- see "Every number the renderer takes from the file is bounded"
 above.
 
 ## Local patches to the vendored LibreDWG
