@@ -6,11 +6,12 @@ bytes, not UTF-8; line endings are CRLF.
 
     python make_fixtures.py [out_dir] [which]
 
-`which` defaults to `all` (the four shipped DXF files, in their verified
-"full" form: the dimension fixture carries a BLOCK_RECORD table so its *D1
-block binds, the viewport fixture a *Paper_Space block so the VIEWPORT lands
-in paper space). `dimlfac-minimal` and `viewport-minimal` write the earlier
-ENTITIES-only variants README.md describes, kept for comparison.
+`which` defaults to `all` (the shipped DXF files, in their verified "full"
+form: the dimension fixture carries a BLOCK_RECORD table so its *D1 block
+binds, the viewport fixture a *Paper_Space block so the VIEWPORT lands in
+paper space plus a LAYOUT object with plot settings for that block).
+`dimlfac-minimal` and `viewport-minimal` write the earlier ENTITIES-only
+variants README.md describes, kept for comparison.
 """
 import os
 import sys
@@ -108,7 +109,8 @@ def tables(layers=((b"0", 7),), dimstyle=False, block_records=(), dimlfac=None):
     30, with DIMLFAC group 144 when `dimlfac` is given -- a dimension uses
     its style's factor, not the header's) and a BLOCK_RECORD table whose
     entries carry explicit handles so BLOCK/entity `330` owner codes can
-    refer to them."""
+    refer to them; a third element on a block record is the handle of its
+    LAYOUT object (`340`)."""
     body = pairs((0, "TABLE"), (2, "LAYER"), (70, len(layers)))
     for name, color in layers:
         body += pairs((0, "LAYER"), (2, name), (70, 0), (62, color), (6, "Continuous"))
@@ -122,8 +124,10 @@ def tables(layers=((b"0", 7),), dimstyle=False, block_records=(), dimlfac=None):
         )
     if block_records:
         body += pairs((0, "TABLE"), (2, "BLOCK_RECORD"), (70, len(block_records)))
-        for handle, name in block_records:
+        for handle, name, *layout in block_records:
             body += pairs((0, "BLOCK_RECORD"), (5, handle), (2, name), (70, 0))
+            if layout:
+                body += pair(340, layout[0])
         body += pair(0, "ENDTAB")
     return section("TABLES", body)
 
@@ -139,6 +143,70 @@ def block(name, owner, handles, body=b"", paper=False, flag=0):
     )
     end = entity("ENDBLK", b"0", (100, "AcDbBlockEnd"), handle=h_end, owner=owner, paper=paper)
     return begin + body + end
+
+
+def dictionary(handle, owner, items):
+    """A DICTIONARY object (OBJECTS section) whose `items` are (name, handle)
+    soft-owner entries (`3` / `350`)."""
+    body = pairs((0, "DICTIONARY"), (5, handle), (330, owner), (100, "AcDbDictionary"), (281, 1))
+    for name, target in items:
+        body += pairs((3, name), (350, target))
+    return body
+
+
+def layout(handle, owner, name, tab_order, block_record, viewport, paper,
+           printer="none_device", margin=6.35, rotation=1):
+    """A LAYOUT object: the embedded AcDbPlotSettings (page setup, all
+    lengths in mm) followed by AcDbLayout. `paper` is (canonical media
+    name, width, height) of the unrotated sheet; `rotation` 1 is 90 degrees
+    counter-clockwise (landscape), and LIMMIN/LIMMAX are the printable area
+    of the sheet as rotated, from (-margin, -margin). EXTMIN/EXTMAX carry
+    the 1e20 / -1e20 "never computed" sentinels AutoCAD writes for a layout
+    that has not been plotted or zoomed. `owner` is the ACAD_LAYOUT
+    dictionary; the AcDbLayout `330` is the block record and `331` the
+    active viewport."""
+    media, w, h = paper
+    if rotation in (1, 3):
+        w, h = h, w
+    plot = [
+        (100, "AcDbPlotSettings"),
+        (1, b""),                            # page setup name
+        (2, printer),                        # printer / plot configuration
+        (4, media),                          # canonical media name
+        (40, margin), (41, margin), (42, margin), (43, margin),
+        (44, float(paper[1])), (45, float(paper[2])),
+        (46, 0.0), (47, 0.0),                # plot origin
+        (48, 0.0), (49, 0.0),                # plot window lower-left
+        (140, 0.0), (141, 0.0),              # plot window upper-right
+        (142, 1.0), (143, 1.0),              # paper units : drawing units
+        (70, 688),                           # plot flags
+        (72, 1),                             # plot paper unit: mm
+        (73, rotation),                      # plot rotation
+        (74, 5),                             # plot type: layout
+        (7, b""),                            # style sheet
+        (75, 16),                            # standard scale: 1:1
+        (147, 1.0),                          # standard scale factor
+        (148, 0.0), (149, 0.0),              # paper image origin
+    ]
+    lay = [
+        (100, "AcDbLayout"),
+        (1, name),
+        (70, 1),                             # layout flags: PSLTSCALE
+        (71, tab_order),
+        (10, -margin), (20, -margin),        # LIMMIN
+        (11, w - margin), (21, h - margin),  # LIMMAX
+        (12, 0.0), (22, 0.0), (32, 0.0),     # INSBASE
+        (14, 1e20), (24, 1e20), (34, 1e20),  # EXTMIN
+        (15, -1e20), (25, -1e20), (35, -1e20),  # EXTMAX
+        (146, 0.0),                          # elevation
+        (13, 0.0), (23, 0.0), (33, 0.0),     # UCSORG
+        (16, 1.0), (26, 0.0), (36, 0.0),     # UCSXDIR
+        (17, 0.0), (27, 1.0), (37, 0.0),     # UCSYDIR
+        (76, 0),                             # UCSORTHOVIEW
+        (330, block_record),
+        (331, viewport),
+    ]
+    return pairs((0, "LAYOUT"), (5, handle), (330, owner), *plot, *lay)
 
 
 def write(name, data):
@@ -241,17 +309,28 @@ def dimlfac12(variant="full"):
 def twisted_viewport(variant="full"):
     hdr = header(INSUNITS=(70, 4))
     pre = b""
+    post = b""
     owner = None
     line_owner = None
     if variant == "full":
         # Verified 2026-09-21: a *Paper_Space BLOCK_RECORD/BLOCK so that the VIEWPORT's
         # 330 owner equals BLOCK_RECORD_PSPACE and it gets entmode 1.
-        pre = tables(block_records=(("1F", "*Model_Space"), ("1C", "*Paper_Space")))
+        pre = tables(block_records=(("1F", "*Model_Space"), ("1C", "*Paper_Space", "2B")))
         pre += section("BLOCKS",
                        block("*Model_Space", "1F", ("20", "21"))
                        + block("*Paper_Space", "1C", ("22", "23"), paper=True))
         owner = "1C"
         line_owner = "1F"
+        # Verified 2026-09-22: an OBJECTS section with the named object
+        # dictionary (C), its ACAD_LAYOUT dictionary (1A) and one LAYOUT (2B)
+        # for *Paper_Space, an A4 sheet in landscape. LibreDWG builds the
+        # LAYOUT from the object alone; the dictionaries are what lets it set
+        # HEADER.DICTIONARY_LAYOUT (README.md). No Model layout.
+        post = section("OBJECTS",
+                       dictionary("C", "0", (("ACAD_LAYOUT", "1A"),))
+                       + dictionary("1A", "C", (("Layout1", "2B"),))
+                       + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
+                                paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0)))
     vp = entity(
         "VIEWPORT", b"0",
         (100, "AcDbViewport"),
@@ -273,7 +352,7 @@ def twisted_viewport(variant="full"):
         handle="2A", owner=owner, paper=True,
     )
     ents = line(0, 0, 100, 50, handle="24" if line_owner else None, owner=line_owner) + vp
-    return hdr + pre + section("ENTITIES", ents) + pair(0, "EOF")
+    return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
 
 
 def hidden_layers():
