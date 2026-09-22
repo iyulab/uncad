@@ -63,11 +63,12 @@ def entity(kind, layer=b"0", *groups, handle=None, owner=None, paper=False):
     return out
 
 
-def text(value, x, y, height=2.5, layer=b"0", extrusion=None, handle=None, owner=None):
+def text(value, x, y, height=2.5, layer=b"0", extrusion=None, handle=None, owner=None,
+         paper=False):
     g = [(10, float(x)), (20, float(y)), (30, 0.0), (40, float(height)), (1, value)]
     if extrusion is not None:
         g += [(210, float(extrusion[0])), (220, float(extrusion[1])), (230, float(extrusion[2]))]
-    return entity("TEXT", layer, *g, handle=handle, owner=owner)
+    return entity("TEXT", layer, *g, handle=handle, owner=owner, paper=paper)
 
 
 def line(x1, y1, x2, y2, layer=b"0", handle=None, owner=None, paper=False,
@@ -608,16 +609,17 @@ def attrib(tag, value, x, y, height, handle, owner):
     )
 
 
-def insert(name, x, y, handle, owner, attribs=None, seqend=None, layer=b"0"):
+def insert(name, x, y, handle, owner, attribs=None, seqend=None, layer=b"0", paper=False):
     """An INSERT, with its ATTRIB chain (DXF 66 = 1) and SEQEND when given."""
     groups = [(100, "AcDbEntity"), (100, "AcDbBlockReference")]
     if attribs:
         groups.append((66, 1))
     groups += [(2, name), (10, float(x)), (20, float(y)), (30, 0.0)]
-    out = entity("INSERT", layer, *groups, handle=handle, owner=owner)
+    out = entity("INSERT", layer, *groups, handle=handle, owner=owner, paper=paper)
     if attribs:
         out += attribs
-        out += entity("SEQEND", layer, (100, "AcDbEntity"), handle=seqend, owner=owner)
+        out += entity("SEQEND", layer, (100, "AcDbEntity"), handle=seqend,
+                      owner=owner, paper=paper)
     return out
 
 
@@ -1046,6 +1048,53 @@ def block_layer0():
     return hdr + pre + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# --------------------------------------------------------------- fixture 18
+def title_block():
+    """A sheet that says what the drawing is -- the question a package of a
+    real set is asked first -- with every string of it in paper space.
+
+    Model space holds one LINE (0,0) -> (100,50) and no text at all, the
+    shape of an AutoCAD sheet set: the title, the sheet number and the
+    office name live on the paper, drawn once, while the model holds the
+    geometry. A4 landscape (297 x 210 mm, 6.35 mm margins on every side, no
+    plot origin, so LIMMIN/LIMMAX put the 297 x 210 sheet at
+    (-6.35, -6.35) .. (290.65, 203.65), the printable corner at the origin)
+    with:
+
+    | handle | entity | where (paper units) | string |
+    |---|---|---|---|
+    | 25 | `TEXT` | (150, 20), height 8 | `GARDEN PAVILION` |
+    | 26 | `INSERT` of `TITLEBLOCK` | (200, 10) | -- |
+    | 42 | `TEXT` inside `TITLEBLOCK` | (10, 10) + the insert, height 5 | `SHEET 1 OF 2` |
+    | 43 | `LINE` inside `TITLEBLOCK` | (0, 5) -> (90, 5) | the rule under it |
+    | 2A | `VIEWPORT` | frame (150, 120) x (200, 120), VIEWCTR (50, 25), VIEWSIZE 60 | the model at 2:1 |
+
+    The nested text's record id is `26/42`, and its anchor on the sheet is
+    (200 + 10, 10 + 10) = (210, 20). The viewport's scale is 120 / 60 = 2
+    paper units per model unit, and its model window is 100 x 60 model
+    units centred on (50, 25), i.e. (0, -5) .. (100, 55)."""
+    hdr = header(INSUNITS=(70, 4))
+    pre = tables(block_records=(("1F", "*Model_Space"), ("1C", "*Paper_Space", "2B"),
+                                ("40", "TITLEBLOCK")))
+    title_body = (line(0, 5, 90, 5, handle="43", owner="40")
+                  + text(b"SHEET 1 OF 2", 10, 10, height=5, handle="42", owner="40"))
+    pre += section("BLOCKS",
+                   block("*Model_Space", "1F", ("20", "21"))
+                   + block("*Paper_Space", "1C", ("22", "23"), paper=True)
+                   + block("TITLEBLOCK", "40", ("41", "44"), body=title_body))
+    post = section("OBJECTS",
+                   dictionary("C", "0", (("ACAD_LAYOUT", "1A"),))
+                   + dictionary("1A", "C", (("Layout1", "2B"),))
+                   + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
+                            paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0)))
+    vp = viewport("2A", "1C", (150.0, 120.0), (200.0, 120.0), (50.0, 25.0), 60.0)
+    ents = (line(0, 0, 100, 50, handle="24", owner="1F")
+            + text(b"GARDEN PAVILION", 150, 20, height=8, handle="25", owner="1C", paper=True)
+            + insert("TITLEBLOCK", 200, 10, "26", "1C", paper=True)
+            + vp)
+    return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -1082,6 +1131,8 @@ if __name__ == "__main__":
         write("polyface_mesh_r2000.dxf", polyface_mesh())
     if which in ("all", "block-layer0"):
         write("block_layer0_r2000.dxf", block_layer0())
+    if which in ("all", "title-block"):
+        write("title_block_r2000.dxf", title_block())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

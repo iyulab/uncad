@@ -216,6 +216,31 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   block definition is placed on the layer of the block reference. `resolve_color` is
   unchanged and now delegates with no reference layer.
 
+- A package's paper layouts index their own text. Every TEXT/MTEXT/ATTRIB a sheet
+  draws -- the drawing's title, the title block, the sheet notes -- is a record in
+  `texts.json` with `space: "paper"`, the `sheet` it is on, its box in that layout's
+  paper units (measured through the same glyph shaping the model texts get) and that
+  sheet image's pixel box, and its string is a `strings.json` key. Model-space records
+  carry `space: "model"`. `manifest.counts.texts_paper` and
+  `capabilities.paper_text` say how much of the package is paper text.
+- `manifest.legend`: what the records' own vocabularies mean and which records carry
+  them -- `confidence` and its five values, the kinds that carry `bbox_confidence` or
+  nothing instead, `measurement_source`, `display_source`, what a region's `labels`
+  are, how a pixel box relates to the image it is quoted in, what a tile sidecar's
+  positional rows hold, how an id resolves to a shard, and what `legibility` means.
+- `manifest.shard_index` entries carry `first_key`/`last_key`, the numeric form of the
+  bounds `first_id`/`last_id` state as hex handle strings, so an id can actually be
+  resolved to its file; `strings.json` carries an `ids` note saying how.
+- `tiles.json`: every written tile carries its PNG's byte count and `sha256`, and every
+  empty one a `reason`, as `docs/VLM_EXPORT_DESIGN.md` section 2 always promised.
+- Tile sidecars carry `records.geometry` (the geometry rows, `[id, px_box, type]`),
+  `counts` (the true number of records of each kind on the tile, whatever the 32 KB cap
+  cut), `geometry_by_kind` and `columns`, a legend for the positional rows.
+- `manifest.capabilities.areas_by_confidence` (how many region areas are exact,
+  estimated and unavailable) and `manifest.frames_dropped_total`.
+- `sheets.json` states `model_to_paper`: how a model point lands on a sheet, in the
+  fields its own viewport records carry.
+
 ### Changed
 
 - Two new dependencies of `uncad`: `png` 0.18, for the 8-bit RGB writer tiny-skia's
@@ -270,6 +295,23 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - The system font database is loaded once per process instead of on every `to_png`.
 - `CadDatabase` has a third field, `header`; a struct literal without it no longer
   compiles (use `CadDatabase::new` or add `header: Header::default()`).
+- A package's `blocks.json` holds the INSERT instances as records, under the same shard
+  rule as the other kinds (`blocks.NNN.json`, listed in `shard_index`), and the block
+  definitions move to `drawing.json`'s `blocks` array -- the block table, beside the
+  layer table. Written whole, `blocks.json` was the one file that could be ten times
+  the 96 KB budget README.txt states (964 KB on a sample whose next largest file was
+  97 KB) and the one record kind no id could be resolved to.
+- `manifest.legibility.per_frame[].reached` is replaced by `target_met` (every text
+  height class reaches `target_px` in the deepest image of that frame) and
+  `pyramid_complete` (the tile budget did not cut the pyramid short). One field named
+  `reached`, published beside `target_px`, read as the first and meant the second.
+- `report.json`'s `hidden.count` is every hidden entity -- the same number
+  `manifest.counts.hidden` prints -- with the old value under `top_level` beside
+  `inside_blocks`, `covers`, `handles_limit` and `handles_truncated`.
+- `manifest.frames_dropped` entries carry a `reason` and now also list the groups that
+  were too small to frame, not only those past `--max-frames`.
+- `uncad::export::Counts` has a `texts_paper` field, and `texts` counts the paper-space
+  records too; a struct literal without it no longer compiles.
 
 ### Fixed
 
@@ -775,6 +817,54 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   option of the other command names the command it belongs to (`--fit` is not an export
   option; `--max-levels` is one), and `--shard-kb`'s error says kilobytes instead of
   pixels. `uncad export` accepts `--no-trim` and `--fonts` as the usage said it should.
+- A drawing whose title is on the paper -- the usual place for it -- exported a package
+  that said it had no text at all: `counts.texts: 0`, `capabilities.text_boxes: "none"`,
+  `texts.json` empty and `strings.json` empty, while the package's own
+  `sheets/Layout1/overview.png` showed the title. Paper-space texts are records now (see
+  Added); the sample whose sheet reads THE PROVENCE indexes it, and a sheet of plan
+  titles and notes indexes all 52 of its strings.
+- Text nested more than eight block references deep was drawn and indexed nowhere. The
+  record walk stopped at 8 while the renderer follows `limits::MAX_BLOCK_REF_DEPTH`
+  (20), so a room tag inside a bound XREF of an assembly of assemblies was in the tile
+  PNG with no record in `texts.json` and no key in `strings.json` -- the one documented
+  way to find it. Both walks use the same cap.
+- `capabilities.areas` was the literal string `"exact"`, derived from nothing. It
+  follows the region records now (`exact`, `mixed`, `estimated`, `unavailable`, `none`),
+  so a package in which 3875 of 4073 areas come from self-crossing outlines no longer
+  invites a reader to total them.
+- A region record whose outline crosses itself published `confidence: "unavailable"`
+  with no `why`, beside an ordinary-looking `area`, `perimeter` and `centroid` -- while
+  the geometry record it is built from carried "self-intersecting outline: the area has
+  no meaning". The region record carries the same `why`.
+- Tile sidecars listed no geometry at all -- LINE/ARC/CIRCLE/LWPOLYLINE/HATCH/SOLID, the
+  bulk of every tile -- although the manifest's guidance promises the sidecar lists what
+  is on the tile and `records_truncated: false` said the list was complete. A dense
+  wall-and-stair tile reported 41 annotation objects and looked exactly like a tile with
+  nothing drawn on it, with 3990 geometry records naming it in their own `tiles`.
+- A sidecar's `neighbors` named tiles that were culled as empty and therefore have
+  neither a `.png` nor a `.json`, so an agent panning tile to tile hit file-not-found
+  with nothing in the package explaining it (24 such links in one sample package).
+  `neighbors`, `parent` and `children` name only written tiles; `tiles.json` still lists
+  the empty ones, now with a reason.
+- Pixel boxes were the record's whole world box mapped into an image's frame with no
+  clipping, so a record listed on a tile it merely overlaps was quoted at coordinates
+  the image does not have -- a dimension at `[945, 790, 9207, 1174]` on a 1092 px tile,
+  8115 px past its right edge; cropping to it failed or gave a sliver. Every box in a
+  `px` map and in a sidecar row is clipped to the image it is quoted in.
+- `manifest.counts.hidden` and `report.json`'s `hidden.count` printed different numbers
+  under the same word (1206 against 0 on one sample), because one counted every hidden
+  entity and the other only the top-level ones, and the handle list was capped at 100
+  without saying so.
+- A detached group too small to become a frame was left out in silence: its records
+  carried `tiles: []` while `frames_dropped` and `warnings` were both empty, so nothing
+  said whether the part was off-drawing, omitted on purpose or an export bug.
+- The package shipped no legend for its own compact forms, and the manifest's guidance
+  named a `confidence` field that text and block records do not carry.
+- `sheets.json`'s only statement about putting a model point on a sheet was
+  `"model_to_paper = C + s (R(twist) (p - T) - V)"`, whose C, T, V and p are in no field
+  of any record in the package. It states the mapping in the fields the viewport records
+  publish -- `frame`, `model_window`, `scale`, `twist_deg` -- and where to go from paper
+  units to sheet pixels.
 
 ### Removed
 

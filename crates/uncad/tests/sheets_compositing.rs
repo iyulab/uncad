@@ -436,3 +436,108 @@ fn an_infinite_line_in_model_space_is_drawn_inside_the_viewport_and_nowhere_else
         "an infinite line escaped the viewport frame"
     );
 }
+
+const TITLE_BLOCK: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/title_block_r2000.dxf"
+);
+
+#[test]
+fn a_sheet_states_the_model_to_paper_mapping_in_the_fields_it_publishes() {
+    // The only statement sheets.json made about putting a model point on a
+    // sheet was `twist_convention: "model_to_paper = C + s (R(twist)
+    // (p - T) - V)"`. C, T, V and p are defined in no file of the package,
+    // and the viewport records carry `frame`, `model_window`, `scale` and
+    // `twist_deg` and nothing that could be bound to them -- so an agent
+    // asked "where on sheet 1 is this?" had to reverse-engineer the
+    // transform or guess. The file now states the mapping in its own
+    // fields, and this is that statement, run.
+    let db = uncad::parse(TITLE_BLOCK).expect("fixture must parse");
+    let tmp = TempDir::new("model_to_paper");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let sheets: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(tmp.0.join("sheets.json")).unwrap()).unwrap();
+    let stated = sheets["model_to_paper"].as_str().expect("the mapping");
+    for field in ["model_window", "frame", "scale", "twist_deg", "world_to_px"] {
+        assert!(stated.contains(field), "{stated}");
+    }
+    assert!(
+        !stated.contains(" T)"),
+        "the undefined symbols are gone: {stated}"
+    );
+
+    // The fixture's viewport, by hand from `make_fixtures.py`: a frame 200
+    // x 120 paper units centred at (150, 120), showing a model window of
+    // VIEWSIZE 60 centred at (50, 25). So the scale is 120 / 60 = 2 paper
+    // units per model unit and the window is 100 x 60 model units:
+    // (0, -5) .. (100, 55).
+    let sheet = &report.sheets[0];
+    let vp = sheet
+        .viewports
+        .iter()
+        .find(|v| v.composited)
+        .expect("a composited viewport");
+    assert_eq!(vp.scale, Some(2.0));
+    assert_eq!(vp.twist_deg, 0.0);
+    let frame = [
+        vp.frame.min_x,
+        vp.frame.min_y,
+        vp.frame.max_x,
+        vp.frame.max_y,
+    ];
+    assert_eq!(frame, [50.0, 60.0, 250.0, 180.0]);
+    let window = vp.model_window.expect("a model window");
+    assert_eq!(
+        window,
+        [[0.0, -5.0], [100.0, -5.0], [100.0, 55.0], [0.0, 55.0]]
+    );
+
+    // The stated mapping: paper = frame_min + (model - window[0]) * scale.
+    // Applied to the four window corners it must give the four corners of
+    // the frame, in the order the file names them.
+    let scale = vp.scale.unwrap();
+    let to_paper = |p: [f64; 2]| {
+        [
+            frame[0] + (p[0] - window[0][0]) * scale,
+            frame[1] + (p[1] - window[0][1]) * scale,
+        ]
+    };
+    for (corner, want) in window.iter().zip([
+        [frame[0], frame[1]],
+        [frame[2], frame[1]],
+        [frame[2], frame[3]],
+        [frame[0], frame[3]],
+    ]) {
+        let got = to_paper(*corner);
+        assert!(
+            (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+            "{corner:?} -> {got:?}, not {want:?}"
+        );
+    }
+
+    // And it lands on the ink: the model LINE runs (0,0) -> (100,50), so
+    // the mapping puts it from (50, 70) to (250, 170) on the paper, and the
+    // composited sheet image has to be dark along it and white beside it.
+    let image = Sheet::read(&tmp.0, sheet);
+    for t in [0.25, 0.5, 0.75] {
+        let model = [100.0 * t, 50.0 * t];
+        let paper = to_paper(model);
+        assert!(
+            image.inked_near(paper[0], paper[1], 2),
+            "nothing at {paper:?} for model {model:?}"
+        );
+    }
+    let off = to_paper([10.0, 45.0]);
+    assert!(
+        !image.inked_near(off[0], off[1], 2),
+        "ink at {off:?}, where the drawing has none"
+    );
+}

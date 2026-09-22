@@ -61,25 +61,32 @@ dir/
   README.txt          reading order; entities.json and drawing.svg are tool inputs, not LLM inputs
   manifest.json       source{version,codepage,name}, units, profile, crop, frames[] (each with its own
                       levels[] and legibility), frames_dropped[], overview{png,px,world,both affines},
-                      legibility{height_classes}, counts, capabilities, sheets[], svg_origin, generator,
-                      guidance, shard_index, warnings[], files[]  (per-tile hashes live in tiles.json).
+                      legibility{target_px, per_frame[{frame, z_max, target_met, pyramid_complete, height_classes}]},
+                      counts, capabilities (every entry derived from the records), sheets[], svg_origin, generator,
+                      legend, guidance, shard_index, warnings[], files[]  (per-tile hashes live in tiles.json).
                       17 KB to 90 KB on the nine drawings docs/EVAL.md measures, not the 12 KB this
                       proposal budgeted: files[] holds one entry per written file with its byte count
                       (89 for example_2000.dwg, 771 for example_2018.dxf) and is most of the weight
   drawing.json        header variables, units, layers[] (state flags, hex + rendered_hex, entity counts),
-                      block definitions (xref/dynamic flags), layouts[] (paper size, per-viewport scale and model window)
+                      blocks[]: the block definitions {name, entity_count, count_by_layer, attrib_tags, anonymous,
+                      instances, instance_ids} -- the table; the instances themselves are records in blocks.json
   overview.png        fitted to the profile budget (claude: <= 1568 px edge and <= 1568 patches), opaque white
   frames/f0/          primary frame: overview.png, tiles/z1..zN/rRR_cCC.png + .json sidecars, tiles.json
   frames/f1/ ...      secondary frames (detached clusters, scale groups), same layout
   geometry.json       every visible non-text entity as a summary record (type, layer, key points, length, bbox, tiles);
                       sharded per layer above the shard size
-  texts.json          TEXT/MTEXT/ATTRIB/dimension labels: plain + raw, world bbox, tiles, px boxes
+  texts.json          TEXT/MTEXT/ATTRIB/dimension labels: plain + raw, world bbox, tiles, px boxes.
+                      `space` is model or paper; a paper-space text (the drawing's title, the title block) names its
+                      `sheet`, is measured in that layout's paper units and carries that sheet image's pixel box
   dimensions.json     measured value, displayed string, unit, definition points, agreement
   regions.json        closed polygons: area, perimeter, centroid, labels; vertex lists only under --full (geometry ref otherwise)
-  blocks.json         definitions {name, count, count_by_layer, attrib_tags, dynamic, xref} and instances
-                      {id, block, at, rot, scale, mirrored, attribs key/value, array}
-  strings.json        normalized string -> [id] inverted index, numeric strings first, id -> shard file
-  tiles.json          every frame/level/tile, including empty ones with a reason; sha256 and bytes
+  blocks.json         the INSERT instances {id, block, at, rot, scale, mirrored, attribs key/value}, records under
+                      the same shard rule as the other kinds (the definitions are drawing.json's blocks[])
+  strings.json        normalized string -> [id] inverted index. An id is resolved through manifest.shard_index
+                      (`first_key`/`last_key`), not through a map here: a map of every id would be a second copy
+                      of the record files
+  tiles.json          every frame/level/tile: the written ones with their png, sidecar, byte count and sha256,
+                      the empty ones with a `reason`
   sheets.json + sheets/<layout>/...   0.3.0: paper size, scale, viewport windows; 0.4.0: model composited per viewport
   report.json         excluded entities with reasons, unshaped characters, code-page fallbacks, dimension paths, timings
   entities.json       --full only: the whole model without the 0.2.0 duplication (block_records definition-only),
@@ -88,8 +95,13 @@ dir/
 ```
 
 Every JSON file follows one `--shard-kb` rule (default 96) and sorts records by
-id, so `manifest.shard_index {file, kind, first_id, last_id, count, bytes}`
-resolves any id to one file. A typical question costs the manifest +
+id, so `manifest.shard_index {file, kind, first_id, last_id, first_key, last_key,
+count, bytes}` resolves any id to one file: ids are hex handles ordered by their
+numeric value, so the bounds a consumer compares against are the numbers
+`first_key`/`last_key`, not the strings (`"109B3"` sorts above a shard whose
+`first_id` is `"3D2D"` while its handle is far below it). The id does not carry
+its kind and one id can be in two (a closed polyline is a geometry record and a
+region record), so the lookup runs over every kind. A typical question costs the manifest +
 `strings.json` lookup + one shard + one sidecar + one tile (1521 tokens). The
 manifest is the largest of the JSON reads and the one this proposal sized
 wrongly: 16 728 bytes on `example_2000.dwg` and 89 532 on `example_2018.dxf`,
@@ -111,8 +123,12 @@ section 4).
   (0.3.0; without it every tile rectangle of a drawing a few thousandths of a
   unit across printed the same numbers). Angles are in degrees; pixels are
   integers; boxes are `[x0, y0, x1, y1]` in world units.
-- `confidence` in `{exact, stored, numeric, cached, estimated, unavailable}`
-  with an optional `why`; `numeric` carries `tol`.
+- `confidence` in `{exact, stored, estimated, unavailable}` with an optional
+  `why`, on the geometry, region and dimension records. A text record carries
+  `bbox_confidence` (`measured` / `estimated`) instead and a block instance
+  carries neither; `manifest.legend` says so, and enumerates this vocabulary,
+  `measurement_source`, `display_source`, what a region's `labels` are and how a
+  pixel box relates to its image.
 - Every record lists `tiles: [...]` and `px: {"ov": [...], "f0/z1/r02_c00": [...]}`.
 
 LINE. `from`/`to` are the plan projection (every box and every pixel map in the
@@ -201,12 +217,16 @@ polygon and in no smaller region, and `simple` is `null` (with `confidence:
 self-intersection test is skipped rather than run at O(n^2); **tile sidecar** `{id, png, z, row, col, px,
 world, ppu, world_to_px, px_to_world, overlap_px, neighbors, parent, children,
 empty, layers_present, layers_truncated, layers_total (only when trimmed),
-fits_profile, expected_encoded_px, resize_factor, norm_to_px, records: {texts:
-[[id, px, t]], dims: [[id, px, s, v]], blocks, regions}}`, capped at 32 KB with
-text truncated to 24 characters: the record rows are cut first
-(`records_truncated`), then the layer list (`layers_truncated`, with
+fits_profile, expected_encoded_px, resize_factor, norm_to_px, columns, counts,
+geometry_by_kind, records: {texts: [[id, px, t]], dims: [[id, px, s, v]], blocks,
+regions, geometry: [[id, px, type]]}}`, capped at 32 KB with
+text truncated to 24 characters: the geometry rows are cut first, then the other
+record rows (`records_truncated`), then the layer list (`layers_truncated`, with
 `layers_total` saying how many names there were), so the file always says which
-of the two a reader is missing. Sidecars are
+of the three a reader is missing. `counts` is the true number of records of each
+kind on the tile whatever was cut, `geometry_by_kind` the same for the geometry,
+and `columns` names the fields of each positional row. Every pixel box is
+clipped to the image it is quoted in. Sidecars are
 authoritative for "what is on this image"; shards hold the full record.
 `strings.json` normalisation is NFKC + case fold + whitespace collapse + a
 canonical fraction form + unit-suffix handling (m2, mm, ㎡, ㎜).
@@ -303,9 +323,12 @@ Model space, one crop per frame; every step is deterministic and reported.
   tells the agent which classes still need a window. z1 and z2 are complete;
   from `--sparse-from 3` a tile is written only if it holds text of a class
   that first crosses the target at that level. Tiles that intersect no visible
-  box are listed `empty: true` and not written. `--max-tiles 400` counts written
-  tiles; when exceeded z_max drops and `legibility.reached = false` points to
-  windows.
+  box are listed `empty: true` and not written, with the reason. `--max-tiles
+  400` counts written tiles; when exceeded z_max drops and
+  `legibility.per_frame[].pyramid_complete = false` points to windows --
+  separately from `target_met`, which is whether every height class reaches
+  `target_px` in the deepest image that frame got. The two used to be one field
+  named `reached`, which read as the second and meant the first.
 - **Implementation**: one SVG string and one `usvg::Tree` per level (numbers
   rounded to 0.01 px at the level's ppu, which cuts the SVG ~40 %); `fontdb`
   built once per process (`OnceLock<Arc<Database>>`); tiles rendered in
@@ -515,14 +538,22 @@ with sharding and a manifest, CLI `uncad export`; frames for detached
 groups, NFKC string keys, per-tile culling and parallel tiles landed after;
 the bundled `Uncad Sans`, usvg-measured text boxes and the paper layouts
 (`sheets.json`, composited sheet images) landed too -- no P7 feature of this
-section's 0.3.0 scope is open, but the package diverges from section 2 in two
-places: `manifest.json` is 17 KB to 90 KB rather than the 12 KB budgeted
+section's 0.3.0 scope is open, but the package diverges from section 2 in
+four places: `manifest.json` is 17 KB to 90 KB rather than the 12 KB budgeted
 there, because it carries a `files[]` array the design never listed (one entry
 per written file, 89 of them for `example_2000.dwg` and 771 for
-`example_2018.dxf`), and `source` is `{codepage, name, version}` -- there is no
+`example_2018.dxf`); `source` is `{codepage, name, version}` -- there is no
 `producer`, and no `input_fidelity: "dxf-partial"` for DXF input as section 1
 promises; `header.format` and the source file's extension are what say the
-input was a DXF); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
+input was a DXF; and `strings.json` has no `id -> shard file` map, because a
+map of every id would be a second copy of the record files -- the ids resolve
+through `manifest.shard_index`'s `first_key`/`last_key` instead, which
+section 2 now describes; and the block definitions carry no `dynamic` or
+`xref` flag -- the block table in `drawing.json` has `anonymous`, the
+per-layer counts, the attribute tags and the instance ids instead. (The
+sha256, the byte count and the reason on each empty tile that section 2 asks
+of `tiles.json` were a fifth divergence until this round, and the paper
+layouts' texts a sixth: both are in the package now.)); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
 (`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
 with five package questions, determinism test, `docs/EVAL.md`) are in --
 goldens (byte-exact reference packages) are not: with the bundled font the

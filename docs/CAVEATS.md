@@ -334,8 +334,14 @@ its 0.3.0 form. Known gaps:
   that fidelity). The twist sign follows ezdxf (a positive twist turns the
   picture counter-clockwise) and has not been checked against a plotted
   sheet; perspective and non-plan views are frames only; R13/R14 files
-  store no view fields at all. Paper-space texts and geometry are drawn but
-  not listed in the records, and sheets get an overview only, no tiles.
+  store no view fields at all. A sheet's **texts** are records like any
+  other since 0.3.0 -- in `texts.json`, with `space: "paper"`, the `sheet`
+  they are on and that sheet image's pixel box, and indexed in
+  `strings.json` -- so the drawing's title and its title block are
+  findable; paper-space *geometry* is drawn but not listed, and sheets get
+  an overview only, no tiles. `sheets.json` states how a model point lands
+  on the sheet in the fields its own viewport records carry (`frame`,
+  `model_window`, `scale`, `twist_deg`).
 - **Frames follow proximity, not meaning.** Entities within 5 % of the crop
   diagonal of each other (`--frame-gap`) are one group; a detached group
   with 20 entities or a text becomes a frame. Two details drawn close
@@ -353,7 +359,11 @@ its 0.3.0 form. Known gaps:
   The texts cover every string the picture shows except one: the label
   inside a DIMENSION's cached `*D` block, which `dimensions.json` carries
   as `display` (and `strings.json` indexes from there) rather than
-  duplicating as a text record. An ACAD_TABLE's cells and a TOLERANCE's
+  duplicating as a text record. The walk follows block references as deep
+  as the renderer does (`limits::MAX_BLOCK_REF_DEPTH`, 20); until 0.3.0 it
+  stopped at 8, so a string nested nine or more blocks deep -- a bound
+  XREF of an assembly of assemblies -- was drawn in the tiles and indexed
+  nowhere. An ACAD_TABLE's cells and a TOLERANCE's
   frame are indexed like any other text, under the ids the picture draws
   them with (`<table>/<cell>`, the tolerance's own handle); until 0.3.0
   they were drawn and indexed nowhere, so a reader searching
@@ -363,9 +373,26 @@ its 0.3.0 form. Known gaps:
 - **A sidecar over budget loses rows, then layer names.** `layers_present`
   used to be written whole whatever it weighed -- 900 layers with
   45-character names put a tile 37 % past the 32 KB cap while
-  `records_truncated` said nothing had been dropped. The record rows are
-  cut first, the layer list after, and `records_truncated` /
-  `layers_truncated` (with `layers_total`) say which.
+  `records_truncated` said nothing had been dropped. The geometry rows go
+  first (they are the bulk of a dense tile, and `counts` and
+  `geometry_by_kind` survive whatever is cut), then the other record rows,
+  then the layer list; `records_truncated` / `layers_truncated` (with
+  `layers_total`) say which. A sidecar's `counts` is always the true
+  number of records of each kind on the tile, so a reader can tell how
+  much of it the rows are missing.
+- **A pixel box is clipped to the image it is quoted in.** A record is
+  listed on an image whenever its world box merely meets it, so the box of
+  a record that continues past the edge named pixels the image does not
+  have (a dimension quoted 8115 px beyond a 1092 px tile). Every box in a
+  record's `px` map and in a tile sidecar is clipped to that image; the
+  record's full extent is its world `bbox`, and the rest of it is on the
+  other images in its `tiles` list.
+- **A detached group too small to frame gets no tiles.** A group below
+  `--min-frame-entities` (20, or one text) stays in the overview only, so
+  its records carry `tiles: []`. It is listed in `manifest.frames_dropped`
+  with `reason: "below_min_entities"` and raises a `SmallGroups` warning,
+  as the groups past `--max-frames` do with `reason: "max_frames"`; the
+  list is capped at 100 entries, with `frames_dropped_total` beside it.
 - **A very large outline is not checked for self-intersection.** A closed
   polyline of more than 2 000 vertices reports `simple: null` with
   `confidence: "estimated"` and a `why`, because the check compares every

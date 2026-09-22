@@ -216,7 +216,9 @@ fn a_door_swing_in_a_rotated_block_reaches_its_far_edge() {
     .expect("exports");
     let blocks: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(tmp.0.join("blocks.json")).unwrap()).unwrap();
-    let instance = blocks["instances"]
+    // The INSERT instances are records (`blocks.json`, or `blocks.NNN.json`
+    // when they shard); this two-entity drawing writes one file.
+    let instance = blocks["records"]
         .as_array()
         .unwrap()
         .iter()
@@ -397,7 +399,7 @@ fn a_rotated_block_inside_a_mirrored_one_is_measured_where_it_is_drawn() {
         let blocks: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(tmp.0.join("blocks.json")).unwrap())
                 .unwrap();
-        let bbox = blocks["instances"][0]["bbox"].as_array().unwrap();
+        let bbox = blocks["records"][0]["bbox"].as_array().unwrap();
         assert!(
             bbox[1].as_f64().unwrap() >= 100.0 - 1e-6 && bbox[3].as_f64().unwrap() >= 110.0 - 1e-6,
             "{name}: {bbox:?}"
