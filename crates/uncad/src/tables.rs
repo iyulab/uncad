@@ -1,5 +1,5 @@
 //! Conversion of the non-entity OBJECT-supertype tables an entity resolves
-//! against: LAYER, BLOCK_RECORD and MLINESTYLE.
+//! against: LAYER, BLOCK_RECORD, MLINESTYLE and DIMSTYLE.
 
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field};
@@ -33,7 +33,39 @@ pub struct BlockRecord {
     pub entities: Vec<Entity>,
 }
 
-/// The three maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
+/// A DIMSTYLE table entry: the variables that turn a measurement into the
+/// label AutoCAD shows (`docs/VLM_EXPORT_DESIGN.md`, "Numeric exactness").
+/// Every numeric field is as stored; 0 means the file never set it and the
+/// header's value applies (see `crate::dimension::EffectiveStyle`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DimStyleRecord {
+    pub name: String,
+    /// Linear measurement factor: the label shows `measurement * dimlfac`.
+    pub dimlfac: f64,
+    /// Decimal places, or the `1/2^n` fraction precision for architectural
+    /// and fractional units.
+    pub dimdec: u16,
+    /// 1 scientific, 2 decimal, 3 engineering, 4 architectural, 5 fractional,
+    /// 6 Windows desktop.
+    pub dimlunit: u16,
+    /// Zero suppression bits (8 = drop trailing zeros; 0-3 select feet/inch
+    /// zero handling for architectural units).
+    pub dimzin: u16,
+    /// Prefix/suffix, `<>` standing for the value.
+    pub dimpost: String,
+    pub dimrnd: f64,
+    pub dimscale: f64,
+    pub dimtxt: f64,
+    pub dimasz: f64,
+    /// Angular format: 0 decimal degrees, 1 deg/min/sec, 2 gradians,
+    /// 3 radians, 4 surveyor.
+    pub dimaunit: u16,
+    pub dimadec: u16,
+    /// Fraction style: 0 horizontal, 1 diagonal, 2 not stacked.
+    pub dimfrac: u16,
+}
+
+/// The maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
 /// therefore `to_json()`'s key order -- is deterministic: the same input
 /// file serializes to the same bytes on every run and every machine.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -52,6 +84,10 @@ pub struct Tables {
     /// between a style's lines and an MLINE's vertices. Per-line color and
     /// linetype are not read: nothing renders them.
     pub mlinestyles: BTreeMap<String, Vec<f64>>,
+    /// DIMSTYLE name -> record. Since 0.3.0 (serde default: an older JSON
+    /// document loads with an empty map).
+    #[serde(default)]
+    pub dimstyles: BTreeMap<String, DimStyleRecord>,
 }
 
 /// # Safety
@@ -68,6 +104,7 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
+    let mut dimstyles = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -101,6 +138,13 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
                     mlinestyles.insert(name, offsets);
                 }
             }
+        } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMSTYLE {
+            let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
+            if !object_ptr.is_null() {
+                if let Some(record) = convert_dimstyle(object_ptr) {
+                    dimstyles.insert(record.name.clone(), record);
+                }
+            }
         }
     }
 
@@ -108,7 +152,30 @@ pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables 
         layers,
         block_records,
         mlinestyles,
+        dimstyles,
     }
+}
+
+fn convert_dimstyle(object_ptr: *mut c_void) -> Option<DimStyleRecord> {
+    let name = crate::dynapi::get_utf8_field(object_ptr, "DIMSTYLE", "name")?;
+    let f64_var = |field: &str| get_field::<f64>(object_ptr, "DIMSTYLE", field).unwrap_or(0.0);
+    let u16_var = |field: &str| get_field::<u16>(object_ptr, "DIMSTYLE", field).unwrap_or(0);
+    Some(DimStyleRecord {
+        name,
+        dimlfac: f64_var("DIMLFAC"),
+        dimdec: u16_var("DIMDEC"),
+        dimlunit: u16_var("DIMLUNIT"),
+        dimzin: u16_var("DIMZIN"),
+        dimpost: crate::dynapi::get_utf8_field(object_ptr, "DIMSTYLE", "DIMPOST")
+            .unwrap_or_default(),
+        dimrnd: f64_var("DIMRND"),
+        dimscale: f64_var("DIMSCALE"),
+        dimtxt: f64_var("DIMTXT"),
+        dimasz: f64_var("DIMASZ"),
+        dimaunit: u16_var("DIMAUNIT"),
+        dimadec: u16_var("DIMADEC"),
+        dimfrac: u16_var("DIMFRAC"),
+    })
 }
 
 /// Resolves a block's real name.

@@ -440,9 +440,13 @@ and pixel-sized symbols (POINT, arrowheads, dashes); **P2 done** (`uncad::text`
 decoder with all three stack separators and the `%%` codes, `text_plain` on
 every text type, TEXT/ATTRIB justification fields and ATTRIB `tag`, MTEXT
 attachment/width/extents/`x_axis_dir` with the rotation derived, renderer
-anchoring) except MTEXT word-wrapping at `rect_width`; the LWPOLYLINE
-closed-bit fix from **P4** and the `dwg_resolve_handle` binding P3 needs are
-in. Everything else below is still open.
+anchoring) except MTEXT word-wrapping at `rect_width`; **P3 done** in its
+0.3.0 form (`DimensionGeometry` per subtype, stored and recomputed
+measurements, `user_text`/cached-label/formatted display text with its
+source, DIMSTYLE table and effective DIMLFAC, basic formatter; the full
+DIMSTYLE formatter with DIMPOST/DIMRND/DIMDSEP and XDATA overrides stays in
+1.0); the LWPOLYLINE closed-bit fix from **P4** is in. Everything else below
+is still open.
 
 | Release | Phase | Files |
 |---|---|---|

@@ -25,7 +25,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 |---|---|---|---|
 | `cp949_r2000.dxf` | 855 | 9 | CP949 (`ANSI_949`) strings in TEXT, MTEXT and a LAYER name |
 | `mirrored_ocs_r2000.dxf` | 925 | 7 | Closed LWPOLYLINE with extrusion (0,0,-1), an open one with a bulge, mirrored CIRCLE/ARC/TEXT |
-| `dimlfac12_r2000.dxf` | 1293 | 9 | `$DIMLFAC 12.0` with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
+| `dimlfac12_r2000.dxf` | 1304 | 9 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose `act_measurement` is 10.0, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 1359 | 11 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field |
 
 ## cp949_r2000.dxf
@@ -101,7 +101,9 @@ bit 1 is not "closed". A closed polyline *without* an extrusion (in-memory
 HEADER: `$INSUNITS 4`, `$DIMLFAC 12.0`, `$DIMDEC 2`, `$DIMLUNIT 2`,
 `$DIMSCALE 1.0`. TABLES: a BLOCK_RECORD table with `*Model_Space` (the
 reader's pre-created handle `1F`) and `*D1` (handle `40`), plus DIMSTYLE
-`STANDARD`. BLOCKS: a BLOCK `*D1` (flag 1, anonymous, `330 = 40`) containing
+`STANDARD` with `144 = 12.0` (DIMLFAC; a dimension uses its style's factor,
+and the reader defaults a missing one to 1.0). BLOCKS: a BLOCK `*D1` (flag 1,
+anonymous, `330 = 40`) containing
 a TEXT "120" at (5,6), height 0.18. ENTITIES: a LINE (0,0)-(10,0) and a
 DIMENSION with `100 AcDbDimension`, `2 *D1`, `10 = (10,5)` dimension-line
 point, `11 = (5,6)` text midpoint, `70 = 32`, `1` empty, `42 = 10.0`,
@@ -110,7 +112,7 @@ point, `11 = (5,6)` text midpoint, `70 = 32`, `1` empty, `42 = 10.0`,
 
 | Item | LibreDWG in-memory (probe) | uncad 0.2.0 | Now / expected after P3 |
 |---|---|---|---|
-| `$DIMLFAC` | 12.0 | not read | `header.dimlfac = 12.0` (P0, asserted) |
+| `$DIMLFAC` / DIMSTYLE `DIMLFAC` | 12.0 / 12.0 | not read | `header.dimlfac = 12.0` (P0), `tables.dimstyles["STANDARD"].dimlfac = 12.0` and the dimension's effective `dimlfac = 12.0` (P3, asserted) |
 | `$DIMDEC` / `$DIMLUNIT` / `$DIMSCALE` | 2 / 2 / 1.0 | not read | read (P0, asserted) |
 | DIMENSION type | `DIMENSION_LINEAR` (upgraded on `AcDbRotatedDimension`) | `DIMENSION` | subtype `linear` |
 | `act_measurement` (group 42) | **10.0** | not read | `measurement: 10.0` |

@@ -10,6 +10,21 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
+  LINEAR, ALIGNED, ANGULAR_3POINT, ANGULAR_2LINE, RADIUS, DIAMETER, ORDINATE, ARC_LENGTH
+  -- with its definition points), `measurement` (the stored `act_measurement`: drawing
+  units before DIMLFAC, degrees for angular kinds, `None` for the R14-era `-1`
+  sentinel), `measurement_from_points` (recomputed: LINEAR projected on its rotation,
+  ALIGNED/RADIUS/DIAMETER distances, angular sectors chosen by the arc point, ordinate
+  offsets, arc length), `user_text`, `display_text` with `display_text_raw` and
+  `display_source` (suppressed / user text with `<>` substituted / the cached `*D`
+  block's label / formatted by this crate), `definition_point`, `text_midpoint`,
+  `dimstyle` and the effective `dimlfac`. `tables.dimstyles` holds every DIMSTYLE's
+  formatting variables (`DimStyleRecord`). The built-in formatter handles decimal,
+  architectural and fractional units, DIMZIN trailing-zero suppression and decimal
+  degrees; the cached label is preferred whenever the file has one. Verified against
+  `example_2000.dwg`: every stored value equals the recomputed one to 1e-6 and the
+  labels read `1504,68` and `108°`.
 - Text decoding (`uncad::text`): `decode_mtext` and `decode_text` turn the stored
   strings into readable ones -- `\P` paragraphs, `\S` stacked fractions in all three
   forms (`1/2`, `1#2`, `+0.1^-0.2`) with a space after a preceding digit so

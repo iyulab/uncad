@@ -107,8 +107,10 @@ fn one() -> f64 {
 pub struct LwPolylineEntity {
     pub common: EntityCommon,
     pub vertices: Vec<Point2D>,
-    /// LWPOLYLINE.flag bit 1 -- see `convert.rs`'s `POLYLINE_CLOSED_FLAG`
-    /// for why not the 512 dwg.h's own comment documents.
+    /// LWPOLYLINE.flag bit 512, LibreDWG's in-memory closed bit (bit 1 marks
+    /// a stored extrusion) -- see `convert.rs`'s `LWPOLYLINE_CLOSED_FLAG`
+    /// and `docs/CAVEATS.md`, "The polyline closed flag". POLYLINE_2D, which
+    /// shares this struct, uses its own bit 1.
     pub closed: bool,
 }
 
@@ -466,15 +468,163 @@ pub struct HatchEntity {
     pub pattern_lines: Vec<HatchPatternLine>,
 }
 
+/// A DIMENSION's kind and the definition points that kind measures between,
+/// as LibreDWG reads them (the DXF group code of each point is noted).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[non_exhaustive]
+#[serde(tag = "kind")]
+pub enum DimensionGeometry {
+    /// A horizontal/vertical/rotated dimension: the distance between the
+    /// extension-line origins (13, 14) projected on the dimension line's
+    /// direction, `rotation` radians from the x axis (50).
+    #[serde(rename = "LINEAR")]
+    Linear {
+        xline1: Point3D,
+        xline2: Point3D,
+        rotation: f64,
+    },
+    /// The straight distance between the extension-line origins (13, 14).
+    #[serde(rename = "ALIGNED")]
+    Aligned { xline1: Point3D, xline2: Point3D },
+    /// The angle at `center` (15) between the directions of `xline1` and
+    /// `xline2` (13, 14); the sector is the one the definition point (10)
+    /// lies in.
+    #[serde(rename = "ANGULAR_3POINT")]
+    Angular3Point {
+        center: Point3D,
+        xline1: Point3D,
+        xline2: Point3D,
+    },
+    /// The angle between two lines (13-14 and 15-16); the sector is the one
+    /// the definition point (10) lies in.
+    #[serde(rename = "ANGULAR_2LINE")]
+    Angular2Line {
+        line1_start: Point3D,
+        line1_end: Point3D,
+        line2_start: Point3D,
+        line2_end: Point3D,
+    },
+    /// `center` (10) to `chord_point` (15) is the radius.
+    #[serde(rename = "RADIUS")]
+    Radius {
+        center: Point3D,
+        chord_point: Point3D,
+        leader_length: f64,
+    },
+    /// `chord_start` (10) to `chord_end` (15) is the diameter.
+    #[serde(rename = "DIAMETER")]
+    Diameter {
+        chord_start: Point3D,
+        chord_end: Point3D,
+        leader_length: f64,
+    },
+    /// The x (`x_datum`) or y offset of `feature` (13) from the datum
+    /// origin, the definition point (10).
+    #[serde(rename = "ORDINATE")]
+    Ordinate {
+        feature: Point3D,
+        leader_end: Point3D,
+        x_datum: bool,
+    },
+    /// An arc-length dimension: the arc about `center` (15) from `xline1`
+    /// to `xline2` (13, 14).
+    #[serde(rename = "ARC_LENGTH")]
+    Arc {
+        center: Point3D,
+        xline1: Point3D,
+        xline2: Point3D,
+    },
+    #[default]
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
+}
+
+impl DimensionGeometry {
+    /// Angular kinds measure degrees; every other kind drawing units.
+    pub fn is_angular(&self) -> bool {
+        matches!(
+            self,
+            DimensionGeometry::Angular3Point { .. } | DimensionGeometry::Angular2Line { .. }
+        )
+    }
+}
+
+/// Where a DIMENSION's [`display_text`](DimensionEntity::display_text) came
+/// from -- see [`crate::dimension`] for the precedence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DisplaySource {
+    /// Nothing to show: no override, no cached label, no measurement.
+    #[default]
+    None,
+    /// `user_text` (DXF 1), with `<>` replaced by the formatted measurement.
+    UserText,
+    /// The TEXT/MTEXT inside the cached `*D` block: what the drawing shows.
+    CachedBlock,
+    /// This crate formatted the measurement itself (basic rules only).
+    Formatted,
+    /// `user_text` is whitespace: AutoCAD's "no text" convention.
+    Suppressed,
+}
+
 /// AutoCAD caches a DIMENSION's rendered geometry (lines, arrows, text) as an
 /// anonymous block already in final world coordinates, so rendering one is
-/// just drawing that block with an identity transform. All 7 DWG dimension
-/// subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
-/// ARC_DIMENSION) share this shape and fold into [`Entity::Dimension`].
+/// just drawing that block with an identity transform. All DWG dimension
+/// subtypes fold into [`Entity::Dimension`]; `geometry` says which one and
+/// carries its definition points.
+///
+/// The value fields come from LibreDWG's `DIMENSION_COMMON` (`act_measurement`,
+/// `user_text`, `def_pt`, `text_midpt`, `dimstyle`) and [`crate::dimension`]'s
+/// derivations; every one of them has a serde default so 0.2.0 JSON, which
+/// held only `common` and `block_name`, still loads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DimensionEntity {
     pub common: EntityCommon,
     pub block_name: String,
+    #[serde(default)]
+    pub geometry: DimensionGeometry,
+    /// The measurement AutoCAD stored (DXF 42): drawing units before
+    /// `DIMLFAC` for linear kinds, degrees for angular kinds, the arc length
+    /// for an arc-length dimension. `None` when the file holds none (R14-era
+    /// dimensions store -1).
+    #[serde(default)]
+    pub measurement: Option<f64>,
+    /// The same quantity recomputed from `geometry` by
+    /// [`crate::dimension::measurement_from_points`]; `None` for an unknown
+    /// geometry. Agrees with `measurement` to 1e-6 on every AutoCAD-written
+    /// dimension checked so far.
+    #[serde(default)]
+    pub measurement_from_points: Option<f64>,
+    /// DXF 1 as stored: empty for "show the measurement", `<>` inside it
+    /// standing for the measurement, whitespace for "show nothing".
+    #[serde(default)]
+    pub user_text: String,
+    /// What the drawing shows for this dimension, decoded (see
+    /// [`display_source`](Self::display_source)).
+    #[serde(default)]
+    pub display_text: String,
+    /// The undecoded form of `display_text` (the cached MTEXT with its
+    /// codes, or `user_text`); empty when this crate formatted the value.
+    #[serde(default)]
+    pub display_text_raw: String,
+    #[serde(default)]
+    pub display_source: DisplaySource,
+    /// DXF 10: the dimension line's definition point (for RADIUS the
+    /// centre, for DIAMETER one chord end, for ORDINATE the datum origin,
+    /// for angular kinds a point on the arc).
+    #[serde(default)]
+    pub definition_point: Point3D,
+    /// DXF 11: where the label sits.
+    #[serde(default)]
+    pub text_midpoint: Point2D,
+    /// The DIMSTYLE's name (DXF 3); empty if unresolvable. Its variables are
+    /// in [`crate::tables::Tables::dimstyles`].
+    #[serde(default)]
+    pub dimstyle: String,
+    /// The `DIMLFAC` in effect (the style's, else the header's): the label
+    /// shows `measurement * dimlfac` for linear kinds.
+    #[serde(default = "one")]
+    pub dimlfac: f64,
 }
 
 /// Best-effort wireframe extracted from a 3DSOLID's ACIS B-rep data (see

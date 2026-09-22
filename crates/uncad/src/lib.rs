@@ -8,6 +8,7 @@
 mod acis;
 pub mod color;
 mod convert;
+pub mod dimension;
 mod dynapi;
 pub mod header;
 pub mod json;
@@ -237,9 +238,12 @@ pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseErr
     // Drop, no C memory, Send + Sync by construction).
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
-    Ok(CadDatabase {
+    let mut db = CadDatabase {
         entities,
         tables,
         header,
-    })
+    };
+    // Needs the tables (cached labels, DIMSTYLEs) and the header together.
+    dimension::attach_display_text(&mut db);
+    Ok(db)
 }

@@ -103,10 +103,12 @@ def arc(cx, cy, r, a0, a1, extrusion=None, layer=b"0"):
     return entity("ARC", layer, *g)
 
 
-def tables(layers=((b"0", 7),), dimstyle=False, block_records=()):
+def tables(layers=((b"0", 7),), dimstyle=False, block_records=(), dimlfac=None):
     """TABLES section: a LAYER table, optionally DIMSTYLE STANDARD (handle
-    30) and a BLOCK_RECORD table whose entries carry explicit handles so
-    BLOCK/entity `330` owner codes can refer to them."""
+    30, with DIMLFAC group 144 when `dimlfac` is given -- a dimension uses
+    its style's factor, not the header's) and a BLOCK_RECORD table whose
+    entries carry explicit handles so BLOCK/entity `330` owner codes can
+    refer to them."""
     body = pairs((0, "TABLE"), (2, "LAYER"), (70, len(layers)))
     for name, color in layers:
         body += pairs((0, "LAYER"), (2, name), (70, 0), (62, color), (6, "Continuous"))
@@ -115,6 +117,7 @@ def tables(layers=((b"0", 7),), dimstyle=False, block_records=()):
         body += pairs(
             (0, "TABLE"), (2, "DIMSTYLE"), (70, 1),
             (0, "DIMSTYLE"), (105, "30"), (2, "STANDARD"), (70, 0),
+            *(((144, dimlfac),) if dimlfac is not None else ()),
             (0, "ENDTAB"),
         )
     if block_records:
@@ -203,7 +206,7 @@ def dimlfac12(variant="full"):
     if variant == "full":
         # Verified 2026-09-21: *Model_Space keeps the reader's pre-created handle 1F,
         # *D1 gets 40, and BLOCK/TEXT/ENDBLK point at it through 330.
-        pre = tables(dimstyle=True, block_records=(("1F", "*Model_Space"), ("40", "*D1")))
+        pre = tables(dimstyle=True, block_records=(("1F", "*Model_Space"), ("40", "*D1")), dimlfac=12.0)
         pre += section("BLOCKS", block(
             "*D1", "40", ("41", "43"), flag=1,
             body=text(b"120", 5, 6, height=0.18, handle="42", owner="40"),

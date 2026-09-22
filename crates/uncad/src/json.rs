@@ -36,6 +36,10 @@
 //!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own fields
 //!   beside the tag. Upper-case like the entity tags, but these are path/edge
 //!   kinds, not DXF entity names.
+//! - DIMENSION carries its `geometry` (`{"kind":"LINEAR",...}` with the
+//!   definition points), `measurement` (stored), `measurement_from_points`,
+//!   `user_text`, `display_text`/`display_text_raw`/`display_source` and
+//!   `dimlfac`; `tables.dimstyles` holds the DIMSTYLE variables. Since 0.3.0.
 //! - TEXT, ATTRIB, MTEXT and TOLERANCE carry both `text` (as stored, with
 //!   `%%` and MTEXT codes) and `text_plain` (decoded, see [`crate::text`]);
 //!   ATTRIB/ATTDEF carry their `tag`. Since 0.3.0; absent from 0.2.0 output.
@@ -270,6 +274,21 @@ mod tests {
             Entity::Dimension(DimensionEntity {
                 common: c.clone(),
                 block_name: "*D1".to_string(),
+                geometry: crate::model::DimensionGeometry::Linear {
+                    xline1: p3(0.0, 0.0, 0.0),
+                    xline2: p3(10.0, 0.0, 0.0),
+                    rotation: 0.0,
+                },
+                measurement: Some(10.0),
+                measurement_from_points: Some(10.0),
+                user_text: String::new(),
+                display_text: "120".to_string(),
+                display_text_raw: "\\A1;120".to_string(),
+                display_source: crate::model::DisplaySource::CachedBlock,
+                definition_point: p3(10.0, 5.0, 0.0),
+                text_midpoint: p2(5.0, 6.0),
+                dimstyle: "STANDARD".to_string(),
+                dimlfac: 12.0,
             }),
             Entity::Hatch(HatchEntity {
                 common: c.clone(),
@@ -522,6 +541,7 @@ mod tests {
                 layers,
                 block_records,
                 mlinestyles,
+                dimstyles: BTreeMap::new(),
             },
         };
 

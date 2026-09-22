@@ -16,11 +16,11 @@ use crate::dynapi::{
 };
 use crate::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, DimensionEntity,
-    EllipseEntity, Entity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
-    HatchGradient, HatchPatternLine, InsertEntity, LeaderEntity, LightEntity, LineEntity,
-    LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, PointEntity,
-    PolylineEntity, RayEntity, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
-    ToleranceEntity, ViewportEntity, WipeoutEntity,
+    DimensionGeometry, DisplaySource, EllipseEntity, Entity, EntityCommon, Face3DEntity,
+    HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine, InsertEntity,
+    LeaderEntity, LightEntity, LineEntity, LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity,
+    MultiLeaderEntity, PointEntity, PolylineEntity, RayEntity, Solid3DEntity, SolidEntity,
+    SplineEntity, TextEntity, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use std::ffi::CStr;
 
@@ -725,7 +725,105 @@ unsafe fn convert_entity(
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block")
                     .and_then(crate::tables::resolve_block_name)
                     .unwrap_or_default();
-            Entity::Dimension(DimensionEntity { common, block_name })
+            let p3 =
+                |field: &str| get_field::<Point3D>(entity_ptr, dxfname, field).unwrap_or_default();
+            let f64_field =
+                |field: &str| get_field::<f64>(entity_ptr, dxfname, field).unwrap_or(0.0);
+            let definition_point = p3("def_pt");
+            let geometry = match fixedtype {
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_LINEAR => {
+                    DimensionGeometry::Linear {
+                        xline1: p3("xline1_pt"),
+                        xline2: p3("xline2_pt"),
+                        rotation: f64_field("dim_rotation"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ALIGNED => {
+                    DimensionGeometry::Aligned {
+                        xline1: p3("xline1_pt"),
+                        xline2: p3("xline2_pt"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG3PT => {
+                    DimensionGeometry::Angular3Point {
+                        center: p3("center_pt"),
+                        xline1: p3("xline1_pt"),
+                        xline2: p3("xline2_pt"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => {
+                    DimensionGeometry::Angular2Line {
+                        line1_start: p3("xline1start_pt"),
+                        line1_end: p3("xline1end_pt"),
+                        line2_start: p3("xline2start_pt"),
+                        line2_end: p3("xline2end_pt"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS => {
+                    DimensionGeometry::Radius {
+                        center: definition_point,
+                        chord_point: p3("first_arc_pt"),
+                        leader_length: f64_field("leader_len"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {
+                    DimensionGeometry::Diameter {
+                        chord_start: definition_point,
+                        chord_end: p3("first_arc_pt"),
+                        leader_length: f64_field("leader_len"),
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => {
+                    // flag2 bit 1: the x coordinate is dimensioned.
+                    let flag2 = get_field::<u8>(entity_ptr, dxfname, "flag2").unwrap_or(0);
+                    DimensionGeometry::Ordinate {
+                        feature: p3("feature_location_pt"),
+                        leader_end: p3("leader_endpt"),
+                        x_datum: flag2 & 1 != 0,
+                    }
+                }
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => DimensionGeometry::Arc {
+                    center: p3("center_pt"),
+                    xline1: p3("xline1_pt"),
+                    xline2: p3("xline2_pt"),
+                },
+                _ => DimensionGeometry::Unknown,
+            };
+            // act_measurement is written for R2000+ files; an R14-era
+            // dimension holds exactly -1.0 for "not computed". Angular
+            // kinds store radians.
+            let stored = get_field::<f64>(entity_ptr, dxfname, "act_measurement");
+            let angular = geometry.is_angular();
+            let ordinate = matches!(geometry, DimensionGeometry::Ordinate { .. });
+            let measurement = stored
+                .filter(|v| v.is_finite() && *v != -1.0 && (ordinate || *v >= 0.0))
+                .map(|v| if angular { v.to_degrees() } else { v });
+            let measurement_from_points =
+                crate::dimension::measurement_from_points(&geometry, definition_point);
+            let user_text = get_utf8_field(entity_ptr, dxfname, "user_text").unwrap_or_default();
+            let text_midpoint =
+                get_field::<Point2D>(entity_ptr, dxfname, "text_midpt").unwrap_or_default();
+            let dimstyle =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "dimstyle")
+                    .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+                    .unwrap_or_default();
+            // display_* and dimlfac are filled by dimension::attach_display_text
+            // once the tables (cached labels, DIMSTYLEs) exist.
+            Entity::Dimension(DimensionEntity {
+                common,
+                block_name,
+                geometry,
+                measurement,
+                measurement_from_points,
+                user_text,
+                display_text: String::new(),
+                display_text_raw: String::new(),
+                display_source: DisplaySource::None,
+                definition_point,
+                text_midpoint,
+                dimstyle,
+                dimlfac: 1.0,
+            })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
             // dynapi's field-table key for this type is "TABLE" (dwg.h's
