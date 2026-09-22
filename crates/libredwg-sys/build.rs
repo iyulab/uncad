@@ -208,6 +208,10 @@ fn main() {
         .allowlist_function("uncad_dwg_is_tu")
         .allowlist_function("uncad_tv_to_utf8")
         .allowlist_function("uncad_entity_tv_to_utf8")
+        // The strings in_dxf.c stores 8-bit whatever the version (HEADER
+        // variables, MTEXT.text) -- never to be run through bit_convert_TU.
+        .allowlist_function("uncad_bytes_to_utf8")
+        .allowlist_function("uncad_entity_bytes_to_utf8")
         .allowlist_function("uncad_free_string")
         .allowlist_function("uncad_codepage_name")
         // Version enum -> "r2004"-style name, for the parsed header.

@@ -54,7 +54,22 @@ pub(super) fn points_attr(pts: &[Point2D]) -> String {
     s
 }
 
+/// Escapes `s` for XML text content (`&`, `<`, `>`; quotes are left alone)
+/// and drops every character XML 1.0 forbids outright
+/// ([`crate::text::is_xml_illegal`]): a control byte in a label would
+/// otherwise make roxmltree reject the whole document, and `to_png` and
+/// the export package with it. The decoder already replaces such characters
+/// in `text_plain`; this is the last line of defence for any string that
+/// reaches the SVG some other way.
 pub(super) fn escape_xml(s: &str) -> String {
+    let s: std::borrow::Cow<str> = if s.chars().any(crate::text::is_xml_illegal) {
+        s.chars()
+            .filter(|&c| !crate::text::is_xml_illegal(c))
+            .collect::<String>()
+            .into()
+    } else {
+        s.into()
+    };
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -109,6 +124,20 @@ mod tests {
         // Quotes are deliberately NOT escaped -- text content, not an
         // attribute value.
         assert_eq!(escape_xml("\"quoted\""), "\"quoted\"");
+    }
+
+    #[test]
+    fn escape_xml_drops_the_characters_xml_forbids() {
+        // XML 1.0 `Char`: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD]
+        // | [#x10000-#x10FFFF] -- so U+0001, U+000B, U+001F and U+FFFE are
+        // out, while tab, newline, DEL and U+FFFD are in.
+        assert_eq!(escape_xml("ZE\u{1}\u{B}RO\u{1F}\u{FFFE}"), "ZERO");
+        assert_eq!(
+            escape_xml("a\tb\nc\r\u{7F}\u{FFFD}"),
+            "a\tb\nc\r\u{7F}\u{FFFD}"
+        );
+        // Stripping happens before escaping, so an entity is still emitted.
+        assert_eq!(escape_xml("\u{0}<"), "&lt;");
     }
 
     #[test]

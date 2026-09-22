@@ -194,6 +194,24 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
   them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
   selected. The same shim now converts them (same CAVEATS entry).
+- MTEXT text and `header.dimpost` of an R2007+ DXF were read as UTF-16 although LibreDWG
+  stores both 8-bit (MTEXT's text chunks are `strdup`'d with no version branch, and the
+  HEADER section is parsed before the version is known), so every MTEXT and the header's
+  `$DIMPOST` came back as CJK-looking garbage that carried bytes read past the end of the
+  allocation (`example_2018.dxf`'s only MTEXT read `"敔獫潴..."` instead of
+  `"Teksto granda nur por testi..."`). Those strings now go through an 8-bit path
+  (`uncad_bytes_to_utf8`) that decodes them as the file's own encoding -- UTF-8 for an
+  R2007+ DXF, the code page otherwise -- with the `\U+XXXX` escapes expanded.
+- The DOS-era BIG5 (24) and GB2312 (31) code pages paired every byte, ASCII included, so
+  a DWG or DXF declaring either lost all its table names and parsed to zero entities; they
+  now pair only bytes >= 0x80, GB2312's EUC-CN bytes are looked up in the 7-bit form its
+  table uses (so `中国` decodes instead of becoming U+FFFD), and CP932 (22, DOS Shift-JIS)
+  is decoded as the double-byte encoding it is instead of one byte at a time.
+- A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
+  code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
+  empty directory, because the SVG carried a character XML forbids. `text_plain` now marks
+  such a character with U+FFFD, `%%001`..`%%031` (other than 9/10/13) are left as written
+  like any other non-code, and the SVG writer strips whatever still reaches it.
 - `parse()` opens files under paths with non-ASCII characters on Windows
   (`docs/CAVEATS.md`, "Fixed: a path with non-ASCII characters ...").
 

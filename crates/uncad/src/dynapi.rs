@@ -273,6 +273,14 @@ pub fn get_header_field<T: Copy>(dwg: *const libredwg_sys::Dwg_Data, field: &str
 /// Reads a text header variable (`DIMPOST`, `DWGCODEPAGE`, ...) as UTF-8 via
 /// `dwg_dynapi_header_utf8text`, with the same code-page handling as
 /// [`get_utf8_field`]. Returns `None` for an unknown name or a null string.
+///
+/// A raw (`isnew == 0`) header string is always 8-bit in memory, even in an
+/// R2007+ DXF: LibreDWG parses the HEADER section before it has set
+/// `header.version`, so `in_dxf.c` stores every `$` text variable as a
+/// plain copy of the file's bytes rather than as UTF-16. It therefore goes
+/// through `uncad_bytes_to_utf8`, never the UTF-16 branch of
+/// `uncad_tv_to_utf8` (which read past the end of the allocation and gave
+/// `header.dimpost` heap garbage on every R2007+ DXF).
 pub fn get_header_utf8(dwg: *const libredwg_sys::Dwg_Data, field: &str) -> Option<String> {
     if dwg.is_null() {
         return None;
@@ -304,8 +312,9 @@ pub fn get_header_utf8(dwg: *const libredwg_sys::Dwg_Data, field: &str) -> Optio
         unsafe { libc::free(text_ptr.cast()) };
         owned
     } else {
-        // SAFETY: dwg is live and text_ptr is a NUL-terminated string it owns.
-        let converted = unsafe { libredwg_sys::uncad_tv_to_utf8(dwg, text_ptr) };
+        // SAFETY: dwg is live and text_ptr is a NUL-terminated 8-bit string
+        // it owns (see above: never UTF-16, whatever the version).
+        let converted = unsafe { libredwg_sys::uncad_bytes_to_utf8(dwg, text_ptr) };
         owned_utf8(converted, text_ptr)
     };
     Some(owned)
@@ -386,6 +395,30 @@ fn codepage_to_utf8(entity: *const c_void, raw: *const std::os::raw::c_char) -> 
     // every dynapi read here) and raw a valid NUL-terminated string owned by
     // the same Dwg_Data; the shim reads both and allocates its result.
     let converted = unsafe { libredwg_sys::uncad_entity_tv_to_utf8(entity, raw) };
+    owned_utf8(converted, raw)
+}
+
+/// The text fields LibreDWG's DXF reader stores as 8-bit bytes whatever the
+/// file's version, so that the "an R2007+ DXF's raw strings are UTF-16" rule
+/// of [`codepage_to_utf8`] does not hold for them. `in_dxf.c` special-cases
+/// MTEXT's group 1/3 chunks (`o->text = strdup (...)` / `realloc` +
+/// `memcpy`, no `bit_utf8_to_TU`); every other field this crate reads goes
+/// through `dwg_dynapi_*_set_value`, which converts to UTF-16 once
+/// `header.version` is R2007+. (Header variables are the other exception,
+/// handled in [`get_header_utf8`].) A DWG stores nothing 8-bit that the
+/// rule gets wrong, and the 8-bit path decodes it the same way, so this
+/// applies to both inputs.
+fn stored_8bit_in_dxf(dxfname: &str, field: &str) -> bool {
+    matches!((dxfname, field), ("MTEXT", "text"))
+}
+
+/// [`codepage_to_utf8`] for the fields [`stored_8bit_in_dxf`] names: the
+/// bytes are the file's own encoding (UTF-8 for an R2007+ DXF, the code page
+/// otherwise) and are never handed to `bit_convert_TU`, which would scan
+/// them for a 16-bit NUL past the end of their allocation.
+fn bytes_to_utf8(entity: *const c_void, raw: *const std::os::raw::c_char) -> String {
+    // SAFETY: as in codepage_to_utf8.
+    let converted = unsafe { libredwg_sys::uncad_entity_bytes_to_utf8(entity, raw) };
     owned_utf8(converted, raw)
 }
 
@@ -497,9 +530,10 @@ pub unsafe fn get_sub_utf8_field(
 /// r2007+ path: it converts the UTF-16 storage itself) or a pointer straight
 /// into the parsed `Dwg_Data` holding the file's own 8-bit code-page bytes
 /// (every older DWG, and every DXF input) -- `isnew` tells us which. The
-/// second case goes through [`codepage_to_utf8`]; both end up as an owned
-/// Rust `String`, with the C-side buffer freed here so nothing leaks per
-/// field read.
+/// second case goes through [`codepage_to_utf8`], or [`bytes_to_utf8`] for
+/// the few fields `in_dxf.c` keeps 8-bit in an R2007+ DXF
+/// ([`stored_8bit_in_dxf`]); all end up as an owned Rust `String`, with the
+/// C-side buffer freed here so nothing leaks per field read.
 pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option<String> {
     if entity.is_null() {
         return None;
@@ -536,9 +570,13 @@ pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option
             .into_owned();
         unsafe { libc::free(text_ptr.cast()) };
         owned
+    } else if stored_8bit_in_dxf(dxfname, field) {
+        // 8-bit in memory whatever the version: never UTF-16.
+        bytes_to_utf8(entity, text_ptr)
     } else {
         // A raw pointer into the Dwg_Data in the file's own code page
-        // (pre-R2007 DWG, or any DXF input): transcode it.
+        // (pre-R2007 DWG, or any DXF input; UTF-16 for an R2007+ DXF):
+        // transcode it.
         codepage_to_utf8(entity, text_ptr)
     };
 

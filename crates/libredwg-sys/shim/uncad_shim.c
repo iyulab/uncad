@@ -275,6 +275,22 @@ put_utf8 (char *out, uint32_t wc)
   return 3;
 }
 
+/* Whether `c` opens a two-byte sequence in the double-byte code page `cp`.
+
+   LibreDWG's dwg_codepage_is_twobyte answers "always" for the DOS-era
+   BIG5 (24) and GB2312 (31) pages, ASCII included, which paired every
+   table name up ("*Model_Space" -> "*M", "od", ...) and turned such a
+   drawing into one with no *Model_Space and no entities. Both are
+   EUC-style encodings whose lead and trail bytes are all >= 0x80, so the
+   high bit is the rule there. */
+static bool
+opens_double_byte (Dwg_Codepage cp, unsigned char c)
+{
+  if (cp == CP_GB2312 || cp == CP_BIG5)
+    return c >= 0x80;
+  return dwg_codepage_is_twobyte (cp, c);
+}
+
 /* Transcodes an 8-bit code-page string to UTF-8 with LibreDWG's own
    code-page tables (dwg_codepage_uc / dwg_codepage_uwc / is_twobyte) and
    then expands \U+XXXX / \M+nXXXX escapes the way bit_TV_to_utf8 does.
@@ -286,13 +302,21 @@ put_utf8 (char *out, uint32_t wc)
    mostly non-ASCII loses its tail ("Стена" -> "Стен"); and it writes a NUL
    for a character the table cannot map, truncating the rest of the string.
    Here the buffer is 3 bytes per input byte (the true bound) and an
-   unmappable character becomes U+FFFD. `cp` must be a value
-   dwg_codepage_dxfstr knows (the caller checks). Returns NULL only when
-   out of memory. */
+   unmappable character becomes U+FFFD. Four more table quirks are
+   corrected on the way (bits.c shares them): the DOS-era BIG5/GB2312
+   pages pair only bytes >= 0x80 (see opens_double_byte); CP932 (22, DOS
+   Shift-JIS) is treated as double-byte although dwg_codepage_isasian
+   leaves it out, so its kanji do not go through the single-byte table one
+   byte at a time; cptbl_gb2312 is indexed by the 7-bit ISO-2022 form
+   (0x2121..0x777E) while the file holds EUC-CN bytes (0xA1A1..0xFEFE), so
+   the pair is masked to 7 bits before the lookup; and ASCII is never
+   looked up (see the loop), so 0x5C stays the backslash the text codes
+   need. `cp` must be a value dwg_codepage_dxfstr knows (the caller
+   checks). Returns NULL only when out of memory. */
 static char *
 convert_codepage (const char *src, Dwg_Codepage cp)
 {
-  const bool is_asian = dwg_codepage_isasian (cp);
+  const bool is_asian = dwg_codepage_isasian (cp) || cp == CP_CP932;
   const size_t srclen = strlen (src);
   const unsigned char *p = (const unsigned char *)src;
   const unsigned char *end = p + srclen;
@@ -306,19 +330,27 @@ convert_codepage (const char *src, Dwg_Codepage cp)
     {
       uint32_t wc;
       unsigned int c = *p++;
-      if (is_asian)
+      if (c < 0x80)
+        /* ASCII stays ASCII (no double-byte page has a lead byte below
+           0x80). dwg_codepage_uwc maps 0x5C to the yen sign for CP932 and
+           to the won sign for JOHAB (their JIS X 0201 / KS X 1003 half),
+           but in a drawing 0x5C is the backslash of MTEXT's \P and of the
+           \U+XXXX escapes whatever the code page, and the tables' other
+           sub-0x80 rows are the identity. */
+        wc = c;
+      else if (is_asian)
         {
-          /* Two-byte code pages have exceptions below 0x80 too, so every
-             byte goes through the table, as in bits.c. */
           uint16_t cc = (uint16_t)c;
-          if (dwg_codepage_is_twobyte (cp, (unsigned char)c) && p < end)
-            cc = (uint16_t)((cc << 8) | *p++);
+          if (opens_double_byte (cp, (unsigned char)c) && p < end)
+            {
+              cc = (uint16_t)((cc << 8) | *p++);
+              if (cp == CP_GB2312)
+                cc &= 0x7F7F;
+            }
           wc = (uint32_t)dwg_codepage_uwc (cp, cc);
           if (wc == 0)
-            wc = cc < 0x80 ? cc : 0xFFFD;
+            wc = 0xFFFD;
         }
-      else if (c < 0x80)
-        wc = c;
       else
         {
           wc = (uint32_t)dwg_codepage_uc (cp, (unsigned char)c);
@@ -341,30 +373,18 @@ convert_codepage (const char *src, Dwg_Codepage cp)
   return out;
 }
 
-char *
-uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
+/* The 8-bit half of uncad_tv_to_utf8: `s` holds bytes in the file's own
+   text encoding -- UTF-8 for an R2007+ DXF (what in_dxf.c's own TU
+   conversion, bit_utf8_to_TU, assumes of the file too), the header code
+   page for everything else -- and is never a UTF-16 buffer. */
+static char *
+bytes_to_utf8 (const Dwg_Data *dwg, const char *s)
 {
-  unsigned int cp;
+  unsigned int cp = (unsigned int)dwg->header.codepage;
   char *converted;
 
-  if (!s)
-    return NULL;
-  /* R2007+ DWG: dynapi already handed out UTF-8 (bit_convert_TU). */
-  if (!dwg || IS_FROM_TU_DWG (dwg))
-    return dup_string (s);
-
-  /* R2007+ DXF: in_dxf stores every string as UTF-16 (TU) as well, but
-     IS_FROM_TU_DWG is false for DXF input, so dynapi hands the UTF-16
-     buffer out as if it were an 8-bit string (truncated at its first NUL,
-     which is why "*Model_Space" used to come back as "*"). Convert it the
-     way dynapi does for a DWG. */
-  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.version >= R_2007)
-    {
-      converted = bit_convert_TU ((BITCODE_TU)(uintptr_t)s);
-      return converted ? converted : dup_string ("");
-    }
-
-  cp = (unsigned int)dwg->header.codepage;
+  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.from_version >= R_2007)
+    cp = CP_UTF8;
   if (cp == CP_UTF8)
     {
       /* Only the \U+XXXX / \M+nXXXX escapes are rewritten; bit_TV_to_utf8
@@ -389,17 +409,64 @@ uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
 }
 
 char *
+uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
+{
+  if (!s)
+    return NULL;
+  /* R2007+ DWG: dynapi already handed out UTF-8 (bit_convert_TU). */
+  if (!dwg || IS_FROM_TU_DWG (dwg))
+    return dup_string (s);
+
+  /* R2007+ DXF: in_dxf stores its T fields as UTF-16 (TU) as well, but
+     IS_FROM_TU_DWG is false for DXF input, so dynapi hands the UTF-16
+     buffer out as if it were an 8-bit string (truncated at its first NUL,
+     which is why "*Model_Space" used to come back as "*"). Convert it the
+     way dynapi does for a DWG. The fields in_dxf.c stores 8-bit anyway
+     (see uncad_bytes_to_utf8) must not come through here: bit_convert_TU
+     scans for a 16-bit NUL and would read past their allocation. */
+  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.version >= R_2007)
+    {
+      char *converted = bit_convert_TU ((BITCODE_TU)(uintptr_t)s);
+      return converted ? converted : dup_string ("");
+    }
+
+  return bytes_to_utf8 (dwg, s);
+}
+
+char *
+uncad_bytes_to_utf8 (const Dwg_Data *dwg, const char *s)
+{
+  if (!s)
+    return NULL;
+  if (!dwg || IS_FROM_TU_DWG (dwg))
+    return dup_string (s);
+  return bytes_to_utf8 (dwg, s);
+}
+
+/* The Dwg_Data owning an entity/object struct pointer (what
+   uncad_object_entity_ptr / uncad_object_object_ptr returned), or NULL
+   when dwg_obj_generic_to_object cannot walk back to the Dwg_Object. */
+static const Dwg_Data *
+owning_dwg (const void *entity)
+{
+  int error = 0;
+  const Dwg_Object *obj;
+  if (!entity)
+    return NULL;
+  obj = dwg_obj_generic_to_object (entity, &error);
+  return (obj && !error) ? obj->parent : NULL;
+}
+
+char *
 uncad_entity_tv_to_utf8 (const void *entity, const char *s)
 {
-  const Dwg_Data *dwg = NULL;
-  if (entity)
-    {
-      int error = 0;
-      const Dwg_Object *obj = dwg_obj_generic_to_object (entity, &error);
-      if (obj && !error)
-        dwg = obj->parent;
-    }
-  return uncad_tv_to_utf8 (dwg, s);
+  return uncad_tv_to_utf8 (owning_dwg (entity), s);
+}
+
+char *
+uncad_entity_bytes_to_utf8 (const void *entity, const char *s)
+{
+  return uncad_bytes_to_utf8 (owning_dwg (entity), s);
 }
 
 void

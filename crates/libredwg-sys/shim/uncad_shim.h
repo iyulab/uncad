@@ -105,16 +105,26 @@ const char *uncad_codepage_name(unsigned int codepage);
  *
  *   - when IS_FROM_TU_DWG(dwg) the input is already UTF-8 and is copied;
  *   - for an R2007+ DXF (DWG_OPTS_IN set, version >= R_2007) the string in
- *     memory is UTF-16 -- in_dxf.c stores it as TU, but IS_FROM_TU_DWG
- *     excludes DXF input so dynapi never converts it -- and it goes through
- *     bit_convert_TU() like a DWG's would;
- *   - a CP_UTF8 code page only has its `\U+XXXX` / `\M+nXXXX` escapes
- *     expanded (bit_TV_to_utf8);
+ *     memory is UTF-16 -- in_dxf.c stores its T fields as TU, but
+ *     IS_FROM_TU_DWG excludes DXF input so dynapi never converts them --
+ *     and it goes through bit_convert_TU() like a DWG's would. This is the
+ *     one rule that is not true of every field: see uncad_bytes_to_utf8
+ *     for the strings in_dxf.c keeps 8-bit whatever the version;
+ *   - an R2007+ DXF's 8-bit strings are UTF-8 (the DXF's own encoding from
+ *     AC1021 on, and what in_dxf.c's TU conversion assumes) and only have
+ *     their `\U+XXXX` / `\M+nXXXX` escapes expanded (bit_TV_to_utf8), as
+ *     does a CP_UTF8 code page;
  *   - CP_UNDEFINED, CP_UTF16 and any value outside LibreDWG's tables fall
  *     back to ANSI_1252, LibreDWG's own default (an unchecked value would
  *     index past its tables);
  *   - otherwise the string is transcoded with LibreDWG's code-page tables,
  *     an unmappable character becoming U+FFFD, and the escapes expanded.
+ *     The double-byte pages follow the file's bytes rather than every
+ *     quirk of LibreDWG's tables: the DOS-era BIG5 (24) and GB2312 (31)
+ *     pair only bytes >= 0x80 (dwg_codepage_is_twobyte pairs ASCII too,
+ *     which garbled every table name and emptied the drawing), CP932 (22)
+ *     is decoded as the double-byte Shift-JIS it is, and GB2312's EUC-CN
+ *     bytes are masked to the 7-bit form its table is indexed by.
  *
  * The result is always a fresh heap buffer (or NULL only for a NULL `s` or
  * out of memory) -- bit_TV_to_utf8() may return its input pointer unchanged,
@@ -123,6 +133,27 @@ const char *uncad_codepage_name(unsigned int codepage);
  */
 char *uncad_tv_to_utf8(const Dwg_Data *dwg, const char *s);
 
+/* uncad_tv_to_utf8 for a string that is 8-bit in memory whatever the file's
+ * version: the bytes are decoded as the file's own text encoding (UTF-8 for
+ * an R2007+ DXF, the header code page otherwise) with the escapes expanded,
+ * and bit_convert_TU() is never run over them.
+ *
+ * This exists because LibreDWG's DXF reader does not store every string the
+ * way the "R2007+ means UTF-16" rule says. dxf_header_read() runs while
+ * `header.version` is still R_INVALID (dxf_fixup_header sets it afterwards,
+ * and the $ACADVER branch only sets it for R13..R2000), so every HEADER text
+ * variable ($DIMPOST, ...) is a plain malloc'd copy of the file's bytes;
+ * and MTEXT's group 1/3 text chunks are strdup'd/realloc'd together with no
+ * version branch at all (in_dxf.c, "MTEXT text > 250 chars"). Handing
+ * either to bit_convert_TU() walks 16-bit units past the end of the
+ * allocation until a zero pair happens to occur, so the header's DIMPOST
+ * and every MTEXT of an R2007+ DXF came back as CJK-looking garbage with
+ * neighbouring heap bytes in it. Same result type and ownership as
+ * uncad_tv_to_utf8; a `dwg` that IS_FROM_TU_DWG (only a TF field can get
+ * here from one) is copied unchanged.
+ */
+char *uncad_bytes_to_utf8(const Dwg_Data *dwg, const char *s);
+
 /* Same as uncad_tv_to_utf8, but finds the owning Dwg_Data through the
  * entity/object struct pointer (what uncad_object_entity_ptr /
  * uncad_object_object_ptr returned -- the same pointer dynapi takes), via
@@ -130,6 +161,11 @@ char *uncad_tv_to_utf8(const Dwg_Data *dwg, const char *s);
  * without conversion.
  */
 char *uncad_entity_tv_to_utf8(const void *entity, const char *s);
+
+/* uncad_bytes_to_utf8 with the same entity-pointer lookup as
+ * uncad_entity_tv_to_utf8: for the fields in_dxf.c stores 8-bit whatever
+ * the version (MTEXT.text). */
+char *uncad_entity_bytes_to_utf8(const void *entity, const char *s);
 
 /* Any string pointer read straight out of `dwg`'s structures (a T/TV field
  * of an embedded struct dynapi cannot reach through utf8text, say): the

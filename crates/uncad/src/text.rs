@@ -144,8 +144,28 @@ fn decode(raw: &str, mtext: bool) -> DecodedText {
         plain.push(c);
         i += 1;
     }
+    // A stray control byte in a label (or a `\U+0001` escape) must not
+    // reach the SVG: roxmltree rejects the whole document, and the PNG and
+    // the export package with it. U+FFFD marks where it was.
+    if plain.chars().any(is_xml_illegal) {
+        plain = plain
+            .chars()
+            .map(|c| if is_xml_illegal(c) { '\u{FFFD}' } else { c })
+            .collect();
+    }
     out.plain = plain;
     out
+}
+
+/// Whether XML 1.0 forbids `c` in a document altogether: the C0 controls
+/// other than tab, LF and CR, and the non-characters U+FFFE / U+FFFF. (A
+/// lone surrogate cannot occur in a Rust `char`.) The renderer's SVG is
+/// parsed by roxmltree, which refuses a document containing one.
+pub(crate) fn is_xml_illegal(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0}'..='\u{8}' | '\u{B}' | '\u{C}' | '\u{E}'..='\u{1F}' | '\u{FFFE}' | '\u{FFFF}'
+    )
 }
 
 fn add_decoration(out: &mut DecodedText, decoration: Decoration) {
@@ -171,9 +191,10 @@ fn unicode_escape(chars: &[char]) -> Option<(char, usize)> {
 /// The `%%` codes: `%%c` diameter, `%%d` degree, `%%p` plus-minus, `%%%` a
 /// percent sign, `%%u`/`%%o` underline/overline toggles (recorded, nothing
 /// emitted), `%%nnn` a character by code (Latin-1 for the upper half, which
-/// matches the Western code pages these codes were written for). Returns
-/// the replacement and the number of chars consumed, or `None` when the
-/// `%%` is not a code.
+/// matches the Western code pages these codes were written for; a control
+/// code below 32 other than tab, LF and CR is not a code, since it could
+/// only produce a character XML forbids). Returns the replacement and the
+/// number of chars consumed, or `None` when the `%%` is not a code.
 fn percent_code(out: &mut DecodedText, chars: &[char]) -> Option<(String, usize)> {
     let code = chars.get(2)?;
     match code.to_ascii_lowercase() {
@@ -194,7 +215,12 @@ fn percent_code(out: &mut DecodedText, chars: &[char]) -> Option<(String, usize)
             if digits.len() == 3 && digits.chars().all(|c| c.is_ascii_digit()) {
                 let n: u32 = digits.parse().ok()?;
                 let ch = if n < 256 {
-                    char::from_u32(n)?
+                    let ch = char::from_u32(n)?;
+                    if is_xml_illegal(ch) {
+                        // `%%001`: left as written, like any other non-code.
+                        return None;
+                    }
+                    ch
                 } else {
                     '\u{FFFD}'
                 };
@@ -480,6 +506,25 @@ mod tests {
         );
         assert_eq!(decode_text("").plain, "");
         assert_eq!(decode_mtext("trailing\\").plain, "trailing\\");
+    }
+
+    #[test]
+    fn xml_illegal_characters_never_survive_decoding() {
+        // A raw control byte in the string, and one written as a \U+ escape,
+        // each become one U+FFFD; tab, LF and CR (the C0 controls XML 1.0
+        // allows) are kept.
+        assert_eq!(decode_text("ZE\u{1}\u{B}RO").plain, "ZE\u{FFFD}\u{FFFD}RO");
+        assert_eq!(decode_mtext(r"A\U+0001B").plain, "A\u{FFFD}B");
+        assert_eq!(decode_text("a\tb\nc\r").plain, "a\tb\nc\r");
+        assert_eq!(decode_text("\u{FFFE}\u{FFFF}").plain, "\u{FFFD}\u{FFFD}");
+        // %%nnn below 32 is not a code (it could only yield a forbidden
+        // character), so it stays as written -- while %%009 (tab) and the
+        // printable %%065 still decode.
+        assert_eq!(decode_text("ZE%%001RO").plain, "ZE%%001RO");
+        assert_eq!(decode_text("%%031").plain, "%%031");
+        assert_eq!(decode_text("a%%009b").plain, "a\tb");
+        assert_eq!(decode_text("%%065").plain, "A");
+        assert!(!decode_text("ZE%%001RO").plain.chars().any(is_xml_illegal));
     }
 
     #[test]
