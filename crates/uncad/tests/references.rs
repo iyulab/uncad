@@ -400,3 +400,175 @@ fn entity_kind(entity: &Entity) -> &'static str {
         _ => "other",
     }
 }
+
+/// Every table this model names by name, probed for the same defect.
+///
+/// A DXF names a table entry by name, and the entry may not be declared.
+/// The model's contract is that such a reference comes back as the name the
+/// file wrote, never as "the file names nothing" -- what the file said is
+/// not the reader's to discard. Two places were already known to break it
+/// (a block, and a dimension style), each found by accident. This is the
+/// sweep that stops the third from being found the same way.
+///
+/// The set is closed by reading which fields the importer resolves by name
+/// and intersecting it with the references this model carries: block,
+/// dimension style, text style, and mline style. Line type (group 6) is not
+/// in it -- this model does not carry a line type at all, so there is
+/// nothing to drop. A layer cannot be probed this way, for the reason the
+/// block test above records: a file naming an undeclared layer is refused
+/// outright, so the case cannot be written by hand.
+fn dxf_from(pairs: &[(u16, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(code, value)| format!("{code:>3}\n{value}\n"))
+        .collect()
+}
+
+/// Tripwire, not a requirement: it asserts the defect is still here.
+///
+/// A leader names its dimension style by name (group 3), and a style the
+/// file does not declare loses that name -- the same importer behaviour the
+/// block and dimension probes record. When the DXF path stops going through
+/// that importer this test goes red, which is the point: it says to come
+/// back and take the recorded deviations out.
+#[test]
+fn the_dxf_importer_still_drops_an_undeclared_dimension_style_named_by_a_leader() {
+    let pairs: &[(u16, &str)] = &[
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "DIMSTYLE"),
+        (0, "DIMSTYLE"),
+        (2, "REAL"),
+        (70, "0"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "LEADER"),
+        (8, "0"),
+        (3, "REAL"),
+        (76, "2"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (10, "1.0"),
+        (20, "1.0"),
+        (30, "0.0"),
+        (0, "LEADER"),
+        (8, "0"),
+        (3, "NOSTYLE"),
+        (76, "2"),
+        (10, "5.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (10, "6.0"),
+        (20, "1.0"),
+        (30, "0.0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    let file = TempFile::new("undeclared-leader-dimstyle.dxf");
+    fs::write(file.path(), dxf_from(pairs)).expect("temp dir writable");
+    let db = uncad::parse(file.path()).expect("the DXF should parse");
+
+    let styles: Vec<&Ref<String>> = db
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Leader(l) => Some(&l.style_name),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(styles.len(), 2, "{:?}", db.entities);
+    // The control: a declared style still resolves, so the probe is sound.
+    assert_eq!(styles[0], &Ref::Resolved("REAL".to_string()));
+    // The defect: the name the file wrote is gone. What it should be is
+    // `Unresolved("NOSTYLE")` -- the drawing named something.
+    assert_eq!(
+        styles[1],
+        &Ref::Absent,
+        "the name survived -- take the recorded deviations out"
+    );
+}
+
+/// Tripwire, as above: the last table this model names by name and that a
+/// file can be written for by hand.
+///
+/// There is no control entity here, unlike the block and dimension-style
+/// probes: an mline style is declared in a dictionary rather than a table,
+/// so a hand-written declaration is not a fair one. The control is instead
+/// that the entity itself arrives with its other values intact -- if it did
+/// not parse at all, the reference would say nothing for a different reason.
+#[test]
+fn the_dxf_importer_still_drops_an_undeclared_mline_style_name() {
+    let pairs: &[(u16, &str)] = &[
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "MLINE"),
+        (8, "0"),
+        (2, "NOSTYLE"),
+        (40, "1.0"),
+        (70, "0"),
+        (71, "0"),
+        (72, "2"),
+        (73, "1"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (11, "0.0"),
+        (21, "0.0"),
+        (31, "0.0"),
+        (12, "1.0"),
+        (22, "0.0"),
+        (32, "0.0"),
+        (13, "0.0"),
+        (23, "1.0"),
+        (33, "0.0"),
+        (74, "1"),
+        (41, "0.0"),
+        (11, "1.0"),
+        (21, "1.0"),
+        (31, "0.0"),
+        (12, "1.0"),
+        (22, "0.0"),
+        (32, "0.0"),
+        (13, "0.0"),
+        (23, "1.0"),
+        (33, "0.0"),
+        (74, "1"),
+        (41, "0.0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    let file = TempFile::new("undeclared-mline-style.dxf");
+    fs::write(file.path(), dxf_from(pairs)).expect("temp dir writable");
+    let Ok(db) = uncad::parse(file.path()) else {
+        // Recorded rather than asserted: the same reason a dangling layer
+        // cannot be probed. If the reader refuses the file, this table
+        // stays unmeasured and the sweep says so instead of guessing.
+        eprintln!("mline probe: the reader refused the hand-written file");
+        return;
+    };
+    let mlines: Vec<_> = db
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::MLine(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    let Some(mline) = mlines.first() else {
+        eprintln!("mline probe: the reader parsed no MLINE from the probe");
+        return;
+    };
+    // The control: the entity itself came through.
+    assert_eq!(mline.vertices.len(), 2, "{mline:?}");
+    // The defect: should be `Unresolved("NOSTYLE")` -- the drawing named
+    // something, and the name is the reader's to carry, not to discard.
+    assert_eq!(
+        mline.mlinestyle_name,
+        Ref::Absent,
+        "the name survived -- take the recorded deviations out"
+    );
+}
