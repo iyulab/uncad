@@ -341,30 +341,18 @@ convert_codepage (const char *src, Dwg_Codepage cp)
   return out;
 }
 
-char *
-uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
+/* The 8-bit half of uncad_tv_to_utf8: `s` holds bytes in the file's own
+   text encoding -- UTF-8 for an R2007+ DXF (what in_dxf.c's own TU
+   conversion, bit_utf8_to_TU, assumes of the file too), the header code
+   page for everything else -- and is never a UTF-16 buffer. */
+static char *
+bytes_to_utf8 (const Dwg_Data *dwg, const char *s)
 {
-  unsigned int cp;
+  unsigned int cp = (unsigned int)dwg->header.codepage;
   char *converted;
 
-  if (!s)
-    return NULL;
-  /* R2007+ DWG: dynapi already handed out UTF-8 (bit_convert_TU). */
-  if (!dwg || IS_FROM_TU_DWG (dwg))
-    return dup_string (s);
-
-  /* R2007+ DXF: in_dxf stores every string as UTF-16 (TU) as well, but
-     IS_FROM_TU_DWG is false for DXF input, so dynapi hands the UTF-16
-     buffer out as if it were an 8-bit string (truncated at its first NUL,
-     which is why "*Model_Space" used to come back as "*"). Convert it the
-     way dynapi does for a DWG. */
-  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.version >= R_2007)
-    {
-      converted = bit_convert_TU ((BITCODE_TU)(uintptr_t)s);
-      return converted ? converted : dup_string ("");
-    }
-
-  cp = (unsigned int)dwg->header.codepage;
+  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.from_version >= R_2007)
+    cp = CP_UTF8;
   if (cp == CP_UTF8)
     {
       /* Only the \U+XXXX / \M+nXXXX escapes are rewritten; bit_TV_to_utf8
@@ -389,17 +377,64 @@ uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
 }
 
 char *
+uncad_tv_to_utf8 (const Dwg_Data *dwg, const char *s)
+{
+  if (!s)
+    return NULL;
+  /* R2007+ DWG: dynapi already handed out UTF-8 (bit_convert_TU). */
+  if (!dwg || IS_FROM_TU_DWG (dwg))
+    return dup_string (s);
+
+  /* R2007+ DXF: in_dxf stores its T fields as UTF-16 (TU) as well, but
+     IS_FROM_TU_DWG is false for DXF input, so dynapi hands the UTF-16
+     buffer out as if it were an 8-bit string (truncated at its first NUL,
+     which is why "*Model_Space" used to come back as "*"). Convert it the
+     way dynapi does for a DWG. The fields in_dxf.c stores 8-bit anyway
+     (see uncad_bytes_to_utf8) must not come through here: bit_convert_TU
+     scans for a 16-bit NUL and would read past their allocation. */
+  if ((dwg->opts & DWG_OPTS_IN) && dwg->header.version >= R_2007)
+    {
+      char *converted = bit_convert_TU ((BITCODE_TU)(uintptr_t)s);
+      return converted ? converted : dup_string ("");
+    }
+
+  return bytes_to_utf8 (dwg, s);
+}
+
+char *
+uncad_bytes_to_utf8 (const Dwg_Data *dwg, const char *s)
+{
+  if (!s)
+    return NULL;
+  if (!dwg || IS_FROM_TU_DWG (dwg))
+    return dup_string (s);
+  return bytes_to_utf8 (dwg, s);
+}
+
+/* The Dwg_Data owning an entity/object struct pointer (what
+   uncad_object_entity_ptr / uncad_object_object_ptr returned), or NULL
+   when dwg_obj_generic_to_object cannot walk back to the Dwg_Object. */
+static const Dwg_Data *
+owning_dwg (const void *entity)
+{
+  int error = 0;
+  const Dwg_Object *obj;
+  if (!entity)
+    return NULL;
+  obj = dwg_obj_generic_to_object (entity, &error);
+  return (obj && !error) ? obj->parent : NULL;
+}
+
+char *
 uncad_entity_tv_to_utf8 (const void *entity, const char *s)
 {
-  const Dwg_Data *dwg = NULL;
-  if (entity)
-    {
-      int error = 0;
-      const Dwg_Object *obj = dwg_obj_generic_to_object (entity, &error);
-      if (obj && !error)
-        dwg = obj->parent;
-    }
-  return uncad_tv_to_utf8 (dwg, s);
+  return uncad_tv_to_utf8 (owning_dwg (entity), s);
+}
+
+char *
+uncad_entity_bytes_to_utf8 (const void *entity, const char *s)
+{
+  return uncad_bytes_to_utf8 (owning_dwg (entity), s);
 }
 
 void

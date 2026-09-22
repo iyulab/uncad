@@ -194,6 +194,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
   them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
   selected. The same shim now converts them (same CAVEATS entry).
+- MTEXT text and `header.dimpost` of an R2007+ DXF were read as UTF-16 although LibreDWG
+  stores both 8-bit (MTEXT's text chunks are `strdup`'d with no version branch, and the
+  HEADER section is parsed before the version is known), so every MTEXT and the header's
+  `$DIMPOST` came back as CJK-looking garbage that carried bytes read past the end of the
+  allocation (`example_2018.dxf`'s only MTEXT read `"敔獫潴..."` instead of
+  `"Teksto granda nur por testi..."`). Those strings now go through an 8-bit path
+  (`uncad_bytes_to_utf8`) that decodes them as the file's own encoding -- UTF-8 for an
+  R2007+ DXF, the code page otherwise -- with the `\U+XXXX` escapes expanded.
 - A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
   code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
   empty directory, because the SVG carried a character XML forbids. `text_plain` now marks
