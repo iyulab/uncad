@@ -43,7 +43,9 @@ cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --fit 4000  # long edge 4000 px
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # two pixels per drawing unit instead
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --crop raw  # keep outlying coordinates
+cargo run -p uncad-cli -- drawing.dwg --output drawing.svg       # --output is the long form of -o
 cargo run -p uncad-cli -- export drawing.dwg -o drawing_pkg      # the LLM/VLM package (docs/VLM_EXPORT_DESIGN.md)
+cargo run -p uncad-cli -- export drawing.dwg -o pkg --padding 0  # the package, flush to the drawing's edge
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document
 ```

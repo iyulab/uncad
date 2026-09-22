@@ -177,6 +177,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   document -- the `export` subcommand and its options included -- and the parser's
   refusals, and `tests/read_paths.rs` reads a DWG and a DXF under a Korean
   directory name (`parse` against `parse_bytes`, error kinds).
+- `ExportOptions::padding` (CLI `uncad export --padding <units>`): the margin around the
+  overview and around each frame's own window, in drawing units. `None`, the default,
+  keeps the automatic 2 %; `Some(0.0)` puts the drawing flush against the image's edge.
+  The flag used to be refused as a rendering-only option, so a package could never have
+  anything but the automatic padding. The sheets keep their own zero padding -- a sheet
+  is the paper exactly -- and `--lattice` stays a rendering option, since the package's
+  patch size is the profile's.
 
 ### Changed
 
@@ -220,6 +227,19 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Every tile rectangle of a small drawing was the same rectangle. The world boxes in
+  `tiles.json`, the sidecars and the records were rounded to `$LUPREC` decimals (3 at
+  the least), which says how precisely the drawing's units are *displayed* and nothing
+  about how far the package zooms into them: on a drawing four thousandths of a unit
+  across -- a jewellery detail, a PCB pad -- all 30 tiles of a level printed
+  `[0, 0, 0.004, 0.003]`, and the `world` a consumer read described a rectangle 48 px
+  away from the one the `world_to_px` beside it maps. The decimals now have a floor
+  taken from the scale: enough that one unit in the last place is a thousandth of a
+  pixel at the deepest level the package can reach. A drawing of ordinary size is drawn
+  at a fraction of a pixel per unit, so its floor is the three or four decimals it was
+  already written with.
+- `--output`, the long form of `-o`, appeared in neither `--help` nor the README, so the
+  only documented spelling was `-o`. Both now list it, in both commands.
 - A panic inside the rasterizer took the process with it. tiny-skia's scan converter
   asserts rather than returning an error when a path's coordinates overflow its
   fixed-point edge list, and the export ran it on worker threads, where the panic came

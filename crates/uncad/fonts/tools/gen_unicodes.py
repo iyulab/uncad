@@ -1,3 +1,4 @@
+import os
 ks = [cp for cp in range(0xAC00, 0xD7A4) if len(chr(cp).encode('euc_kr')) == 2]
 assert len(ks) == 2350, len(ks)
 lines = [
@@ -11,5 +12,11 @@ lines = [
  "# KS X 1001 Hangul syllables (2350)",
 ]
 lines += ["U+%04X" % cp for cp in ks]
-open('subset/unicodes.txt', 'w', encoding='utf-8').write("\n".join(lines) + "\n")
-print("wrote subset/unicodes.txt with", len(ks), "syllables")
+# Next to this script: the checked-in tools/unicodes.txt that pyftsubset
+# reads, so the command works from any directory. newline='' keeps the LF
+# line endings the repository stores (.gitattributes: eol=lf); without it
+# Python would translate them to CRLF on Windows and the file would differ
+# from the checked-in one byte for byte.
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'unicodes.txt')
+open(out, 'w', encoding='utf-8', newline='').write("\n".join(lines) + "\n")
+print("wrote", out, "with", len(ks), "syllables")
