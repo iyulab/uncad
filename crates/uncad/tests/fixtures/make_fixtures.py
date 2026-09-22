@@ -91,6 +91,17 @@ def lwpolyline(points, closed, extrusion=None, bulges=None, layer=b"0",
     return entity("LWPOLYLINE", layer, *g, handle=handle, owner=owner, paper=paper)
 
 
+def construction(kind, x, y, dx, dy, layer=b"0", handle=None, owner=None):
+    """A RAY or an XLINE: base point (10) and unit direction (11)."""
+    return entity(
+        kind, layer,
+        (100, "AcDbXline" if kind == "XLINE" else "AcDbRay"),
+        (10, float(x)), (20, float(y)), (30, 0.0),
+        (11, float(dx)), (21, float(dy)), (31, 0.0),
+        handle=handle, owner=owner,
+    )
+
+
 def circle(cx, cy, r, extrusion=None, layer=b"0"):
     g = [(10, float(cx)), (20, float(cy)), (30, 0.0), (40, float(r))]
     if extrusion is not None:
@@ -814,6 +825,43 @@ def radial():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# --------------------------------------------------------------- fixture 13
+def infinite_lines():
+    """The two entities that have no end, in a drawing 0.002 units across.
+
+    A RAY and an XLINE are mathematically infinite, so the renderer has to
+    decide where to stop drawing them. Drawing them a fixed 1e6 units long
+    (what uncad did before 0.3.0) is a coordinate, not a length: this
+    drawing's crop is 0.002 units wide, so a 1568 px image is around 750
+    thousand pixels per unit and that segment lands 7e11 px off the canvas,
+    where tiny-skia's fixed-point scan converter asserts and takes the
+    process with it. The right answer is the edge of the picture.
+
+    | handle | entity | where | what it must look like |
+    |---|---|---|---|
+    | 30 | `LINE` | (0,0) to (0.002, 0.002) | the diagonal, and the entity the crop comes from |
+    | 31 | `TEXT` "X" | (0.0013, 0.0002), height 0.0006 | one text class, so the export can build a tile pyramid at all |
+    | 32 | `XLINE` | (0.001, 0.001), direction (1, 0) | a horizontal line across the whole image, through the middle |
+    | 33 | `RAY` | (0.001, 0.001), direction (0, 1) | a vertical line from the middle to the *top* edge, with nothing below it |
+
+    The base point of both construction lines is inside the LINE's box, so
+    the crop of this drawing is the crop of its finite entities -- an
+    infinite line must never enlarge it. The text sits in the bottom-right
+    quarter, clear of the middle row and column, so a test can sample both
+    construction lines (and the empty half below the ray) at pixels nothing
+    else draws on.
+    """
+    hdr = header(INSUNITS=(70, 4))
+    tbl = tables()
+    ents = (
+        line(0.0, 0.0, 0.002, 0.002, handle="30")
+        + text("X", 0.0013, 0.0002, height=0.0006, handle="31")
+        + construction("XLINE", 0.001, 0.001, 1.0, 0.0, handle="32")
+        + construction("RAY", 0.001, 0.001, 0.0, 1.0, handle="33")
+    )
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -840,6 +888,8 @@ if __name__ == "__main__":
         write("hatched_viewport_r2000.dxf", hatched_viewport())
     if which in ("all", "nested-attrib"):
         write("nested_attrib_r2000.dxf", nested_attrib())
+    if which in ("all", "infinite-lines"):
+        write("infinite_lines_r2000.dxf", infinite_lines())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":

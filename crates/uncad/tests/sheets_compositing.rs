@@ -317,3 +317,122 @@ fn sheet_rect_turns_the_paper_and_converts_the_unit() {
         "a height of 0 is no paper"
     );
 }
+
+/// The twisted-viewport fixture, whose one viewport shows the model at
+/// scale 2 twisted 30 degrees -- the frame an infinite line in model space
+/// has to be clipped in.
+const TWISTED_VIEWPORT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/twisted_viewport_r2000.dxf"
+);
+
+/// A RAY or an XLINE in model space is clipped through the viewport's own
+/// matrix, in the *sheet's* frame -- the one the model fragment is finally
+/// written in. Clip it in the model's frame instead and the segment is cut
+/// at the wrong place: too short (nothing where the viewport shows the
+/// line) or too long (the coordinate that overflows the rasterizer is back).
+/// This sheet's scale is low enough that the pre-0.3.0 1e6-unit segment
+/// survived it; what the test pins is the frame, and that the clip keeps
+/// the line inside the viewport it belongs to.
+///
+/// The fixture carries no construction line, so one is added to the parsed
+/// model: to `entities` and to the `*Model_Space` block record, which is
+/// what the renderer selects model space by.
+#[test]
+fn an_infinite_line_in_model_space_is_drawn_inside_the_viewport_and_nowhere_else() {
+    use uncad::model::{Entity, EntityCommon, Point3D, RayEntity};
+
+    let ink = |db: &uncad::CadDatabase, name: &str| -> (usize, usize) {
+        let tmp = TempDir::new(name);
+        let report = export_package(
+            db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 0,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let sheet = Sheet::read(&tmp.0, report.sheets.first().expect("one sheet"));
+        // The viewport's frame is 200 x 120 paper units about (150, 100).
+        // Its own dashed border, and the model line that starts exactly on
+        // it, live in a two-unit band that counts as neither side.
+        let (inside, outside) = (0..sheet.height)
+            .flat_map(|y| (0..sheet.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| sheet.dark[y * sheet.width + x])
+            .fold((0, 0), |(inside, outside), (x, y)| {
+                let wx = sheet.min_x + x as f64 / sheet.ppu;
+                let wy = sheet.max_y - y as f64 / sheet.ppu;
+                if (52.0..=248.0).contains(&wx) && (42.0..=158.0).contains(&wy) {
+                    (inside + 1, outside)
+                } else if (48.0..=252.0).contains(&wx) && (38.0..=162.0).contains(&wy) {
+                    (inside, outside)
+                } else {
+                    (inside, outside + 1)
+                }
+            });
+        (inside, outside)
+    };
+
+    let plain = uncad::parse(TWISTED_VIEWPORT).expect("fixture must parse");
+    let mut with_lines = uncad::parse(TWISTED_VIEWPORT).expect("fixture must parse");
+    // Through the middle of the model window (view centre (50, 25)).
+    for (handle, vector) in [
+        (
+            "2F",
+            Point3D {
+                x: 1.0,
+                y: 0.5,
+                z: 0.0,
+            },
+        ),
+        (
+            "3F",
+            Point3D {
+                x: 0.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        ),
+    ] {
+        let line = RayEntity {
+            common: EntityCommon {
+                handle: handle.to_string(),
+                layer: "0".to_string(),
+                color_index: 256,
+                ..EntityCommon::default()
+            },
+            point: Point3D {
+                x: 50.0,
+                y: 25.0,
+                z: 0.0,
+            },
+            vector,
+        };
+        let entity = if handle == "2F" {
+            Entity::XLine(line)
+        } else {
+            Entity::Ray(line)
+        };
+        with_lines
+            .tables
+            .block_records
+            .get_mut("*Model_Space")
+            .expect("the model block")
+            .entities
+            .push(entity.clone());
+        with_lines.entities.push(entity);
+    }
+
+    let (inside_plain, outside_plain) = ink(&plain, "no_construction_lines");
+    let (inside_lines, outside_lines) = ink(&with_lines, "construction_lines");
+    assert!(
+        inside_lines > inside_plain + 100,
+        "the construction lines drew almost nothing inside the viewport: \
+         {inside_plain} -> {inside_lines} pixels"
+    );
+    assert_eq!(
+        outside_plain, outside_lines,
+        "an infinite line escaped the viewport frame"
+    );
+}
