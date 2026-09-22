@@ -160,7 +160,9 @@ pub struct LwPolylineEntity {
     /// shares this struct, uses its own bit 1.
     pub closed: bool,
     /// One bulge per vertex (`tan(theta/4)` of the arc leaving it, 0 for a
-    /// straight segment); empty when the file stores none.
+    /// straight segment); empty when the file stores none. Signed for the
+    /// world-coordinate `vertices`: a mirrored OCS (`extrusion` z < 0)
+    /// reverses every arc, so the stored bulges are negated on the way in.
     #[serde(default)]
     pub bulges: Vec<f64>,
     /// `[start, end]` width per vertex; empty when unset.

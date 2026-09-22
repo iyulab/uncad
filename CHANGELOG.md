@@ -198,6 +198,61 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   LibreDWG decodes its `height` for R13/R14 only, so `text_height` was 0 and the SVG
   carried `font-size="0"`. The height is the DIMSTYLE's `DIMTXT` now (the new
   `ToleranceEntity::dimstyle` names it), else the header's, else 1.0.
+- Polyline arcs were drawn as their mirror image across the chord: the renderer emitted
+  SVG sweep flag 1 for a positive (counter-clockwise) bulge, so every fillet, slot,
+  rounded corner and revision-cloud scallop bent the wrong way -- away from the space
+  the crop reserved for it (the ARC entity was right all along). A polyline in a
+  mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
+  vertices, since the reflection reverses each arc's turn; `bulges` are documented as
+  world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- Drawings far from the origin lost their lines and got garbled text in every PNG, tile
+  and sheet, silently: the SVG carried absolute world coordinates and usvg/tiny-skia keep
+  path points in `f32`, so at 1e7 units the 1.25 px strokes collapsed and at 2.5e8 (a
+  millimetre plan at projected coordinates) the glyph outlines were quantized to 16 mm.
+  The renderer now writes every coordinate relative to the drawing's own origin -- the
+  rounded per-axis median of its entities' reference points, used only when it exceeds
+  32768 units, so every drawing near the origin keeps its SVG byte for byte -- and
+  reports it as `ToSvgResult::origin` / `ToPngResult::origin` (SVG user units = world
+  minus origin; `view_box` and every JSON record stay in world units); the package's
+  `manifest.json` carries `drawing.svg`'s origin as `svg_origin`. A composited sheet
+  folds the model's and the paper's origins into the viewport matrix.
+- On a composited sheet the paper's and the model's hatch pattern definitions shared ids
+  (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
+  legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's
+  pattern lines were not scaled by the viewport, so a 1:16 viewport drew them 0.08 px
+  wide. A paper render prefixes its ids with `p`, and every composited viewport gets its
+  own copy of the model's defs (ids suffixed with the viewport handle) with the pattern
+  strokes scaled by its scale. New fixture `hatched_viewport_r2000.dxf`.
+- A rotated block nested inside a mirrored (negative x scale or extrusion `(0,0,-1)`)
+  or non-uniformly scaled block reference had its bounds, crop, tile membership,
+  `blocks.json` box and `texts.json` anchors reflected about the parent's insertion
+  point, although the picture (nested `<g transform>` groups) was right: the composed
+  transform added rotations and multiplied scales, which is only valid for a uniform
+  scale. Both the renderer's transform and the export's affine are full 2 x 3 matrices
+  composed by multiplication now. A nested text's estimated box goes through the same
+  matrix, and its `rotation_deg` is the orientation of its glyphs (the transformed up
+  axis), so an upright mirror-written label stays 0.
+- The extent of a CIRCLE, ARC, ELLIPSE or bulged polyline inside a block reference
+  rotated by other than a multiple of 90 degrees was measured from two corners of its
+  box, so a circle in a block inserted at 45 degrees had a zero-width extent and a
+  door swing lost its far half: `--crop raw` cut it off, `blocks.json` boxes were short
+  and the tiles the swing crossed were rendered blank. All four corners are measured
+  now (conservative by up to sqrt 2 at 45 degrees, never short).
+- Text was drawn 27 % too small: the CAD text height (the height of the capitals) was
+  used as the SVG em size. TEXT, ATTRIB, MTEXT, TOLERANCE and dimension labels are now
+  drawn at `font-size = height / 0.733`, the bundled face's cap-height ratio
+  (`png::BUNDLED_CAP_HEIGHT`, from the font's OS/2 table), so a height-2.5 label has
+  2.5-unit capitals; the justification offsets are one height for top and half for
+  middle. MTEXT baselines are spaced 5/3 of the height (AutoCAD's single spacing, and
+  what the extents estimate already assumed) instead of 1.2. `texts.json` records keep
+  the drawing's `height`; their measured boxes reflect the larger glyphs, and the 0.6-em
+  estimate (`text::CHAR_ADVANCE`) scales with the font size.
+- A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
+  `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
+  MTEXT already was.
+- The `TinyOverview` warning tested the overview's long edge, which the profile always
+  keeps at several hundred pixels, so it never fired; it now tests the short edge (a
+  500:1 drawing's 700 x 28 px overview is reported).
 - Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
   offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
   anchored at its left-baseline point, i.e. displaced by up to its own width (541 of

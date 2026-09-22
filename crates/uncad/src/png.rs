@@ -107,10 +107,14 @@ pub struct ToPngResult {
     pub height: u32,
     /// The rendering's viewBox, i.e. what the image shows -- see
     /// [`ViewBox`] for the world-to-pixel mapping together with
-    /// [`px_per_unit`](Self::px_per_unit).
+    /// [`px_per_unit`](Self::px_per_unit). In world units.
     pub view_box: ViewBox,
     /// Pixels per drawing unit: `pixel = (world - viewBox origin) * this`.
     pub px_per_unit: f64,
+    /// The world point the intermediate SVG's coordinates were relative
+    /// to (see [`crate::ToSvgResult::origin`]); the pixel mapping above is
+    /// unaffected. Since 0.3.0.
+    pub origin: [f64; 2],
     pub unsupported_types: Vec<String>,
     /// Entities hidden by the drawing -- see [`crate::ToSvgResult::hidden`].
     pub hidden: usize,
@@ -166,8 +170,13 @@ impl std::error::Error for PngError {}
 /// touches disk.
 ///
 /// Text is shaped with the bundled `Uncad Sans` face by default
-/// ([`Fonts`]), so the image is the same on every machine; a character the
-/// subset lacks is dropped with a warning in the log rather than an error.
+/// ([`Fonts`]), so the image is the same on every machine. A character the
+/// subset lacks is not an error and is not dropped: usvg keeps it as glyph
+/// 0, which the subset carries as a crossed `.notdef` box with its own
+/// advance, so it is drawn as a box and the rest of the string keeps its
+/// layout (the export counts it in `unshaped_glyphs`). usvg logs a
+/// `log::warn!` for it only when the embedding application installs a
+/// `log` implementation; this crate and the CLI install none.
 pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, PngError> {
     let rendered = svg::render(db, options.svg);
     let content = rendered.choice.rect;
@@ -241,6 +250,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         height,
         view_box,
         px_per_unit,
+        origin: rendered.origin,
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
         crop: rendered.choice.report(rect, padding_units),
@@ -322,8 +332,9 @@ pub enum Fonts {
     /// The bundled `Uncad Sans` only (a Noto Sans KR subset: Latin, Greek,
     /// the 2350 common Hangul syllables and the CAD symbols -- see
     /// `crates/uncad/fonts/README.md`). The same pixels and the same text
-    /// boxes on every machine; a character outside the subset is dropped
-    /// with a warning in the log.
+    /// boxes on every machine; a character outside the subset is drawn as
+    /// a crossed `.notdef` box (the subset keeps the notdef outline) and
+    /// counted as unshaped by the export -- see [`to_png`].
     #[default]
     Bundled,
     /// The bundled face first, then the host's installed fonts for the
@@ -334,6 +345,21 @@ pub enum Fonts {
 
 /// The family name the bundled font is registered under.
 pub const BUNDLED_FONT_FAMILY: &str = "Uncad Sans";
+
+/// The bundled face's cap height as a fraction of its em: OS/2
+/// `sCapHeight` 733 over `head.unitsPerEm` 1000 in
+/// `fonts/UncadSans-Regular.otf` (read from the font's own tables; the
+/// unit test below checks the value against the embedded bytes). CAD text
+/// height is the height of the capitals, not the em, so the renderer draws
+/// a text of height `h` at `font-size = h / BUNDLED_CAP_HEIGHT` and the
+/// estimates in [`crate::text`] scale their per-character advance the same
+/// way.
+pub const BUNDLED_CAP_HEIGHT: f64 = 0.733;
+
+/// The descender the renderer assumes below the baseline, as a fraction of
+/// the em (a Latin `p`/`g` in the bundled face, not the deeper CJK
+/// descender the `hhea` table carries).
+pub const BUNDLED_DESCENDER: f64 = 0.2;
 
 static UNCAD_SANS: &[u8] = include_bytes!("../fonts/UncadSans-Regular.otf");
 
@@ -402,6 +428,37 @@ fn encode_rgb8(pixmap: &tiny_skia::Pixmap) -> Result<Vec<u8>, PngError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One table of an OpenType font: its bytes, found through the table
+    /// directory at the start of the file (a 12-byte header, then 16-byte
+    /// records of tag, checksum, offset, length).
+    fn otf_table<'a>(font: &'a [u8], tag: &[u8; 4]) -> &'a [u8] {
+        let count = u16::from_be_bytes([font[4], font[5]]) as usize;
+        (0..count)
+            .map(|i| &font[12 + 16 * i..12 + 16 * (i + 1)])
+            .find(|record| &record[..4] == tag)
+            .map(|record| {
+                let offset = u32::from_be_bytes(record[8..12].try_into().unwrap()) as usize;
+                let length = u32::from_be_bytes(record[12..16].try_into().unwrap()) as usize;
+                &font[offset..offset + length]
+            })
+            .unwrap_or_else(|| panic!("the font has a {} table", String::from_utf8_lossy(tag)))
+    }
+
+    #[test]
+    fn the_cap_height_constant_is_the_bundled_fonts_own() {
+        // head.unitsPerEm sits at offset 18; OS/2 sCapHeight at offset 88
+        // (version 2+; the field exists since version 2).
+        let head = otf_table(UNCAD_SANS, b"head");
+        let upem = f64::from(u16::from_be_bytes([head[18], head[19]]));
+        let os2 = otf_table(UNCAD_SANS, b"OS/2");
+        let version = u16::from_be_bytes([os2[0], os2[1]]);
+        assert!(version >= 2, "OS/2 version {version} has no sCapHeight");
+        let cap = f64::from(i16::from_be_bytes([os2[88], os2[89]]));
+        assert_eq!(upem, 1000.0);
+        assert_eq!(cap, 733.0);
+        assert!((cap / upem - BUNDLED_CAP_HEIGHT).abs() < 1e-12);
+    }
 
     /// Decodes just the IHDR chunk's width/height (bytes 16..24 of any
     /// PNG) rather than pulling in an image-decoding dependency purely for

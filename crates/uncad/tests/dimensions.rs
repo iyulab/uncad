@@ -373,8 +373,19 @@ fn a_tolerance_takes_its_text_height_from_its_dimension_style() {
     assert!(tolerance.text_height > 0.0);
     let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
     assert!(!svg.contains("font-size=\"0\""), "a zero-height text");
+    // The renderer draws capitals at the CAD height, so the em size is the
+    // height over the bundled face's cap-height ratio.
+    let start = svg.find("id=\"4F1\"").expect("4F1 is drawn");
+    let element = &svg[start..start + 400];
+    let font_size = element
+        .split("font-size=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .and_then(|v| v.parse::<f64>().ok())
+        .expect("4F1 has a font-size");
+    let expected = 2.5 / uncad::png::BUNDLED_CAP_HEIGHT;
     assert!(
-        svg.contains("id=\"4F1\"") && svg.contains("font-size=\"2.5\""),
-        "4F1 at its style's height"
+        (font_size - expected).abs() < 1e-9,
+        "4F1 at its style's height: font-size {font_size} vs {expected}"
     );
 }

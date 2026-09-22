@@ -11,8 +11,10 @@ Extended-A Noto Sans KR has, Greek, General Punctuation, Hangul Compatibility
 Jamo, the 2350 KS X 1001 Hangul syllables, and the CAD symbols `∅ ° ± ² ³ ×
 Ø ㎡ ㎜ ㎥ ㎝ ㎞ ← ↑ → ↓ φ Δ Ω`. Hanja, the other 8822 syllables and `⌀`
 (U+2300, absent from Noto Sans KR itself) are not included: with the default
-`Fonts::Bundled` such a character is dropped with a usvg warning, with
-`Fonts::BundledAndSystem` the host's fonts fill in.
+`Fonts::Bundled` such a character is drawn as a crossed `.notdef` box (the
+subset keeps the notdef outline, see below) and counted in the export's
+`unshaped_glyphs` / `UnshapedGlyphs` warning; with `Fonts::BundledAndSystem`
+the host's fonts fill in.
 
 ## Why this font
 

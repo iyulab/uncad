@@ -255,6 +255,19 @@ fn read_extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
         .unwrap_or(crate::geom::WORLD_Z)
 }
 
+/// Keeps a polyline's bulges consistent with its vertices once those are in
+/// world coordinates: the OCS-to-world map of a mirrored extrusion (z < 0)
+/// is a reflection, which reverses every arc's turning direction, so each
+/// bulge changes sign. A bulge is `tan(theta / 4)` with the sign of the
+/// turn, so negating it is exact.
+fn mirror_bulges(bulges: &mut [f64], extrusion: Point3D) {
+    if extrusion.z < 0.0 {
+        for b in bulges.iter_mut().filter(|b| **b != 0.0) {
+            *b = -*b;
+        }
+    }
+}
+
 /// The bulge of every VERTEX_2D a POLYLINE_2D owns, in order.
 ///
 /// # Safety
@@ -533,6 +546,7 @@ unsafe fn convert_entity(
             if bulges.iter().all(|b| *b == 0.0) {
                 bulges.clear();
             }
+            mirror_bulges(&mut bulges, extrusion);
             let widths: Vec<[f64; 2]> =
                 get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_widths", "widths");
             let const_width =
@@ -890,6 +904,7 @@ unsafe fn convert_entity(
             if bulges.len() != vertices.len() || bulges.iter().all(|b| *b == 0.0) {
                 bulges.clear();
             }
+            mirror_bulges(&mut bulges, extrusion);
             let vertices = vertices
                 .iter()
                 .map(|v| crate::geom::ocs_to_wcs_2d(*v, elevation, extrusion))
@@ -1503,6 +1518,28 @@ unsafe fn dxfname(obj: *mut libredwg_sys::Dwg_Object) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mirror_bulges_negates_every_bulge_under_a_mirrored_ocs_only() {
+        // Shared by the LWPOLYLINE and POLYLINE_2D arms: the OCS-to-world
+        // map for (0,0,-1) is the reflection x -> -x, which turns a
+        // counter-clockwise arc clockwise, so tan(theta / 4) flips sign; a
+        // zero stays a plain 0 (not -0), and an upright OCS changes nothing.
+        let mut bulges = vec![0.0, 0.41421356, -1.0, 0.0];
+        mirror_bulges(
+            &mut bulges,
+            Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: -1.0,
+            },
+        );
+        assert_eq!(bulges, [0.0, -0.41421356, 1.0, 0.0]);
+        assert!(bulges.iter().all(|b| *b != 0.0 || !b.is_sign_negative()));
+        let mut upright = vec![0.0, 0.41421356];
+        mirror_bulges(&mut upright, crate::geom::WORLD_Z);
+        assert_eq!(upright, [0.0, 0.41421356]);
+    }
 
     fn aci_stop(shift_value: f64, index: i16) -> libredwg_sys::Dwg_HATCH_Color {
         libredwg_sys::Dwg_HATCH_Color {

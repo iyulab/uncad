@@ -253,3 +253,86 @@ fn hangul_renders_with_the_bundled_font() {
     // Every character is in the bundled face, so the host's fonts add nothing.
     assert_eq!(ink, ink_system);
 }
+
+/// A TEXT whose every character is outside the bundled subset (Hanja),
+/// plus a LINE for a crop.
+fn hanja_only() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let entities = vec![
+        uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: "L".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 100.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }),
+        uncad::Entity::Text(TextEntity {
+            common: EntityCommon {
+                handle: "T".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point2D { x: 10.0, y: 10.0 },
+            text_height: 20.0,
+            text: "\u{6f22}\u{5b57}".into(),
+            text_plain: "\u{6f22}\u{5b57}".into(),
+            rotation: 0.0,
+            horizontal_alignment: 0,
+            vertical_alignment: 0,
+            alignment_point: None,
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            style: String::new(),
+        }),
+    ];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_character_outside_the_bundled_subset_is_drawn_as_a_notdef_box() {
+    // The documented behaviour of `Fonts::Bundled`: a missing character is
+    // not dropped, it is drawn as the subset's crossed .notdef box. So the
+    // image holds ink above the line (the text sits at y 10..30 over a
+    // line at y 0), not just the line itself.
+    let result = hanja_only()
+        .to_png(ToPngOptions {
+            lattice: 0,
+            ..Default::default()
+        })
+        .expect("renders");
+    let image = decode(&result.png);
+    let (_, y_line) = result.view_box.world_to_px(0.0, 0.0, result.px_per_unit);
+    let (_, y_text_top) = result.view_box.world_to_px(0.0, 30.0, result.px_per_unit);
+    let mut above_line = 0usize;
+    for y in (y_text_top as u32).saturating_sub(2)..(y_line as u32).saturating_sub(4) {
+        for x in 0..image.width {
+            if image.pixel(x, y)[0] < 128 {
+                above_line += 1;
+            }
+        }
+    }
+    // Two boxes of a 20-unit glyph at ~14 px/unit: hundreds of stroke
+    // pixels each; a dropped glyph would leave the band empty.
+    assert!(
+        above_line > 500,
+        "only {above_line} dark pixels above the line: the missing glyphs were not drawn"
+    );
+}
