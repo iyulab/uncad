@@ -4,11 +4,11 @@ This project bundles or builds against the following third-party components.
 
 ## LibreDWG
 
-- **Source**: https://github.com/LibreDWG/libredwg (the real upstream project, tracked as a **git submodule** at `lib/libredwg`, plus an unmodified subset of it vendored directly into `crates/libredwg-sys/vendor/libredwg/` — see below)
+- **Source**: https://github.com/LibreDWG/libredwg (the real upstream project, tracked as a **git submodule** at `lib/libredwg`, plus a subset of it, carrying the two local patches described below, vendored directly into `crates/libredwg-sys/vendor/libredwg/`)
 - **Copyright**: Free Software Foundation, Inc.
 - **License**: GNU General Public License v3.0 or later (GPLv3+), original `COPYING` file included at `crates/libredwg-sys/vendor/libredwg/COPYING`
 - **Used for**: DWG and DXF parsing (core engine, compiled as a native static library, linked via Rust FFI — `crates/libredwg-sys`)
-- **Modified**: yes, in two places, both marked in the source with an `uncad local patch` comment naming what changed and why (GPLv3 §5(a)). `src/dwg.c`: `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and `dwg_handle_name()` read a table record's name through a new `uncad_record_name_utf8()` helper, so an R2007+ DXF's UTF-16 record names are compared correctly. `src/common.c`: `cvt_TIMEBLL()` zeroes its `struct tm` and clamps every field into the ranges `strftime()` accepts, so a corrupt date cannot fail-fast the process. `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG", has the full reasoning. Everything else is upstream as written; autotools' generated `config.h` is stood in for by this project's own `crates/libredwg-sys/vendor-config/config.h`, a separate file, not a patch to LibreDWG's own sources.
+- **Modified**: yes, in two places, both dated 2026-09-23 and marked in the source with an `uncad local patch` comment naming what changed and why (GPLv3 §5(a)). The same notice travels inside the published crate as `crates/libredwg-sys/NOTICE.md`, because `docs/` is not part of that tarball. `src/dwg.c`: `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and `dwg_handle_name()` read a table record's name through a new `uncad_record_name_utf8()` helper, so an R2007+ DXF's UTF-16 record names are compared correctly. `src/common.c`: `cvt_TIMEBLL()` zeroes its `struct tm` and clamps every field into the ranges `strftime()` accepts, so a corrupt date cannot fail-fast the process. `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG", has the full reasoning. Everything else is upstream as written; autotools' generated `config.h` is stood in for by this project's own `crates/libredwg-sys/vendor-config/config.h`, a separate file, not a patch to LibreDWG's own sources.
 - **Vendored subset**: `crates/libredwg-sys` is published to crates.io as a standalone, self-contained crate, and crates.io only packages files inside a crate's own directory (no git submodules for downstream consumers). So `crates/libredwg-sys/vendor/libredwg/` holds a copy of just the 112 upstream files this crate's `build.rs` actually compiles/includes (24 `.c` files plus every header/`.spec`/`.inc`/codepage table they `#include`, traced from the real include graph, not a hand-picked subset), with the two patches above, rather than the full `lib/libredwg` submodule (which also has tests, docs, examples, and program sources this crate never builds). See `docs/ARCHITECTURE.md`'s "Build" section and `scripts/sync-libredwg-vendor.sh` for how it's kept in sync with the submodule.
 
 ## Rust dependencies
@@ -46,6 +46,12 @@ the licenses, not every copyright holder. Versions above are what `Cargo.toml` a
 `Cargo.lock` has the resolved ones.
 
 ---
+
+Each published crate carries the full GPLv3 text as a `LICENSE` file in its own directory
+(`crates/libredwg-sys/`, `crates/uncad/`, `crates/uncad-cli/`), byte-identical to the
+repository root's. They are copies rather than one shared file because `cargo package`
+never reaches outside a crate directory, and GPLv3 §4 asks for the licence to be conveyed
+with the source that is conveyed — a crates.io tarball is exactly that.
 
 This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party *code* bundled; the second bundled component, the Noto Sans KR subset below, is data under the SIL Open Font License 1.1, which permits bundling in GPL software). The Rust dependencies above are all permissive, so none of them constrains that choice. See [`LICENSE`](../LICENSE).
 

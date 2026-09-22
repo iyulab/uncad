@@ -16,8 +16,12 @@ use uncad::{
     ToJsonOptions, ToPngOptions, ToSvgOptions,
 };
 
-const USAGE: &str = "\
-uncad - parse DWG/DXF drawings
+const VERSION: &str = concat!("uncad ", env!("CARGO_PKG_VERSION"));
+
+const USAGE: &str = concat!(
+    "uncad ",
+    env!("CARGO_PKG_VERSION"),
+    " - parse DWG/DXF drawings
 
 Usage:
   uncad <input.dwg>                 print a summary (version, units, entity count per type)
@@ -35,6 +39,7 @@ Both commands:
                                 (its extension picks the format) or, under
                                 'export', the package directory
   -h, --help                  print this usage
+  -V, --version               print the version and exit
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -102,7 +107,8 @@ Examples:
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
   uncad drawing.dwg -o drawing.png --fit 4000
-  uncad drawing.dwg -o drawing.png --scale 2";
+  uncad drawing.dwg -o drawing.png --scale 2"
+);
 
 /// Which command line is being parsed: the flags each one accepts differ,
 /// and a flag of the other command is refused with a message naming it.
@@ -126,6 +132,7 @@ struct Args {
     include_hidden: bool,
     padding: Option<String>,
     help: bool,
+    version: bool,
     // The plain command only.
     space: String,
     lattice: Option<String>,
@@ -163,6 +170,7 @@ fn parse_args(argv: &[String], command: Command) -> Result<Args, String> {
         include_hidden: false,
         padding: None,
         help: false,
+        version: false,
         space: "model".to_string(),
         lattice: None,
         fit: None,
@@ -197,6 +205,7 @@ fn parse_args(argv: &[String], command: Command) -> Result<Args, String> {
         };
         match flag {
             "-h" | "--help" => args.help = true,
+            "-V" | "--version" => args.version = true,
             "-o" | "--output" => args.output = Some(value()?),
             "--crop" => args.crop = value()?,
             "--no-trim" => args.crop = "raw".to_string(),
@@ -344,6 +353,13 @@ fn main() -> ExitCode {
         }
     };
 
+    if args.version {
+        // stdout, unlike the usage: this line is meant to be captured
+        // (a bug report, a shell check of what is installed).
+        println!("{VERSION}");
+        return ExitCode::SUCCESS;
+    }
+
     if args.help || args.input.is_none() {
         eprintln!("{USAGE}");
         return if args.help {
@@ -458,6 +474,10 @@ fn run(args: &Args) -> Result<(), String> {
 
 fn run_export(argv: &[String]) -> Result<(), String> {
     let args = parse_args(argv, Command::Export)?;
+    if args.version {
+        println!("{VERSION}");
+        return Ok(());
+    }
     if args.help {
         eprintln!("{USAGE}");
         return Ok(());

@@ -558,7 +558,11 @@ constant:
 Every cap **the renderer** applies is *reported*, never silent: `ToSvgResult::limits` and
 `ToPngResult::limits` carry a `LimitReport`, the CLI prints it as a warning, and a package
 puts it in `report.json` under `limits` and in `warnings`. The same drawing now renders in
-1.4 s to a 67 MB SVG saying it dropped 3 496 block references and 869 entities.
+0.6 s to a 385 KB SVG (394 554 bytes) whose warning reads "1824 block references past the
+20 nesting / 100000 expansion limit; 8 entities that would each have drawn more than
+4 MiB". The 4 MiB per-entity cap is what those eight hit; with it in place the drawing body
+never approaches the 64 MiB backstop, so nothing is counted against `MAX_SVG_BODY_BYTES`
+any more.
 
 A count on its own is not enough to act on, so `LimitReport::dropped` also *names* the
 entities -- handle, DXF type and which cap acted -- for the first 100 of them
@@ -901,8 +905,11 @@ has the same shape and the same absence of anything this crate can do about it.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it now carries four local patches. Each is marked
-in the source with an `uncad local patch` comment saying why.
+`docs/ARCHITECTURE.md`, "Build"), and it now carries five local patches. Each is
+marked in the source with a dated `uncad local patch` comment saying why, and each
+is listed again in `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that
+is what a crates.io consumer receives and this file is not in the tarball
+(GPLv3 §5(a)).
 **`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
 these patches is part of any submodule update.**
 
@@ -1125,8 +1132,8 @@ layout" covers where a new test belongs. The counts below are what
 `cargo test --workspace -- --list` reports at 0.3.0; regenerate them from that command
 rather than editing them by hand.
 
-`cargo test --workspace` runs 346 tests (345 of them by default; `corpus_sweep` is
-listed but `#[ignore]`d). 147 of them are `uncad` unit tests, by module:
+`cargo test --workspace` runs 382 tests (381 of them by default; `corpus_sweep` is
+listed but `#[ignore]`d). 158 of them are `uncad` unit tests, by module:
 `svg*.rs` 50 -- `svg.rs` 21 (HATCH edge approximation, stroke-width substitution,
 block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation,
 non-finite coordinate defense, block-reference recursion blowup), `svg/infinite.rs` 16
@@ -1151,8 +1158,9 @@ them genuinely useful regression guards: whether `crop::outliers` sets aside the
 INSERT and nothing else, or whether `parse_sat_records` really stops at the
 `End-of-ACIS-data` marker, is decidable without a DWG file at all.
 
-**Real-file tests**: 153 across the 23 integration files in `crates/uncad/tests/`, plus
-45 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
+**Real-file tests**: 173 across the 23 integration files in `crates/uncad/tests/`,
+plus 45 in `uncad-cli`'s `documented_invocations.rs` and 6 in its
+`release_invariants.rs`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
 `parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
 (`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
 unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
@@ -1184,8 +1192,17 @@ asserting a bound or a screened entity, never a crash),
 `entities` and in `tables.block_records`) and `corpus_sweep.rs` (1, `#[ignore]`d: parses
 and renders all 208 corpus files and fails on any panic -- `docs/EVAL.md` records what it
 found). The other four run against this project's own committed DXF fixtures
-(`crates/uncad/tests/fixtures/`, 17 files written by `make_fixtures.py`): `fixtures.rs`
-(18), `block_transforms.rs` (4), `sheets_compositing.rs` (4) and `control_chars.rs` (2).
+(`crates/uncad/tests/fixtures/`, 18 files written by `make_fixtures.py`): `fixtures.rs`
+(19), `block_transforms.rs` (4), `sheets_compositing.rs` (4) and `control_chars.rs` (2).
+`uncad-cli`'s `tests/release_invariants.rs` (6) reads the repository rather than a
+drawing: that every published crate directory holds the GPLv3 text (`cargo package`
+reaches no further than the crate directory, so the repository root's copy never travels),
+that the bundled font and the vendored LibreDWG keep their own licence beside them, that
+nothing calls the vendored copy unmodified while it carries `uncad local patch` markers,
+that `uncad --version` prints the version in the manifest, that README, this file and
+`docs/ARCHITECTURE.md` state the integration-test counts the tree actually has, and that
+`ci.yml` triggers on every push as the Clippy section below claims. Its numbers are
+derived from the tree, never copied from the documents.
 `uncad-cli`'s `tests/documented_invocations.rs` (45) runs every call the README and
 `--help` document against the real binary -- the `export` subcommand and each of its
 options included -- and the parser's refusals (an unknown option, a second positional, a
@@ -1211,7 +1228,12 @@ independent reference rather than against this project's own output.
 
 A separate `lint` job in `.github/workflows/ci.yml` runs `cargo fmt --check` and
 `cargo clippy --workspace --all-targets -- -D warnings` on every push and pull request, so
-whether the tree is clean is tracked automatically. A separate `security-audit` job runs
+whether the tree is clean is tracked automatically. "Every push" means every branch, not
+just `main`: the workflow's trigger was `push: branches: [main]` until 0.3.0, which left a
+long-lived release branch with no automated coverage at all until someone opened a pull
+request for it. A `concurrency` group keyed on `github.head_ref || github.ref` with
+`cancel-in-progress` keeps the wider trigger cheap -- a branch's push run is superseded as
+soon as its pull-request run, or the next push, starts. A separate `security-audit` job runs
 `cargo audit` against `Cargo.lock` for dependency vulnerabilities (without submodules --
 the vendored C sources are not part of the Rust dependency graph). The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
@@ -1223,7 +1245,7 @@ generated code. New warnings in hand-written code still fail CI.
 ## Windows/Linux
 
 Builds and tests pass on Linux (`x86_64-unknown-linux-gnu`), verified locally in a Docker
-`rust:latest` image with `libclang-dev` and re-verified on every push by the
+`rust:latest` image with `libclang-dev` and re-verified on every push (any branch) by the
 `ubuntu-latest` job in `.github/workflows/ci.yml`. A `windows-latest` job covers the MSVC
 platform this project is actually developed on. Three real bugs were found and fixed while
 getting Linux working:

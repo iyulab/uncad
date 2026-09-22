@@ -240,6 +240,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   estimated and unavailable) and `manifest.frames_dropped_total`.
 - `sheets.json` states `model_to_paper`: how a model point lands on a sheet, in the
   fields its own viewport records carry.
+- `uncad --version` (and `-V`), on both commands, printing `uncad <version>` on stdout;
+  `--help` carries the same line at the top. The flag used to fall through to the
+  unknown-option arm and exit 1, so an installed binary had no way to say what it was.
+- Every published crate now carries the GPLv3 text as its own `LICENSE`: `cargo package`
+  only includes files under the crate directory, so the repository root's copy never
+  reached a tarball and `uncad-cli` 0.2.0 shipped with no licence text at all (GPLv3 §4).
+  `crates/libredwg-sys/NOTICE.md` is new beside it: the modification notice for the two
+  local patches in the vendored LibreDWG, dated, inside the tarball, because the
+  in-source markers used to point at `docs/CAVEATS.md`, which a crates.io consumer never
+  receives (GPLv3 §5(a)).
 
 ### Changed
 
@@ -471,7 +481,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   emitted drawing body (64 MiB, the backstop behind the rest), the points one entity may
   draw with (100 000), and how much larger than the shape it fills a HATCH pattern's tile
   may be (16x -- a corrupt spacing of 1e12 over a ten-unit boundary asks resvg for a
-  pixmap 1e11 pixels on a side). The same drawing now renders in 1.4 s. No corpus file
+  pixmap 1e11 pixels on a side). The same drawing now renders in 0.6 s to a 385 KB SVG,
+  reporting 1 824 dropped block references and 8 entities left out by the 4 MiB
+  per-entity cap above. No corpus file
   and none of the seven AutoCAD samples engages any cap: their documents are unchanged
   byte for byte. See `docs/CAVEATS.md`, "Every number the renderer takes from the file
   is bounded".
@@ -865,6 +877,31 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   of any record in the package. It states the mapping in the fields the viewport records
   publish -- `frame`, `model_window`, `scale`, `twist_deg` -- and where to go from paper
   units to sheet pixels.
+- Building `libredwg-sys` without libclang now fails in a second with a message naming
+  the prerequisite and the install command for Windows, Debian/Ubuntu, Fedora, Alpine and
+  macOS. It used to compile all of LibreDWG first and then die inside
+  `bindgen::Builder::generate()` with a raw `Unable to find libclang` panic under a
+  screenful of `cc` environment dump -- nothing in which names uncad, LLVM, or the fix.
+  README.md documents the prerequisite, but `cargo install uncad-cli` never shows it.
+- `libredwg-sys`'s crates.io description no longer calls the vendored LibreDWG
+  "unmodified upstream". It carries two local patches, which `README.md`,
+  `docs/CAVEATS.md` and `docs/THIRD_PARTY_NOTICES.md` all describe -- the description was
+  the one piece of metadata still saying the opposite, and it is the most visible one.
+  `docs/THIRD_PARTY_NOTICES.md` called the vendored subset "unmodified" four lines above
+  declaring it modified; it no longer does.
+- `.github/workflows/ci.yml` triggers on every push, not only on pushes to `main`.
+  `docs/CAVEATS.md` has claimed since 0.3.0's lint section that "whether the tree is
+  clean is tracked automatically" on every push, which was not true of a branch with no
+  pull request open. A `concurrency` group keeps the wider trigger from doubling runs.
+- Documents that count things: README said 18 of 22 integration test files where the tree
+  has 19 of 23, `docs/ARCHITECTURE.md`'s crate-layout listing omitted `tests/limits.rs`
+  and contradicted its own total, `docs/CAVEATS.md` said 149 real-file tests where its own
+  per-file numbers sum to 150, and the byte-flip measurements in `docs/CAVEATS.md` and
+  here predated the 4 MiB per-entity cap. `docs/VLM_EXPORT_DESIGN.md` sections 2, 3, 4
+  and 5 are now tagged where they describe a proposal rather than the package, and
+  section 10 carries the measured list of differences.
+  `crates/uncad-cli/tests/release_invariants.rs` re-derives these numbers from the tree
+  so the next drift fails a test.
 
 ### Removed
 

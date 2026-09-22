@@ -32,9 +32,9 @@ crates/
                          acis.rs (3DSOLID wireframes) beside them. Read-only: there is
                          no DWG/DXF write path.
     tests/               integration tests against the public API, one file per concern
-                         (22 files: acceptance, acis_sab, block_transforms, codepage,
+                         (23 files: acceptance, acis_sab, block_transforms, codepage,
                          control_chars, corpus_sweep, corrupt_dwg, crop, dimensions,
-                         dxf_pipeline, export, fixtures, header, png_output,
+                         dxf_pipeline, export, fixtures, header, limits, png_output,
                          polyline_closed, polyline_geometry, r2007_dxf_handles,
                          read_paths, sheets, sheets_compositing, text_fields,
                          visibility); corpus_sweep.rs is ignored by
@@ -43,7 +43,10 @@ crates/
     examples/            dump.rs / blocks.rs -- manual checks
   uncad-cli/             the CLI binary (uncad)
     tests/               documented_invocations.rs -- every call README and --help
-                         advertise
+                         advertise; release_invariants.rs -- what has to hold before a
+                         publish (a licence file in every crate, metadata that does not
+                         contradict the vendored sources, the counts the documents
+                         state, the CI trigger)
 ```
 
 ## Build: the `cc` crate instead of autotools, a vendored copy instead of the submodule
@@ -104,7 +107,7 @@ it needs access to**.
 
 **Unit tests** exist where they are precisely because they can call private helpers.
 Everything that needs no external file -- color resolution, SVG generation, SAT parsing,
-the crop rules, polyline geometry -- lives here: 145 of the 340 tests
+the crop rules, polyline geometry -- lives here: 158 of the 382 tests
 (`docs/CAVEATS.md` owns that count; it is repeated here only to size the layer). One
 exception: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` reads a real DWG
 end-to-end but sits here because it needs the private `png_dimensions` helper.

@@ -2328,8 +2328,10 @@ dwg_find_table_control (Dwg_Data *restrict dwg, const char *restrict table)
   return NULL;
 }
 
-/* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the vendored
-   LibreDWG") -------------------------------------------------------------
+/* --- uncad local patch, 2026-09-23 (NOTICE.md at the root of this crate,
+   "The two changes"; the full reasoning is in the project's docs/CAVEATS.md,
+   "Local patches to the vendored LibreDWG", which is not in the published
+   tarball) ---------------------------------------------------------------
 
    LibreDWG stores a T (text) field as UTF-16 whenever the *writer* side of
    dynapi decided to: dynapi_set_helper() widens as soon as

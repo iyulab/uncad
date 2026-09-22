@@ -61,6 +61,12 @@ fn main() {
          and unsafe to silently use on a {pointer_width}-bit target. See docs/CAVEATS.md."
     );
 
+    // The other prerequisite, and the one a crates.io consumer is actually
+    // likely to be missing. Checked here rather than at the bindgen call
+    // below so that it costs a second, not the several minutes of `cc` that
+    // would otherwise come first.
+    check_libclang();
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
     // Build from the vendored copy inside the crate (vendor/libredwg), not
@@ -340,5 +346,62 @@ fn main() {
             .parent()
             .expect("vendor/libredwg/src always has a parent directory")
             .display()
+    );
+}
+
+/// Fails early, and by name, when libclang is missing.
+///
+/// bindgen needs libclang at build time. Without it the build dies at the
+/// bottom of this file inside `Builder::generate()` -- after several minutes
+/// of compiling LibreDWG, under a screenful of `cc` environment dump -- with
+/// `Unable to find libclang: "couldn't find any valid shared libraries
+/// matching: ['clang.dll', 'libclang.dll'] ..."`, which names neither this
+/// crate, nor LLVM, nor the command that fixes it. README.md's "Platform"
+/// section documents the prerequisite, and someone running
+/// `cargo install uncad-cli` never reads README.md.
+///
+/// `bindgen::clang_version()` makes the same `ensure_libclang_is_loaded()`
+/// call `generate()` does, so it fails exactly where `generate()` would --
+/// by panicking rather than returning an error, which is why this probes it
+/// through `catch_unwind` instead of matching a `Result`. Cargo always
+/// builds build scripts with `panic = "unwind"` (a profile's `panic` setting
+/// does not reach them), so the unwind is caught rather than aborting.
+fn check_libclang() {
+    let previous_hook = std::panic::take_hook();
+    // Swallow bindgen's own message; the panic below replaces it.
+    std::panic::set_hook(Box::new(|_| {}));
+    let found = std::panic::catch_unwind(bindgen::clang_version).is_ok();
+    std::panic::set_hook(previous_hook);
+    if found {
+        return;
+    }
+
+    // A wrong LIBCLANG_PATH is its own failure mode, and bindgen's message
+    // reports it as an empty candidate list.
+    let stale_path = match std::env::var("LIBCLANG_PATH") {
+        Ok(path) => {
+            format!("LIBCLANG_PATH is set to '{path}', and no clang library was found there.\n")
+        }
+        Err(_) => String::new(),
+    };
+    panic!(
+        "
+libredwg-sys generates its FFI bindings with bindgen, which needs libclang,
+and no libclang could be found.
+{stale_path}
+Install LLVM/Clang, then build again:
+  Windows         winget install LLVM.LLVM  (or: choco install llvm)
+                  if it is still not found afterwards, set
+                  LIBCLANG_PATH to the directory holding libclang.dll
+                  (a default install puts it in LLVM/bin under
+                  Program Files)
+  Debian/Ubuntu   sudo apt install libclang-dev
+  Fedora/RHEL     sudo dnf install clang-devel
+  Alpine          apk add clang-dev
+  macOS           xcode-select --install, or: brew install llvm
+                  and set LIBCLANG_PATH=$(brew --prefix llvm)/lib
+
+LLVM is needed to build this crate, not to run what it builds.
+"
     );
 }

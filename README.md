@@ -48,6 +48,7 @@ cargo run -p uncad-cli -- export drawing.dwg -o drawing_pkg      # the LLM/VLM p
 cargo run -p uncad-cli -- export drawing.dwg -o pkg --padding 0  # the package, flush to the drawing's edge
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document
+cargo run -p uncad-cli -- --version                              # or -V; --help lists every option
 ```
 
 ## Scope
@@ -71,10 +72,13 @@ Pure Rust plus native FFI. WebAssembly and the browser are not targets — the
 intended consumers are libraries and binaries (CLI, server, desktop app).
 
 `bindgen` needs `libclang`, so LLVM/Clang has to be installed (Windows:
-`winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). The LibreDWG C
+`winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`, Fedora:
+`dnf install clang-devel`, macOS: `xcode-select --install`). That holds for
+`cargo install uncad-cli` too; without it `libredwg-sys`'s build script stops
+before compiling anything and prints the same list. The LibreDWG C
 sources are vendored into `crates/libredwg-sys/vendor/libredwg/`, so **building
 does not need the `lib/libredwg` submodule**. Running `cargo test --workspace`
-does: 18 of the 22 integration test files in `uncad` (plus `png.rs`'s own
+does: 19 of the 23 integration test files in `uncad` (plus `png.rs`'s own
 end-to-end test and `tests/documented_invocations.rs` in `uncad-cli`) read
 fixtures from that submodule's `test/test-data/`; the four that do not
 (`fixtures.rs`, `block_transforms.rs`, `control_chars.rs`,
@@ -92,7 +96,10 @@ also links `libc`, `resvg`, `png`, `serde`, `serde_json` and
 `unicode-normalization`, and through them 68 crates in all, every one of them
 under a permissive license. The bundled font
 (`crates/uncad/fonts/UncadSans-Regular.otf`, a Noto Sans KR subset) is under the
-SIL Open Font License 1.1, with its licence text beside it. Copyright and
+SIL Open Font License 1.1, with its licence text beside it. Each published crate
+carries the GPLv3 text as its own `LICENSE`, and `crates/libredwg-sys/NOTICE.md`
+carries the modification notice for the two vendored patches, because a crates.io
+tarball holds nothing from outside the crate directory. Copyright and
 license details, including which dependency notices have to travel with a
 redistributed binary, are in
 [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
