@@ -712,6 +712,10 @@ from a fuzzed file's 71 mutated offsets; measured with `GetProcessMemoryInfo` on
 release build, calling the shim directly so the cost is unambiguously the C decoder's.
 There is no regression test for it -- a test that allocates 11 GB does not belong in a
 suite -- which is the other half of why the out-of-process advice above is not optional.
+The same sweep found a milder DWG case in the same place: a 31 KB `2000/Spline.dwg` with
+32 flipped bytes reaches 634 MB before the decoder gives up and returns a clean
+`ParseError` (critical read error 320), which is a transient cost rather than a hazard but
+has the same shape and the same absence of anything this crate can do about it.
 
 ## Local patches to the vendored LibreDWG
 
