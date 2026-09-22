@@ -119,6 +119,12 @@ const char *uncad_codepage_name(unsigned int codepage);
  *     index past its tables);
  *   - otherwise the string is transcoded with LibreDWG's code-page tables,
  *     an unmappable character becoming U+FFFD, and the escapes expanded.
+ *     The double-byte pages follow the file's bytes rather than every
+ *     quirk of LibreDWG's tables: the DOS-era BIG5 (24) and GB2312 (31)
+ *     pair only bytes >= 0x80 (dwg_codepage_is_twobyte pairs ASCII too,
+ *     which garbled every table name and emptied the drawing), CP932 (22)
+ *     is decoded as the double-byte Shift-JIS it is, and GB2312's EUC-CN
+ *     bytes are masked to the 7-bit form its table is indexed by.
  *
  * The result is always a fresh heap buffer (or NULL only for a NULL `s` or
  * out of memory) -- bit_TV_to_utf8() may return its input pointer unchanged,

@@ -2,9 +2,10 @@
 //! the 0.3.0 code-page work (see `docs/ARCHITECTURE.md`, "Strings and
 //! paths"): single-byte code pages must keep every character, an R2007+ DXF
 //! (UTF-16 in memory) must decode at all, the strings LibreDWG's DXF reader
-//! keeps 8-bit in an R2007+ DXF (MTEXT) must not be read as UTF-16, and a
-//! corrupt code-page value in a file header must not crash the process. The
-//! 8-bit fixtures are written by the tests themselves from group codes, as
+//! keeps 8-bit in an R2007+ DXF (MTEXT) must not be read as UTF-16, the
+//! DOS-era double-byte pages must not pair ASCII, and a corrupt code-page
+//! value in a file header must not crash the process. The 8-bit fixtures
+//! are written by the tests themselves from group codes, as
 //! `documented_invocations.rs` does, so the expected strings are the ones
 //! the test encoded.
 
@@ -230,6 +231,63 @@ fn an_r2018_dxf_carries_its_non_ascii_mtext_as_utf8_or_escapes() {
         })
         .collect();
     assert_eq!(plain, vec!["가나 AB".to_string(), "가나 AB".to_string()]);
+}
+
+#[test]
+fn the_dos_era_double_byte_code_pages_do_not_pair_ascii() {
+    // dwg_codepage_is_twobyte says every byte of BIG5 (24) and GB2312 (31)
+    // opens a pair, so "*Model_Space" was consumed as "*M", "od", ... and no
+    // entity was ever selected. The same byte-0x13 patch the corrupt-code-
+    // page test makes, with the two real values (and CP932, which now goes
+    // through the double-byte path too): the ASCII names must survive and
+    // the drawing keep the 70 entities its declared ANSI_1252 gives.
+    let reference = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file is readable");
+    assert_eq!(reference.entities.len(), 70);
+    let bytes = std::fs::read(EXAMPLE_2000_DWG).expect("corpus file is readable");
+    assert_eq!(bytes[0x13], 30, "example_2000.dwg declares ANSI_1252 (30)");
+    for (cp, name) in [(24u8, "BIG5"), (31, "GB2312"), (22, "CP932")] {
+        let mut patched = bytes.clone();
+        patched[0x13] = cp;
+        let db = uncad::parse_bytes(&patched, uncad::Format::Dwg).expect("still a valid DWG");
+        assert_eq!(db.header.codepage_name, name);
+        assert_eq!(db.entities.len(), 70, "{name}");
+        assert!(
+            db.tables.layers.contains_key("Tavolo 3"),
+            "{name}: {:?}",
+            db.tables.layers.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            db.tables.block_records.contains_key("*Model_Space"),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_dos_era_double_byte_code_pages_decode_their_cjk_pairs() {
+    let dir = TempDir::new("codepage-dbcs");
+    // Byte sequences from Python: '中国 AB'.encode('gb2312') (EUC-CN),
+    // '中文 AB'.encode('big5'), '日本 AB'.encode('shift_jis') (CP932). The
+    // Windows twins 936/950/932 of the same bytes are the control group.
+    // The last CP932 case keeps 0x5C a backslash (LibreDWG's table says
+    // yen), so the \U+ escape it opens still expands and a \P would still
+    // be a paragraph break.
+    let cases: [(&str, &[u8], &str); 7] = [
+        ("GB2312", b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
+        ("ANSI_936", b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
+        ("BIG5", b"\xA4\xA4\xA4\xE5 AB", "中文 AB"),
+        ("ANSI_950", b"\xA4\xA4\xA4\xE5 AB", "中文 AB"),
+        ("CP932", b"\x93\xFA\x96\x7B AB", "日本 AB"),
+        ("ANSI_932", b"\x93\xFA\x96\x7B AB", "日本 AB"),
+        ("CP932", b"\x93\xFA\\P\\U+00B1", "日\\P\u{B1}"),
+    ];
+    for (i, (codepage, bytes, expected)) in cases.iter().enumerate() {
+        let path = dir.0.join(format!("case{i}.dxf"));
+        std::fs::write(&path, dxf_with_texts(codepage, &[bytes])).expect("writable");
+        let db = uncad::parse(&path).expect("the DXF must parse");
+        assert_eq!(db.header.codepage_name, *codepage);
+        assert_eq!(text_values(&db), vec![expected.to_string()], "{codepage}");
+    }
 }
 
 #[test]

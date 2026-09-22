@@ -202,6 +202,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `"Teksto granda nur por testi..."`). Those strings now go through an 8-bit path
   (`uncad_bytes_to_utf8`) that decodes them as the file's own encoding -- UTF-8 for an
   R2007+ DXF, the code page otherwise -- with the `\U+XXXX` escapes expanded.
+- The DOS-era BIG5 (24) and GB2312 (31) code pages paired every byte, ASCII included, so
+  a DWG or DXF declaring either lost all its table names and parsed to zero entities; they
+  now pair only bytes >= 0x80, GB2312's EUC-CN bytes are looked up in the 7-bit form its
+  table uses (so `中国` decodes instead of becoming U+FFFD), and CP932 (22, DOS Shift-JIS)
+  is decoded as the double-byte encoding it is instead of one byte at a time.
 - A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
   code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
   empty directory, because the SVG carried a character XML forbids. `text_plain` now marks

@@ -275,6 +275,22 @@ put_utf8 (char *out, uint32_t wc)
   return 3;
 }
 
+/* Whether `c` opens a two-byte sequence in the double-byte code page `cp`.
+
+   LibreDWG's dwg_codepage_is_twobyte answers "always" for the DOS-era
+   BIG5 (24) and GB2312 (31) pages, ASCII included, which paired every
+   table name up ("*Model_Space" -> "*M", "od", ...) and turned such a
+   drawing into one with no *Model_Space and no entities. Both are
+   EUC-style encodings whose lead and trail bytes are all >= 0x80, so the
+   high bit is the rule there. */
+static bool
+opens_double_byte (Dwg_Codepage cp, unsigned char c)
+{
+  if (cp == CP_GB2312 || cp == CP_BIG5)
+    return c >= 0x80;
+  return dwg_codepage_is_twobyte (cp, c);
+}
+
 /* Transcodes an 8-bit code-page string to UTF-8 with LibreDWG's own
    code-page tables (dwg_codepage_uc / dwg_codepage_uwc / is_twobyte) and
    then expands \U+XXXX / \M+nXXXX escapes the way bit_TV_to_utf8 does.
@@ -286,13 +302,21 @@ put_utf8 (char *out, uint32_t wc)
    mostly non-ASCII loses its tail ("Стена" -> "Стен"); and it writes a NUL
    for a character the table cannot map, truncating the rest of the string.
    Here the buffer is 3 bytes per input byte (the true bound) and an
-   unmappable character becomes U+FFFD. `cp` must be a value
-   dwg_codepage_dxfstr knows (the caller checks). Returns NULL only when
-   out of memory. */
+   unmappable character becomes U+FFFD. Four more table quirks are
+   corrected on the way (bits.c shares them): the DOS-era BIG5/GB2312
+   pages pair only bytes >= 0x80 (see opens_double_byte); CP932 (22, DOS
+   Shift-JIS) is treated as double-byte although dwg_codepage_isasian
+   leaves it out, so its kanji do not go through the single-byte table one
+   byte at a time; cptbl_gb2312 is indexed by the 7-bit ISO-2022 form
+   (0x2121..0x777E) while the file holds EUC-CN bytes (0xA1A1..0xFEFE), so
+   the pair is masked to 7 bits before the lookup; and ASCII is never
+   looked up (see the loop), so 0x5C stays the backslash the text codes
+   need. `cp` must be a value dwg_codepage_dxfstr knows (the caller
+   checks). Returns NULL only when out of memory. */
 static char *
 convert_codepage (const char *src, Dwg_Codepage cp)
 {
-  const bool is_asian = dwg_codepage_isasian (cp);
+  const bool is_asian = dwg_codepage_isasian (cp) || cp == CP_CP932;
   const size_t srclen = strlen (src);
   const unsigned char *p = (const unsigned char *)src;
   const unsigned char *end = p + srclen;
@@ -306,19 +330,27 @@ convert_codepage (const char *src, Dwg_Codepage cp)
     {
       uint32_t wc;
       unsigned int c = *p++;
-      if (is_asian)
+      if (c < 0x80)
+        /* ASCII stays ASCII (no double-byte page has a lead byte below
+           0x80). dwg_codepage_uwc maps 0x5C to the yen sign for CP932 and
+           to the won sign for JOHAB (their JIS X 0201 / KS X 1003 half),
+           but in a drawing 0x5C is the backslash of MTEXT's \P and of the
+           \U+XXXX escapes whatever the code page, and the tables' other
+           sub-0x80 rows are the identity. */
+        wc = c;
+      else if (is_asian)
         {
-          /* Two-byte code pages have exceptions below 0x80 too, so every
-             byte goes through the table, as in bits.c. */
           uint16_t cc = (uint16_t)c;
-          if (dwg_codepage_is_twobyte (cp, (unsigned char)c) && p < end)
-            cc = (uint16_t)((cc << 8) | *p++);
+          if (opens_double_byte (cp, (unsigned char)c) && p < end)
+            {
+              cc = (uint16_t)((cc << 8) | *p++);
+              if (cp == CP_GB2312)
+                cc &= 0x7F7F;
+            }
           wc = (uint32_t)dwg_codepage_uwc (cp, cc);
           if (wc == 0)
-            wc = cc < 0x80 ? cc : 0xFFFD;
+            wc = 0xFFFD;
         }
-      else if (c < 0x80)
-        wc = c;
       else
         {
           wc = (uint32_t)dwg_codepage_uc (cp, (unsigned char)c);
