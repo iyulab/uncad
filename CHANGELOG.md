@@ -173,6 +173,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A paper layout with no paper size, no limits and nothing but point-like content (a
+  lone POINT or a zero-length LINE in `*Paper_Space`, the R13/R14 and OBJECTS-less DXF
+  case) failed the whole export with `rendering failed: render size is zero`, leaving a
+  half-written directory with no manifest: the sheet was fitted with zero padding, so a
+  zero-size rectangle gave an infinite scale. Such a layout is skipped now with an
+  `UnusableSheet` warning naming it, and the rest of the package is written.
 - Two paper layouts whose names differ only outside `[A-Za-z0-9_-]` shared one sheet
   image: the directory came from the sanitised name alone, so every all-Hangul name of
   the same length (평면도 / 입면도, the usual Korean set) became `___`, the second layout's

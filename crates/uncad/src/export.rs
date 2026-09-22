@@ -1188,6 +1188,24 @@ pub fn export_package(
                 }
                 None => (crop::EMPTY_RECT, "empty"),
             };
+            // No paper size, no limits and nothing but point-like content (a
+            // lone POINT, a zero-length LINE, an empty TEXT): there is no
+            // rectangle to fit, and a sheet is fitted with zero padding, so
+            // the scale would come out infinite and the render fail with
+            // "render size is zero" -- aborting a package that is already
+            // half written. One unusable sheet is worth a warning, not the
+            // whole export.
+            let usable = [rect.min_x, rect.min_y, rect.max_x, rect.max_y]
+                .iter()
+                .all(|v| v.is_finite() && v.abs() < 1e15)
+                && (rect.width() > 0.0 || rect.height() > 0.0);
+            if !usable {
+                warnings.push(format!(
+                    "UnusableSheet: layout {} ({}) has no paper size, no limits and no usable content ({rect_source}); its sheet is skipped",
+                    spec.name, spec.block
+                ));
+                continue;
+            }
             // Every viewport of the block, hidden layer or not: a frame on
             // an off, frozen or non-plotting layer (the usual way to hide
             // the border) still shows its model window; only the border

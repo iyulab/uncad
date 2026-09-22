@@ -617,3 +617,107 @@ fn a_paper_hatch_keeps_its_own_pattern_on_the_composited_sheet() {
     let full_rows = fractions.iter().filter(|f| **f > 0.9).count();
     assert!((3..=10).contains(&full_rows), "{full_rows} full rows");
 }
+
+/// A drawing whose paper space holds nothing but one POINT, and no LAYOUT
+/// objects at all -- the R13/R14 / OBJECTS-less DXF shape `sheet_specs`
+/// falls back for. The paper block's extents are a single point, so the
+/// sheet has no rectangle: no paper size, no limits, nothing to fit.
+fn paper_space_with_one_point() -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D, PointEntity};
+    use uncad::tables::BlockRecord;
+
+    let model = vec![uncad::Entity::Line(LineEntity {
+        common: EntityCommon {
+            handle: "24".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        start_point: Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+        end_point: Point3D {
+            x: 100.0,
+            y: 50.0,
+            z: 0.0,
+        },
+    })];
+    let paper = vec![uncad::Entity::Point(PointEntity {
+        common: EntityCommon {
+            handle: "2A".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        position: Point3D {
+            x: 100.0,
+            y: 100.0,
+            z: 0.0,
+        },
+    })];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        BlockRecord {
+            name: "*Model_Space".into(),
+            entities: model.clone(),
+        },
+    );
+    tables.block_records.insert(
+        "*Paper_Space".into(),
+        BlockRecord {
+            name: "*Paper_Space".into(),
+            entities: paper,
+        },
+    );
+    uncad::CadDatabase::new(model, tables)
+}
+
+#[test]
+fn a_paper_layout_with_no_usable_rectangle_is_skipped_not_fatal() {
+    // The sheet rectangle falls through to the paper entities' extents, and
+    // a lone POINT's extent is a single point: fitting it with the zero
+    // padding a sheet uses divided by a zero width, so px-per-unit was
+    // infinite, `Pixmap::new` failed and the whole export died with
+    // "render size is zero" after the model overview and tiles had already
+    // been written.
+    let db = paper_space_with_one_point();
+    let tmp = TempDir::new("paper_point");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("a degenerate paper layout must not fail the export");
+    assert!(report.sheets.is_empty(), "{:?}", report.sheets);
+    assert_eq!(report.counts.sheets, 0);
+    let warning = report
+        .warnings
+        .iter()
+        .find(|w| w.starts_with("UnusableSheet"))
+        .unwrap_or_else(|| panic!("{:?}", report.warnings));
+    // The fallback names the layout after its block, without the star.
+    assert!(
+        warning.contains("Paper_Space") && warning.contains("entities"),
+        "{warning}"
+    );
+    // The rest of the package is there, and so is the warning.
+    assert!(tmp.0.join("manifest.json").exists());
+    assert!(!tmp.0.join("sheets").exists());
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["counts"]["sheets"], 0);
+    assert!(manifest["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w.as_str().unwrap().starts_with("UnusableSheet")));
+    let report_json = read_json(&tmp.0.join("report.json"));
+    assert!(report_json["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w.as_str().unwrap().starts_with("UnusableSheet")));
+}
