@@ -3,13 +3,13 @@
 This file records how the 0.3.0 "Readable" work is checked beyond the unit
 tests, and the numbers those checks produced.
 
-**Everything below was measured on 2026-09-23** against the head of the
-`fix/docs2` branch (every round of 0.3.0 fixes merged, the R2007+ DXF
-table-name patch and the RAY/XLINE clipping included), on Windows 11 with
+**Everything below was measured on 2026-09-23** against the head of
+`feat/0.3-readable` (every round of 0.3.0 fixes merged, up to and including
+the polyline, mesh, colour, cap and package-record work), on Windows 11 with
 rustc 1.95.0, on an AMD Ryzen 5 6600H with 12 logical cores, **release
 profile** unless a line says otherwise. Sizes are decimal MB (10^6 bytes) of
 the whole package directory; times are wall clock around the process, the
-median of three warm runs, parsing included. Rerun the commands below and
+fastest of three warm runs, parsing included. Rerun the commands below and
 replace the tables when something changes.
 
 ## 1. Corpus sweep
@@ -29,7 +29,7 @@ Last run (release profile, 7.2 s for the whole test):
 | ext | files | parsed | rendered | entities | excluded by crop | hidden | seconds |
 |---|---|---|---|---|---|---|---|
 | dwg | 141 | 141 | 141 | 3799 | 16 | 3353 | 4.6 |
-| dxf | 67 | 58 | 58 | 843 | 12 | 246 | 2.5 |
+| dxf | 67 | 58 | 58 | 812 | 12 | 246 | 2.5 |
 
 No panics. The nine DXF files LibreDWG refuses are its own known limits
 (its DXF reader is documented as incomplete): `2000/TS1.dxf`,
@@ -41,12 +41,14 @@ inside dimension blocks (`docs/CAVEATS.md`, "Hidden entities").
 
 The DWG row is what it was before any of the fixes; only its timing changed
 with the profile (the first run recorded here was a debug build, 232 s). The
-two DXF columns moved with the R2007+ DXF table-name fix, and only they: an
-entity of such a file now resolves its layer, so the layer-off / frozen /
-non-plotting / `DEFPOINTS` rules can fire at all (110 hidden before the fix,
-246 now), and with 136 more entities out of the picture the outlier rule
-measures against a different visible set, which moved the exclusions too (8
-before, 12 now).
+DXF columns moved twice. The R2007+ DXF table-name fix let an entity of such
+a file resolve its layer, so the layer-off / frozen / non-plotting /
+`DEFPOINTS` rules can fire at all (110 hidden before it, 246 now), and with
+136 more entities out of the picture the outlier rule measures against a
+different visible set, which moved the exclusions too (8 before, 12 now).
+Then the mesh fix stopped reporting a polyline's own VERTEX records as
+entities in their own right, which is where the entity count lost 31 (843 to
+812) without anything leaving the picture.
 
 ## 2. Acceptance questions
 
@@ -91,40 +93,37 @@ tiles empty per zoom level, per frame.
 
 | File | Entities | Overview px | Frames and levels | Files | Size | Time |
 |---|---|---|---|---|---|---|
-| `example_2000.dwg` | 68 | 1008 x 1176 | f0: z1 9/0, z2 27/3 | 89 | 1.16 MB | 0.27 s |
-| `example_2018.dxf` | 70 | 1036 x 1148 | f0: z1 9/0, z2 25/5, z3 82/28, z4 261/138 | 771 | 5.45 MB | 1.27 s |
-| `samples/AutoCADSamples1.dwg` | 6798 | 952 x 1260 | f0: z1 6/0, z2 30/0, z3 89/19 | 304 | 13.84 MB | 1.22 s |
-| `samples/AutoCADSamples2.dwg` | 5656 | 1204 x 1008 | f0: z1 8/0, z2 21/0; f1: z1 4/0, z2 21/0 | 154 | 5.48 MB | 1.87 s |
-| `samples/AutoCADSamples3.dwg` | 6486 | 1456 x 280 | f0: z1 9/0, z2 18/7, z3 66/44; f1: z1 6/0; f2: z1 9/0 | 268 | 13.99 MB | 1.48 s |
-| `samples/AutoCADSamples4.dwg` | 2979 | 1288 x 952 | f0: z1 8/0, z2 21/0, z3 94/4; f1: z1 4/0, z2 14/0 | 315 | 9.32 MB | 1.64 s |
-| `samples/AutoCADSamples5.dwg` | 19891 | 1568 x 756 | f0: z1 8/0 | 223 | 21.72 MB | 3.60 s |
-| `samples/AutoCADSamples6.dwg` (floor plan) | 4845 | 1568 x 756 | f0: z1 6/0, z2 24/0; f1: z1 3/0, z2 14/0 | 129 | 7.90 MB | 0.91 s |
-| `samples/AutoCADSamples7.dwg` | 5351 | 1316 x 924 | f0: z1 6/0, z2 24/0, z3 107/1 | 313 | 10.70 MB | 2.08 s |
+| `example_2000.dwg` | 68 | 1064 x 1148 | f0: z1 9/0, z2 30/6 | 83 | 1.14 MB | 0.28 s |
+| `example_2018.dxf` | 70 | 1036 x 1148 | f0: z1 9/0, z2 30/6, z3 110/32, z4 399/144 | 749 | 5.58 MB | 1.42 s |
+| `samples/AutoCADSamples1.dwg` | 6798 | 952 x 1260 | f0: z1 6/0, z2 30/0, z3 108/19 | 303 | 15.25 MB | 1.34 s |
+| `samples/AutoCADSamples2.dwg` | 5656 | 1204 x 1008 | f0: z1 8/0, z2 21/0; f1: z1 4/0, z2 21/0 | 154 | 6.25 MB | 1.88 s |
+| `samples/AutoCADSamples3.dwg` | 6486 | 1456 x 280 | f0: z1 9/0, z2 25/7, z3 110/44; f1: z1 6/0; f2: z1 9/0 | 268 | 14.85 MB | 1.70 s |
+| `samples/AutoCADSamples4.dwg` | 2979 | 1288 x 952 | f0: z1 8/0, z2 21/0, z3 98/4; f1: z1 4/0, z2 14/0 | 316 | 9.92 MB | 1.25 s |
+| `samples/AutoCADSamples5.dwg` | 19891 | 1568 x 756 | f0: z1 8/0 | 226 | 21.98 MB | 3.96 s |
+| `samples/AutoCADSamples6.dwg` (floor plan) | 4845 | 1568 x 756 | f0: z1 6/0, z2 24/0; f1: z1 3/0, z2 14/0 | 133 | 7.80 MB | 1.03 s |
+| `samples/AutoCADSamples7.dwg` | 5351 | 1316 x 924 | f0: z1 6/0, z2 24/0, z3 108/1 | 315 | 11.09 MB | 2.27 s |
 
 Every one of the nine exits 0 and writes one sheet image per paper layout:
 two each for `example_2000.dwg` and `example_2018.dxf` (Letter, in mm), one
 for each sample.
 
-`example_2018.dxf` is the outlier of the table: 771 files and 5.45 MB where
+`example_2018.dxf` is the outlier of the table: 749 files and 5.58 MB where
 the run before these fixes wrote 85 files and 0.93 MB, stopping at z2. The
 cause is the ACAD_TABLE at handle `4F2`, whose seven cells became text records
 when a table's text started being indexed. Six of them are 4.5 units high,
 which makes 4.5 the drawing's dominant text class: the count-weighted median
 the depth rule zooms on moves from 100 units to 4.5, and 4.5 units never
-reaches 14 px within the budget, so the pyramid runs to z4 and 377 tiles and
-the manifest carries a `MaxTiles` warning that z5 would have needed 979 tiles
-against the 23 left of 400. Its DWG twin `example_2018.dwg` still writes 85
-files, 34 tiles and 5 text records, because LibreDWG's DWG decoder hands that
+reaches 14 px within the budget, so the pyramid runs to z4 and 548 tiles and
+the manifest carries a `MaxTiles` warning. Its DWG twin `example_2018.dwg` still writes a two-level pyramid, because LibreDWG's DWG decoder hands that
 same entity over as an unsupported type rather than as an ACAD_TABLE, so it
 has no cells to index. The DXF package is the one that now shows what the
 drawing holds; a table of small text is an expensive thing to make readable.
 
 Sample 5 has no text at all, so the depth rule gives it one zoom level and
 its 19 891 entities land on 8 tiles. It is still the slowest run and the
-largest package, and the records are why, not the images: 19 853 geometry
-and 4073 region records shard into 195 JSON files (176 `geometry.NNN.json`
-and 19 `regions.NNN.json`) taking 18.8 of the 21.7 MB, against 2.1 MB of
-tiles and 0.8 MB of overview and sheet.
+largest package, and the records are why, not the images: its geometry and
+region records shard into most of the package's 226 files and most of its
+22.0 MB, against about 2 MB of tiles and under 1 MB of overview and sheet.
 
 Its `report.json` lists 25 exclusions, all empty
 TEXT entities thousands of units from the 44-unit drawing (`far_outlier`);
