@@ -20,10 +20,10 @@ use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
     DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
-    InsertEntity, LeaderEntity, LightEntity, LineEntity, LwPolylineEntity, MLineEntity,
-    MLineVertex, MTextEntity, MultiLeaderEntity, Origin, PointEntity, PolylineEntity, RayEntity,
-    Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity,
-    ViewportEntity, WipeoutEntity,
+    InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LineEntity,
+    LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, Origin,
+    PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
+    TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D};
 
@@ -1031,7 +1031,11 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
             let insertion_point = get_point3d(entity_ptr, "TOLERANCE", "ins_pt")?;
-            let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
+            // Same as the dimension's measurement: this library has no "the
+            // file did not write this group" for a number, and a frame of
+            // zero height is not a height.
+            let text_height =
+                get_field::<f64>(entity_ptr, "TOLERANCE", "height").filter(|h| *h != 0.0);
             let text_value = text
                 .field(entity_ptr, "TOLERANCE", "text_value")
                 .unwrap_or_default();
@@ -1040,6 +1044,22 @@ unsafe fn convert_entity(
                 insertion_point,
                 text_height,
                 text_value,
+                // A zero vector is not a direction: this library cannot tell
+                // an absent DXF 11 from a zeroed one, so the degenerate
+                // value is reported as nothing rather than as a direction.
+                direction: get_point3d(entity_ptr, "TOLERANCE", "x_direction")
+                    .filter(|d| d.x != 0.0 || d.y != 0.0 || d.z != 0.0),
+                style_name: reference(
+                    dwg,
+                    text,
+                    get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                        entity_ptr,
+                        "TOLERANCE",
+                        "dimstyle",
+                    ),
+                    c"DIMSTYLE",
+                    |handle_ptr| text.handle_name(dwg, handle_ptr),
+                ),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_WIPEOUT => {
@@ -1075,10 +1095,51 @@ unsafe fn convert_entity(
             // value means an arrowhead is drawn.
             let has_arrowhead =
                 get_field::<u16>(entity_ptr, "LEADER", "arrowhead_type").unwrap_or(0) > 0;
+            // 0 straight, 1 spline (dwg.spec). The format does not state
+            // what an absent group means, so an unreadable field is nothing.
+            let path_type = match get_field::<u16>(entity_ptr, "LEADER", "path_type") {
+                Some(0) => Some(LeaderPath::Straight),
+                Some(1) => Some(LeaderPath::Spline),
+                _ => None,
+            };
+            // 0 text, 1 tolerance, 2 insert, 3 none -- and 3 is the value the
+            // format falls back to, so anything else reads as "nothing".
+            let annotation = match get_field::<u16>(entity_ptr, "LEADER", "annot_type") {
+                Some(0) => LeaderAnnotation::MText,
+                Some(1) => LeaderAnnotation::Tolerance,
+                Some(2) => LeaderAnnotation::Insert,
+                _ => LeaderAnnotation::Nothing,
+            };
+            let annotation_id = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                entity_ptr,
+                "LEADER",
+                "associated_annotation",
+            )
+            .and_then(|r| {
+                if r.is_null() {
+                    return None;
+                }
+                // SAFETY: a non-null Dwg_Object_Ref owned by the live
+                // Dwg_Data this pass walks, same contract as reference().
+                let value = unsafe { (*r).absolute_ref };
+                (value != 0).then(|| EntityId::new(value))
+            });
             Entity::Leader(LeaderEntity {
                 common,
                 vertices,
                 has_arrowhead,
+                path_type,
+                annotation,
+                annotation_id,
+                style_name: reference(
+                    dwg,
+                    text,
+                    get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                        entity_ptr, "LEADER", "dimstyle",
+                    ),
+                    c"DIMSTYLE",
+                    |handle_ptr| text.handle_name(dwg, handle_ptr),
+                ),
             })
         }
         // SAFETY: obj is valid per this function's own `# Safety` doc contract.
