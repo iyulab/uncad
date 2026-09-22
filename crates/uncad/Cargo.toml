@@ -28,3 +28,13 @@ serde_json = "1.0.151"
 # unsupported types listed in order, byte-identical output) render it through
 # the renderer crate. A version dependency, never a path.
 iron-render-cad = "0.1.0"
+# A second, independent DWG reader, used by tests only -- it is how this
+# crate's own output gets an oracle that does not share its engine. A
+# *development* dependency on purpose: nothing a consumer builds or links
+# reaches it, and the crate's public surface does not change. Consumed
+# unmodified; a fork or a patch would be a different decision.
+#
+# Weak (file-scope) copyleft, so it is allowed by name in `deny.toml` rather
+# than folded into the permissive list, and it is named in
+# `docs/THIRD_PARTY_NOTICES.md` with where its source can be obtained.
+acadrust = "0.5.5"

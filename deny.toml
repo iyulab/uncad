@@ -14,6 +14,24 @@
 #
 # Run locally: cargo deny check licenses
 
+[graph]
+# Development dependencies are part of this repository's dependency graph even
+# though nothing distributed contains them, and this file exists so that graph
+# stays knowable -- not only the distributed part of it. This widens the graph
+# the `sources` and `bans` checks below walk, so a test-only dependency from an
+# unknown registry or a git URL is caught like any other.
+#
+# It does NOT widen the license check, and that is worth knowing rather than
+# assuming. Measured with cargo-deny 0.20.2: setting this takes the gathered
+# graph from 92 crates to 134, yet a test-only dependency's license is still
+# never evaluated -- adding its license to `allow` below reports the license as
+# "not encountered", and removing the matching entry from `exceptions` does not
+# make the check fail. So the license grade of a development dependency is
+# established by reading it and recording it in `docs/THIRD_PARTY_NOTICES.md`,
+# not by this gate. An entry here for such a crate would read as coverage that
+# does not exist, which is worse than no entry.
+exclude-dev = false
+
 [licenses]
 # Permissive only. Every entry below was observed in the current graph; this is
 # not a speculative allowlist.
@@ -32,14 +50,29 @@ allow = [
 # copyleft, not permissive, and admitting one here would quietly undo the
 # boundary this file exists to hold. Adding one is a decision to be argued,
 # not a line to be appended when a build fails.
+#
+# MPL-2.0 in particular stays out of this list even though one *development*
+# dependency now carries it. Its copyleft reaches only the files it already
+# covers, and it explicitly permits distributing a larger work under other
+# terms -- but even an unmodified copy obliges whoever distributes a built
+# form to say where that dependency's source can be obtained. That is one
+# obligation more than permissive, so it would be granted per crate rather
+# than to every crate that might carry the license later. The crate carrying
+# it here is test-only and out of this gate's reach (see `[graph]` above); it
+# is recorded in `docs/THIRD_PARTY_NOTICES.md` instead.
 
-# The GPL lives here and only here: the three crates this workspace publishes.
-# A fourth name appearing in this list means the copyleft boundary moved, which
-# is a decision, not a dependency bump.
+# Copyleft is granted per crate, never by license name. The GPL lives on the
+# three crates this workspace publishes and nowhere else -- a fourth crate
+# named here means the boundary moved, which is a decision, not a dependency
+# bump.
 exceptions = [
     { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
+    # Weak, file-scope copyleft, consumed unmodified and only by this
+    # workspace's tests. Granted to this crate by name: a second MPL crate
+    # arriving later must be argued on its own, which is the whole reason
+    # the license is not in the `allow` list above.
 ]
 
 [bans]
