@@ -173,6 +173,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Two paper layouts whose names differ only outside `[A-Za-z0-9_-]` shared one sheet
+  image: the directory came from the sanitised name alone, so every all-Hangul name of
+  the same length (평면도 / 입면도, the usual Korean set) became `___`, the second layout's
+  `sheets/___/overview.png` overwrote the first's, both `sheets.json` entries pointed at
+  the survivor and `manifest.files` listed that path twice with two byte counts; an empty
+  layout name wrote `sheets//overview.png` into the manifest while the file landed
+  elsewhere. Sheet directories are unique now -- an empty name becomes `sheet`, a repeat
+  takes `_2`, `_3` in tab order -- so the manifest never lists a path twice.
 - The package wrote world rectangles in two shapes: `manifest.json`'s `overview.world`,
   `frames[].content`, `crop.*` and everything in `sheets.json` came out of serde's derive
   as `{"min_x": .., "min_y": .., "max_x": .., "max_y": ..}`, while tiles.json, every
