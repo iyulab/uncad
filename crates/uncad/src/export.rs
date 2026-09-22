@@ -344,9 +344,12 @@ pub struct SheetReport {
     pub units: String,
     /// The plot settings, when the file has a LAYOUT for this sheet.
     pub plot: Option<crate::tables::PlotSettings>,
-    /// The sheet rectangle in paper units and where it came from:
-    /// `paper_size` (the plot settings), `limits` (LIMMIN/LIMMAX) or
-    /// `entities` (the paper entities' extents).
+    /// The sheet rectangle in paper units and where it came from, in order
+    /// of preference: `layout_limits` (the LAYOUT's LIMMIN/LIMMAX, AutoCAD's
+    /// own placement of the paper, taken whenever they span a rectangle),
+    /// `paper_size` (computed from the plot settings, see
+    /// [`crate::tables::PlotSettings::sheet_rect`]), `entities` (the paper
+    /// entities' extents) or `empty`.
     pub rect: Rect,
     pub rect_source: String,
     pub overview: ImageInfo,
@@ -1085,12 +1088,21 @@ pub fn export_package(
                     ..Default::default()
                 },
             );
+            // The layout's own LIMMIN/LIMMAX first: AutoCAD keeps them equal
+            // to the paper's placement (margins and plot origin folded in,
+            // rotation included), which the page-setup formula in
+            // `PlotSettings::sheet_rect` only approximates.
+            let limits_ok = [spec.limmin.x, spec.limmin.y, spec.limmax.x, spec.limmax.y]
+                .iter()
+                .all(|v| v.is_finite())
+                && spec.limmax.x > spec.limmin.x
+                && spec.limmax.y > spec.limmin.y;
             let (rect, rect_source) = match spec.plot.as_ref().and_then(|p| p.sheet_rect()) {
-                Some(r) => (r, "paper_size"),
-                None if spec.limmax.x > spec.limmin.x && spec.limmax.y > spec.limmin.y => (
+                _ if limits_ok => (
                     Rect::new(spec.limmin.x, spec.limmin.y, spec.limmax.x, spec.limmax.y),
-                    "limits",
+                    "layout_limits",
                 ),
+                Some(r) => (r, "paper_size"),
                 None if paper_rendered.choice.content.is_some() => {
                     (paper_rendered.choice.rect, "entities")
                 }
@@ -1454,7 +1466,7 @@ pub fn export_package(
                     json!(rounder.derived(length)),
                 );
                 if let Some(area) = p.area() {
-                    let signed = crate::geom::polyline_signed_area(&p.vertices, &p.bulges);
+                    let signed = p.signed_area();
                     let simple = crate::geom::is_simple(&p.vertices);
                     v.insert("area".into(), json!(rounder.derived(area)));
                     v.insert(

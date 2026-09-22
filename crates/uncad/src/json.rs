@@ -397,6 +397,7 @@ mod tests {
                 text_height: 2.5,
                 text_value: "%%v0.1".to_string(),
                 text_plain: "%%v0.1".to_string(),
+                dimstyle: String::new(),
             }),
             Entity::AcadTable(AcadTableEntity {
                 common: c.clone(),

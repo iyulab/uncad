@@ -2,8 +2,10 @@
 //! LAYOUT objects and their plot settings, the viewport view fields, the
 //! paper-to-model mapping, and the sheet images `uncad export` writes.
 //! Sources: the corpus's `example_2000.dwg` (two Letter layouts, each with
-//! only its overall viewport) and this project's `twisted_viewport_r2000.dxf`
-//! (a 200 x 120 viewport at scale 2 twisted 30 degrees over a model line).
+//! only its overall viewport), this project's `twisted_viewport_r2000.dxf`
+//! (a 200 x 120 viewport at scale 2 twisted 30 degrees over a model line)
+//! and `plot_origin_r2000.dxf` (an inch layout with asymmetric margins and
+//! a non-zero plot origin, the page setup AutoCAD-written drawings carry).
 
 use std::path::{Path, PathBuf};
 
@@ -19,6 +21,10 @@ const EXAMPLE_2000_DWG: &str = concat!(
 const TWISTED: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/twisted_viewport_r2000.dxf"
+);
+const PLOT_ORIGIN: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/plot_origin_r2000.dxf"
 );
 
 struct TempDir(PathBuf);
@@ -180,8 +186,23 @@ fn the_export_writes_one_sheet_per_paper_layout() {
         (s1.name.as_str(), s1.tab_order, s1.units.as_str()),
         ("Layout1", 1, "mm")
     );
-    assert_eq!(s1.rect_source, "paper_size");
+    // The layout's own limits are taken first; with a zero plot origin
+    // they and the page-setup formula place the sheet identically (the
+    // stored limits carry AutoCAD's own float noise, 6e-6 mm here).
+    assert_eq!(s1.rect_source, "layout_limits");
     assert!((s1.rect.max_x - 273.05).abs() < 1e-3);
+    let computed = db.tables.layouts["Layout1"]
+        .plot
+        .sheet_rect()
+        .expect("a paper size");
+    for (got, want) in [
+        (s1.rect.min_x, computed.min_x),
+        (s1.rect.min_y, computed.min_y),
+        (s1.rect.max_x, computed.max_x),
+        (s1.rect.max_y, computed.max_y),
+    ] {
+        assert!((got - want).abs() < 1e-3, "{got} vs {want}");
+    }
     assert_eq!(s1.overview.png, "sheets/Layout1/overview.png");
     assert!(tmp.0.join(&s1.overview.png).exists());
     assert_eq!(s1.overview.px[0] % 28, 0);
@@ -279,4 +300,113 @@ fn the_model_is_composited_through_a_real_viewport() {
     // Well inside the frame's lower-right quarter: blank.
     let (bx, by) = at(220.0, 70.0);
     assert!(!dark(bx, by), "unexpected ink at ({bx}, {by})");
+}
+
+#[test]
+fn a_plot_origin_moves_the_sheet_and_the_limits_are_taken_first() {
+    // The fixture's page setup (tests/fixtures/README.md): ANSI B 17 x 11
+    // in unrotated, margins (0.25, 0.75, 0.25, 0.75) in, plot origin
+    // (-0.25, -0.5) in. AutoCAD puts the layout origin at the printable
+    // corner moved by the plot origin, so the sheet starts at
+    // -(margin + origin) = (-(0.25 - 0.25), -(0.75 - 0.5)) = (0, -0.25)
+    // and ends at (17, 10.75); the file's LIMMIN/LIMMAX say the same. A
+    // margins-only placement would end at y = 10.25 and cut the border's
+    // top edge at y = 10.5.
+    let db = uncad::parse(PLOT_ORIGIN).expect("fixture must parse");
+    let layout = &db.tables.layouts["Layout1"];
+    let p = &layout.plot;
+    assert_eq!((p.paper_units, p.rotation), (0, 0));
+    assert!((p.paper_width_mm - 431.8).abs() < 1e-9 && (p.paper_height_mm - 279.4).abs() < 1e-9);
+    assert_eq!(p.margins_mm, [6.35, 19.05, 6.35, 19.05]);
+    assert_eq!((p.plot_origin.x, p.plot_origin.y), (-6.35, -12.7));
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    let sheet = p.sheet_rect().expect("a paper size");
+    assert!(
+        close(sheet.min_x, 0.0)
+            && close(sheet.min_y, -0.25)
+            && close(sheet.max_x, 17.0)
+            && close(sheet.max_y, 10.75),
+        "{sheet:?}"
+    );
+    assert!(
+        close(layout.limmin.x, 0.0)
+            && close(layout.limmin.y, -0.25)
+            && close(layout.limmax.x, 17.0)
+            && close(layout.limmax.y, 10.75),
+        "{:?} {:?}",
+        layout.limmin,
+        layout.limmax
+    );
+
+    let tmp = TempDir::new("plot_origin");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(report.sheets.len(), 1);
+    let sheet = &report.sheets[0];
+    assert_eq!(
+        (sheet.name.as_str(), sheet.units.as_str()),
+        ("Layout1", "in")
+    );
+    assert_eq!(sheet.rect_source, "layout_limits");
+    assert!(
+        close(sheet.rect.min_x, 0.0)
+            && close(sheet.rect.min_y, -0.25)
+            && close(sheet.rect.max_x, 17.0)
+            && close(sheet.rect.max_y, 10.75),
+        "{:?}",
+        sheet.rect
+    );
+    // The border rectangle (0.5, 0.25)..(16.5, 10.5) lies inside the sheet.
+    let border = db.tables.block_records["*Paper_Space"]
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::LwPolyline(p) => Some(p),
+            _ => None,
+        })
+        .expect("the border polyline");
+    let (bx0, by0, bx1, by1) =
+        uncad::geom::polyline_bounds(&border.vertices, &border.bulges, border.closed).unwrap();
+    assert!(
+        sheet.rect.min_x <= bx0
+            && sheet.rect.min_y <= by0
+            && sheet.rect.max_x >= bx1
+            && sheet.rect.max_y >= by1,
+        "{:?} does not contain ({bx0}, {by0})..({bx1}, {by1})",
+        sheet.rect
+    );
+    assert_eq!(sheet.viewports.len(), 1);
+    assert!(sheet.viewports[0].composited);
+    assert_eq!(sheet.viewports[0].scale, Some(0.2));
+
+    // And the image shows the border's top edge (y = 10.5): ink there,
+    // none in the blank strip between it and the paper's top edge.
+    let png = std::fs::read(tmp.0.join(&sheet.overview.png)).unwrap();
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
+    let mut reader = decoder.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().expect("a frame size")];
+    let info = reader.next_frame(&mut buf).unwrap();
+    let (w, h) = (info.width as usize, info.height as usize);
+    let dark = |x: usize, y: usize| buf[(y * w + x) * 3] < 128;
+    let ov = &sheet.overview;
+    let at = |wx: f64, wy: f64| -> (usize, usize) {
+        let px = ((wx - ov.world.min_x) * ov.ppu).round() as usize;
+        let py = ((ov.world.max_y - wy) * ov.ppu).round() as usize;
+        (px.min(w - 1), py.min(h - 1))
+    };
+    let (tx, ty) = at(4.0, 10.5);
+    let hit = (0..3).any(|dy| dark(tx, (ty + dy).saturating_sub(1).min(h - 1)));
+    assert!(hit, "no ink on the border's top edge at ({tx}, {ty})");
+    let (gx, gy) = at(4.0, 10.65);
+    assert!(
+        !dark(gx, gy),
+        "unexpected ink above the border at ({gx}, {gy})"
+    );
 }

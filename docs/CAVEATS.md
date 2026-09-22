@@ -95,7 +95,10 @@ mesh being just as inherently 3D as an ACIS solid's wireframe.
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
 `text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
 this project does not parse or strip (there is no dedicated stripper the way MTEXT has
-`strip_mtext_formatting`). Readable, but not real GD&T symbols.
+`strip_mtext_formatting`). Readable, but not real GD&T symbols. Its `text_height` is
+the entity's own only in R13/R14 files (LibreDWG decodes `height` for those alone);
+an R2000+ frame takes its DIMSTYLE's `DIMTXT`, else the header's, else 1.0 -- it used
+to come out as 0 and draw nothing.
 
 **ACAD_TABLE** has nearly INSERT's field shape in `dwg.h` (`ins_pt`/`scale`/`rotation`/
 `block_header`), and its own `flag_for_table_value` comment states that 0x06 ("has a
@@ -169,10 +172,12 @@ its 0.3.0 form. Known gaps:
   content on the tile; a dense drawing whose every entity touches every
   tile still costs `tiles x content`. Tiles of a level render in parallel;
   `--max-tiles` (400) and `--max-levels` (5) bound the total.
-- **Sheets are plan views composited by rule.** The sheet is the paper size
-  from the layout's plot settings (portrait size turned by the rotation
-  code, printable corner at the origin, as AutoCAD lays it out), else the
-  layout's limits, else the paper entities' extents. The model is drawn
+- **Sheets are plan views composited by rule.** The sheet is the layout's
+  own limits (`LIMMIN`/`LIMMAX`, AutoCAD's placement of the paper, margins
+  and plot origin folded in), else the paper size from the plot settings
+  (portrait size turned by the rotation code, the printable corner moved
+  by the plot origin at the layout origin), else the paper entities'
+  extents; `sheets.json` says which (`rect_source`). The model is drawn
   through every viewport that is on, looks down the z axis and is not the
   sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
   centred exactly on its frame (a DWG stores no id; the rule held on every

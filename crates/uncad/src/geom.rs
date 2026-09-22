@@ -282,36 +282,51 @@ pub fn polyline_length(vertices: &[Point2D], bulges: &[f64], closed: bool) -> f6
 /// its vertices plus each arc's circular segment, added when the arc bulges
 /// outward and subtracted when it bulges inward. Positive for a
 /// counter-clockwise outline. An open polyline is closed by a straight
-/// segment for this purpose. Self-intersecting outlines give a value with
-/// no geometric meaning; see [`is_simple`].
-pub fn polyline_signed_area(vertices: &[Point2D], bulges: &[f64]) -> f64 {
-    let vertices = dedup_closing_vertex(vertices, true);
-    let n = vertices.len();
-    if n < 3 {
+/// segment from its last vertex back to its first for this purpose: the
+/// bulge stored on the last vertex (AutoCAD keeps one there, e.g. after
+/// BREAK or TRIM) applies to no segment, exactly as in
+/// [`polyline_segments`]. Self-intersecting outlines give a value with no
+/// geometric meaning; see [`is_simple`].
+pub fn polyline_signed_area(vertices: &[Point2D], bulges: &[f64], closed: bool) -> f64 {
+    let mut segments = polyline_segments(vertices, bulges, closed);
+    if !closed {
+        if let (Some(&first), Some(&last)) = (vertices.first(), vertices.last()) {
+            if vertices.len() >= 2 {
+                segments.push(Segment::Line {
+                    from: last,
+                    to: first,
+                });
+            }
+        }
+    }
+    if segments.len() < 3 {
         return 0.0;
     }
-    let mut shoelace = 0.0;
-    for i in 0..n {
-        let (a, b) = (vertices[i], vertices[(i + 1) % n]);
-        shoelace += a.x * b.y - b.x * a.y;
-    }
-    let mut area = shoelace / 2.0;
-    for i in 0..n {
-        let bulge = bulges.get(i).copied().unwrap_or(0.0);
-        if let Some(arc) = bulge_arc(vertices[i], vertices[(i + 1) % n], bulge) {
-            // A counter-clockwise arc bulges to the right of travel, which is
-            // outward for a counter-clockwise outline and inward for a
-            // clockwise one -- so adding a signed term does the right thing
-            // for both orientations.
-            area += arc.segment_area() * bulge.signum();
+    let mut area = 0.0;
+    for segment in &segments {
+        match *segment {
+            Segment::Line { from, to } => area += (from.x * to.y - to.x * from.y) / 2.0,
+            Segment::Arc {
+                from,
+                to,
+                bulge,
+                arc,
+            } => {
+                area += (from.x * to.y - to.x * from.y) / 2.0;
+                // A counter-clockwise arc bulges to the right of travel,
+                // which is outward for a counter-clockwise outline and
+                // inward for a clockwise one -- so adding a signed term does
+                // the right thing for both orientations.
+                area += arc.segment_area() * bulge.signum();
+            }
         }
     }
     area
 }
 
 /// The enclosed area, unsigned.
-pub fn polyline_area(vertices: &[Point2D], bulges: &[f64]) -> f64 {
-    polyline_signed_area(vertices, bulges).abs()
+pub fn polyline_area(vertices: &[Point2D], bulges: &[f64], closed: bool) -> f64 {
+    polyline_signed_area(vertices, bulges, closed).abs()
 }
 
 /// Whether the straight-segment outline through `vertices` (closed) has no
@@ -484,7 +499,7 @@ mod tests {
             arc.segment_area()
         );
         assert!(close(polyline_length(&vertices, &bulges, true), 305.536037));
-        assert!(close(polyline_area(&vertices, &bulges), 5356.747702));
+        assert!(close(polyline_area(&vertices, &bulges, true), 5356.747702));
         let (_, _, max_x, _) = polyline_bounds(&vertices, &bulges, true).unwrap();
         assert!(close(max_x, 110.355339), "{max_x}");
         // The same outline clockwise: same area, negative sign.
@@ -492,7 +507,10 @@ mod tests {
         // Reversed, the arc is the segment leaving vertex 1 ((100,50) down to
         // (100,0)) and must bulge to the left of travel, i.e. negatively.
         let cw_bulges = [0.0, -0.41421356, 0.0, 0.0];
-        assert!(close(polyline_signed_area(&cw, &cw_bulges), -5356.747702));
+        assert!(close(
+            polyline_signed_area(&cw, &cw_bulges, true),
+            -5356.747702
+        ));
         assert!(is_simple(&vertices));
     }
 
@@ -517,13 +535,54 @@ mod tests {
         assert!(close(polyline_length(&vertices, &[], false), 5.0));
         assert_eq!(polyline_segments(&vertices, &[], true).len(), 2);
         assert_eq!(polyline_segments(&[p(1.0, 1.0)], &[], true).len(), 0);
-        assert_eq!(polyline_area(&vertices, &[]), 0.0);
+        assert_eq!(polyline_area(&vertices, &[], false), 0.0);
         assert!(bulge_arc(p(0.0, 0.0), p(0.0, 0.0), 1.0).is_none());
         // A repeated closing vertex does not add a zero-length segment.
         let repeated = [p(0.0, 0.0), p(4.0, 0.0), p(4.0, 3.0), p(0.0, 0.0)];
         assert_eq!(polyline_segments(&repeated, &[], true).len(), 3);
-        assert!(close(polyline_area(&repeated, &[]), 6.0));
+        assert!(close(polyline_area(&repeated, &[], true), 6.0));
         assert!(close(polyline_length(&repeated, &[], true), 12.0));
+    }
+
+    #[test]
+    fn an_open_polylines_last_bulge_does_not_bend_the_closing_segment() {
+        // The right triangle (0,0) -> (10,0) -> (10,10), open, with a bulge
+        // of 1 (a semicircle) left on its last vertex. Closed by a straight
+        // segment the area is 10 * 10 / 2 = 50, and the last bulge applies
+        // to nothing. Bent, the closing chord (10,10) -> (0,0) of length
+        // 10 sqrt(2) would carry a semicircle of radius 5 sqrt(2), adding
+        // pi * 50 / 2 = 78.539816 for a bulge of +1 (an arc to the right of
+        // travel, outside this counter-clockwise triangle) or taking it
+        // away for -1.
+        let vertices = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)];
+        for bulge in [1.0, -1.0, 669.19] {
+            let bulges = [0.0, 0.0, bulge];
+            assert!(
+                close(polyline_signed_area(&vertices, &bulges, false), 50.0),
+                "bulge {bulge}: {}",
+                polyline_signed_area(&vertices, &bulges, false)
+            );
+            // Length is unaffected either way: two straight sides.
+            assert!(close(polyline_length(&vertices, &bulges, false), 20.0));
+        }
+        // Flagged closed, the same bulge is the real closing segment.
+        let bulges = [0.0, 0.0, 1.0];
+        assert!(close(
+            polyline_signed_area(&vertices, &bulges, true),
+            50.0 + std::f64::consts::PI * 50.0 / 2.0
+        ));
+        // An open polyline drawn back to its first vertex: the bulge on the
+        // vertex before the repeat is a real segment, the repeat's own is
+        // not. Here the third segment (10,10) -> (0,0) with bulge -1 is a
+        // semicircle to the left of travel, i.e. inside, so 50 - 78.539816;
+        // the 5.0 on the repeated vertex (a 315-degree arc, were there a
+        // chord for it) must count for nothing.
+        let back_home = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0), p(0.0, 0.0)];
+        let bulges = [0.0, 0.0, -1.0, 5.0];
+        assert!(close(
+            polyline_signed_area(&back_home, &bulges, false),
+            50.0 - std::f64::consts::PI * 50.0 / 2.0
+        ));
     }
 
     #[test]

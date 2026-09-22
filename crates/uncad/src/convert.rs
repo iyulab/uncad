@@ -923,7 +923,21 @@ unsafe fn convert_entity(
                 |field: &str| get_field::<Point3D>(entity_ptr, dxfname, field).unwrap_or_default();
             let f64_field =
                 |field: &str| get_field::<f64>(entity_ptr, dxfname, field).unwrap_or(0.0);
-            let definition_point = p3("def_pt");
+            // For a 2-line angular dimension the two readers fill `def_pt`
+            // and `xline2end_pt` the other way round: the DWG decoder
+            // follows the stream order (`dwg.spec`: the leading 2RD is the
+            // arc point, DXF 16, and `xline2end_pt` gets the last point,
+            // DXF 10 -- the second line's end), while the DXF reader maps
+            // by group code (dynapi: `def_pt` = 10, `xline2end_pt` = 16).
+            // Both paths must end up with the arc point as the definition
+            // point (the sector probe) and the DXF 10 point as `line2_end`.
+            let ang2ln_swapped = source.from_dxf
+                && fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN;
+            let definition_point = if ang2ln_swapped {
+                p3("xline2end_pt")
+            } else {
+                p3("def_pt")
+            };
             let geometry = match fixedtype {
                 libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_LINEAR => {
                     DimensionGeometry::Linear {
@@ -950,7 +964,11 @@ unsafe fn convert_entity(
                         line1_start: p3("xline1start_pt"),
                         line1_end: p3("xline1end_pt"),
                         line2_start: p3("xline2start_pt"),
-                        line2_end: p3("xline2end_pt"),
+                        line2_end: if ang2ln_swapped {
+                            p3("def_pt")
+                        } else {
+                            p3("xline2end_pt")
+                        },
                     }
                 }
                 libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS => {
@@ -968,12 +986,19 @@ unsafe fn convert_entity(
                     }
                 }
                 libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => {
-                    // flag2 bit 1: the x coordinate is dimensioned.
-                    let flag2 = get_field::<u8>(entity_ptr, dxfname, "flag2").unwrap_or(0);
+                    // Which coordinate is dimensioned. A DWG stores it as
+                    // bit 1 of the stream-only `flag2` byte; a DXF carries
+                    // it as bit 0x40 of group 70, which the DXF reader
+                    // stores in `flag` and never copies into `flag2`.
+                    let x_datum = if source.from_dxf {
+                        get_field::<u8>(entity_ptr, dxfname, "flag").unwrap_or(0) & 0x40 != 0
+                    } else {
+                        get_field::<u8>(entity_ptr, dxfname, "flag2").unwrap_or(0) & 1 != 0
+                    };
                     DimensionGeometry::Ordinate {
                         feature: p3("feature_location_pt"),
                         leader_end: p3("leader_endpt"),
-                        x_datum: flag2 & 1 != 0,
+                        x_datum,
                     }
                 }
                 libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => DimensionGeometry::Arc {
@@ -1121,15 +1146,26 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
             let insertion_point = get_field::<Point3D>(entity_ptr, "TOLERANCE", "ins_pt")?;
-            let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
+            // `height` is only decoded for R13/R14 (`dwg.spec`); every later
+            // file leaves it at 0.0 and takes the height from the DIMSTYLE
+            // -- dimension::attach_display_text fills that in once the
+            // tables exist.
+            let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height")
+                .filter(|h| h.is_finite() && *h > 0.0)
+                .unwrap_or(0.0);
             let text_value =
                 get_utf8_field(entity_ptr, "TOLERANCE", "text_value").unwrap_or_default();
+            let dimstyle =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TOLERANCE", "dimstyle")
+                    .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+                    .unwrap_or_default();
             Entity::Tolerance(ToleranceEntity {
                 common,
                 insertion_point,
                 text_height,
                 text_plain: crate::text::decode_text(&text_value).plain,
                 text_value,
+                dimstyle,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_WIPEOUT => {

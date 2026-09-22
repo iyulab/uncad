@@ -18,7 +18,7 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `status_flag`, `on`, `id`, `frozen_layers`) with `scale()`, `model_window()`,
   `model_to_paper()` / `paper_to_model()` and `is_overall()`. `uncad export` writes
   `sheets.json` and `sheets/<layout>/overview.png` for every paper layout: the sheet
-  (from the paper size, else the limits, else the paper entities) at the profile's size
+  (the layout's limits, else the paper size, else the paper entities) at the profile's size
   with the layout's own entities and the model composited through each on, plan-view,
   non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
   layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
@@ -95,11 +95,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
   `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
   `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
-  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()` and
-  `area()`; POLYLINE_2D bulges are collected from its VERTEX_2D subentities. The renderer
-  draws bulges as SVG arcs instead of chords (the 25-arc revision cloud in
-  `example_2000.dwg` was a 25-gon). The design document's worked example -- a 100 x 50
-  outline with one 90-degree arc -- measures 305.536 around and 5356.748 in area.
+  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()`,
+  `area()` and `signed_area()`; POLYLINE_2D bulges are collected from its VERTEX_2D
+  subentities. The renderer draws bulges as SVG arcs instead of chords (the 25-arc
+  revision cloud in `example_2000.dwg` was a 25-gon). The design document's worked
+  example -- a 100 x 50 outline with one 90-degree arc -- measures 305.536 around and
+  5356.748 in area.
 - `extrusion` on CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, INSERT and SOLID (serde default
   `(0,0,1)`), so a consumer can tell a mirrored entity apart.
 - Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
@@ -172,6 +173,31 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
+  points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
+  stream order, so `line2_end` held the arc point and the sector probe lay on the line
+  itself (`example_2000.dxf` 43B measured 42.3 degrees from its points instead of 108),
+  and the ordinate's X/Y type -- bit 64 of group 70 in a DXF, the stream-only `flag2`
+  in a DWG -- was never read, so every DXF ordinate was a Y datum. `definition_point`
+  is the arc point (DXF 16) for `ANGULAR_2LINE` from both readers now, and the model
+  docs say so.
+- The sheet rectangle ignored the plot origin (DXF 46/47). `PlotSettings::sheet_rect`
+  placed the paper by the margins alone, so with the usual "origin = minus the margins"
+  page setup the exported sheet was shifted by a margin and the title block's top and
+  right edges fell off `sheets/<layout>/overview.png` (six of seven AutoCAD-written
+  samples). The export now takes the layout's own `LIMMIN`/`LIMMAX` first
+  (`rect_source: "layout_limits"`; AutoCAD keeps them equal to the paper's placement,
+  rotation included) and `sheet_rect` folds the offset in as ezdxf does for the
+  `paper_size` fallback.
+- `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
+  package's `area` / `orientation`) applied the bulge stored on the last vertex of an
+  *open* polyline to the straight segment that closes it for the area, which AutoCAD
+  leaves behind after BREAK/TRIM: a 0.77 x 0.45 in sketch reported 63646 in^2. The
+  helpers take the `closed` flag now, like `polyline_length` and `polyline_bounds`.
+- TOLERANCE (a GD&T feature control frame) rendered invisibly in every R2000+ file:
+  LibreDWG decodes its `height` for R13/R14 only, so `text_height` was 0 and the SVG
+  carried `font-size="0"`. The height is the DIMSTYLE's `DIMTXT` now (the new
+  `ToleranceEntity::dimstyle` names it), else the header's, else 1.0.
 - Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
   offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
   anchored at its left-baseline point, i.e. displaced by up to its own width (541 of

@@ -70,16 +70,17 @@ def text(value, x, y, height=2.5, layer=b"0", extrusion=None, handle=None, owner
     return entity("TEXT", layer, *g, handle=handle, owner=owner)
 
 
-def line(x1, y1, x2, y2, layer=b"0", handle=None, owner=None):
+def line(x1, y1, x2, y2, layer=b"0", handle=None, owner=None, paper=False):
     return entity(
         "LINE", layer,
         (10, float(x1)), (20, float(y1)), (30, 0.0),
         (11, float(x2)), (21, float(y2)), (31, 0.0),
-        handle=handle, owner=owner,
+        handle=handle, owner=owner, paper=paper,
     )
 
 
-def lwpolyline(points, closed, extrusion=None, bulges=None, layer=b"0"):
+def lwpolyline(points, closed, extrusion=None, bulges=None, layer=b"0",
+               handle=None, owner=None, paper=False):
     g = [(100, "AcDbPolyline"), (90, len(points)), (70, 1 if closed else 0), (43, 0.0)]
     if extrusion is not None:
         g += [(210, float(extrusion[0])), (220, float(extrusion[1])), (230, float(extrusion[2]))]
@@ -87,7 +88,7 @@ def lwpolyline(points, closed, extrusion=None, bulges=None, layer=b"0"):
         g += [(10, float(x)), (20, float(y))]
         if bulges and bulges.get(i):
             g += [(42, float(bulges[i]))]
-    return entity("LWPOLYLINE", layer, *g)
+    return entity("LWPOLYLINE", layer, *g, handle=handle, owner=owner, paper=paper)
 
 
 def circle(cx, cy, r, extrusion=None, layer=b"0"):
@@ -155,32 +156,44 @@ def dictionary(handle, owner, items):
 
 
 def layout(handle, owner, name, tab_order, block_record, viewport, paper,
-           printer="none_device", margin=6.35, rotation=1):
+           printer="none_device", margin=6.35, rotation=1, margins=None,
+           plot_origin=(0.0, 0.0), paper_units=1):
     """A LAYOUT object: the embedded AcDbPlotSettings (page setup, all
     lengths in mm) followed by AcDbLayout. `paper` is (canonical media
     name, width, height) of the unrotated sheet; `rotation` 1 is 90 degrees
-    counter-clockwise (landscape), and LIMMIN/LIMMAX are the printable area
-    of the sheet as rotated, from (-margin, -margin). EXTMIN/EXTMAX carry
-    the 1e20 / -1e20 "never computed" sentinels AutoCAD writes for a layout
-    that has not been plotted or zoomed. `owner` is the ACAD_LAYOUT
-    dictionary; the AcDbLayout `330` is the block record and `331` the
-    active viewport."""
+    counter-clockwise (landscape). `margins` is (left, bottom, right, top)
+    in mm (default: `margin` on every side), `plot_origin` the DXF 46/47
+    offset in mm and `paper_units` DXF 72 (1 mm, 0 inches: the layout's own
+    unit, which LIMMIN/LIMMAX are written in). LIMMIN/LIMMAX follow
+    AutoCAD's placement of the sheet: the layout origin is the printable
+    corner moved by the plot origin, so the paper runs from
+    -(margin + origin) to that plus the rotated size (ezdxf's
+    `reset_paper_limits`; verified against seven AutoCAD-written layouts on
+    2026-09-22). EXTMIN/EXTMAX carry the 1e20 / -1e20 "never computed"
+    sentinels AutoCAD writes for a layout that has not been plotted or
+    zoomed. `owner` is the ACAD_LAYOUT dictionary; the AcDbLayout `330` is
+    the block record and `331` the active viewport."""
     media, w, h = paper
     if rotation in (1, 3):
         w, h = h, w
+    left, bottom, right, top = margins if margins is not None else (margin,) * 4
+    ox, oy = plot_origin
+    k = 1.0 / 25.4 if paper_units == 0 else 1.0
+    shift_x, shift_y = left + ox, bottom + oy
+    r = lambda v: round(v, 9) + 0.0  # noqa: E731  -- no float noise, no -0.0
     plot = [
         (100, "AcDbPlotSettings"),
         (1, b""),                            # page setup name
         (2, printer),                        # printer / plot configuration
         (4, media),                          # canonical media name
-        (40, margin), (41, margin), (42, margin), (43, margin),
+        (40, float(left)), (41, float(bottom)), (42, float(right)), (43, float(top)),
         (44, float(paper[1])), (45, float(paper[2])),
-        (46, 0.0), (47, 0.0),                # plot origin
+        (46, float(ox)), (47, float(oy)),    # plot origin
         (48, 0.0), (49, 0.0),                # plot window lower-left
         (140, 0.0), (141, 0.0),              # plot window upper-right
         (142, 1.0), (143, 1.0),              # paper units : drawing units
         (70, 688),                           # plot flags
-        (72, 1),                             # plot paper unit: mm
+        (72, paper_units),                   # plot paper unit: 1 mm, 0 in
         (73, rotation),                      # plot rotation
         (74, 5),                             # plot type: layout
         (7, b""),                            # style sheet
@@ -193,8 +206,8 @@ def layout(handle, owner, name, tab_order, block_record, viewport, paper,
         (1, name),
         (70, 1),                             # layout flags: PSLTSCALE
         (71, tab_order),
-        (10, -margin), (20, -margin),        # LIMMIN
-        (11, w - margin), (21, h - margin),  # LIMMAX
+        (10, r(-shift_x * k)), (20, r(-shift_y * k)),            # LIMMIN
+        (11, r((w - shift_x) * k)), (21, r((h - shift_y) * k)),  # LIMMAX
         (12, 0.0), (22, 0.0), (32, 0.0),     # INSBASE
         (14, 1e20), (24, 1e20), (34, 1e20),  # EXTMIN
         (15, -1e20), (25, -1e20), (35, -1e20),  # EXTMAX
@@ -402,6 +415,120 @@ def hidden_layers():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# ---------------------------------------------------------------- fixture 6
+def plot_origin():
+    """A paper layout with the page setup AutoCAD-written drawings usually
+    carry: inch units, asymmetric margins and a plot origin that is not
+    zero, so the sheet is not at `(-left, -bottom)`. ANSI B landscape
+    (431.8 x 279.4 mm = 17 x 11 in) unrotated, margins (0.25, 0.75, 0.25,
+    0.75) in, plot origin (-0.25, -0.5) in: the layout origin is the
+    printable corner moved by the origin, so the sheet runs from
+    (-(0.25 - 0.25), -(0.75 - 0.5)) = (0, -0.25) to (17, 10.75), which is
+    what LIMMIN/LIMMAX say. On paper: a border rectangle (0.5, 0.25) ..
+    (16.5, 10.5) -- its top edge lies above the 10.25 a margins-only sheet
+    would end at -- and a 12 x 8 in plan viewport at (8.5, 5.5) showing the
+    model at 1:5 (VIEWSIZE 40 for a height of 8) centred on (50, 25). The
+    model holds one LINE (0,0) -> (100,50). Same block/dictionary layout and
+    handles as the twisted-viewport fixture."""
+    hdr = header(INSUNITS=(70, 1))
+    pre = tables(block_records=(("1F", "*Model_Space"), ("1C", "*Paper_Space", "2B")))
+    pre += section("BLOCKS",
+                   block("*Model_Space", "1F", ("20", "21"))
+                   + block("*Paper_Space", "1C", ("22", "23"), paper=True))
+    post = section("OBJECTS",
+                   dictionary("C", "0", (("ACAD_LAYOUT", "1A"),))
+                   + dictionary("1A", "C", (("Layout1", "2B"),))
+                   + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
+                            paper=("ANSI_B_(17.00_x_11.00_Inches)", 431.8, 279.4),
+                            rotation=0, margins=(6.35, 19.05, 6.35, 19.05),
+                            plot_origin=(-6.35, -12.7), paper_units=0))
+    vp = entity(
+        "VIEWPORT", b"0",
+        (100, "AcDbViewport"),
+        (10, 8.5), (20, 5.5), (30, 0.0),
+        (40, 12.0), (41, 8.0),
+        (68, 1), (69, 2),
+        (12, 50.0), (22, 25.0),
+        (13, 0.0), (23, 0.0),
+        (14, 10.0), (24, 10.0),
+        (15, 10.0), (25, 10.0),
+        (16, 0.0), (26, 0.0), (36, 1.0),
+        (17, 0.0), (27, 0.0), (37, 0.0),
+        (42, 50.0), (43, 0.0), (44, 0.0),
+        (45, 40.0),
+        (50, 0.0),
+        (51, 0.0),
+        (72, 100),
+        (90, 32864),
+        handle="2A", owner="1C", paper=True,
+    )
+    border = lwpolyline([(0.5, 0.25), (16.5, 0.25), (16.5, 10.5), (0.5, 10.5)], closed=True,
+                        handle="25", owner="1C", paper=True)
+    ents = line(0, 0, 100, 50, handle="24", owner="1F") + border + vp
+    return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
+
+
+# ---------------------------------------------------------------- fixture 7
+def angular_ordinate():
+    """The two dimension kinds whose definition points a DXF lays out
+    differently from a DWG (LibreDWG maps DXF groups by code, its DWG
+    decoder by stream order): a 2-line angular dimension and an ordinate
+    dimension of each type. Every value below is derived by hand.
+
+    The angular dimension (AcDb2LineAngularDimension, 70 = 2 | 32): line 1
+    from 13 = (0,0) to 14 = (10,0), line 2 from 15 = (0,0) to 10 = (5,
+    8.660254) -- for this kind group 10 is the second line's end point --
+    and the arc point 16 = (4.330127, 2.5), 30 degrees along a radius of
+    5, inside the 60-degree sector; 42 = pi/3. Read with 10 and 16 swapped
+    the probe would sit at 60 degrees between rays at 30 and 180 degrees,
+    i.e. 150.
+
+    The ordinates (AcDbOrdinateDimension) share the datum origin 10 =
+    (100, 200) and the feature 13 = (130, 250); 14 is the leader end. The
+    first has bit 64 of 70 set (70 = 6 | 32 | 64 = 102): an X ordinate,
+    130 - 100 = 30 (42 = 30.0). The second has 70 = 38: a Y ordinate,
+    250 - 200 = 50 (42 = 50.0). No cached *D blocks, so the labels are
+    formatted from the values: DIMADEC 0 and DIMDEC 2 from the header."""
+    hdr = header(INSUNITS=(70, 4), DIMDEC=(70, 2), DIMADEC=(70, 0), DIMLUNIT=(70, 2))
+    tbl = tables(dimstyle=True)
+    common = lambda block: [(100, "AcDbDimension"), (2, block)]  # noqa: E731
+    angular = entity(
+        "DIMENSION", b"0",
+        *common("*D1"),
+        (10, 5.0), (20, 8.660254037844386), (30, 0.0),
+        (11, 6.0), (21, 3.5), (31, 0.0),
+        (70, 34),
+        (1, b""),
+        (42, 1.0471975511965976),
+        (3, "STANDARD"),
+        (100, "AcDb2LineAngularDimension"),
+        (13, 0.0), (23, 0.0), (33, 0.0),
+        (14, 10.0), (24, 0.0), (34, 0.0),
+        (15, 0.0), (25, 0.0), (35, 0.0),
+        (16, 4.330127018922194), (26, 2.5), (36, 0.0),
+    )
+
+    def ordinate(block, flag, value, leader):
+        return entity(
+            "DIMENSION", b"0",
+            *common(block),
+            (10, 100.0), (20, 200.0), (30, 0.0),
+            (11, float(leader[0])), (21, float(leader[1])), (31, 0.0),
+            (70, flag),
+            (1, b""),
+            (42, float(value)),
+            (3, "STANDARD"),
+            (100, "AcDbOrdinateDimension"),
+            (13, 130.0), (23, 250.0), (33, 0.0),
+            (14, float(leader[0])), (24, float(leader[1])), (34, 0.0),
+        )
+
+    ents = (line(0, 0, 10, 0) + line(0, 0, 5, 8.660254037844386) + angular
+            + ordinate("*D2", 102, 30.0, (130, 270))
+            + ordinate("*D3", 38, 50.0, (150, 250)))
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -414,6 +541,10 @@ if __name__ == "__main__":
         write("twisted_viewport_r2000.dxf", twisted_viewport("full"))
     if which in ("all", "hidden"):
         write("hidden_layers_r2000.dxf", hidden_layers())
+    if which in ("all", "plot-origin"):
+        write("plot_origin_r2000.dxf", plot_origin())
+    if which in ("all", "angular-ordinate"):
+        write("angular_ordinate_r2000.dxf", angular_ordinate())
     if which == "dimlfac-minimal":
         write("dimlfac12_r2000.dxf", dimlfac12("minimal"))
     if which == "viewport-minimal":
