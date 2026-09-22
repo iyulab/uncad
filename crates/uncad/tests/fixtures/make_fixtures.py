@@ -105,6 +105,43 @@ def arc(cx, cy, r, a0, a1, extrusion=None, layer=b"0"):
     return entity("ARC", layer, *g)
 
 
+def viewport(handle, owner, center, size, view_center, view_size, twist_deg=0.0,
+             vp_id=2, on=1, status=32864, view_dir=(0.0, 0.0, 1.0), layer=b"0",
+             lens=50.0):
+    """A paper-space VIEWPORT (`AcDbViewport`). `center`/`size` are the
+    frame on the sheet in paper units, `view_center` (DXF 12, VIEWCTR) and
+    `view_size` (45, VIEWSIZE) the model window it shows, so the scale is
+    `size[1] / view_size`; `twist_deg` is DXF 51 (the reader converts it to
+    radians). `on` is DXF 68 (0 switches the viewport off in a DXF) and
+    `status` DXF 90, whose 0x20000 bit is a DWG's own "off"; `vp_id` is
+    DXF 69 (1 marks the sheet's overall viewport). `view_dir` is DXF 16,
+    VIEWDIR -- anything but (0,0,1) is a non-plan view."""
+    cx, cy = center
+    w, h = size
+    vx, vy = view_center
+    dx, dy, dz = view_dir
+    return entity(
+        "VIEWPORT", layer,
+        (100, "AcDbViewport"),
+        (10, float(cx)), (20, float(cy)), (30, 0.0),
+        (40, float(w)), (41, float(h)),
+        (68, on), (69, vp_id),
+        (12, float(vx)), (22, float(vy)),
+        (13, 0.0), (23, 0.0),
+        (14, 10.0), (24, 10.0),
+        (15, 10.0), (25, 10.0),
+        (16, float(dx)), (26, float(dy)), (36, float(dz)),
+        (17, 0.0), (27, 0.0), (37, 0.0),
+        (42, float(lens)), (43, 0.0), (44, 0.0),
+        (45, float(view_size)),
+        (50, 0.0),
+        (51, float(twist_deg)),
+        (72, 100),
+        (90, status),
+        handle=handle, owner=owner, paper=True,
+    )
+
+
 def hatch(points, angle_deg, spacing, handle=None, owner=None, paper=False, layer=b"0"):
     """A pattern HATCH (not solid) over the closed polyline `points`: one
     user-defined family of lines at `angle_deg`, `spacing` apart, no dashes.
@@ -155,10 +192,13 @@ def tables(layers=((b"0", 7),), dimstyle=False, block_records=(), dimlfac=None):
     its style's factor, not the header's) and a BLOCK_RECORD table whose
     entries carry explicit handles so BLOCK/entity `330` owner codes can
     refer to them; a third element on a block record is the handle of its
-    LAYOUT object (`340`)."""
+    LAYOUT object (`340`). A layer is `(name, colour)` or
+    `(name, colour, flag)` with the DXF 70 flag (1 frozen, 4 locked); a
+    negative colour means the layer is off."""
     body = pairs((0, "TABLE"), (2, "LAYER"), (70, len(layers)))
-    for name, color in layers:
-        body += pairs((0, "LAYER"), (2, name), (70, 0), (62, color), (6, "Continuous"))
+    for name, color, *rest in layers:
+        flag = rest[0] if rest else 0
+        body += pairs((0, "LAYER"), (2, name), (70, flag), (62, color), (6, "Continuous"))
     body += pair(0, "ENDTAB")
     if dimstyle:
         body += pairs(
@@ -404,26 +444,8 @@ def twisted_viewport(variant="full"):
                        + dictionary("1A", "C", (("Layout1", "2B"),))
                        + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
                                 paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0)))
-    vp = entity(
-        "VIEWPORT", b"0",
-        (100, "AcDbViewport"),
-        (10, 150.0), (20, 100.0), (30, 0.0),
-        (40, 200.0), (41, 120.0),
-        (68, 1), (69, 2),
-        (12, 50.0), (22, 25.0),
-        (13, 0.0), (23, 0.0),
-        (14, 10.0), (24, 10.0),
-        (15, 10.0), (25, 10.0),
-        (16, 0.0), (26, 0.0), (36, 1.0),
-        (17, 0.0), (27, 0.0), (37, 0.0),
-        (42, 50.0), (43, 0.0), (44, 0.0),
-        (45, 60.0),
-        (50, 0.0),
-        (51, 30.0),
-        (72, 100),
-        (90, 32864),
-        handle="2A", owner=owner, paper=True,
-    )
+    vp = viewport("2A", owner, (150.0, 100.0), (200.0, 120.0), (50.0, 25.0), 60.0,
+                  twist_deg=30.0)
     ents = line(0, 0, 100, 50, handle="24" if line_owner else None, owner=line_owner) + vp
     return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
 
@@ -446,26 +468,8 @@ def hatched_viewport():
                    + dictionary("1A", "C", (("Layout1", "2B"),))
                    + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
                             paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0)))
-    vp = entity(
-        "VIEWPORT", b"0",
-        (100, "AcDbViewport"),
-        (10, 150.0), (20, 100.0), (30, 0.0),
-        (40, 200.0), (41, 120.0),
-        (68, 1), (69, 2),
-        (12, 50.0), (22, 25.0),
-        (13, 0.0), (23, 0.0),
-        (14, 10.0), (24, 10.0),
-        (15, 10.0), (25, 10.0),
-        (16, 0.0), (26, 0.0), (36, 1.0),
-        (17, 0.0), (27, 0.0), (37, 0.0),
-        (42, 50.0), (43, 0.0), (44, 0.0),
-        (45, 60.0),
-        (50, 0.0),
-        (51, 30.0),
-        (72, 100),
-        (90, 32864),
-        handle="2A", owner="1C", paper=True,
-    )
+    vp = viewport("2A", "1C", (150.0, 100.0), (200.0, 120.0), (50.0, 25.0), 60.0,
+                  twist_deg=30.0)
     ents = (line(0, 0, 100, 50, handle="24", owner="1F")
             + hatch([(20, 10), (60, 10), (60, 30), (20, 30)], 90.0, 2.0, handle="30", owner="1F")
             + vp
@@ -547,26 +551,7 @@ def plot_origin():
                             paper=("ANSI_B_(17.00_x_11.00_Inches)", 431.8, 279.4),
                             rotation=0, margins=(6.35, 19.05, 6.35, 19.05),
                             plot_origin=(-6.35, -12.7), paper_units=0))
-    vp = entity(
-        "VIEWPORT", b"0",
-        (100, "AcDbViewport"),
-        (10, 8.5), (20, 5.5), (30, 0.0),
-        (40, 12.0), (41, 8.0),
-        (68, 1), (69, 2),
-        (12, 50.0), (22, 25.0),
-        (13, 0.0), (23, 0.0),
-        (14, 10.0), (24, 10.0),
-        (15, 10.0), (25, 10.0),
-        (16, 0.0), (26, 0.0), (36, 1.0),
-        (17, 0.0), (27, 0.0), (37, 0.0),
-        (42, 50.0), (43, 0.0), (44, 0.0),
-        (45, 40.0),
-        (50, 0.0),
-        (51, 0.0),
-        (72, 100),
-        (90, 32864),
-        handle="2A", owner="1C", paper=True,
-    )
+    vp = viewport("2A", "1C", (8.5, 5.5), (12.0, 8.0), (50.0, 25.0), 40.0)
     border = lwpolyline([(0.5, 0.25), (16.5, 0.25), (16.5, 10.5), (0.5, 10.5)], closed=True,
                         handle="25", owner="1C", paper=True)
     ents = line(0, 0, 100, 50, handle="24", owner="1F") + border + vp
@@ -634,6 +619,132 @@ def angular_ordinate():
     return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
 
 
+# ---------------------------------------------------------------- fixture 8
+def viewport_states():
+    """Every viewport state the sheet compositing rules distinguish, and two
+    page setups the other layout fixtures do not carry.
+
+    `Layout1` (`*Paper_Space`, tab 1): A4 210 x 297 mm with plot rotation 2
+    (upside down, so the sheet keeps its portrait size), asymmetric margins
+    (10, 20, 5, 15) mm and no plot origin, so the sheet runs from
+    (-10, -20) to (200, 277) mm. On it, four 60 x 40 viewports, each
+    showing the model window 30 x 20 around (50, 25) at scale 40 / 20 = 2:
+
+    - `2A` at (50, 50): on, plan, layer 0 -- composited, border drawn.
+    - `2D` at (50, 120): the same, but on the frozen layer `VPFROZEN`, the
+      usual way to hide a viewport's border -- composited, no border.
+    - `2E` at (50, 190): switched off (DXF 68 = 0 and the status flag's
+      0x20000 bit, 32864 | 0x20000 = 163936) -- not composited.
+    - `2F` at (140, 50): VIEWDIR (1,1,1), an isometric view -- not
+      composited (the compositing transform is a plan-view mapping).
+
+    `Layout2` (`*Paper_Space0`, tab 2, empty): ANSI B 431.8 x 279.4 mm with
+    plot rotation 3 (90 degrees clockwise: the landscape sheet is turned
+    portrait) in inch paper units and uniform 6.35 mm margins, so the sheet
+    is (-0.25, -0.25) to (273.05 / 25.4, 425.45 / 25.4) = (10.75, 16.75)
+    in. It pins the rotation swap and the 1/25.4 conversion in
+    `PlotSettings::sheet_rect` against the limits AutoCAD would store.
+
+    The model holds the LINE (0,0) -> (100,50) of the viewport fixtures, so
+    each composited window shows it running corner to corner.
+    """
+    hdr = header(INSUNITS=(70, 4))
+    pre = tables(layers=((b"0", 7), (b"VPFROZEN", 4, 1)),
+                 block_records=(("1F", "*Model_Space"),
+                                ("1C", "*Paper_Space", "2B"),
+                                ("1D", "*Paper_Space0", "2C")))
+    pre += section("BLOCKS",
+                   block("*Model_Space", "1F", ("20", "21"))
+                   + block("*Paper_Space", "1C", ("22", "23"), paper=True)
+                   + block("*Paper_Space0", "1D", ("26", "27"), paper=True))
+    post = section("OBJECTS",
+                   dictionary("C", "0", (("ACAD_LAYOUT", "1A"),))
+                   + dictionary("1A", "C", (("Layout1", "2B"), ("Layout2", "2C")))
+                   + layout("2B", "1A", "Layout1", 1, block_record="1C", viewport="2A",
+                            paper=("ISO_A4_(210.00_x_297.00_MM)", 210.0, 297.0),
+                            rotation=2, margins=(10.0, 20.0, 5.0, 15.0))
+                   + layout("2C", "1A", "Layout2", 2, block_record="1D", viewport="0",
+                            paper=("ANSI_B_(17.00_x_11.00_Inches)", 431.8, 279.4),
+                            rotation=3, paper_units=0))
+    window = dict(view_center=(50.0, 25.0), view_size=20.0)
+    ents = (line(0, 0, 100, 50, handle="24", owner="1F")
+            + viewport("2A", "1C", (50.0, 50.0), (60.0, 40.0), vp_id=2, **window)
+            + viewport("2D", "1C", (50.0, 120.0), (60.0, 40.0), vp_id=3,
+                       layer=b"VPFROZEN", **window)
+            + viewport("2E", "1C", (50.0, 190.0), (60.0, 40.0), vp_id=4,
+                       on=0, status=32864 | 0x20000, **window)
+            + viewport("2F", "1C", (140.0, 50.0), (60.0, 40.0), vp_id=5,
+                       view_dir=(1.0, 1.0, 1.0), **window))
+    return hdr + pre + section("ENTITIES", ents) + post + pair(0, "EOF")
+
+
+# ---------------------------------------------------------------- fixture 9
+def radial():
+    """The three dimension kinds no corpus DXF carries (`2000/TS1.dwg` has
+    all three, but every TS1 DXF fails LibreDWG's reader): a radius, a
+    diameter and a 3-point angular dimension, with no cached `*D` blocks so
+    the labels are formatted from the values. Every number is derived by
+    hand, and group 42 (`act_measurement`) is written as the value a CAD
+    program would have measured, so `measurement` and
+    `measurement_from_points` must agree.
+
+    | 70 | subclass | 10 | 13 | 14 | 15 | 42 | value |
+    |---|---|---|---|---|---|---|---|
+    | 36 (4 radius) | `AcDbRadialDimension` | (0,0) centre | | | (3,4) on the circle | 5.0 | 3-4-5: radius 5 |
+    | 35 (3 diameter) | `AcDbDiametricDimension` | (20,0) chord start | | | (20,10) chord end | 10.0 | the vertical diameter of the circle at (20,5), r = 5 |
+    | 37 (5 angular 3-point) | `AcDb3PointAngularDimension` | (44.330127, 2.5) arc point, 30 degrees along r = 5 | (50,0) | (45, 8.660254) | (40,0) centre | pi/3 | the 60-degree sector between the rays at 0 and 60 degrees |
+
+    The arc point picks the sector: it lies at 30 degrees, inside the
+    60-degree one, so the 300-degree sector on the other side is not the
+    one dimensioned.
+    """
+    hdr = header(INSUNITS=(70, 4), DIMDEC=(70, 2), DIMADEC=(70, 0), DIMLUNIT=(70, 2))
+    tbl = tables(dimstyle=True)
+    radius = entity(
+        "DIMENSION", b"0",
+        (100, "AcDbDimension"), (2, "*D1"),
+        (10, 0.0), (20, 0.0), (30, 0.0),
+        (11, 1.5), (21, 2.0), (31, 0.0),
+        (70, 36),
+        (1, b""),
+        (42, 5.0),
+        (3, "STANDARD"),
+        (100, "AcDbRadialDimension"),
+        (15, 3.0), (25, 4.0), (35, 0.0),
+        (40, 0.0),
+    )
+    diameter = entity(
+        "DIMENSION", b"0",
+        (100, "AcDbDimension"), (2, "*D2"),
+        (10, 20.0), (20, 0.0), (30, 0.0),
+        (11, 20.0), (21, 5.0), (31, 0.0),
+        (70, 35),
+        (1, b""),
+        (42, 10.0),
+        (3, "STANDARD"),
+        (100, "AcDbDiametricDimension"),
+        (15, 20.0), (25, 10.0), (35, 0.0),
+        (40, 0.0),
+    )
+    angular = entity(
+        "DIMENSION", b"0",
+        (100, "AcDbDimension"), (2, "*D3"),
+        (10, 44.33012701892219), (20, 2.5), (30, 0.0),
+        (11, 46.0), (21, 3.0), (31, 0.0),
+        (70, 37),
+        (1, b""),
+        (42, 1.0471975511965976),
+        (3, "STANDARD"),
+        (100, "AcDb3PointAngularDimension"),
+        (13, 50.0), (23, 0.0), (33, 0.0),
+        (14, 45.0), (24, 8.660254037844386), (34, 0.0),
+        (15, 40.0), (25, 0.0), (35, 0.0),
+    )
+    ents = (circle(0, 0, 5) + circle(20, 5, 5) + arc(40, 0, 10, 0, 60)
+            + radius + diameter + angular)
+    return hdr + tbl + section("ENTITIES", ents) + pair(0, "EOF")
+
+
 if __name__ == "__main__":
     which = sys.argv[2] if len(sys.argv) > 2 else "all"
     if which in ("all", "cp949"):
@@ -652,6 +763,10 @@ if __name__ == "__main__":
         write("plot_origin_r2000.dxf", plot_origin())
     if which in ("all", "angular-ordinate"):
         write("angular_ordinate_r2000.dxf", angular_ordinate())
+    if which in ("all", "radial"):
+        write("radial_r2000.dxf", radial())
+    if which in ("all", "viewport-states"):
+        write("viewport_states_r2000.dxf", viewport_states())
     if which in ("all", "hatched-viewport"):
         write("hatched_viewport_r2000.dxf", hatched_viewport())
     if which == "dimlfac-minimal":

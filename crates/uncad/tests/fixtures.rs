@@ -44,13 +44,46 @@ const HATCHED_VIEWPORT: &str = concat!(
     "/tests/fixtures/hatched_viewport_r2000.dxf"
 );
 
-const ALL: [&str; 6] = [
+const HIDDEN_LAYERS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/hidden_layers_r2000.dxf"
+);
+
+const PLOT_ORIGIN: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/plot_origin_r2000.dxf"
+);
+
+const ANGULAR_ORDINATE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/angular_ordinate_r2000.dxf"
+);
+
+const VIEWPORT_STATES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/viewport_states_r2000.dxf"
+);
+
+const RADIAL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/radial_r2000.dxf"
+);
+
+/// Every shipped fixture, so the checks that must hold for all of them
+/// (parsing, the JSON round trip) cover each new file from the day it
+/// lands.
+const ALL: [&str; 11] = [
     CP949,
     MIRRORED,
     DIMLFAC12,
     TWISTED_VIEWPORT,
     MIRRORED_BULGE,
     HATCHED_VIEWPORT,
+    HIDDEN_LAYERS,
+    PLOT_ORIGIN,
+    ANGULAR_ORDINATE,
+    VIEWPORT_STATES,
+    RADIAL,
 ];
 
 fn parse(path: &str) -> uncad::CadDatabase {
