@@ -173,6 +173,18 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- The CLI took an option it did not know as the input file, or dropped it in silence.
+  `parse_args` matched only the render flags and ended in `other if input.is_none() =>
+  input = other` and `_ => {}`, while `uncad export` scanned its own eleven options in a
+  second loop that also ended in `_ => {}`: `uncad export --max-levels 2 d.dwg -o out`
+  failed with "cannot open input file '--max-levels'", `uncad export d.dwg -o out
+  --max-level 1 --sharkb 1` exited 0 and wrote the default package, and a second input
+  path or an option missing its value went the same way. One parser now owns every flag
+  of both commands, so an option is either understood wherever it stands or refused by
+  name: an unknown option, a second positional and a missing value are errors, an
+  option of the other command names the command it belongs to (`--fit` is not an export
+  option; `--max-levels` is one), and `--shard-kb`'s error says kilobytes instead of
+  pixels. `uncad export` accepts `--no-trim` and `--fonts` as the usage said it should.
 - Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
   points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
   stream order, so `line2_end` held the arc point and the sector probe lay on the line

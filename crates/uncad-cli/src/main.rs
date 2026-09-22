@@ -75,7 +75,7 @@ Export options (uncad export):
   --no-sheets                 skip sheets.json and the paper-layout images
   --svg                       also write drawing.svg
   --full                      also write entities.json (the whole model)
-  (--crop, --include-hidden apply too)
+  (--crop, --no-trim, --include-hidden and --fonts apply too)
 
 Examples:
   uncad drawing.dwg
@@ -86,15 +86,31 @@ Examples:
   uncad drawing.dwg -o drawing.png --fit 4000
   uncad drawing.dwg -o drawing.png --scale 2";
 
+/// Which command line is being parsed: the flags each one accepts differ,
+/// and a flag of the other command is refused with a message naming it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Command {
+    /// `uncad <input> [-o <output>]`
+    Plain,
+    /// `uncad export <input> -o <dir>`
+    Export,
+}
+
+/// Every option as the raw string it was given; the typed parsers
+/// (`svg_options`, `png_options`, `export_options`) turn them into values,
+/// so a bad value is reported by the command that uses it.
 struct Args {
     input: Option<String>,
     output: Option<String>,
-    space: String,
+    // Both commands.
     crop: String,
-    padding: Option<String>,
-    lattice: Option<String>,
     fonts: String,
     include_hidden: bool,
+    help: bool,
+    // The plain command only.
+    space: String,
+    padding: Option<String>,
+    lattice: Option<String>,
     fit: Option<String>,
     ppu: Option<String>,
     scale: Option<String>,
@@ -102,19 +118,35 @@ struct Args {
     stroke: Option<String>,
     max_edge: Option<String>,
     pretty: bool,
-    help: bool,
+    // `uncad export` only.
+    profile: Option<String>,
+    max_levels: Option<String>,
+    max_tiles: Option<String>,
+    text_px: Option<String>,
+    shard_kb: Option<String>,
+    frame_gap: Option<String>,
+    min_frame_entities: Option<String>,
+    max_frames: Option<String>,
+    svg: bool,
+    full: bool,
+    no_sheets: bool,
 }
 
-fn parse_args(argv: &[String]) -> Args {
+/// One parser for both commands, so a token is either understood or
+/// refused: an option no arm matches is an error naming it (before or after
+/// the input), a second positional is an error, and an option of the other
+/// command is an error naming that command. Nothing falls through silently.
+fn parse_args(argv: &[String], command: Command) -> Result<Args, String> {
     let mut args = Args {
         input: None,
         output: None,
-        space: "model".to_string(),
         crop: "auto".to_string(),
-        padding: None,
-        lattice: None,
         fonts: "bundled".to_string(),
         include_hidden: false,
+        help: false,
+        space: "model".to_string(),
+        padding: None,
+        lattice: None,
         fit: None,
         ppu: None,
         scale: None,
@@ -122,77 +154,158 @@ fn parse_args(argv: &[String]) -> Args {
         stroke: None,
         max_edge: None,
         pretty: false,
-        help: false,
+        profile: None,
+        max_levels: None,
+        max_tiles: None,
+        text_px: None,
+        shard_kb: None,
+        frame_gap: None,
+        min_frame_entities: None,
+        max_frames: None,
+        svg: false,
+        full: false,
+        no_sheets: false,
     };
     let mut i = 0;
     while i < argv.len() {
-        match argv[i].as_str() {
-            "-o" | "--output" => {
-                i += 1;
-                args.output = argv.get(i).cloned();
-            }
-            "--space" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.space = v.clone();
-                }
-            }
+        let flag = argv[i].as_str();
+        // The value of a valued option is the next token, whatever it looks
+        // like (`--crop -5,-5,5,5` is a value, not an option).
+        let mut value = || -> Result<String, String> {
+            i += 1;
+            argv.get(i)
+                .cloned()
+                .ok_or_else(|| format!("{flag} needs a value (see --help)"))
+        };
+        match flag {
+            "-h" | "--help" => args.help = true,
+            "-o" | "--output" => args.output = Some(value()?),
+            "--crop" => args.crop = value()?,
             "--no-trim" => args.crop = "raw".to_string(),
-            "--crop" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.crop = v.clone();
-                }
+            "--fonts" => args.fonts = value()?,
+            "--include-hidden" => args.include_hidden = true,
+            // The plain command's rendering options.
+            "--space" => {
+                plain_only(flag, command)?;
+                args.space = value()?;
             }
             "--padding" => {
-                i += 1;
-                args.padding = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.padding = Some(value()?);
             }
             "--lattice" => {
-                i += 1;
-                args.lattice = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.lattice = Some(value()?);
             }
-            "--fonts" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.fonts = v.clone();
-                }
-            }
-            "--include-hidden" => args.include_hidden = true,
             "--fit" => {
-                i += 1;
-                args.fit = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.fit = Some(value()?);
             }
             "--ppu" => {
-                i += 1;
-                args.ppu = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.ppu = Some(value()?);
             }
             "--scale" => {
-                i += 1;
-                args.scale = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.scale = Some(value()?);
             }
             "--bg" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.bg = v.clone();
-                }
+                plain_only(flag, command)?;
+                args.bg = value()?;
             }
             "--stroke" => {
-                i += 1;
-                args.stroke = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.stroke = Some(value()?);
             }
             "--max-edge" => {
-                i += 1;
-                args.max_edge = argv.get(i).cloned();
+                plain_only(flag, command)?;
+                args.max_edge = Some(value()?);
             }
-            "--pretty" => args.pretty = true,
-            "-h" | "--help" => args.help = true,
-            other if args.input.is_none() => args.input = Some(other.to_string()),
-            _ => {}
+            "--pretty" => {
+                plain_only(flag, command)?;
+                args.pretty = true;
+            }
+            // The package's options.
+            "--profile" => {
+                export_only(flag, command)?;
+                args.profile = Some(value()?);
+            }
+            "--max-levels" => {
+                export_only(flag, command)?;
+                args.max_levels = Some(value()?);
+            }
+            "--max-tiles" => {
+                export_only(flag, command)?;
+                args.max_tiles = Some(value()?);
+            }
+            "--text-px" => {
+                export_only(flag, command)?;
+                args.text_px = Some(value()?);
+            }
+            "--shard-kb" => {
+                export_only(flag, command)?;
+                args.shard_kb = Some(value()?);
+            }
+            "--frame-gap" => {
+                export_only(flag, command)?;
+                args.frame_gap = Some(value()?);
+            }
+            "--min-frame-entities" => {
+                export_only(flag, command)?;
+                args.min_frame_entities = Some(value()?);
+            }
+            "--max-frames" => {
+                export_only(flag, command)?;
+                args.max_frames = Some(value()?);
+            }
+            "--svg" => {
+                export_only(flag, command)?;
+                args.svg = true;
+            }
+            "--full" => {
+                export_only(flag, command)?;
+                args.full = true;
+            }
+            "--no-sheets" => {
+                export_only(flag, command)?;
+                args.no_sheets = true;
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown option '{other}' (see --help)"));
+            }
+            other => match &args.input {
+                None => args.input = Some(other.to_string()),
+                Some(input) => {
+                    return Err(format!(
+                        "unexpected argument '{other}': the input is already '{input}' (see --help)"
+                    ))
+                }
+            },
         }
         i += 1;
     }
-    args
+    Ok(args)
+}
+
+/// Refuses a rendering/JSON option under `uncad export`, naming the command
+/// it belongs to.
+fn plain_only(flag: &str, command: Command) -> Result<(), String> {
+    match command {
+        Command::Plain => Ok(()),
+        Command::Export => Err(format!(
+            "{flag} is not an option of 'uncad export'; it belongs to 'uncad <input> -o <output>' (see --help)"
+        )),
+    }
+}
+
+/// Refuses a package option under the plain command, naming `uncad export`.
+fn export_only(flag: &str, command: Command) -> Result<(), String> {
+    match command {
+        Command::Export => Ok(()),
+        Command::Plain => Err(format!(
+            "{flag} is an option of 'uncad export' (uncad export <input> -o <dir> [options]; see --help)"
+        )),
+    }
 }
 
 fn main() -> ExitCode {
@@ -206,7 +319,13 @@ fn main() -> ExitCode {
             }
         };
     }
-    let args = parse_args(&argv);
+    let args = match parse_args(&argv, Command::Plain) {
+        Ok(args) => args,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     if args.help || args.input.is_none() {
         eprintln!("{USAGE}");
@@ -308,7 +427,7 @@ fn run(args: &Args) -> Result<(), String> {
 }
 
 fn run_export(argv: &[String]) -> Result<(), String> {
-    let args = parse_args(argv);
+    let args = parse_args(argv, Command::Export)?;
     if args.help {
         eprintln!("{USAGE}");
         return Ok(());
@@ -321,66 +440,7 @@ fn run_export(argv: &[String]) -> Result<(), String> {
         .output
         .as_deref()
         .ok_or_else(|| "export needs an output directory: -o <dir>".to_string())?;
-    let mut options = ExportOptions {
-        crop: parse_crop(&args.crop)?,
-        include_hidden: args.include_hidden,
-        fonts: parse_fonts(&args.fonts)?,
-        source_name: Path::new(input)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned()),
-        ..Default::default()
-    };
-    let mut i = 0;
-    while i < argv.len() {
-        let next = || {
-            argv.get(i + 1)
-                .cloned()
-                .ok_or_else(|| format!("{} needs a value", argv[i]))
-        };
-        match argv[i].as_str() {
-            "--profile" => {
-                let name = next()?;
-                options.profile = Profile::by_name(&name).ok_or_else(|| {
-                    format!("unsupported --profile '{name}' (claude, claude-hires, openai-patch)")
-                })?;
-                i += 1;
-            }
-            "--max-levels" => {
-                options.max_levels = parse_count("--max-levels", &next()?)?;
-                i += 1;
-            }
-            "--max-tiles" => {
-                options.max_tiles = parse_count("--max-tiles", &next()?)? as usize;
-                i += 1;
-            }
-            "--text-px" => {
-                options.target_text_px = parse_positive("--text-px", &next()?)?;
-                i += 1;
-            }
-            "--shard-kb" => {
-                options.shard_kb = parse_pixels("--shard-kb", &next()?)? as usize;
-                i += 1;
-            }
-            "--frame-gap" => {
-                options.frame_gap = parse_non_negative("--frame-gap", &next()?)?;
-                i += 1;
-            }
-            "--min-frame-entities" => {
-                options.min_frame_entities =
-                    parse_count("--min-frame-entities", &next()?)? as usize;
-                i += 1;
-            }
-            "--max-frames" => {
-                options.max_frames = parse_count("--max-frames", &next()?)? as usize;
-                i += 1;
-            }
-            "--svg" => options.svg = true,
-            "--full" => options.full = true,
-            "--no-sheets" => options.sheets = false,
-            _ => {}
-        }
-        i += 1;
-    }
+    let options = export_options(&args, input)?;
     let db = parse_input(input)?;
     let report = uncad::export::export_package(&db, Path::new(output), &options)
         .map_err(|e| e.to_string())?;
@@ -409,6 +469,57 @@ fn run_export(argv: &[String]) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+fn export_options(args: &Args, input: &str) -> Result<ExportOptions, String> {
+    let defaults = ExportOptions::default();
+    let profile = match &args.profile {
+        Some(name) => Profile::by_name(name).ok_or_else(|| {
+            format!("unsupported --profile '{name}' (claude, claude-hires, openai-patch)")
+        })?,
+        None => defaults.profile,
+    };
+    let count = |flag: &str, value: &Option<String>, default: usize| -> Result<usize, String> {
+        match value {
+            Some(value) => parse_count(flag, value).map(|n| n as usize),
+            None => Ok(default),
+        }
+    };
+    Ok(ExportOptions {
+        profile,
+        max_levels: match &args.max_levels {
+            Some(value) => parse_count("--max-levels", value)?,
+            None => defaults.max_levels,
+        },
+        max_tiles: count("--max-tiles", &args.max_tiles, defaults.max_tiles)?,
+        target_text_px: match &args.text_px {
+            Some(value) => parse_positive("--text-px", value)?,
+            None => defaults.target_text_px,
+        },
+        crop: parse_crop(&args.crop)?,
+        include_hidden: args.include_hidden,
+        shard_kb: match &args.shard_kb {
+            Some(value) => parse_whole("--shard-kb", "kilobytes", value)? as usize,
+            None => defaults.shard_kb,
+        },
+        svg: args.svg,
+        full: args.full,
+        source_name: Path::new(input)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        frame_gap: match &args.frame_gap {
+            Some(value) => parse_non_negative("--frame-gap", value)?,
+            None => defaults.frame_gap,
+        },
+        min_frame_entities: count(
+            "--min-frame-entities",
+            &args.min_frame_entities,
+            defaults.min_frame_entities,
+        )?,
+        max_frames: count("--max-frames", &args.max_frames, defaults.max_frames)?,
+        fonts: parse_fonts(&args.fonts)?,
+        sheets: !args.no_sheets,
+    })
 }
 
 /// `uncad::parse()` reports a nonexistent path or a wrong extension as a bare
@@ -559,10 +670,15 @@ fn parse_positive(flag: &str, value: &str) -> Result<f64, String> {
 }
 
 fn parse_pixels(flag: &str, value: &str) -> Result<u32, String> {
+    parse_whole(flag, "pixels", value)
+}
+
+/// A whole number of `unit` (pixels, kilobytes) greater than 0.
+fn parse_whole(flag: &str, unit: &str, value: &str) -> Result<u32, String> {
     match value.parse::<u32>() {
-        Ok(pixels) if pixels > 0 => Ok(pixels),
+        Ok(number) if number > 0 => Ok(number),
         _ => Err(format!(
-            "{flag} must be a whole number of pixels greater than 0 (got '{value}')"
+            "{flag} must be a whole number of {unit} greater than 0 (got '{value}')"
         )),
     }
 }
