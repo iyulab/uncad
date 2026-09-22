@@ -585,6 +585,31 @@ impl Affine {
 const MAX_BLOCK_DEPTH: u32 = 8;
 const MAX_PLACED_TEXTS: usize = 200_000;
 
+/// The most vertices an outline may have before its self-intersection test
+/// is skipped. [`crate::geom::is_simple`] compares every pair of
+/// non-adjacent segments, so the test costs O(n^2): a single closed
+/// polyline of 64 000 vertices (a surveyed contour or a traced boundary,
+/// routine in a GIS import) held the export for 175 s where the same
+/// drawing at 16 000 held it for 9 s -- four times the vertices, nineteen
+/// times the time -- for one boolean on one record. At this cap the test
+/// costs a tenth of a second in an unoptimised build and a few
+/// milliseconds in a release one, and no outline in the corpus comes near
+/// it: the largest region in `AutoCADSamples5.dwg` has 378 vertices.
+const MAX_SIMPLE_TEST_VERTICES: usize = 2_000;
+
+/// What a record says instead of claiming an untested outline is simple.
+const UNTESTED_OUTLINE: &str =
+    "outline too large to test for self-intersection; the area assumes it does not cross itself";
+
+/// Whether `vertices` outline a non-self-intersecting polygon, or `None`
+/// when there are too many of them to ask (see
+/// [`MAX_SIMPLE_TEST_VERTICES`]). Unknown is reported as `null`, never as
+/// `true`: a crossing outline's area is meaningless, and a reader must be
+/// able to tell "checked, fine" from "not checked".
+fn simple_outline(vertices: &[Point2D]) -> Option<bool> {
+    (vertices.len() <= MAX_SIMPLE_TEST_VERTICES).then(|| crate::geom::is_simple(vertices))
+}
+
 fn p2(p: Point3D) -> Point2D {
     Point2D { x: p.x, y: p.y }
 }
@@ -1670,19 +1695,26 @@ pub fn export_package(
                 );
                 if let Some(area) = p.area() {
                     let signed = p.signed_area();
-                    let simple = crate::geom::is_simple(&p.vertices);
+                    let simple = simple_outline(&p.vertices);
                     v.insert("area".into(), json!(rounder.derived(area)));
                     v.insert(
                         "orientation".into(),
                         json!(if signed >= 0.0 { "ccw" } else { "cw" }),
                     );
                     v.insert("simple".into(), json!(simple));
-                    if !simple {
-                        confidence = "unavailable";
-                        v.insert(
-                            "why".into(),
-                            json!("self-intersecting outline: the area has no meaning"),
-                        );
+                    match simple {
+                        Some(true) => {}
+                        Some(false) => {
+                            confidence = "unavailable";
+                            v.insert(
+                                "why".into(),
+                                json!("self-intersecting outline: the area has no meaning"),
+                            );
+                        }
+                        None => {
+                            confidence = "estimated";
+                            v.insert("why".into(), json!(UNTESTED_OUTLINE));
+                        }
                     }
                     if p.closed && p.vertices.len() >= 3 {
                         let centroid = polygon_centroid(&p.vertices);
@@ -1706,8 +1738,15 @@ pub fn export_package(
                         r.insert("simple".into(), json!(simple));
                         r.insert(
                             "confidence".into(),
-                            json!(if simple { "exact" } else { "unavailable" }),
+                            json!(match simple {
+                                Some(true) => "exact",
+                                Some(false) => "unavailable",
+                                None => "estimated",
+                            }),
                         );
+                        if simple.is_none() {
+                            r.insert("why".into(), json!(UNTESTED_OUTLINE));
+                        }
                         r.insert("bbox".into(), rounder.rect(&bbox));
                         r.insert("tiles".into(), json!(tiles_for(&bbox)));
                         r.insert("px".into(), px_map(&bbox));

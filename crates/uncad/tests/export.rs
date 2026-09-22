@@ -2194,3 +2194,101 @@ fn a_package_says_when_its_dimension_values_were_recomputed() {
     let manifest = read_json(&tmp.0.join("manifest.json"));
     assert_eq!(manifest["capabilities"]["dimension_values"], "computed");
 }
+/// One closed LWPOLYLINE of `n` vertices on a circle of radius 100: a
+/// surveyed contour or a traced boundary, the shape whose pairwise
+/// self-intersection test costs O(n^2).
+fn one_big_ring(n: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LwPolylineEntity, Point2D, Point3D};
+    let vertices: Vec<Point2D> = (0..n)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            Point2D {
+                x: 100.0 * a.cos(),
+                y: 100.0 * a.sin(),
+            }
+        })
+        .collect();
+    let entities = vec![uncad::Entity::LwPolyline(LwPolylineEntity {
+        common: EntityCommon {
+            handle: "R1".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        vertices,
+        closed: true,
+        bulges: Vec::new(),
+        widths: Vec::new(),
+        const_width: 0.0,
+        elevation: 0.0,
+        extrusion: Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    })];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn an_outline_too_big_to_test_says_so_instead_of_claiming_it_is_simple() {
+    // `geom::is_simple` compares every pair of non-adjacent segments, and
+    // the export called it for every closed polyline whatever its size: one
+    // 64 000-vertex contour held the export for 175 s (16 000 took 9 s) to
+    // produce one boolean. Above the cap the answer is `null` -- not the
+    // `true` that would let a reader trust an area that may be meaningless.
+    for (n, want_simple) in [(64usize, true), (8000, false)] {
+        let db = one_big_ring(n);
+        let tmp = TempDir::new(&format!("ring{n}"));
+        let started = std::time::Instant::now();
+        export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let elapsed = started.elapsed();
+        let regions = records(&tmp.0, "regions");
+        assert_eq!(regions.len(), 1, "one closed polyline, one region");
+        let region = &regions[0];
+        assert_eq!(region["vertex_count"], n);
+        if want_simple {
+            // A circle's outline does not cross itself, and 64 vertices is
+            // well inside the cap, so the test still runs and says so.
+            assert_eq!(region["simple"], true);
+            assert_eq!(region["confidence"], "exact");
+        } else {
+            assert!(region["simple"].is_null(), "{}", region["simple"]);
+            assert_eq!(region["confidence"], "estimated");
+            assert!(
+                region["why"]
+                    .as_str()
+                    .is_some_and(|w| w.contains("self-intersection")),
+                "{}",
+                region["why"]
+            );
+            // The point of the cap. 8000 vertices took about 3 s of
+            // pairwise testing before; the whole export now takes a
+            // fraction of that, so a minute is a bound no machine this
+            // runs on can miss while the test is still being skipped.
+            assert!(
+                elapsed < std::time::Duration::from_secs(60),
+                "{elapsed:?} for one polyline"
+            );
+        }
+        // The area itself is still reported either way: the shoelace sum is
+        // the same arithmetic.
+        assert!(region["area"].as_f64().is_some_and(|a| a > 0.0));
+    }
+}
+
