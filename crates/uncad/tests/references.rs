@@ -260,13 +260,14 @@ fn corpus_drawings() -> Vec<PathBuf> {
 }
 
 /// DXF 340 on a LEADER names another entity of the *same* drawing, so the
-/// reference ID the model carries has to be one that drawing's entities
-/// answer to. An ID minted by any other route points at nothing, and a
-/// consumer cannot tell that from a leader that annotates nothing on
-/// purpose -- the two are the same `None`/`Some` shape.
+/// resolved reference ID has to be one that drawing's entities answer to --
+/// an ID minted by any other route points at nothing while claiming to have
+/// resolved. And in this corpus every leader's reference does resolve, so
+/// an unresolved one here is a read that lost track of its target.
 #[test]
 fn a_leader_annotation_id_names_an_entity_the_same_drawing_carries() {
     let mut dangling: Vec<String> = Vec::new();
+    let mut unresolved: Vec<String> = Vec::new();
     let mut checked = 0usize;
     let mut leaders = 0usize;
     for path in corpus_drawings() {
@@ -280,8 +281,13 @@ fn a_leader_annotation_id_names_an_entity_the_same_drawing_carries() {
                 continue;
             };
             leaders += 1;
-            let Some(id) = leader.annotation_id else {
-                continue;
+            let id = match &leader.annotation_id {
+                Ref::Resolved(id) => *id,
+                Ref::Unresolved(handle) => {
+                    unresolved.push(format!("{}: {handle}", path.display()));
+                    continue;
+                }
+                Ref::Absent => continue,
             };
             checked += 1;
             if !ids.contains(&id) {
@@ -296,9 +302,15 @@ fn a_leader_annotation_id_names_an_entity_the_same_drawing_carries() {
     );
     assert!(
         dangling.is_empty(),
-        "{} of {checked} annotation references name no entity of their own drawing:\n{}",
+        "{} of {checked} resolved annotation references name no entity of their own drawing:\n{}",
         dangling.len(),
         dangling.join("\n")
+    );
+    assert!(
+        unresolved.is_empty(),
+        "{} annotation references did not resolve:\n{}",
+        unresolved.len(),
+        unresolved.join("\n")
     );
 }
 
@@ -322,7 +334,7 @@ fn a_leader_annotation_reference_points_at_the_kind_of_entity_it_declares() {
             let Entity::Leader(leader) = entity else {
                 continue;
             };
-            let Some(id) = leader.annotation_id else {
+            let Ref::Resolved(id) = leader.annotation_id else {
                 continue;
             };
             let expected = match leader.annotation {
@@ -376,12 +388,12 @@ fn a_leader_annotation_id_is_the_same_read_as_dwg_and_as_its_dxf_twin() {
     assert_eq!(dwg, dxf, "the two formats disagree on the reference IDs");
 }
 
-fn annotation_ids_of(path: &Path) -> Vec<(u64, Option<u64>)> {
+fn annotation_ids_of(path: &Path) -> Vec<(u64, String)> {
     let db = uncad::parse(path).expect("the twin parses");
-    let mut out: Vec<(u64, Option<u64>)> = db
+    let mut out: Vec<(u64, String)> = db
         .all_entities()
         .filter_map(|e| match e {
-            Entity::Leader(l) => Some((e.common().id.value(), l.annotation_id.map(|i| i.value()))),
+            Entity::Leader(l) => Some((e.common().id.value(), format!("{:?}", l.annotation_id))),
             _ => None,
         })
         .collect();

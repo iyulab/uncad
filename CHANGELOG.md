@@ -8,6 +8,16 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
+  entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
+  entity answers to it, `Absent` is a leader that names nothing. The `Option` it
+  replaces carried the first two as the same `Some`.
+- A LEADER's `has_arrowhead` is `Option<bool>`; `None` where the flag cannot be read.
+- `LightEntity::has_target` is gone and `LightEntity::light_type`
+  (`Option<LightType>`: distant, point, spot) takes its place. `has_target` was not
+  something the file states but a conclusion drawn from the type and two points; the
+  type is what the file states, and whether a light aims at its target follows from
+  it. Breaking for consumers reading any of the three fields.
 - `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
   `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
   instead of two rendered hex strings. The parser no longer decides how a

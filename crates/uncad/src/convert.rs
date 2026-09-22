@@ -20,7 +20,7 @@ use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
     DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
-    InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LineEntity,
+    InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, Origin,
     PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
     TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
@@ -1078,14 +1078,22 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LIGHT => {
             let position = get_point3d(entity_ptr, "LIGHT", "position")?;
             let target = get_point3d(entity_ptr, "LIGHT", "target").unwrap_or(position);
-            // type: distant=1, point=2, spot=3 (dwg.h, BITCODE_BL) -- only
-            // distant/spot actually aim at `target`.
-            let light_type = get_field::<u32>(entity_ptr, "LIGHT", "type").unwrap_or(2);
+            // type: distant=1, point=2, spot=3 (dwg.h, BITCODE_BL). Whether
+            // the light aims at `target` follows from this; carrying the
+            // type rather than that conclusion leaves the step to whoever
+            // needs it. An unreadable field or a value outside the three is
+            // nothing, not a point light.
+            let light_type = match get_field::<u32>(entity_ptr, "LIGHT", "type") {
+                Some(1) => Some(LightType::Distant),
+                Some(2) => Some(LightType::Point),
+                Some(3) => Some(LightType::Spot),
+                _ => None,
+            };
             Entity::Light(LightEntity {
                 common,
                 position,
                 target,
-                has_target: light_type != 2 && target != position,
+                light_type,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINE => {
@@ -1106,7 +1114,7 @@ unsafe fn convert_entity(
             // not write it to DXF at all, so reading it here reported an
             // arrowhead for a leader whose file says it has none.
             let has_arrowhead =
-                get_field::<u8>(entity_ptr, "LEADER", "arrowhead_on").unwrap_or(0) != 0;
+                get_field::<u8>(entity_ptr, "LEADER", "arrowhead_on").map(|on| on != 0);
             // 0 straight, 1 spline (dwg.spec). The format does not state
             // what an absent group means, so an unreadable field is nothing.
             let path_type = match get_field::<u16>(entity_ptr, "LEADER", "path_type") {
@@ -1473,31 +1481,34 @@ const HANDLELESS_ID_BASE: u64 = 1 << 63;
 /// position in the object table, and a handle copied out of the reference
 /// would match nothing in such a file.
 ///
-/// A reference the object table does not answer to keeps whatever value it
-/// carries (`absolute_ref`, else the relative handle the library never
-/// resolved -- the two rungs [`reference`] uses). That is a different fact
-/// from "the file names nothing", and the model's `Option` cannot yet tell
-/// the two apart, so the value is kept rather than dropped.
+/// A reference the object table does not answer to is [`Ref::Unresolved`],
+/// carrying whatever value it has (`absolute_ref`, else the relative handle
+/// the library never resolved -- the two rungs [`reference`] uses), in hex.
+/// That is a different fact from "the file names nothing", which is
+/// [`Ref::Absent`].
 fn entity_reference(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
-) -> Option<EntityId> {
-    let handle_ptr = handle_ptr?;
-    if handle_ptr.is_null() {
-        return None;
-    }
+) -> Ref<EntityId> {
+    let Some(handle_ptr) = handle_ptr.filter(|p| !p.is_null()) else {
+        return Ref::Absent;
+    };
     // SAFETY: a non-null Dwg_Object_Ref owned by the live Dwg_Data this
     // conversion pass walks, the same contract reference() reads under.
     let object = unsafe { referenced_object(dwg, handle_ptr) };
     if !object.is_null() {
-        return Some(unsafe { entity_identity(object) }.0);
+        return Ref::Resolved(unsafe { entity_identity(object) }.0);
     }
+    // Nothing in the drawing answers to the handle. The handle is kept, the
+    // same form an entity's own handle takes: a file that points at an
+    // entity it does not carry has said something different from a file
+    // that points at nothing.
     let (absolute_ref, handle_value) =
         unsafe { ((*handle_ptr).absolute_ref, (*handle_ptr).handleref.value) };
-    if absolute_ref != 0 {
-        return Some(EntityId::new(absolute_ref));
+    match (absolute_ref, handle_value) {
+        (0, 0) => Ref::Absent,
+        (0, value) | (value, _) => Ref::Unresolved(format!("{value:X}")),
     }
-    (handle_value != 0).then(|| EntityId::new(handle_value))
 }
 
 /// Turns a handle field into the model's three-state reference: no field or
