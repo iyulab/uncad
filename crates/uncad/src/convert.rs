@@ -1493,11 +1493,15 @@ fn dimension_point_fields(
             Some("center_pt"),
             None,
         ),
+        // Measured against the same drawing in both formats: this
+        // library's `def_pt` holds group 16 here, and `xline2end_pt` comes
+        // back holding group 13's point instead of group 16's. The mapping
+        // follows the measurement, not the field names.
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => (
             Some("xline1start_pt"),
             Some("xline1end_pt"),
             Some("xline2start_pt"),
-            Some("xline2end_pt"),
+            Some("def_pt"),
         ),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {
@@ -1508,6 +1512,12 @@ fn dimension_point_fields(
             Some("leader_endpt"),
             None,
             None,
+        ),
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => (
+            Some("xline1_pt"),
+            Some("xline2_pt"),
+            Some("center_pt"),
+            Some("leader1_pt"),
         ),
         _ => (None, None, None, None),
     }
@@ -1524,6 +1534,9 @@ fn dimension_kind(fixedtype: libredwg_sys::Dwg_Object_Type) -> Option<DimensionK
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS => DimensionKind::Radius,
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG3PT => DimensionKind::Angular3Point,
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE => DimensionKind::Ordinate,
+        // Its group 70 says 5, a three-point angular dimension; the entity
+        // it is decides it instead.
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => DimensionKind::ArcLength,
         _ => return None,
     })
 }

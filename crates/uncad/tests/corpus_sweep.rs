@@ -249,3 +249,57 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     assert_eq!(s.skipped_edges, 1_034);
     assert_eq!(s.files_with_empty_blocks, 20);
 }
+
+/// Which of this library's point fields is which DXF group cannot be read off
+/// the field names for a two-line angular dimension: `def_pt` holds group 16
+/// there, and `xline2end_pt` comes back holding group 13's point. The mapping
+/// in the reader follows a measurement against the same drawing in both
+/// formats, so the measurement is pinned here -- if the library's field
+/// layout changes, this fails rather than the model quietly holding the wrong
+/// point.
+#[test]
+fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
+    let path = Path::new(CORPUS).join("example_2000.dwg");
+    let db = uncad::parse(&path).expect("the corpus drawing parses");
+    let dim = db
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Dimension(d) if d.kind == Some(uncad::model::DimensionKind::Angular2Line) => {
+                Some(d)
+            }
+            _ => None,
+        })
+        .expect("the drawing has a two-line angular dimension");
+
+    // The values the DXF twin writes for groups 13, 14, 15 and 16.
+    let near = |got: Option<uncad::model::Point3D>, want: (f64, f64), group: u32| {
+        let got = got.unwrap_or_else(|| panic!("group {group} should be read"));
+        assert!(
+            (got.x - want.0).abs() < 1e-6 && (got.y - want.1).abs() < 1e-6,
+            "group {group}: got ({}, {}), the file states ({}, {})",
+            got.x,
+            got.y,
+            want.0,
+            want.1
+        );
+    };
+    near(
+        dim.points.extension1,
+        (490.6216519543077, 4118.24274338716),
+        13,
+    );
+    near(
+        dim.points.extension2,
+        (-276.8548009664508, 4701.847034571434),
+        14,
+    );
+    near(
+        dim.points.radial,
+        (172.7442546208081, 3207.985617767696),
+        15,
+    );
+    near(dim.points.arc, (3.542714605046057, 4128.871501442696), 16);
+    // Group 10 is the one this library does not keep for this subtype.
+    assert_eq!(dim.definition_point, None);
+}

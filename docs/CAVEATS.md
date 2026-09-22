@@ -333,10 +333,20 @@ as "not stated"; the alternative costs every pre-R2000 dimension a measurement t
 gave -- and a false difference between a drawing and its own twin in the other format.
 
 **Group 10 of a two-line angular dimension.** For that one subtype the library does not store
-group 10: its own `def_pt` holds a different point, and group 16 belongs to the second extension
-line's end. Reporting `def_pt` as group 10 would mean the field held one point for most
-drawings and another for these, so it is reported as "not stated" instead. Every other subtype
-reports it.
+group 10: its own `def_pt` holds group 16 instead. Reporting `def_pt` as group 10 would mean
+the field held one point for most drawings and another for these, so it is reported as "not
+stated" instead. Every other subtype reports it.
+
+That subtype is also the one place where the field names are not the mapping. Measured against
+the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
+groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` comes
+back holding group 13's point rather than group 16's. The reader follows the measurement, and
+`tests/corpus_sweep.rs` pins it against the values the DXF twin writes, so a change in the
+library's field layout fails the build instead of quietly putting the wrong point in the model.
+
+An arc-length dimension is a separate entity in the format rather than a value of group 70 --
+the group says 5 on such a dimension, which would read as a three-point angular one. It is
+filed by the entity it is.
 
 ## The polyline "closed" flag
 
