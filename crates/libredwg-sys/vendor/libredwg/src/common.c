@@ -525,8 +525,10 @@ find_hv (BITCODE_H *entries, BITCODE_BS num_entries, BITCODE_RLL handle_value)
   return -1; // not found
 }
 
-/* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the vendored
-   LibreDWG") -------------------------------------------------------------
+/* --- uncad local patch, 2026-09-23 (NOTICE.md at the root of this crate,
+   "The two changes"; the full reasoning is in the project's docs/CAVEATS.md,
+   "Local patches to the vendored LibreDWG", which is not in the published
+   tarball) ---------------------------------------------------------------
 
    Every caller of cvt_TIMEBLL() hands the struct tm straight to strftime()
    (dec_macros.h's FIELD_TIMEBLL/FIELD_TIMERLL and the DECODER block in
