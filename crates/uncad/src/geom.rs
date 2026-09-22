@@ -524,9 +524,67 @@ mod tests {
         // i.e. downward, and past a semicircle the centre is on that side).
         assert!(arc.center.y < 0.0, "{arc:?}");
         assert!(close(arc.center.x, 5.0));
-        let (_, min_y, _, max_y) = arc.bounds();
-        assert!(close(max_y, arc.center.y + arc.radius) || max_y <= 0.0 + 1e-9);
-        assert!(close(min_y, arc.center.y - arc.radius), "{min_y}");
+        // The exact box of the arc itself. Centre (5,-5), r = 5 sqrt(2) =
+        // 7.0710678, start 135 degrees, sweep +270, so the counter-clockwise
+        // run 135..405 degrees crosses 180, 270 and 360 but never 90 (450 is
+        // past the end). The crossings give min_x = centre.x - r, min_y =
+        // centre.y - r and max_x = centre.x + r; the top of the circle is
+        // outside the sweep, so max_y comes from the endpoints (0,0) and
+        // (10,0) and is 0, not centre.y + r = 2.0710678.
+        let r = 5.0 * 2f64.sqrt();
+        let (min_x, min_y, max_x, max_y) = arc.bounds();
+        assert!(close(arc.radius, r), "{}", arc.radius);
+        assert!(close(min_x, 5.0 - r), "{min_x}");
+        assert!(close(min_y, -5.0 - r), "{min_y}");
+        assert!(close(max_x, 5.0 + r), "{max_x}");
+        assert!(
+            max_y <= 1e-9,
+            "the sweep misses the top of the circle: {max_y}"
+        );
+        assert!(close(max_y, 0.0), "{max_y}");
+    }
+
+    #[test]
+    fn an_arcs_bounds_are_its_own_not_the_whole_circles() {
+        // A quarter circle of radius 10 about the origin, 0 to 90 degrees:
+        // the endpoints are (10,0) and (0,10) and the only crossings in the
+        // sweep are those same two points, so the box is (0,0)-(10,10), a
+        // tenth of the whole circle's 20 x 20 area.
+        let quarter = BulgeArc {
+            center: p(0.0, 0.0),
+            radius: 10.0,
+            start_angle: 0.0,
+            end_angle: std::f64::consts::FRAC_PI_2,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        let (min_x, min_y, max_x, max_y) = quarter.bounds();
+        assert!(close(min_x, 0.0) && close(min_y, 0.0), "{min_x} {min_y}");
+        assert!(close(max_x, 10.0) && close(max_y, 10.0), "{max_x} {max_y}");
+        // The same quarter turned by 45 degrees (-45 to 45) crosses 0
+        // degrees, so it reaches x = 10 while y stays within +-10/sqrt(2).
+        let turned = BulgeArc {
+            center: p(0.0, 0.0),
+            radius: 10.0,
+            start_angle: -std::f64::consts::FRAC_PI_4,
+            end_angle: std::f64::consts::FRAC_PI_4,
+            sweep: std::f64::consts::FRAC_PI_2,
+        };
+        let h = 10.0 / 2f64.sqrt();
+        let (min_x, min_y, max_x, max_y) = turned.bounds();
+        assert!(close(min_x, h) && close(max_x, 10.0), "{min_x} {max_x}");
+        assert!(close(min_y, -h) && close(max_y, h), "{min_y} {max_y}");
+        // A clockwise sweep bounds the same arc as the counter-clockwise one
+        // between the same two angles.
+        let backwards = BulgeArc {
+            center: p(0.0, 0.0),
+            radius: 10.0,
+            start_angle: std::f64::consts::FRAC_PI_2,
+            end_angle: 0.0,
+            sweep: -std::f64::consts::FRAC_PI_2,
+        };
+        let (min_x, min_y, max_x, max_y) = backwards.bounds();
+        assert!(close(min_x, 0.0) && close(min_y, 0.0), "{min_x} {min_y}");
+        assert!(close(max_x, 10.0) && close(max_y, 10.0), "{max_x} {max_y}");
     }
 
     #[test]

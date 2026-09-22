@@ -181,3 +181,113 @@ fn an_empty_drawing_gets_a_ten_unit_canvas() {
         .expect("an empty canvas still renders");
     assert!(png.width > 0 && png.height > 0);
 }
+
+// -------------------------------------------------------------- arcs
+
+fn arc(handle: &str, cx: f64, cy: f64, r: f64, a0_deg: f64, a1_deg: f64) -> uncad::Entity {
+    uncad::Entity::Arc(uncad::model::ArcEntity {
+        common: uncad::model::EntityCommon {
+            handle: handle.into(),
+            layer: "0".into(),
+            ..Default::default()
+        },
+        center: uncad::model::Point3D {
+            x: cx,
+            y: cy,
+            z: 0.0,
+        },
+        radius: r,
+        start_angle: a0_deg.to_radians(),
+        end_angle: a1_deg.to_radians(),
+        extrusion: uncad::geom::WORLD_Z,
+    })
+}
+
+fn line(handle: &str, x1: f64, y1: f64, x2: f64, y2: f64) -> uncad::Entity {
+    uncad::Entity::Line(uncad::model::LineEntity {
+        common: uncad::model::EntityCommon {
+            handle: handle.into(),
+            layer: "0".into(),
+            ..Default::default()
+        },
+        start_point: uncad::model::Point3D {
+            x: x1,
+            y: y1,
+            z: 0.0,
+        },
+        end_point: uncad::model::Point3D {
+            x: x2,
+            y: y2,
+            z: 0.0,
+        },
+    })
+}
+
+/// The tight content rectangle the renderer measured, with no crop guard
+/// and no padding in the way.
+fn raw_content(entities: Vec<uncad::Entity>) -> Rect {
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+        .to_svg(ToSvgOptions {
+            crop: CropMode::Raw,
+            padding: Some(0.0),
+            ..Default::default()
+        })
+        .crop
+        .content
+        .expect("something was drawn")
+}
+
+#[test]
+fn an_arc_contributes_its_own_extent_not_its_whole_circle() {
+    // A quarter circle of radius 10 about the origin, 0 to 90 degrees. Its
+    // endpoints are (10,0) and (0,10) and no other multiple of 90 degrees
+    // lies in the sweep, so the extent is (0,0)-(10,10): 10 x 10, a quarter
+    // of the circle's own 20 x 20 box.
+    let quarter = raw_content(vec![arc("a", 0.0, 0.0, 10.0, 0.0, 90.0)]);
+    for (got, want) in [
+        (quarter.min_x, 0.0),
+        (quarter.min_y, 0.0),
+        (quarter.max_x, 10.0),
+        (quarter.max_y, 10.0),
+    ] {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}: {quarter:?}");
+    }
+    assert!((quarter.width() - 10.0).abs() < 1e-9 && (quarter.height() - 10.0).abs() < 1e-9);
+
+    // The same arc as the full circle would be (-10,-10)-(10,10).
+    let whole = raw_content(vec![arc("a", 0.0, 0.0, 10.0, 0.0, 360.0)]);
+    assert!((whole.min_x + 10.0).abs() < 1e-9 && (whole.min_y + 10.0).abs() < 1e-9);
+
+    // And the case the rule is for: a 100 x 100 plan with a large-radius
+    // fillet along its top edge -- radius 1000 about (50, -900), from 75 to
+    // 105 degrees. The arc runs from (50 + 1000 cos 75, -900 + 1000 sin 75)
+    // to (50 - 1000 cos 75, the same y) over the 90-degree crossing
+    // (50, 100), so it adds 1000 cos 75 = 258.8 units on each side and
+    // nothing below y = -900 + 1000 sin 75 = 65.9. Bounded by its circle,
+    // the crop would have stretched to (-950, -1900)-(1050, 100).
+    let plan = vec![
+        line("1", 0.0, 0.0, 100.0, 0.0),
+        line("2", 100.0, 0.0, 100.0, 100.0),
+        line("3", 0.0, 100.0, 100.0, 100.0),
+        line("4", 0.0, 0.0, 0.0, 100.0),
+        arc("f", 50.0, -900.0, 1000.0, 75.0, 105.0),
+    ];
+    let content = raw_content(plan);
+    let reach = 1000.0 * 75f64.to_radians().cos();
+    for (got, want) in [
+        (content.min_x, 50.0 - reach),
+        (content.min_y, 0.0),
+        (content.max_x, 50.0 + reach),
+        (content.max_y, 100.0),
+    ] {
+        assert!((got - want).abs() < 1e-9, "{got} vs {want}: {content:?}");
+    }
+}

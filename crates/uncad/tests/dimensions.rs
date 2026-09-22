@@ -7,7 +7,11 @@
 //! `angular_ordinate_r2000.dxf` fixture and the corpus's `example_2000.dxf`
 //! (the same drawing as the DWG) cover the two dimension kinds whose
 //! definition points LibreDWG's DXF reader lays out differently from its
-//! DWG decoder.
+//! DWG decoder. The three kinds `example_2000` has none of -- RADIUS,
+//! DIAMETER and ANGULAR_3POINT -- come from the corpus's `2000/TS1.dwg`
+//! (AutoCAD-written, so its cached labels are the reference) and, since
+//! every TS1 DXF fails LibreDWG's reader, from this project's
+//! `radial_r2000.dxf` for the DXF side.
 
 use uncad::model::{DimensionGeometry, DisplaySource, Point3D};
 use uncad::Entity;
@@ -27,6 +31,14 @@ const EXAMPLE_2000_DWG: &str = concat!(
 const EXAMPLE_2000_DXF: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../lib/libredwg/test/test-data/example_2000.dxf"
+);
+const RADIAL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/radial_r2000.dxf"
+);
+const TS1_2000_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/2000/TS1.dwg"
 );
 
 fn dimensions(db: &uncad::CadDatabase) -> Vec<&uncad::model::DimensionEntity> {
@@ -388,4 +400,203 @@ fn a_tolerance_takes_its_text_height_from_its_dimension_style() {
         (font_size - expected).abs() < 1e-9,
         "4F1 at its style's height: font-size {font_size} vs {expected}"
     );
+}
+
+/// The one dimension of `kind` in `dims`.
+fn of_kind<'a>(
+    dims: &'a [&'a uncad::model::DimensionEntity],
+    kind: &str,
+) -> &'a uncad::model::DimensionEntity {
+    let mut found = dims.iter().filter(|d| {
+        matches!(
+            (&d.geometry, kind),
+            (DimensionGeometry::Radius { .. }, "RADIUS")
+                | (DimensionGeometry::Diameter { .. }, "DIAMETER")
+                | (DimensionGeometry::Angular3Point { .. }, "ANGULAR_3POINT")
+        )
+    });
+    let dim = found.next().unwrap_or_else(|| panic!("a {kind} dimension"));
+    assert!(found.next().is_none(), "one {kind} dimension only");
+    dim
+}
+
+#[test]
+fn the_radial_and_three_point_kinds_read_from_an_autocad_dwg() {
+    // 2000/TS1.dwg is a sampler AutoCAD wrote in 2011 (its TS1.txt lists
+    // "11. 3 point angular dimension", "13. Diametric Dimension" and
+    // "14. Radial Dimension"); example_2000 has none of the three. The
+    // labels cached in the *D blocks are AutoCAD's own, at the Standard
+    // style's DIMDEC 4, so they -- not this crate's arithmetic -- are what
+    // the recomputed values are checked against.
+    let db = uncad::parse(TS1_2000_DWG).expect("corpus file must parse");
+    let dims = dimensions(&db);
+
+    let radius = of_kind(&dims, "RADIUS");
+    let DimensionGeometry::Radius {
+        center,
+        chord_point,
+        ..
+    } = radius.geometry
+    else {
+        unreachable!()
+    };
+    // The radius is the distance from the centre to the point on the arc.
+    // Were the chord point mapped to the definition point (the centre
+    // itself), it would be 0.
+    let by_hand = (chord_point.x - center.x).hypot(chord_point.y - center.y);
+    assert!(by_hand > 1.0, "the two points are distinct: {by_hand}");
+    assert!(
+        same_point(radius.definition_point, center),
+        "10 is the centre"
+    );
+    assert_eq!(radius.display_text, "R1.1897");
+    for got in [
+        radius.measurement.unwrap(),
+        radius.measurement_from_points.unwrap(),
+    ] {
+        assert!((got - by_hand).abs() < 1e-9, "{got} vs {by_hand}");
+        assert!((got - 1.1897).abs() < 5e-5, "the label says R1.1897: {got}");
+    }
+
+    let diameter = of_kind(&dims, "DIAMETER");
+    let DimensionGeometry::Diameter {
+        chord_start,
+        chord_end,
+        ..
+    } = diameter.geometry
+    else {
+        unreachable!()
+    };
+    // The diameter is the chord through the circle: both dimensions
+    // annotate the same circle, so it is twice the radius above.
+    let by_hand = (chord_end.x - chord_start.x).hypot(chord_end.y - chord_start.y);
+    assert_eq!(diameter.display_text, "\u{2205}2.3794");
+    for got in [
+        diameter.measurement.unwrap(),
+        diameter.measurement_from_points.unwrap(),
+    ] {
+        assert!((got - by_hand).abs() < 1e-9, "{got} vs {by_hand}");
+        assert!((got - 2.3794).abs() < 5e-5, "the label says 2.3794: {got}");
+        assert!(
+            (got - 2.0 * radius.measurement.unwrap()).abs() < 1e-3,
+            "the diameter is twice the radius: {got}"
+        );
+    }
+
+    let angular = of_kind(&dims, "ANGULAR_3POINT");
+    let DimensionGeometry::Angular3Point {
+        center,
+        xline1,
+        xline2,
+    } = angular.geometry
+    else {
+        unreachable!()
+    };
+    // The angle between the two rays from the centre, in degrees.
+    let ray = |p: Point3D| (p.y - center.y).atan2(p.x - center.x);
+    let by_hand = (ray(xline2) - ray(xline1)).to_degrees().abs();
+    assert_eq!(angular.display_text, "45\u{00B0}");
+    for got in [
+        angular.measurement.unwrap(),
+        angular.measurement_from_points.unwrap(),
+    ] {
+        assert!((got - by_hand).abs() < 1e-9, "{got} vs {by_hand}");
+        assert!(
+            (got - 45.0).abs() < 1e-9,
+            "the label says 45 degrees: {got}"
+        );
+    }
+
+    // All three carry AutoCAD's cached label rather than a formatted one,
+    // and its measurement agrees with the definition points.
+    for dim in [radius, diameter, angular] {
+        assert_eq!(dim.display_source, DisplaySource::CachedBlock);
+        assert_eq!(dim.dimstyle, "Standard");
+        let (stored, recomputed) = (
+            dim.measurement.unwrap(),
+            dim.measurement_from_points.unwrap(),
+        );
+        assert!(
+            (stored - recomputed).abs() <= 1e-6 * stored.abs().max(1.0),
+            "{}: {stored} vs {recomputed}",
+            dim.common.handle
+        );
+    }
+}
+
+#[test]
+fn the_radial_fixture_reads_its_definition_points_from_dxf_groups() {
+    // Derived by hand (tests/fixtures/README.md): a radius whose centre
+    // (DXF 10) is the origin and whose point on the circle (15) is (3,4),
+    // a 3-4-5 triangle, so the radius is 5; a diameter whose chord runs
+    // from (20,0) (10) to (20,10) (15), so the diameter is 10; and a
+    // 3-point angular dimension about (40,0) (15) between the rays to
+    // (50,0) (13) and (45, 8.660254) (14), 60 degrees apart, with the arc
+    // point (10) at 30 degrees -- inside that sector rather than in the
+    // 300-degree one on the other side.
+    let db = uncad::parse(RADIAL).expect("fixture must parse");
+    assert_eq!(db.header.format, "dxf");
+    let dims = dimensions(&db);
+    assert_eq!(dims.len(), 3);
+
+    let radius = of_kind(&dims, "RADIUS");
+    let DimensionGeometry::Radius {
+        center,
+        chord_point,
+        leader_length,
+    } = radius.geometry
+    else {
+        unreachable!()
+    };
+    assert!(same_point(center, p3(0.0, 0.0)), "{center:?}");
+    assert!(same_point(chord_point, p3(3.0, 4.0)), "{chord_point:?}");
+    assert_eq!(leader_length, 0.0);
+    assert_eq!(radius.measurement, Some(5.0));
+    assert_eq!(radius.measurement_from_points, Some(5.0));
+
+    let diameter = of_kind(&dims, "DIAMETER");
+    let DimensionGeometry::Diameter {
+        chord_start,
+        chord_end,
+        ..
+    } = diameter.geometry
+    else {
+        unreachable!()
+    };
+    assert!(same_point(chord_start, p3(20.0, 0.0)), "{chord_start:?}");
+    assert!(same_point(chord_end, p3(20.0, 10.0)), "{chord_end:?}");
+    assert_eq!(diameter.measurement, Some(10.0));
+    assert_eq!(diameter.measurement_from_points, Some(10.0));
+
+    let angular = of_kind(&dims, "ANGULAR_3POINT");
+    let DimensionGeometry::Angular3Point {
+        center,
+        xline1,
+        xline2,
+    } = angular.geometry
+    else {
+        unreachable!()
+    };
+    assert!(same_point(center, p3(40.0, 0.0)), "{center:?}");
+    assert!(same_point(xline1, p3(50.0, 0.0)), "{xline1:?}");
+    assert!(
+        same_point(xline2, p3(45.0, 8.660254037844386)),
+        "{xline2:?}"
+    );
+    assert!(
+        same_point(angular.definition_point, p3(44.33012701892219, 2.5)),
+        "{:?}",
+        angular.definition_point
+    );
+    let degrees = angular.measurement_from_points.unwrap();
+    assert!((degrees - 60.0).abs() < 1e-9, "{degrees}");
+    assert!((angular.measurement.unwrap() - 60.0).abs() < 1e-9);
+    assert_eq!(angular.display_text, "60\u{00B0}");
+
+    // No *D block is cached, so the labels are formatted from the values.
+    // They carry no `R` or diameter sign: the DIMPOST prefix and suffix
+    // are not applied yet (docs/VLM_EXPORT_DESIGN.md, "what stays out").
+    assert_eq!(radius.display_source, DisplaySource::Formatted);
+    assert_eq!(radius.display_text, "5.00");
+    assert_eq!(diameter.display_text, "10.00");
 }

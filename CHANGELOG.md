@@ -38,6 +38,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
   answers five agent questions from the package alone; `tests/export.rs` checks every
   file, the tile grid, sidecar affines and byte-identical output on a second run.
+  `tests/sheets_compositing.rs` pins which viewports a sheet composites and where the
+  paper lies for every plot rotation and paper unit, from the new
+  `viewport_states_r2000.dxf` fixture (one viewport per state, two page setups); the new
+  `radial_r2000.dxf` fixture and the corpus's `2000/TS1.dwg` cover the RADIUS, DIAMETER
+  and ANGULAR_3POINT dimensions no other test file has.
   `docs/EVAL.md` records the sweep, the timings and how to rerun them.
   `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
   document -- the `export` subcommand and its options included -- and the parser's

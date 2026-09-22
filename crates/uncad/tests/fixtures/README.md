@@ -8,9 +8,10 @@ and mirrored OCS, `DIMLFAC` versus `act_measurement`, and a twisted VIEWPORT.
 they land.
 
 Every file was written from scratch by `make_fixtures.py` in this directory
-on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin and the
-angular/ordinate fixtures on 2026-09-22) -- no third-party drawing was
-copied, so they are redistributable under the repository's GPL-3. All are
+on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin, the
+angular/ordinate, the hatched-viewport, the viewport-states and the radial
+fixtures on 2026-09-22) -- no third-party drawing was copied, so they are
+redistributable under the repository's GPL-3. All are
 R2000 (`$ACADVER AC1015`) text DXF with CRLF line endings, at most 2.5 KB
 each, and above the 256-byte minimum LibreDWG's `dwg_read_dxf` enforces.
 
@@ -32,6 +33,8 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes | One LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
 | `plot_origin_r2000.dxf` | 2430 | 17 | A LAYOUT `Layout1` in inches (ANSI B landscape, rotation 0) with asymmetric margins and a non-zero plot origin (DXF 46/47), so the sheet is not at `(-left, -bottom)`; a paper-space border LWPOLYLINE and a 1:5 plan VIEWPORT over a model LINE |
 | `angular_ordinate_r2000.dxf` | 1491 | 10 | A 2-line angular DIMENSION (60 degrees) and an X- and a Y-type ordinate DIMENSION (30 and 50): the two kinds whose definition points LibreDWG's DXF reader lays out differently from its DWG decoder |
+| `viewport_states_r2000.dxf` | 4387 | 5 entities, 2 layers, 2 layouts | One VIEWPORT per state the sheet compositing rules distinguish (on; on a frozen layer; off; non-plan) plus two page setups no other fixture has: plot rotation 2 with asymmetric margins in mm, and plot rotation 3 in inches |
+| `radial_r2000.dxf` | 1425 | 6 entities, 1 DIMSTYLE | A RADIUS, a DIAMETER and a 3-point angular DIMENSION -- the three kinds no corpus DXF carries -- each with its circle or arc, no cached `*D` block |
 | `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
 | `nested_attrib_r2000.dxf` | 2174 | 3 model-space entities, 2 blocks (6 entities) | A block with an ATTDEF inserted inside another block, its ATTRIB value owned by the block record: the attribute of a *nested* block reference, which the export used to drop |
 
@@ -413,6 +416,93 @@ from R2004 on, and a DWG stores the value on the INSERT itself with no
 block child. `tests/export.rs` covers that second shape with a database
 built in the test, and both reach the same record id.
 
+## viewport_states_r2000.dxf
+
+The viewport fixture's skeleton with a second paper layout and four
+viewports, so the sheet compositing rules (`export.rs`, the `composited`
+filter) have one viewport per state. TABLES: LAYERs `0` (colour 7) and
+`VPFROZEN` (colour 4, `70 = 1`: frozen, the usual way to hide a viewport's
+border); BLOCK_RECORDs `*Model_Space` (`1F`), `*Paper_Space` (`1C`,
+`340 = 2B`) and `*Paper_Space0` (`1D`, `340 = 2C`). BLOCKS: all three
+(`20`/`21`, `22`/`23`, `26`/`27`), empty. ENTITIES: the model LINE `24`
+(0,0) -> (100,50) of the other viewport fixtures, then four VIEWPORTs owned
+by `1C` (`67 = 1`), each a 60 x 40 frame showing the model window 30 x 20
+about (50,25) -- `12 = (50,25)`, `45 = 20`, so the scale is 40 / 20 = 2 --
+with `69` counting up from 2 so none is the overall frame:
+
+| Handle | `10` centre | Layer | `68` | `90` | `16` VIEWDIR | Composited | Border |
+|---|---|---|---|---|---|---|---|
+| `2A` | (50, 50) | `0` | 1 | 32864 | (0,0,1) | yes | drawn |
+| `2D` | (50, 120) | `VPFROZEN` | 1 | 32864 | (0,0,1) | yes -- a hidden border does not hide the window | none: the entity is not among the sheet's paper parts |
+| `2E` | (50, 190) | `0` | **0** | **163936** (`32864 \| 0x20000`) | (0,0,1) | no: switched off | drawn |
+| `2F` | (140, 50) | `0` | 1 | 32864 | **(1,1,1)** | no: not a plan view | drawn |
+
+OBJECTS: the named object dictionary (`C`), the `ACAD_LAYOUT` dictionary
+(`1A`) with both entries, and two LAYOUTs:
+
+- `2B` `Layout1`, tab 1, block `1C`, active viewport `2A`: ISO A4
+  `44/45 = 210 x 297` mm, `73 = 2` (upside down, so the sheet keeps its
+  portrait size), `72 = 1` (mm), margins `40..43 = 10 / 20 / 5 / 15` mm, no
+  plot origin. The sheet therefore runs from `-(left, bottom)` = (-10, -20)
+  to (210 - 10, 297 - 20) = (200, 277) mm, which is what `10`/`11`
+  (LIMMIN/LIMMAX) say.
+- `2C` `Layout2`, tab 2, block `1D` (empty), no active viewport: ANSI B
+  `44/45 = 431.8 x 279.4` mm, `73 = 3` (90 degrees clockwise, so the
+  landscape sheet becomes portrait 279.4 x 431.8), `72 = 0` (**inches**),
+  margins 6.35 mm all round, no plot origin: (-0.25, -0.25) to
+  (273.05 / 25.4, 425.45 / 25.4) = (10.75, 16.75) in.
+
+Verified 2026-09-22 through `uncad <file> -o out.json` and `uncad export`:
+the four VIEWPORTs read back with the layers, `on`, `status_flag`, `id` and
+`view_direction` above, both LAYOUTs with those limits and plot settings,
+and `sheets.json` reports `2A`/`2D` composited, `2E`/`2F` not, with
+`Layout1` holding 3 paper entities (`2D`'s border is on the frozen layer).
+`tests/sheets_compositing.rs` asserts all of that, that the picture has ink
+at each composited frame's centre and none at the others', and that
+`PlotSettings::sheet_rect()` agrees with both layouts' stored limits (the
+rotation swap and the 1/25.4 inch conversion).
+
+Handles avoid the ones LibreDWG's reader takes for itself (1, 2, 20-23) as
+well as `C`, `1A`, `1C`, `1D`, `1F`, `24`, `26`, `27`, `2A`-`2F`; each
+VIEWPORT with a `5` handle still gets its own `VX_TABLE_RECORD` artefact, as
+the viewport fixture's section describes.
+
+## radial_r2000.dxf
+
+The three dimension kinds no corpus DXF carries. `2000/TS1.dwg` has all
+three (`tests/dimensions.rs` reads them from it, and its AutoCAD-written
+labels `R1.1897`, `∅2.3794` and `45°` are the
+reference for the values), but every TS1 DXF in the corpus fails LibreDWG's
+reader with a critical error, so the DXF side needs a fixture of its own.
+
+HEADER: `$INSUNITS 4`, `$DIMDEC 2`, `$DIMADEC 0`, `$DIMLUNIT 2`. TABLES: a
+LAYER table and DIMSTYLE `STANDARD` (handle 30). ENTITIES: the circle or arc
+each dimension annotates, then the three DIMENSIONs with no cached `*D`
+blocks, every number derived by hand:
+
+| Handle | `70` | Subclass | `10` | `13` | `14` | `15` | `42` | Value |
+|---|---|---|---|---|---|---|---|---|
+| 34 | 36 (4 radius) | `AcDbRadialDimension` | (0,0) centre | | | (3,4) on the circle | 5.0 | 3-4-5: radius 5 |
+| 35 | 35 (3 diameter) | `AcDbDiametricDimension` | (20,0) chord start | | | (20,10) chord end | 10.0 | the vertical diameter of the r = 5 circle at (20,5) |
+| 36 | 37 (5 angular 3-point) | `AcDb3PointAngularDimension` | (44.330127, 2.5) arc point | (50,0) | (45, 8.660254) | (40,0) centre | pi/3 | the 60-degree sector |
+
+The arc point of the angular dimension lies at 30 degrees along a radius of
+5 -- inside the 60-degree sector between the rays at 0 and 60 degrees, not
+the 300-degree one on the other side, which is what the sector probe in
+`dimension::measurement_from_points` has to get right.
+
+What the file pins (verified 2026-09-22 through `uncad <file> -o out.json`,
+6 entities read): LibreDWG's DXF reader maps `def_pt` to group 10 and
+`first_arc_pt` / `center_pt` to group 15, and `convert.rs` turns those into
+`Radius { center, chord_point }`, `Diameter { chord_start, chord_end }` and
+`Angular3Point { center, xline1, xline2 }`, so the recomputed measurement
+equals the written `42` for each. Mapping the radius' chord point to the
+definition point (the centre) makes the value 0 and fails the test. Since no
+`*D` block is cached, the labels are formatted: `5.00`, `10.00` and
+`60°` -- the `R` and diameter-sign prefixes are DIMPOST, which
+the formatter does not apply yet (`docs/VLM_EXPORT_DESIGN.md`, "what stays
+out").
+
 ## What did not work
 
 1. **`cp949_r2000.dwg` via LibreDWG's add/write API**: `dwg_add_Document`,
@@ -454,7 +544,7 @@ built in the test, and both reach the same record id.
 python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (a name such as `mirrored-bulge`, `hatched-viewport` or `nested-attrib` writes only that one)
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
-python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, cp949, mirrored, dimlfac, viewport, hidden)
+python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, radial, viewport-states, cp949, mirrored, dimlfac, viewport, hidden)
 ```
 
 The default mode is meant to reproduce the shipped bytes exactly; check with
