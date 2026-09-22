@@ -2144,3 +2144,393 @@ fn exporting_onto_an_existing_file_reports_the_path_it_could_not_write() {
     // Nothing was written next to the file that blocked it.
     assert!(file.is_file());
 }
+
+/// The same drawing as `EXAMPLE_2000_DWG`, saved in a format that predates
+/// `act_measurement`.
+const EXAMPLE_R14_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_r14.dwg"
+);
+
+#[test]
+fn a_package_says_when_its_dimension_values_were_recomputed() {
+    // An R14 file stores no measurement, and the records used to present
+    // the 0.0 it leaves behind as one: `measurement: 0`, `confidence:
+    // "stored"`, `capabilities.dimension_values: "exact"`, beside a
+    // `display` of "1504,68". The values now come from the definition
+    // points, and every place that says where a number came from says so.
+    let db = uncad::parse(EXAMPLE_R14_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("r14");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let dims = records(&tmp.0, "dimensions");
+    assert_eq!(dims.len(), 10);
+    for d in &dims {
+        assert_eq!(d["measurement_source"], "from_points", "{}", d["id"]);
+        assert_eq!(d["confidence"], "exact", "{}", d["id"]);
+        // The value is the one the points give, and it is not 0.
+        assert_eq!(
+            d["measurement"], d["measurement_from_points"],
+            "{}",
+            d["id"]
+        );
+        assert!(
+            d["measurement"].as_f64().is_some_and(|m| m.abs() > 1.0),
+            "{} measures {}",
+            d["id"],
+            d["measurement"]
+        );
+        // Nothing stored means nothing to compare against.
+        assert!(d["delta"].is_null(), "{}", d["id"]);
+    }
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["capabilities"]["dimension_values"], "computed");
+}
+/// One closed LWPOLYLINE of `n` vertices on a circle of radius 100: a
+/// surveyed contour or a traced boundary, the shape whose pairwise
+/// self-intersection test costs O(n^2).
+fn one_big_ring(n: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LwPolylineEntity, Point2D, Point3D};
+    let vertices: Vec<Point2D> = (0..n)
+        .map(|i| {
+            let a = std::f64::consts::TAU * i as f64 / n as f64;
+            Point2D {
+                x: 100.0 * a.cos(),
+                y: 100.0 * a.sin(),
+            }
+        })
+        .collect();
+    let entities = vec![uncad::Entity::LwPolyline(LwPolylineEntity {
+        common: EntityCommon {
+            handle: "R1".into(),
+            layer: "0".into(),
+            ..EntityCommon::default()
+        },
+        vertices,
+        closed: true,
+        bulges: Vec::new(),
+        widths: Vec::new(),
+        const_width: 0.0,
+        elevation: 0.0,
+        extrusion: Point3D {
+            x: 0.0,
+            y: 0.0,
+            z: 1.0,
+        },
+    })];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn an_outline_too_big_to_test_says_so_instead_of_claiming_it_is_simple() {
+    // `geom::is_simple` compares every pair of non-adjacent segments, and
+    // the export called it for every closed polyline whatever its size: one
+    // 64 000-vertex contour held the export for 175 s (16 000 took 9 s) to
+    // produce one boolean. Above the cap the answer is `null` -- not the
+    // `true` that would let a reader trust an area that may be meaningless.
+    for (n, want_simple) in [(64usize, true), (8000, false)] {
+        let db = one_big_ring(n);
+        let tmp = TempDir::new(&format!("ring{n}"));
+        let started = std::time::Instant::now();
+        export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        let elapsed = started.elapsed();
+        let regions = records(&tmp.0, "regions");
+        assert_eq!(regions.len(), 1, "one closed polyline, one region");
+        let region = &regions[0];
+        assert_eq!(region["vertex_count"], n);
+        if want_simple {
+            // A circle's outline does not cross itself, and 64 vertices is
+            // well inside the cap, so the test still runs and says so.
+            assert_eq!(region["simple"], true);
+            assert_eq!(region["confidence"], "exact");
+        } else {
+            assert!(region["simple"].is_null(), "{}", region["simple"]);
+            assert_eq!(region["confidence"], "estimated");
+            assert!(
+                region["why"]
+                    .as_str()
+                    .is_some_and(|w| w.contains("self-intersection")),
+                "{}",
+                region["why"]
+            );
+            // The point of the cap. 8000 vertices took about 3 s of
+            // pairwise testing before; the whole export now takes a
+            // fraction of that, so a minute is a bound no machine this
+            // runs on can miss while the test is still being skipped.
+            assert!(
+                elapsed < std::time::Duration::from_secs(60),
+                "{elapsed:?} for one polyline"
+            );
+        }
+        // The area itself is still reported either way: the shoelace sum is
+        // the same arithmetic.
+        assert!(region["area"].as_f64().is_some_and(|a| a > 0.0));
+    }
+}
+
+/// `count` layers with 45-character AIA-style names, one line each, all
+/// over the same patch of the drawing so that every tile sees nearly every
+/// layer: the shape (900 layers drawn across a whole plan) that made
+/// `layers_present` alone overrun the sidecar budget, at the entity count
+/// the budget actually depends on.
+fn layers_everywhere(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D};
+    let mut entities = Vec::new();
+    for i in 0..count {
+        let layer = format!("A-WALL-FULL-DIMS-ANNO-TEXT-IDENTITY-PATT-{i:04}");
+        assert_eq!(layer.len(), 45);
+        let (x, y) = (20.0 + (i % 17) as f64, 20.0 + (i % 13) as f64);
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer,
+                ..EntityCommon::default()
+            },
+            start_point: Point3D { x, y, z: 0.0 },
+            end_point: Point3D {
+                x: x + 8.0,
+                y: y + 6.0,
+                z: 0.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_tile_on_hundreds_of_layers_keeps_its_sidecar_under_the_cap() {
+    // The shrink loop cut the four row lists and stopped as soon as they
+    // were empty, so a tile carrying no text, dimension, block or region
+    // record -- just geometry on 900 layers -- wrote its whole layer list
+    // whatever it weighed: 43 866 bytes, 37 % over the 32 KB the design
+    // promises, with `records_truncated: false` saying nothing had been
+    // dropped. 900 names of 45 characters is 40 500 characters before the
+    // quoting and the rest of the file, so the list alone cannot fit.
+    let db = layers_everywhere(900);
+    let tmp = TempDir::new("layers_everywhere");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let (mut checked, mut trimmed) = (0, 0);
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let file = tmp.0.join(path);
+        let bytes = std::fs::metadata(&file).unwrap().len();
+        assert!(bytes <= 32 * 1024, "{path} is {bytes} bytes");
+        let sidecar = read_json(&file);
+        let present = sidecar["layers_present"].as_array().unwrap().len();
+        if sidecar["layers_truncated"] == true {
+            // The flag says what was dropped, and the total says how much
+            // of it the reader is missing.
+            let total = sidecar["layers_total"].as_u64().unwrap() as usize;
+            assert!(total > present, "{path}: {present} of {total}");
+            assert!(total <= 900, "{path}: {total} layers");
+            trimmed += 1;
+        } else {
+            assert!(sidecar["layers_total"].is_null());
+        }
+        // Nothing else was cut: there were no record rows to cut.
+        assert_eq!(sidecar["records_truncated"], false, "{path}");
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    assert!(trimmed >= 1, "900 layers on one tile must overflow it");
+}
+
+/// The DXF of the same drawing as `EXAMPLE_2000_DWG`. LibreDWG's DXF
+/// reader resolves the ACAD_TABLE's cached block where its DWG decoder
+/// does not, so this is the file whose picture carries table text.
+const EXAMPLE_2000_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2000.dxf"
+);
+
+#[test]
+fn every_string_the_picture_draws_is_a_text_record_and_a_strings_key() {
+    // `collect_texts` matched TEXT, ATTRIB, MTEXT and INSERT only, while
+    // the renderer also draws a TOLERANCE's own <text> and an ACAD_TABLE's
+    // cached block -- so seven table cells reading "test"/"xx" and one
+    // feature control frame were in the picture, with ids the export mints,
+    // and in no record and no strings.json key. The manifest's guidance
+    // tells the reader to find things by looking them up in strings.json.
+    let db = uncad::parse(EXAMPLE_2000_DXF).expect("corpus file must parse");
+    let tmp = TempDir::new("drawn_texts");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            svg: true,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    // The expected set is not a list written here: it is every id the
+    // renderer put a <text> element under, read back out of the SVG the
+    // same run wrote. The dimension labels are the documented exception --
+    // they are drawn from each DIMENSION's *D block and carried by
+    // dimensions.json's `display` instead (docs/VLM_EXPORT_DESIGN.md).
+    let svg = std::fs::read_to_string(tmp.0.join("drawing.svg")).expect("drawing.svg");
+    let drawn: BTreeSet<String> = svg
+        .match_indices("<text id=\"")
+        .map(|(i, m)| {
+            let rest = &svg[i + m.len()..];
+            rest[..rest.find('"').expect("closing quote")].to_string()
+        })
+        .collect();
+    let dimension_ids: BTreeSet<String> = records(&tmp.0, "dimensions")
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    let expected: BTreeSet<String> = drawn
+        .iter()
+        .filter(|id| !dimension_ids.contains(id.split('/').next().unwrap_or_default()))
+        .cloned()
+        .collect();
+    assert!(
+        expected.len() >= 11,
+        "the drawing draws more than the three top-level texts: {expected:?}"
+    );
+
+    let indexed: BTreeSet<String> = records(&tmp.0, "texts")
+        .iter()
+        .map(|r| r["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        expected.difference(&indexed).collect::<Vec<_>>(),
+        Vec::<&String>::new(),
+        "drawn but not indexed"
+    );
+
+    // And the strings index carries what those records say, so the reader
+    // the manifest instructs finds a table cell by its text.
+    let strings = read_json(&tmp.0.join("strings.json"));
+    let ids = strings["strings"]["test"]
+        .as_array()
+        .expect("a table cell reading \"test\"");
+    assert!(
+        ids.iter()
+            .any(|v| v.as_str().is_some_and(|s| s.contains('/'))),
+        "{ids:?} should name the cells inside the table"
+    );
+    let texts = records(&tmp.0, "texts");
+    let kinds: BTreeSet<&str> = texts.iter().filter_map(|r| r["kind"].as_str()).collect();
+    assert!(kinds.contains("TOLERANCE"), "{kinds:?}");
+}
+
+/// `count` short LINEs on a 500-column grid: the cheapest entity there is,
+/// so that what a timing test measures is the pass over the records rather
+/// than the rasterizer.
+fn many_lines(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D};
+    let mut entities = Vec::with_capacity(count);
+    for i in 0..count {
+        let (x, y) = ((i % 500) as f64 * 2.0, (i / 500) as f64 * 2.0);
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D { x, y, z: 0.0 },
+            end_point: Point3D {
+                x: x + 1.0,
+                y,
+                z: 0.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn record_building_does_not_grow_with_the_square_of_the_entity_count() {
+    // Every record looked its entity's extent up with a linear scan over
+    // all of them, so the pass cost O(N^2): a generated 100 000-LINE
+    // drawing spent 59 s in the export phase where 25 000 spent 8.6 s --
+    // four times the entities, seven times the time -- and the same
+    // 100 000 take 12 s through the map the tiles are already culled with.
+    //
+    // Only a clock can see a change that alters no output, so the test
+    // measures the shape rather than a duration: four times the entities
+    // may cost at most `LIMIT` times the time. Measured both ways on this
+    // very drawing (twice each), the scan lands at 7.3x and the map at
+    // 2.9x, so 5.5 separates them with room for a loaded machine in either
+    // direction.
+    const LIMIT: f64 = 5.5;
+    let time_of = |count: usize| -> f64 {
+        let db = many_lines(count);
+        let tmp = TempDir::new(&format!("scale{count}"));
+        let started = std::time::Instant::now();
+        export_package(
+            &db,
+            &tmp.0,
+            &ExportOptions {
+                max_levels: 1,
+                ..Default::default()
+            },
+        )
+        .expect("exports");
+        started.elapsed().as_secs_f64()
+    };
+    // Warm the font atlas and the allocator on a size neither run measures.
+    time_of(500);
+    let small = time_of(12_500);
+    let big = time_of(50_000);
+    assert!(
+        big <= small * LIMIT,
+        "50 000 entities took {big:.2}s against {small:.2}s for 12 500 ({:.1}x)",
+        big / small
+    );
+}

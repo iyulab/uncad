@@ -1023,17 +1023,19 @@ unsafe fn convert_entity(
                 },
                 _ => DimensionGeometry::Unknown,
             };
-            // act_measurement is written for R2000+ files; an R14-era
-            // dimension holds exactly -1.0 for "not computed". Angular
-            // kinds store radians.
+            // act_measurement is written for R2000+ files; an older one (and
+            // a DXF without group 42) leaves it at -1.0 or at 0.0.
+            // `usable_stored_measurement` says which values are a
+            // measurement of this dimension and converts angular radians to
+            // degrees; the definition points stand in for the rest.
             let stored = get_field::<f64>(entity_ptr, dxfname, "act_measurement");
-            let angular = geometry.is_angular();
-            let ordinate = matches!(geometry, DimensionGeometry::Ordinate { .. });
-            let measurement = stored
-                .filter(|v| v.is_finite() && *v != -1.0 && (ordinate || *v >= 0.0))
-                .map(|v| if angular { v.to_degrees() } else { v });
             let measurement_from_points =
                 crate::dimension::measurement_from_points(&geometry, definition_point);
+            let measurement = crate::dimension::usable_stored_measurement(
+                stored,
+                &geometry,
+                measurement_from_points,
+            );
             let user_text = get_utf8_field(entity_ptr, dxfname, "user_text").unwrap_or_default();
             let text_midpoint =
                 get_field::<Point2D>(entity_ptr, dxfname, "text_midpt").unwrap_or_default();

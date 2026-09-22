@@ -585,6 +585,31 @@ impl Affine {
 const MAX_BLOCK_DEPTH: u32 = 8;
 const MAX_PLACED_TEXTS: usize = 200_000;
 
+/// The most vertices an outline may have before its self-intersection test
+/// is skipped. [`crate::geom::is_simple`] compares every pair of
+/// non-adjacent segments, so the test costs O(n^2): a single closed
+/// polyline of 64 000 vertices (a surveyed contour or a traced boundary,
+/// routine in a GIS import) held the export for 175 s where the same
+/// drawing at 16 000 held it for 9 s -- four times the vertices, nineteen
+/// times the time -- for one boolean on one record. At this cap the test
+/// costs a tenth of a second in an unoptimised build and a few
+/// milliseconds in a release one, and no outline in the corpus comes near
+/// it: the largest region in `AutoCADSamples5.dwg` has 378 vertices.
+const MAX_SIMPLE_TEST_VERTICES: usize = 2_000;
+
+/// What a record says instead of claiming an untested outline is simple.
+const UNTESTED_OUTLINE: &str =
+    "outline too large to test for self-intersection; the area assumes it does not cross itself";
+
+/// Whether `vertices` outline a non-self-intersecting polygon, or `None`
+/// when there are too many of them to ask (see
+/// [`MAX_SIMPLE_TEST_VERTICES`]). Unknown is reported as `null`, never as
+/// `true`: a crossing outline's area is meaningless, and a reader must be
+/// able to tell "checked, fine" from "not checked".
+fn simple_outline(vertices: &[Point2D]) -> Option<bool> {
+    (vertices.len() <= MAX_SIMPLE_TEST_VERTICES).then(|| crate::geom::is_simple(vertices))
+}
+
 fn p2(p: Point3D) -> Point2D {
     Point2D { x: p.x, y: p.y }
 }
@@ -767,6 +792,66 @@ fn collect_texts(
                 }
                 collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
             }
+        }
+        Entity::AcadTable(t) => {
+            // An ACAD_TABLE draws the block it caches its laid-out cells in
+            // through the same block-reference path as an INSERT
+            // (`svg.rs`), so its cell texts are drawn, with the ids
+            // `<table>/<text>` this mints -- and used to be in no text
+            // record and no `strings.json` key, so a reader searching for a
+            // value they can see in a cell found nothing. The frame is the
+            // INSERT one without the extrusion flip: the renderer passes
+            // the table's `scale.x` through as it stands.
+            if depth >= MAX_BLOCK_DEPTH {
+                return;
+            }
+            let Some(block) = db.tables.block_records.get(&t.block_name) else {
+                return;
+            };
+            let child_affine =
+                Affine::placement(p2(t.insertion_point), t.scale.x, t.scale.y, t.rotation)
+                    .then(affine);
+            let child_prefix = id(&t.common.handle);
+            for child in &block.entities {
+                if matches!(child, Entity::Attdef(_)) {
+                    continue;
+                }
+                collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
+            }
+        }
+        Entity::Tolerance(t) => {
+            // A TOLERANCE draws one <text> of its own (the feature control
+            // frame's codes and values), anchored at the insertion point,
+            // unrotated, at the height `dimension::tolerance_text_height`
+            // resolved -- so it is as findable as any other string in the
+            // picture only if it is indexed like one.
+            if t.text_plain.trim().is_empty() {
+                return;
+            }
+            let base = p2(t.insertion_point);
+            out.push(PlacedText {
+                id: id(&t.common.handle),
+                kind: "TOLERANCE",
+                layer: t.common.layer.clone(),
+                text: t.text_plain.clone(),
+                raw: t.text_value.clone(),
+                height: t.text_height * scale,
+                rotation: affine.text_rotation(0.0),
+                anchor: affine.apply(base),
+                bbox: affine.apply_rect(&estimate_text_box(
+                    base,
+                    t.text_height,
+                    0.0,
+                    &t.text_plain,
+                    1.0,
+                    0,
+                    0,
+                )),
+                bbox_confidence: "estimated",
+                unshaped: 0,
+                style: String::new(),
+                tag: None,
+            });
         }
         _ => {}
     }
@@ -1429,9 +1514,12 @@ pub fn export_package(
     let tiles_for =
         |bbox: &Rect| -> Vec<String> { images_for(bbox).iter().map(|i| i.id.clone()).collect() };
 
-    let extent_of = |handle: &str| -> Option<Rect> {
-        extents.iter().find(|e| e.handle == handle).map(|e| e.rect)
-    };
+    // The same map the tiles are culled with, built above. A linear `find`
+    // over every visible entity's extent, once per record, made building the
+    // dimension, geometry and block records quadratic in entity count: a
+    // generated 100k-LINE drawing took 128 s where 25k took 9.7 s (4x the
+    // entities, 13x the time). The lookup is O(1) and returns the same rect.
+    let extent_of = |handle: &str| -> Option<Rect> { extent_of_handle.get(handle).copied() };
 
     // texts
     let mut text_records: Vec<Record> = texts
@@ -1495,10 +1583,15 @@ pub fn export_package(
             )
         });
         let angular = d.geometry.is_angular();
-        let (measurement, source) = match (d.measurement, d.measurement_from_points) {
-            (Some(m), _) => (Some(m), "act_measurement"),
-            (None, Some(p)) => (Some(p), "from_points"),
-            (None, None) => (None, "none"),
+        // `confidence` follows the source, not merely "there is a number":
+        // a value the definition points gave is exact arithmetic on what
+        // the file stores, but it is not what the drawing was measured at,
+        // and a reader deciding whether to trust the number over the label
+        // needs the two kept apart.
+        let (measurement, source, confidence) = match (d.measurement, d.measurement_from_points) {
+            (Some(m), _) => (Some(m), "act_measurement", "stored"),
+            (None, Some(p)) => (Some(p), "from_points", "exact"),
+            (None, None) => (None, "none", "unavailable"),
         };
         let delta = match (d.measurement, d.measurement_from_points) {
             (Some(m), Some(p)) => Some(rounder.derived(m - p)),
@@ -1541,14 +1634,7 @@ pub fn export_package(
         v.insert("geometry".into(), serde_json::to_value(&d.geometry)?);
         v.insert("definition_point".into(), rounder.pt3(d.definition_point));
         v.insert("text_at".into(), rounder.pt2(d.text_midpoint));
-        v.insert(
-            "confidence".into(),
-            json!(if measurement.is_some() {
-                "stored"
-            } else {
-                "unavailable"
-            }),
-        );
+        v.insert("confidence".into(), json!(confidence));
         v.insert("bbox".into(), rounder.rect(&bbox));
         v.insert("tiles".into(), json!(tiles_for(&bbox)));
         v.insert("px".into(), px_map(&bbox));
@@ -1672,19 +1758,26 @@ pub fn export_package(
                 );
                 if let Some(area) = p.area() {
                     let signed = p.signed_area();
-                    let simple = crate::geom::is_simple(&p.vertices);
+                    let simple = simple_outline(&p.vertices);
                     v.insert("area".into(), json!(rounder.derived(area)));
                     v.insert(
                         "orientation".into(),
                         json!(if signed >= 0.0 { "ccw" } else { "cw" }),
                     );
                     v.insert("simple".into(), json!(simple));
-                    if !simple {
-                        confidence = "unavailable";
-                        v.insert(
-                            "why".into(),
-                            json!("self-intersecting outline: the area has no meaning"),
-                        );
+                    match simple {
+                        Some(true) => {}
+                        Some(false) => {
+                            confidence = "unavailable";
+                            v.insert(
+                                "why".into(),
+                                json!("self-intersecting outline: the area has no meaning"),
+                            );
+                        }
+                        None => {
+                            confidence = "estimated";
+                            v.insert("why".into(), json!(UNTESTED_OUTLINE));
+                        }
                     }
                     if p.closed && p.vertices.len() >= 3 {
                         let centroid = polygon_centroid(&p.vertices);
@@ -1708,8 +1801,15 @@ pub fn export_package(
                         r.insert("simple".into(), json!(simple));
                         r.insert(
                             "confidence".into(),
-                            json!(if simple { "exact" } else { "unavailable" }),
+                            json!(match simple {
+                                Some(true) => "exact",
+                                Some(false) => "unavailable",
+                                None => "estimated",
+                            }),
                         );
+                        if simple.is_none() {
+                            r.insert("why".into(), json!(UNTESTED_OUTLINE));
+                        }
                         r.insert("bbox".into(), rounder.rect(&bbox));
                         r.insert("tiles".into(), json!(tiles_for(&bbox)));
                         r.insert("px".into(), px_map(&bbox));
@@ -2060,8 +2160,17 @@ pub fn export_package(
     });
 
     // manifest.json, README.txt and report.json, last (they list the files)
+    // "exact" is reserved for values the file itself measured: a package of
+    // an R13/R14 drawing (no act_measurement anywhere) carries values this
+    // crate recomputed from the definition points, and used to advertise
+    // them as the drawing's own.
+    let dim_source = |want: &str| {
+        dim_records
+            .iter()
+            .any(|r| r.value.get("measurement_source").is_some_and(|s| s == want))
+    };
     let capabilities = json!({
-        "dimension_values": if dim_records.iter().any(|r| r.value.get("measurement").is_some_and(|m| !m.is_null())) { "exact" } else if dim_records.is_empty() { "none" } else { "text_only" },
+        "dimension_values": if dim_records.is_empty() { "none" } else if dim_source("act_measurement") { "exact" } else if dim_source("from_points") { "computed" } else { "text_only" },
         "areas": "exact",
         "text_boxes": if measured > 0 { "measured" } else if texts.is_empty() { "none" } else { "estimated" },
         "fonts": match options.fonts { Fonts::Bundled => "bundled", Fonts::BundledAndSystem => "bundled+system" },
@@ -2111,12 +2220,6 @@ pub fn export_package(
         "warnings": warnings,
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
-    std::fs::write(dir.join("manifest.json"), &manifest_text).map_err(|source| {
-        ExportError::Io {
-            path: dir.join("manifest.json"),
-            source,
-        }
-    })?;
     let readme = format!(
         "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window; sheets/<layout>/overview.png\n  6. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
@@ -2131,6 +2234,17 @@ pub fn export_package(
     std::fs::write(dir.join("report.json"), &report_text).map_err(|source| ExportError::Io {
         path: dir.join("report.json"),
         source,
+    })?;
+    // manifest.json is written last, after every file it names: a directory
+    // that holds one is a finished package, and one that does not is
+    // nothing a reader should trust. (It is also what the next run's
+    // `clear_previous_package` reads, so a half-written package is cleared
+    // by its own manifest only once that manifest is true.)
+    std::fs::write(dir.join("manifest.json"), &manifest_text).map_err(|source| {
+        ExportError::Io {
+            path: dir.join("manifest.json"),
+            source,
+        }
     })?;
 
     Ok(ExportReport {
@@ -2380,6 +2494,14 @@ struct OverviewFit {
     padding: f64,
 }
 
+/// The most characters of a layout name a sheet directory keeps. Well
+/// under every per-component limit even after the `_99` dedup suffix, and
+/// well under what is left of Windows' 260-character path budget once the
+/// package directory and `sheets/<name>/overview.png` are counted -- while
+/// still long enough to read a real layout name off the path (the longest
+/// in the corpus is 22 characters).
+const MAX_SHEET_DIR: usize = 100;
+
 /// The directory one sheet's image goes in, under `sheets/`: the layout's
 /// name with every character outside `[A-Za-z0-9_-]` replaced by `_` (so
 /// the path is portable and an ASCII name stays readable), `sheet` when
@@ -2390,6 +2512,16 @@ struct OverviewFit {
 /// sanitises to `_`, so two three-syllable Korean names both became `___`
 /// and the second layout's PNG silently overwrote the first's while both
 /// `sheets.json` entries pointed at the one surviving file.
+///
+/// The name is also cut to [`MAX_SHEET_DIR`] characters. A layout name
+/// longer than the filesystem's 255-byte per-component limit (NTFS, ext4)
+/// made the first `sheets/<name>/overview.png` write fail, and with it the
+/// whole export: the other layouts, the tiles and every record file were
+/// lost to one bad string, and what stayed on disk was a directory with no
+/// `manifest.json` -- not a package, and not something the next run's
+/// `clear_previous_package` would tidy up either, since that reads the
+/// manifest. The dedup suffix alone could push a legal 255-character name
+/// over the edge.
 fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
     let safe: String = name
         .chars()
@@ -2400,6 +2532,9 @@ fn sheet_dir(name: &str, used: &mut BTreeSet<String>) -> String {
                 '_'
             }
         })
+        // Sanitising leaves pure ASCII, so this cuts characters and bytes
+        // alike and can never split one.
+        .take(MAX_SHEET_DIR)
         .collect();
     let base = if safe.is_empty() {
         "sheet".to_string()
@@ -2897,7 +3032,7 @@ fn sidecar(
     // layers at all, so filtering tiles by layer skipped it. Computed
     // before the truncation loop, so the layer set stays complete even
     // when rows are cut.
-    let mut layers: BTreeSet<String> = BTreeSet::new();
+    let mut layer_set: BTreeSet<String> = BTreeSet::new();
     for rec in on_tile(texts, &tile.world)
         .iter()
         .chain(on_tile(dims, &tile.world).iter())
@@ -2906,15 +3041,18 @@ fn sidecar(
         .chain(on_tile(geometry, &tile.world).iter())
     {
         if let Some(Value::String(l)) = rec.value.get("layer") {
-            layers.insert(l.clone());
+            layer_set.insert(l.clone());
         }
     }
+    let layers_total = layer_set.len();
+    let mut layers: Vec<String> = layer_set.into_iter().collect();
     let build = |text_rows: &[Value],
                  dim_rows: &[Value],
                  block_rows: &[Value],
                  region_rows: &[Value],
+                 layers: &[String],
                  truncated: bool| {
-        json!({
+        let mut value = json!({
             "$schema": SCHEMA,
             "id": img.id,
             "png": img.png,
@@ -2933,15 +3071,34 @@ fn sidecar(
             "children": children,
             "empty": tile.empty,
             "layers_present": layers,
+            "layers_truncated": layers.len() < layers_total,
             "records": { "texts": text_rows, "dims": dim_rows, "blocks": block_rows, "regions": region_rows },
             "records_truncated": truncated,
-        })
+        });
+        if layers.len() < layers_total {
+            value["layers_total"] = json!(layers_total);
+        }
+        value
     };
     let mut truncated = false;
-    let mut value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+    let mut value = build(
+        &text_rows,
+        &dim_rows,
+        &block_rows,
+        &region_rows,
+        &layers,
+        truncated,
+    );
+    // The shrink used to cut the four row lists and nothing else, and stop
+    // as soon as they were empty -- so a tile whose records were few but
+    // whose layers were many (a plan of 900 AIA-named layers, each drawn
+    // across the whole sheet) wrote a 44 KB sidecar, 37 % over the budget,
+    // with `records_truncated: false` to say the file was complete. The
+    // layer list is cut the same way once the rows are gone, and each list
+    // has its own flag, so the file always says which of the two the reader
+    // is missing.
     while serde_json::to_string(&value).map_or(0, |s| s.len()) > SIDECAR_LIMIT {
-        truncated = true;
-        let longest = [
+        let rows_left = [
             text_rows.len(),
             dim_rows.len(),
             block_rows.len(),
@@ -2950,19 +3107,34 @@ fn sidecar(
         .into_iter()
         .max()
         .unwrap_or(0);
-        if longest == 0 {
+        if rows_left > 0 {
+            truncated = true;
+            for rows in [
+                &mut text_rows,
+                &mut dim_rows,
+                &mut block_rows,
+                &mut region_rows,
+            ] {
+                let keep = rows.len() * 3 / 4;
+                rows.truncate(keep);
+            }
+        } else if !layers.is_empty() {
+            // Records first, layers after: a record is what a reader came
+            // for, the layer list is an index into them. Alphabetical, so
+            // which names survive is at least predictable.
+            let keep = layers.len() * 3 / 4;
+            layers.truncate(keep);
+        } else {
             break;
         }
-        for rows in [
-            &mut text_rows,
-            &mut dim_rows,
-            &mut block_rows,
-            &mut region_rows,
-        ] {
-            let keep = rows.len() * 3 / 4;
-            rows.truncate(keep);
-        }
-        value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+        value = build(
+            &text_rows,
+            &dim_rows,
+            &block_rows,
+            &region_rows,
+            &layers,
+            truncated,
+        );
     }
     value
 }
@@ -3192,6 +3364,32 @@ mod tests {
         assert_eq!(sheet_dir("", &mut used), "sheet");
         assert_eq!(sheet_dir("", &mut used), "sheet_2");
         assert_eq!(used.len(), 7, "every name got its own directory");
+    }
+
+    #[test]
+    fn a_sheet_directory_is_short_enough_for_the_filesystem() {
+        // A layout name of 300 characters made `sheets/<name>/overview.png`
+        // longer than the 255-byte per-component limit NTFS and ext4 both
+        // impose; the write failed, `export_package` returned Err, and the
+        // four other layouts, the tiles and every record file went with it,
+        // leaving a directory with no manifest.json. The same file with a
+        // 255-character name exported fine, so the limit itself was the
+        // threshold -- and the dedup suffix could cross it on its own.
+        let mut used = BTreeSet::new();
+        let long = "L".repeat(300);
+        let first = sheet_dir(&long, &mut used);
+        assert_eq!(first, "L".repeat(MAX_SHEET_DIR));
+        // Two names that differ only past the cut still get a directory
+        // each, and the suffix stays inside the limit.
+        let second = sheet_dir(&format!("{long}-other"), &mut used);
+        assert_eq!(second, format!("{}_2", "L".repeat(MAX_SHEET_DIR)));
+        for dir in [&first, &second] {
+            assert!(dir.len() < 255, "{} bytes", dir.len());
+            assert!(dir.is_ascii(), "sanitising leaves ASCII: {dir}");
+        }
+        // A name at the cap keeps every character of it.
+        let exact = "N".repeat(MAX_SHEET_DIR);
+        assert_eq!(sheet_dir(&exact, &mut used), exact);
     }
 
     #[test]

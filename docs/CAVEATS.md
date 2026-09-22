@@ -180,6 +180,38 @@ side of the FFI boundary and the honest workaround is a DWG: the same drawing as
 parses in linear time. A caller that must accept large DXFs should bound the work itself
 (a size or entity-count limit before calling `parse`, and a timeout).
 
+## A DIMSTYLE's 0 is read as 0, unless the record is a husk
+
+A dimension's label is formatted at its DIMSTYLE's `DIMDEC`/`DIMADEC`, and 0 is
+an ordinary setting for both (whole millimetres, whole degrees). Until 0.3.0 a
+0 there was taken as "unset" and the header's `$DIMDEC` stood in, so a metric
+style asking for "50" produced "50.0000" -- a string neither the picture, nor
+the cached label, nor `strings.json` carries.
+
+Telling "the file said 0" from "the file said nothing" is not something the
+record's numbers answer: LibreDWG's DXF reader creates the DIMSTYLE object,
+presets the few fields it has defaults for (`DIMSCALE = DIMLFAC = DIMTFAC = 1`,
+`DIMLUNIT = DIMALTU = 2`, `in_dxf.c`) and leaves the rest zeroed, exactly as if
+the file had written 0. What separates the two in practice is the sizing pair:
+no usable style has both a text height and an arrow size of 0, since a
+zero-height dimension text draws nothing. `sample_2000.dxf` is the proof -- it
+names the same `Standard` style that `sample_2000.dwg` writes in full (DIMDEC
+4, DIMTXT 0.18, DIMASZ 0.18) and leaves all three at 0. So a record with a
+`DIMTXT` or `DIMASZ` above zero is taken at its word, 0 included, and one with
+neither is treated as a husk whose fields say nothing (`carries_a_body` in
+`crates/uncad/src/dimension.rs`).
+
+The residual case: a DXF that writes a style's body but omits group 271 gets
+DIMDEC 0 where AutoCAD would apply its own default of 4. No file written by a
+CAD program does that -- every one of the 40-odd real styles in the corpus
+writes all of them -- and patching the vendored reader to default the field
+instead would change what "0" means for every consumer of `tables.dimstyles`.
+`DIMLUNIT` and `DIMLFAC` keep their "0 means unset" reading, since 0 is not a
+value either can hold (the unit codes run 1..=6, and a factor of 0 would zero
+every label). Precision is clamped to the DXF reference's maximum of 8: the
+fields are 16-bit, and AutoCAD's `DIMADEC` of -1 ("use DIMDEC") reads back as
+65535, which `format!` would honour literally.
+
 ## The polyline "closed" flag
 
 Fixed in 0.3.0. Until then LWPOLYLINE's `closed` was read from bit 1 of `flag`, the DXF
@@ -266,6 +298,33 @@ its 0.3.0 form. Known gaps:
   drawn in the one face.
 - Records for entities inside block references are limited to texts;
   geometry inside blocks is drawn but not listed (INSERT instances are).
+  The texts cover every string the picture shows except one: the label
+  inside a DIMENSION's cached `*D` block, which `dimensions.json` carries
+  as `display` (and `strings.json` indexes from there) rather than
+  duplicating as a text record. An ACAD_TABLE's cells and a TOLERANCE's
+  frame are indexed like any other text, under the ids the picture draws
+  them with (`<table>/<cell>`, the tolerance's own handle); until 0.3.0
+  they were drawn and indexed nowhere, so a reader searching
+  `strings.json` for a value they could see in a cell found nothing.
+  Indexing them also lets the legibility model see them, so a drawing
+  whose only small text is in a table now zooms deep enough to read it.
+- **A sidecar over budget loses rows, then layer names.** `layers_present`
+  used to be written whole whatever it weighed -- 900 layers with
+  45-character names put a tile 37 % past the 32 KB cap while
+  `records_truncated` said nothing had been dropped. The record rows are
+  cut first, the layer list after, and `records_truncated` /
+  `layers_truncated` (with `layers_total`) say which.
+- **A very large outline is not checked for self-intersection.** A closed
+  polyline of more than 2 000 vertices reports `simple: null` with
+  `confidence: "estimated"` and a `why`, because the check compares every
+  pair of segments: one 64 000-vertex contour held the export for 175 s
+  for that one boolean. The area is still reported; it assumes the outline
+  does not cross itself. The largest outline in the corpus has 378
+  vertices.
+- **A layout name is cut to 100 characters in the path.** `sheets/<name>/`
+  is the sanitised layout name, and a name past the filesystem's 255-byte
+  per-component limit used to fail the whole export, manifest and all.
+  `sheets.json` and the manifest still carry the name in full.
 
 ## The crop: what the picture shows (since 0.3.0)
 

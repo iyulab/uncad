@@ -37,21 +37,119 @@ pub struct EffectiveStyle {
     pub dimadec: u16,
 }
 
+/// Whether a DIMSTYLE record carries the style's own settings, or is the
+/// husk a file leaves behind when it names a style without writing its
+/// body.
+///
+/// The distinction is what tells "the file said nothing" from "the file
+/// said zero", and nothing in the record's numbers says it directly:
+/// LibreDWG's DXF reader creates the record, presets the few fields it has
+/// defaults for (`DIMSCALE = DIMLFAC = DIMTFAC = 1`, `DIMLUNIT = 2`) and
+/// leaves every other field at zero, exactly as if the file had written 0.
+/// The tell is the sizing pair: no usable style has both a text height and
+/// an arrow size of zero, since a zero-height dimension text draws nothing.
+/// `sample_2000.dxf` is the proof -- it names the same `Standard` style
+/// that `sample_2000.dwg` writes in full (DIMDEC 4, DIMTXT 0.18,
+/// DIMASZ 0.18) and leaves all three at 0 -- and every one of the 40-odd
+/// real styles in the corpus has DIMTXT and DIMASZ above zero.
+fn carries_a_body(style: &DimStyleRecord) -> bool {
+    style.dimtxt > 0.0 || style.dimasz > 0.0
+}
+
 impl EffectiveStyle {
-    /// A style field of 0 means "unset" in a file that never wrote it; the
-    /// header's value stands in.
+    /// The values that govern this dimension's label: its own DIMSTYLE's
+    /// where the file wrote one, the header's current values otherwise.
+    ///
+    /// A style the file wrote is taken at its word, 0 included: DIMDEC 0
+    /// (whole millimetres) and DIMADEC 0 (whole degrees) are the ordinary
+    /// metric settings, and treating them as "unset" gave a style that asks
+    /// for "50" the header's precision instead -- "50.0000" against a
+    /// picture, a cached label and a `strings.json` key all reading "50".
+    /// DIMLUNIT and DIMLFAC keep the `> 0` guard because 0 is not a value
+    /// either can hold: the unit codes run 1..=6, and a linear factor of 0
+    /// would zero every label.
     pub fn resolve(style: Option<&DimStyleRecord>, header: &Header) -> EffectiveStyle {
+        let style = style.filter(|s| carries_a_body(s));
         let pick_f64 = |s: Option<f64>, h: f64| s.filter(|v| *v > 0.0).unwrap_or(h);
         let pick_u16 = |s: Option<u16>, h: u16| s.filter(|v| *v > 0).unwrap_or(h);
         let dimlfac = pick_f64(style.map(|s| s.dimlfac), header.dimlfac);
         EffectiveStyle {
             dimlfac: if dimlfac > 0.0 { dimlfac } else { 1.0 },
-            dimdec: pick_u16(style.map(|s| s.dimdec), header.dimdec),
+            dimdec: style.map_or(header.dimdec, |s| s.dimdec),
             dimlunit: pick_u16(style.map(|s| s.dimlunit), header.dimlunit),
-            dimzin: style.map(|s| s.dimzin).unwrap_or(header.dimzin),
-            dimadec: pick_u16(style.map(|s| s.dimadec), header.dimadec),
+            dimzin: style.map_or(header.dimzin, |s| s.dimzin),
+            dimadec: style.map_or(header.dimadec, |s| s.dimadec),
         }
     }
+}
+
+/// How far a stored measurement may sit from the one the definition points
+/// give before it is treated as not a measurement of this dimension at all.
+///
+/// Derived from the corpus, not chosen: across all 26 `example_*` /
+/// `sample_*` files and the nine `AutoCADSamples*.dwg`, every DIMENSION
+/// whose file wrote a real `act_measurement` agrees with
+/// [`measurement_from_points`] to better than 2.3e-7 relative (one
+/// dimension in `example_20xx` differs at all; the rest are exact). The
+/// values this rejects are off by 100 %. 1 % leaves four orders of
+/// magnitude of headroom over the worst honest disagreement.
+const MEASUREMENT_DISAGREEMENT: f64 = 0.01;
+
+/// The measurement a DIMENSION stores (DXF group 42, `act_measurement`)
+/// when it can be believed, in the unit [`DimensionEntity::measurement`]
+/// uses: degrees for angular kinds, drawing units (before `DIMLFAC`)
+/// otherwise. `None` means "ask the definition points instead".
+///
+/// AutoCAD writes the field from R2000 on. Before that -- and in a DXF
+/// that simply omits group 42 -- the field is not a measurement, and the
+/// two ways it is left say so differently: an R13/R14 DWG holds exactly
+/// -1.0 ("not computed"), while an R13/R14 DXF, and any DXF without a 42,
+/// leaves it at 0.0. Only the first was rejected, so every DIMENSION in
+/// `example_r13.dwg`, `example_r14.dwg` and `example_r13.dxf` exported a
+/// measurement of 0 with confidence "stored" beside a label reading
+/// "1504,68".
+///
+/// So a stored value is refused when
+/// - it is not finite, or is exactly the -1.0 sentinel;
+/// - it is negative and the kind's measurement cannot be (every kind but
+///   ORDINATE, which is a signed offset from a datum);
+/// - it is zero and the kind's measurement cannot be (same exception: a
+///   feature may sit exactly on the datum). A genuinely degenerate
+///   dimension loses nothing but the "stored" label: the definition points
+///   give the same 0;
+/// - it disagrees with the definition points by more than
+///   [`MEASUREMENT_DISAGREEMENT`]. Magnitudes are compared, so a sign
+///   convention this crate reconstructs differently (ORDINATE's datum
+///   axis) does not throw a good value away, and a computed value of 0 is
+///   no evidence against a stored one -- the suspicion there runs the
+///   other way.
+pub fn usable_stored_measurement(
+    stored: Option<f64>,
+    geometry: &DimensionGeometry,
+    from_points: Option<f64>,
+) -> Option<f64> {
+    let stored = stored.filter(|v| v.is_finite())?;
+    // Before the unit conversion: the sentinel is the raw field.
+    if stored == -1.0 {
+        return None;
+    }
+    // ORDINATE stores a signed offset; every other kind stores a size.
+    let signed = matches!(geometry, DimensionGeometry::Ordinate { .. });
+    let value = if geometry.is_angular() {
+        stored.to_degrees()
+    } else {
+        stored
+    };
+    if !signed && value <= 0.0 {
+        return None;
+    }
+    if let Some(computed) = from_points {
+        let (a, b) = (value.abs(), computed.abs());
+        if b != 0.0 && (a - b).abs() > MEASUREMENT_DISAGREEMENT * a.max(b) {
+            return None;
+        }
+    }
+    Some(value)
 }
 
 /// The quantity a dimension's definition points measure, with the same
@@ -190,6 +288,16 @@ fn sector_degrees(vertex: &Point3D, rays: &[f64], probe: &Point3D) -> f64 {
     (sorted[0] + tau - sorted[sorted.len() - 1]).to_degrees()
 }
 
+/// The decimals a label is written with, for a `DIMDEC`/`DIMADEC` that may
+/// be anything. Both hold 0..=8 per the DXF reference, but the field is a
+/// 16-bit integer: AutoCAD's DIMADEC of -1 ("use DIMDEC for angles"), or a
+/// corrupt record, reads back as 65535 and would have `format!` build a
+/// 65 KB label for every dimension in the drawing. `split_fraction` clamps
+/// the same way for the fraction-precision codes.
+fn precision(dimdec: u16) -> usize {
+    usize::from(dimdec.min(8))
+}
+
 /// Formats a measurement the way a basic dimension style would show it:
 /// linear values times `DIMLFAC` in decimal (`DIMLUNIT` 2 and every code
 /// this does not handle), architectural feet-inches (4) or fractional
@@ -198,14 +306,14 @@ fn sector_degrees(vertex: &Point3D, rays: &[f64], probe: &Point3D) -> f64 {
 /// degree sign.
 pub fn format_measurement(value: f64, angular: bool, style: &EffectiveStyle) -> String {
     if angular {
-        return format!("{:.*}\u{00B0}", usize::from(style.dimadec), value);
+        return format!("{:.*}\u{00B0}", precision(style.dimadec), value);
     }
     let scaled = value * style.dimlfac;
     match style.dimlunit {
         4 => format_architectural(scaled, style.dimdec),
         5 => format_fractional(scaled, style.dimdec),
         _ => {
-            let text = format!("{:.*}", usize::from(style.dimdec), scaled);
+            let text = format!("{:.*}", precision(style.dimdec), scaled);
             if style.dimzin & 8 != 0 && text.contains('.') {
                 text.trim_end_matches('0').trim_end_matches('.').to_string()
             } else {
@@ -586,5 +694,162 @@ mod tests {
         d.measurement_from_points = None;
         resolve_display(&mut d, &style(), None);
         assert_eq!(d.display_source, DisplaySource::None);
+    }
+
+    #[test]
+    fn a_stored_measurement_that_cannot_be_this_dimensions_is_refused() {
+        // Expected values come from the geometry, not from the function:
+        // the ALIGNED pair (0,0)-(3,4) is 5 units apart (3-4-5), and the
+        // ORDINATE offset is `feature.y - def_pt.y` = 4 - 1.
+        let aligned = DimensionGeometry::Aligned {
+            xline1: p(0.0, 0.0),
+            xline2: p(3.0, 4.0),
+        };
+        let ordinate = DimensionGeometry::Ordinate {
+            feature: p(2.0, 4.0),
+            leader_end: p(6.0, 4.0),
+            x_datum: false,
+        };
+        let take = usable_stored_measurement;
+
+        // What the fix is about: 0.0 is how an R13/R14 file and a DXF
+        // without group 42 say "not computed", and a length of 0 is not a
+        // measurement this dimension could have.
+        assert_eq!(take(Some(0.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(0.0), &aligned, None), None);
+        // The older sentinel, and any other impossible sign.
+        assert_eq!(take(Some(-1.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(-5.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(f64::NAN), &aligned, Some(5.0)), None);
+        assert_eq!(take(None, &aligned, Some(5.0)), None);
+        // A value that measures something else entirely.
+        assert_eq!(take(Some(500.0), &aligned, Some(5.0)), None);
+        // A believable one survives, disagreement inside the tolerance
+        // included (5.02 is 0.4 % off 5.0, the corpus's worst honest
+        // disagreement is 2.3e-5 %).
+        assert_eq!(take(Some(5.0), &aligned, Some(5.0)), Some(5.0));
+        assert_eq!(take(Some(5.02), &aligned, Some(5.0)), Some(5.02));
+        assert_eq!(take(Some(5.0), &aligned, None), Some(5.0));
+
+        // An ORDINATE is a signed offset from a datum, so 0 and a negative
+        // value are both measurements it can have ...
+        assert_eq!(take(Some(0.0), &ordinate, Some(0.0)), Some(0.0));
+        assert_eq!(take(Some(-3.0), &ordinate, Some(3.0)), Some(-3.0));
+        assert_eq!(take(Some(3.0), &ordinate, Some(-3.0)), Some(3.0));
+        // ... but not one that disagrees with the points by 100 %.
+        assert_eq!(take(Some(0.0), &ordinate, Some(3.0)), None);
+
+        // Angular kinds store radians and are reported in degrees.
+        let angular = DimensionGeometry::Angular3Point {
+            center: p(0.0, 0.0),
+            xline1: p(1.0, 0.0),
+            xline2: p(0.0, 1.0),
+        };
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let got = take(Some(quarter), &angular, Some(90.0)).expect("a right angle");
+        assert!((got - 90.0).abs() < 1e-9, "{got}");
+        assert_eq!(take(Some(0.0), &angular, Some(90.0)), None);
+    }
+
+    fn header_with(dimdec: u16, dimadec: u16, dimzin: u16) -> Header {
+        Header {
+            dimdec,
+            dimadec,
+            dimzin,
+            dimlunit: 2,
+            dimlfac: 1.0,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_style_the_file_wrote_is_taken_at_its_word_zero_included() {
+        // DIMDEC 0 ("50", whole millimetres) and DIMADEC 0 are ordinary
+        // metric settings, and were read as "unset": the header's DIMDEC 4
+        // stood in and every label came out as "50.0000" -- a string no
+        // part of the drawing shows.
+        let header = header_with(4, 3, 8);
+        let metric = DimStyleRecord {
+            name: "ISO-0".into(),
+            dimdec: 0,
+            dimadec: 0,
+            dimzin: 0,
+            dimlunit: 2,
+            dimlfac: 1.0,
+            // What says the file wrote this style's body at all.
+            dimtxt: 2.5,
+            dimasz: 2.5,
+            ..Default::default()
+        };
+        let resolved = EffectiveStyle::resolve(Some(&metric), &header);
+        assert_eq!(
+            (resolved.dimdec, resolved.dimadec, resolved.dimzin),
+            (0, 0, 0)
+        );
+        assert_eq!(format_measurement(50.0, false, &resolved), "50");
+        assert_eq!(format_measurement(108.0, true, &resolved), "108\u{00B0}");
+
+        // A style the file wrote in full is still honoured when it asks for
+        // decimals.
+        let three = DimStyleRecord {
+            dimdec: 3,
+            ..metric.clone()
+        };
+        assert_eq!(
+            format_measurement(50.0, false, &EffectiveStyle::resolve(Some(&three), &header)),
+            "50.000"
+        );
+
+        // The husk a file leaves when it names a style without writing its
+        // body reads back as all zeros (LibreDWG's DXF reader presets only
+        // DIMSCALE/DIMLFAC/DIMTFAC = 1 and DIMLUNIT = 2), and says nothing:
+        // the header's values stand in, as they did before.
+        let husk = DimStyleRecord {
+            name: "STANDARD".into(),
+            dimlfac: 1.0,
+            dimlunit: 2,
+            ..Default::default()
+        };
+        let resolved = EffectiveStyle::resolve(Some(&husk), &header);
+        assert_eq!(
+            (resolved.dimdec, resolved.dimadec, resolved.dimzin),
+            (4, 3, 8)
+        );
+        assert_eq!(
+            EffectiveStyle::resolve(None, &header),
+            EffectiveStyle::resolve(Some(&husk), &header)
+        );
+
+        // DIMLUNIT and DIMLFAC keep their guard: 0 is not a value either
+        // can hold, so a style carrying one takes the header's.
+        let zeroed = DimStyleRecord {
+            dimlunit: 0,
+            dimlfac: 0.0,
+            ..metric.clone()
+        };
+        let header = Header {
+            dimlunit: 4,
+            dimlfac: 12.0,
+            ..header_with(4, 3, 8)
+        };
+        let resolved = EffectiveStyle::resolve(Some(&zeroed), &header);
+        assert_eq!((resolved.dimlunit, resolved.dimlfac), (4, 12.0));
+    }
+
+    #[test]
+    fn a_precision_outside_the_dxf_range_does_not_build_a_65_kb_label() {
+        // DIMADEC is a 16-bit field: AutoCAD's -1 ("use DIMDEC for angles")
+        // and a corrupt record both read back as 65535, and `format!`
+        // would honour it literally, once per dimension in the drawing.
+        let wild = EffectiveStyle {
+            dimlfac: 1.0,
+            dimdec: u16::MAX,
+            dimlunit: 2,
+            dimzin: 0,
+            dimadec: u16::MAX,
+        };
+        // 8 decimals is the DXF reference's maximum for both fields.
+        assert_eq!(format_measurement(1.5, false, &wild), "1.50000000");
+        assert_eq!(format_measurement(90.0, true, &wild), "90.00000000\u{00B0}");
     }
 }

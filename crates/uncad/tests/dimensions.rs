@@ -600,3 +600,94 @@ fn the_radial_fixture_reads_its_definition_points_from_dxf_groups() {
     assert_eq!(radius.display_text, "5.00");
     assert_eq!(diameter.display_text, "10.00");
 }
+
+/// The same drawing in the four formats that differ only in whether the
+/// file carries `act_measurement`: `example_2007.dwg` writes it, and the
+/// three R13/R14 files leave it at 0.0.
+const EXAMPLE_2007_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2007.dwg"
+);
+const EXAMPLE_R13_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_r13.dwg"
+);
+const EXAMPLE_R13_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_r13.dxf"
+);
+const EXAMPLE_R14_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_r14.dwg"
+);
+
+#[test]
+fn a_stored_measurement_of_zero_is_not_a_measurement() {
+    // Only an act_measurement of exactly -1.0 was refused, so the R13/R14
+    // way of saying "not computed" -- leaving the field at 0.0 -- was taken
+    // as a real measurement: every DIMENSION in these three files reported
+    // 0, with `confidence: "stored"`, beside a cached label reading
+    // "1504,68".
+    //
+    // The expected values are not written here and not computed by the
+    // code under test: they are the `act_measurement`s AutoCAD itself wrote
+    // into `example_2007.dwg`, which is the same drawing saved in a newer
+    // format (identical handles, identical definition points). Each old
+    // file's value has to match its 2007 twin's stored one.
+    let reference = uncad::parse(EXAMPLE_2007_DWG).expect("corpus file must parse");
+    let reference: Vec<(String, f64)> = dimensions(&reference)
+        .iter()
+        .map(|d| {
+            (
+                d.common.handle.clone(),
+                d.measurement.unwrap_or_else(|| {
+                    panic!("2007 writes act_measurement for {}", d.common.handle)
+                }),
+            )
+        })
+        .collect();
+    assert_eq!(reference.len(), 10, "the drawing has ten dimensions");
+
+    for path in [EXAMPLE_R14_DWG, EXAMPLE_R13_DWG, EXAMPLE_R13_DXF] {
+        let db = uncad::parse(path).expect("corpus file must parse");
+        let dims = dimensions(&db);
+        for (handle, want) in &reference {
+            let Some(d) = dims.iter().find(|d| d.common.handle == *handle) else {
+                // The R13 DXF drops the ARC_LENGTH dimension entirely.
+                continue;
+            };
+            // Nothing believable is stored, so the definition points are
+            // the source ...
+            assert_eq!(d.measurement, None, "{path} {handle} stored");
+            // ... and they give the value the 2007 file measured. The
+            // tolerance is the one the two files' own float storage needs:
+            // the worst pair in the drawing differs by 2.3e-7 relative.
+            let got = d
+                .measurement_from_points
+                .unwrap_or_else(|| panic!("{path} {handle} has definition points"));
+            assert!(
+                (got - want).abs() <= 1e-6 * want.abs(),
+                "{path} {handle}: {got} vs the 2007 file's {want}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_believable_stored_measurement_is_still_preferred() {
+    // The other half of the rule: where the file does carry a measurement,
+    // it stays the source. `example_2007.dwg`'s ALIGNED 37E stores
+    // 1504.6794770244742 while its definition points give
+    // 1504.6798093211207 -- a real 3.3e-4 disagreement in the file itself,
+    // which the stored value must survive.
+    let db = uncad::parse(EXAMPLE_2007_DWG).expect("corpus file must parse");
+    let dims = dimensions(&db);
+    let aligned = dims
+        .iter()
+        .find(|d| d.common.handle == "37E")
+        .expect("handle 37E");
+    let stored = aligned.measurement.expect("2007 stores a measurement");
+    let computed = aligned.measurement_from_points.expect("and has points");
+    assert!(stored != computed, "the file's two values differ");
+    assert!((stored - 1504.679477024474).abs() < 1e-9, "{stored}");
+}

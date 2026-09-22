@@ -285,6 +285,59 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   TRACE, POLYLINE_MESH, SHAPE, BODY and OLE2FRAME are not converted either, and draw
   nothing; they are reported through `unsupported_types` like any other unsupported type.
   The documentation now says so.
+
+- Every DIMENSION of an R13/R14 drawing exported a measurement of 0. Only an
+  `act_measurement` of exactly -1.0 was taken as "not computed", but an R13/R14 DXF
+  (and any DXF without a group 42) leaves the field at 0.0 instead, and that 0 was
+  reported as the drawing's own measurement with `measurement_source:
+  "act_measurement"`, `confidence: "stored"` and `capabilities.dimension_values:
+  "exact"` -- beside a `display` reading "1504,68". A stored value is now refused when
+  it cannot be a measurement of that dimension (the -1.0 sentinel; 0 or a negative
+  value on any kind but ORDINATE, which is a signed offset; a value disagreeing with
+  the definition points by more than 1 %, where the corpus's worst honest disagreement
+  is 2.3e-7), and the definition points supply it instead. `confidence` now follows the
+  source -- `stored`, `exact` or `unavailable` -- and `capabilities.dimension_values`
+  has a fourth value, `computed`, for a package whose values were all recomputed.
+- A DIMSTYLE asking for whole numbers was overruled by the header. `DIMDEC` 0 (and
+  `DIMADEC` 0) is the ordinary metric setting, and it was read as "unset": a style that
+  asks for "50" was formatted at `$DIMDEC`'s precision as "50.0000", a string the
+  picture, the cached label and `strings.json` all disagree with. A style record the
+  file wrote is now taken at its word, 0 included; a husk -- a record naming a style
+  whose body the file never wrote, which LibreDWG's DXF reader hands over as all zeros
+  -- still falls back to the header (see `docs/CAVEATS.md`). Label precision is also
+  clamped to the DXF maximum of 8 decimals, so a `DIMADEC` of -1 read back from the
+  16-bit field no longer formats every label to 65 535 places.
+- Text drawn by an ACAD_TABLE or a TOLERANCE reached no record and no `strings.json`
+  key. Both put readable strings in the picture, with ids the export mints, and
+  `collect_texts` matched only TEXT, ATTRIB, MTEXT and INSERT -- so a reader following
+  the manifest's own instruction to look a value up in `strings.json` could not find
+  what a table cell plainly shows. Indexing them also lets the legibility model see
+  them, so a drawing whose only small text is in a table now zooms deep enough to read
+  it.
+- Building the records was quadratic in entity count. Every dimension, geometry and
+  block record looked its entity's extent up with a linear scan over all of them,
+  although the map the tiles are culled with was already built: a generated
+  100 000-LINE drawing spent 59 s in the export phase where 25 000 spent 8.6 s, and now
+  spends 12 s. The largest sample (`AutoCADSamples5.dwg`) went from 27.0 s to 17.6 s.
+- One large closed polyline could hold the whole export. The self-intersection test
+  compares every pair of segments, and ran on every closed polyline whatever its size:
+  a single 64 000-vertex contour (a surveyed boundary, a GIS import) took 175 s for the
+  one boolean it produces, where 16 000 took 9 s. Above 2 000 vertices the test is
+  skipped and the record says `simple: null` with `confidence: "estimated"` and a
+  `why`, rather than claiming an outline is simple without having looked; the same
+  drawings now export in 1.0 s and 0.7 s.
+- A tile sidecar could pass the documented 32 KB cap and report itself complete. The
+  shrink loop cut only the record rows, so a plan of 900 layers with 45-character
+  names -- each drawn across the sheet, so every tile sees nearly all of them -- wrote
+  43 866-byte sidecars with `records_truncated: false`. The layer list is now cut too,
+  after the rows, and a sidecar carries `layers_truncated` (and `layers_total` when it
+  is set) beside `records_truncated`, so it says which of the two a reader is missing.
+- A layout name longer than the filesystem's 255-byte component limit failed the whole
+  export and left a directory with no `manifest.json` -- not a package, and not
+  something the next run could clear either, since clearing reads the manifest. The
+  sheet directory name is capped at 100 characters (the full name stays in
+  `sheets.json` and the manifest), and `manifest.json` is now written last, after every
+  file it names.
 - Every tile rectangle of a small drawing was the same rectangle. The world boxes in
   `tiles.json`, the sidecars and the records were rounded to `$LUPREC` decimals (3 at
   the least), which says how precisely the drawing's units are *displayed* and nothing
