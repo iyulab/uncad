@@ -3,9 +3,7 @@
 //! formatting codes. Pure functions, no renderer state.
 
 use crate::dynapi::{Point2D, Point3D};
-use regex::Regex;
 use std::fmt::Write as _;
-use std::sync::LazyLock;
 
 /// Snaps a subnormal `f64` (magnitude roughly below 2.2e-308) to exactly
 /// `0.0`. Rust's `f64` `Display` never switches to scientific notation, so a
@@ -74,33 +72,6 @@ pub(super) fn rotate_transform_attr(rot_rad: f64, x: f64, y: f64) -> String {
     format!(" transform=\"rotate({rot_deg} {x} {y})\"")
 }
 
-/// Strips MTEXT's inline formatting codes (`\A`, `\H`, `\W`, `\C`, `\Q`, `\T`,
-/// `\f`, `{...}` grouping, `\P` paragraph breaks) down to plain, possibly
-/// multi-line text. `\S...;` (stacked/fraction text, e.g. `"1#8"` -> `"1/8"`)
-/// is unwrapped rather than dropped, since the fraction content is meaningful.
-///
-/// A best-effort plain-text approximation, not a real MTEXT formatter: no
-/// stacked fractions, color or font changes are visually reproduced.
-pub(super) fn strip_mtext_formatting(text: &str) -> String {
-    static STACKED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\S([^;]*);").unwrap());
-    static HASH_CARET_BACKSLASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[#^\\]").unwrap());
-    static PARAGRAPH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\P").unwrap());
-    static NBSP: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\~").unwrap());
-    static INLINE_CODE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\\[A-Za-z][^;]*;").unwrap());
-    static BRACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[{}]").unwrap());
-    static DOUBLE_BACKSLASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\\\\").unwrap());
-
-    let unstacked = STACKED.replace_all(text, |caps: &regex::Captures| {
-        HASH_CARET_BACKSLASH.replace_all(&caps[1], "/").into_owned()
-    });
-    let paragraphs = PARAGRAPH.replace_all(&unstacked, "\n");
-    let spaces = NBSP.replace_all(&paragraphs, " ");
-    let uncoded = INLINE_CODE.replace_all(&spaces, "");
-    let ungrouped = BRACES.replace_all(&uncoded, "");
-    DOUBLE_BACKSLASH.replace_all(&ungrouped, "\\").into_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,17 +123,5 @@ mod tests {
             rotate_transform_attr(quarter_turn, 5.0, 7.0),
             " transform=\"rotate(-90 5 7)\""
         );
-    }
-
-    #[test]
-    fn strip_mtext_formatting_unwraps_stacked_fractions_and_drops_inline_codes() {
-        let stripped = strip_mtext_formatting(r"\A1;Line1\PLine2 {\C1;colored} \S1#8;");
-        assert_eq!(stripped, "Line1\nLine2 colored 1/8");
-    }
-
-    #[test]
-    fn strip_mtext_formatting_collapses_double_backslash_and_expands_nbsp() {
-        assert_eq!(strip_mtext_formatting(r"a\\b"), r"a\b");
-        assert_eq!(strip_mtext_formatting(r"a\~b"), "a b");
     }
 }

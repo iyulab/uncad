@@ -26,7 +26,7 @@ use crate::model::{Entity, EntityCommon, MLineVertex};
 use crate::tables::Tables;
 use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
-use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
+use format::{escape_xml, neg, points_attr, rotate_transform_attr, xy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -346,12 +346,84 @@ fn dashed_outline(pts: &[Point2D], color: &str, dash: &str) -> String {
     )
 }
 
-/// A single-line `<text>` at an already-y-flipped position -- TEXT, ATTRIB and
-/// TOLERANCE all render to this.
-fn text_element(at: Point2D, height: f64, rotation: f64, color: &str, text: &str) -> String {
-    let (x, y) = (at.x, neg(at.y));
+/// Where a single-line text is anchored and how: the SVG `text-anchor`, the
+/// world-space anchor point, and how far (in text heights) the baseline sits
+/// below the anchor in SVG's y-down space.
+struct TextAnchor {
+    at: Point2D,
+    anchor: &'static str,
+    baseline_drop: f64,
+}
+
+/// AutoCAD's justification rules, approximated with SVG's `text-anchor` and a
+/// baseline offset: horizontal 1/4 = middle, 2 = end, 3 (aligned) and 5 (fit)
+/// are drawn centered between the two points; vertical 1 bottom raises the
+/// baseline by a descender, 2 middle and 4 (middle-center) drop it by roughly
+/// half a cap height, 3 top by a cap height. Glyph widths come from the
+/// renderer's font, not AutoCAD's, so the extent is an approximation; the
+/// anchor point itself is exact.
+fn text_anchor(
+    start: Point2D,
+    alignment: Option<Point2D>,
+    horizontal: u16,
+    vertical: u16,
+) -> TextAnchor {
+    let Some(align) = alignment else {
+        return TextAnchor {
+            at: start,
+            anchor: "start",
+            baseline_drop: 0.0,
+        };
+    };
+    let (at, anchor) = match horizontal {
+        1 | 4 => (align, "middle"),
+        2 => (align, "end"),
+        3 | 5 => (
+            Point2D {
+                x: (start.x + align.x) / 2.0,
+                y: (start.y + align.y) / 2.0,
+            },
+            "middle",
+        ),
+        _ => (align, "start"),
+    };
+    let baseline_drop = if horizontal == 4 {
+        0.36
+    } else {
+        match vertical {
+            1 => -0.2,
+            2 => 0.36,
+            3 => 0.72,
+            _ => 0.0,
+        }
+    };
+    TextAnchor {
+        at,
+        anchor,
+        baseline_drop,
+    }
+}
+
+/// A single-line `<text>` -- TEXT, ATTRIB and TOLERANCE all render to this.
+/// `anchor` positions it (world space); `rotation` is about the anchor.
+fn text_element(
+    anchor: &TextAnchor,
+    height: f64,
+    rotation: f64,
+    color: &str,
+    text: &str,
+) -> String {
+    let (x, y) = (
+        anchor.at.x,
+        neg(anchor.at.y) + anchor.baseline_drop * height,
+    );
+    let anchor_attr = if anchor.anchor == "start" {
+        String::new()
+    } else {
+        format!(" text-anchor=\"{}\"", anchor.anchor)
+    };
     format!(
-        "<text x=\"{x}\" y=\"{y}\" font-size=\"{height}\" fill=\"{color}\" stroke=\"none\"{}>{}</text>",
+        "<text x=\"{x}\" y=\"{y}\" font-size=\"{height}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{}</text>",
         rotate_transform_attr(rotation, x, y),
         escape_xml(text)
     )
@@ -592,26 +664,38 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             Some(polyline_element(&xy(&p.vertices), p.closed, &color))
         }
         Entity::Text(t) => {
-            ctx.consider(t.start_point.x, t.start_point.y);
-            Some(text_element(
+            let anchor = text_anchor(
                 t.start_point,
+                t.alignment_point,
+                t.horizontal_alignment,
+                t.vertical_alignment,
+            );
+            ctx.consider(anchor.at.x, anchor.at.y);
+            Some(text_element(
+                &anchor,
                 t.text_height,
                 t.rotation,
                 &color,
-                &t.text,
+                &t.text_plain,
             ))
         }
         Entity::Attrib(a) => {
-            ctx.consider(a.start_point.x, a.start_point.y);
-            if a.text.is_empty() {
+            let anchor = text_anchor(
+                a.start_point,
+                a.alignment_point,
+                a.horizontal_alignment,
+                a.vertical_alignment,
+            );
+            ctx.consider(anchor.at.x, anchor.at.y);
+            if a.text.is_empty() || a.invisible {
                 return Some(String::new());
             }
             Some(text_element(
-                a.start_point,
+                &anchor,
                 a.text_height,
                 a.rotation,
                 &color,
-                &a.text,
+                &a.text_plain,
             ))
         }
         Entity::Tolerance(t) => {
@@ -619,21 +703,25 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             if t.text_value.is_empty() {
                 return Some(String::new());
             }
-            Some(text_element(
-                Point2D {
+            let anchor = TextAnchor {
+                at: Point2D {
                     x: t.insertion_point.x,
                     y: t.insertion_point.y,
                 },
+                anchor: "start",
+                baseline_drop: 0.0,
+            };
+            Some(text_element(
+                &anchor,
                 t.text_height,
                 0.0,
                 &color,
-                &t.text_value,
+                &t.text_plain,
             ))
         }
         Entity::MText(m) => {
             ctx.consider(m.insertion_point.x, m.insertion_point.y);
-            let stripped = strip_mtext_formatting(&m.text);
-            let lines: Vec<&str> = stripped.lines().filter(|l| !l.is_empty()).collect();
+            let lines: Vec<&str> = m.text_plain.lines().filter(|l| !l.is_empty()).collect();
             if lines.is_empty() {
                 return Some(String::new());
             }
@@ -650,10 +738,31 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 m.line_spacing_factor
             };
             let line_height = text_height * line_spacing_factor * 1.2;
+            // The attachment point is a corner or edge of the text block
+            // (DXF 71, 1 = top-left ... 9 = bottom-right): columns pick the
+            // SVG anchor, rows where the first baseline sits relative to the
+            // insertion point (a cap height is ~0.72 em, a descender ~0.2).
+            let column = (m.attachment.clamp(1, 9) - 1) % 3;
+            let row = (m.attachment.clamp(1, 9) - 1) / 3;
+            let anchor_attr = match column {
+                1 => " text-anchor=\"middle\"",
+                2 => " text-anchor=\"end\"",
+                _ => "",
+            };
+            let block_height = line_height * (lines.len() as f64 - 1.0) + text_height;
+            let first_baseline_drop = match row {
+                0 => 0.72 * text_height,
+                1 => 0.72 * text_height - block_height / 2.0,
+                _ => 0.72 * text_height - block_height + 0.2 * text_height,
+            };
             let (x, y) = (m.insertion_point.x, neg(m.insertion_point.y));
             let mut tspans = String::new();
             for (i, line) in lines.iter().enumerate() {
-                let dy = if i == 0 { 0.0 } else { line_height };
+                let dy = if i == 0 {
+                    first_baseline_drop
+                } else {
+                    line_height
+                };
                 let _ = write!(
                     tspans,
                     "<tspan x=\"{x}\" dy=\"{dy}\">{}</tspan>",
@@ -661,8 +770,8 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 );
             }
             Some(format!(
-                "<text x=\"{x}\" y=\"{y}\" font-size=\"{text_height}\" fill=\"{color}\" stroke=\"none\" transform=\"rotate({} {x} {y})\">{tspans}</text>",
-                neg(m.rotation.to_degrees())
+                "<text x=\"{x}\" y=\"{y}\" font-size=\"{text_height}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
+                rotate_transform_attr(m.rotation, x, y)
             ))
         }
         Entity::Point(p) => {

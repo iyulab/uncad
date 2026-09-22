@@ -36,6 +36,9 @@
 //!   `{"type":"LINE"|"ARC"|"ELLIPSE"|"SPLINE", ...}` with the edge's own fields
 //!   beside the tag. Upper-case like the entity tags, but these are path/edge
 //!   kinds, not DXF entity names.
+//! - TEXT, ATTRIB, MTEXT and TOLERANCE carry both `text` (as stored, with
+//!   `%%` and MTEXT codes) and `text_plain` (decoded, see [`crate::text`]);
+//!   ATTRIB/ATTDEF carry their `tag`. Since 0.3.0; absent from 0.2.0 output.
 //! - `entities` holds what the drawing shows (model + paper space), while
 //!   `tables.block_records` holds *every* block including those two, so a
 //!   model-space entity appears twice. That duplication is the model's own, not
@@ -130,7 +133,16 @@ mod tests {
             start_point: p2(1.0, 2.0),
             text_height: 2.5,
             text: "TAG".to_string(),
+            text_plain: "TAG".to_string(),
             rotation: 0.1,
+            tag: "ROOM".to_string(),
+            invisible: false,
+            horizontal_alignment: 0,
+            vertical_alignment: 0,
+            alignment_point: None,
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            style: "STANDARD".to_string(),
         };
         let ray = RayEntity {
             common: c.clone(),
@@ -161,8 +173,15 @@ mod tests {
                 common: c.clone(),
                 start_point: p2(0.0, 0.0),
                 text_height: 2.5,
-                text: "hi".to_string(),
+                text: "hi %%c".to_string(),
+                text_plain: "hi \u{2205}".to_string(),
                 rotation: 0.2,
+                horizontal_alignment: 1,
+                vertical_alignment: 2,
+                alignment_point: Some(p2(5.0, 5.0)),
+                width_factor: 0.8,
+                oblique_angle: 0.1,
+                style: "ROMANS".to_string(),
             }),
             Entity::LwPolyline(lwpoly.clone()),
             Entity::Arc(ArcEntity {
@@ -208,6 +227,7 @@ mod tests {
                 text_height: 2.5,
                 default_value: "?".to_string(),
                 rotation: 0.4,
+                tag: "ROOM".to_string(),
             }),
             Entity::Viewport(ViewportEntity {
                 common: c.clone(),
@@ -230,10 +250,17 @@ mod tests {
             Entity::MText(MTextEntity {
                 common: c.clone(),
                 insertion_point: p3(0.0, 0.0, 0.0),
-                text: "para".to_string(),
+                text: "para\\Pgraph".to_string(),
+                text_plain: "para\ngraph".to_string(),
                 text_height: 2.5,
                 rotation: 0.3,
                 line_spacing_factor: 1.0,
+                attachment: 5,
+                rect_width: 40.0,
+                extents_width: 12.0,
+                extents_height: 6.0,
+                x_axis_dir: p3(0.955, 0.296, 0.0),
+                style: "STANDARD".to_string(),
             }),
             Entity::Polyline3D(PolylineEntity {
                 common: c.clone(),
@@ -313,6 +340,7 @@ mod tests {
                 insertion_point: p3(0.0, 0.0, 0.0),
                 text_height: 2.5,
                 text_value: "%%v0.1".to_string(),
+                text_plain: "%%v0.1".to_string(),
             }),
             Entity::AcadTable(AcadTableEntity {
                 common: c.clone(),

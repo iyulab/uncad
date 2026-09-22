@@ -10,6 +10,19 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- Text decoding (`uncad::text`): `decode_mtext` and `decode_text` turn the stored
+  strings into readable ones -- `\P` paragraphs, `\S` stacked fractions in all three
+  forms (`1/2`, `1#2`, `+0.1^-0.2`) with a space after a preceding digit so
+  `3{\H0.7x;\S1#2;}"` reads `3 1/2"` (it rendered as `31/2"`), `{}` groups and
+  `\A`/`\H`/`\f`/`\C`/... format codes removed, `\U+XXXX`, and the `%%c` (diameter),
+  `%%d`, `%%p`, `%%%`, `%%nnn` symbol codes with `%%u`/`%%o` reported as decorations.
+  TEXT, ATTRIB, MTEXT and TOLERANCE carry the result as `text_plain` next to the raw
+  `text`; the renderer draws `text_plain`.
+- Text placement fields: TEXT and ATTRIB gain `horizontal_alignment`,
+  `vertical_alignment`, `alignment_point`, `width_factor`, `oblique_angle` and `style`;
+  ATTRIB and ATTDEF gain `tag` (the attribute's name), ATTRIB `invisible`; MTEXT gains
+  `attachment`, `rect_width`, `extents_width`, `extents_height`, `x_axis_dir` and
+  `style`. All have serde defaults, so 0.2.0 JSON still loads.
 - PNG sizing in pixels: `ToPngOptions { size: PngSize, background: Background,
   stroke_px, max_edge }`. `PngSize::FitLongEdge(px)` (the default, 1568 px -- the
   largest a Claude standard-tier image keeps unresized), `PxPerUnit(f64)` and
@@ -52,6 +65,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
+  offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
+  anchored at its left-baseline point, i.e. displaced by up to its own width (541 of
+  861 texts on one sample drawing). MTEXT is rotated by its `x_axis_dir` (always drawn
+  unrotated before, `docs/CAVEATS.md` "Text placement") and positioned by its
+  attachment point instead of always top-left. Invisible ATTRIBs are no longer drawn.
 - LWPOLYLINE `closed` is read from bit 512 of `flag`, LibreDWG's in-memory closed bit,
   instead of bit 1 (which marks a stored extrusion). Every closed LWPOLYLINE in a DWG was
   exported and drawn open before, and mirrored open ones as closed
@@ -87,6 +106,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Removed
 
+- The `regex` dependency: the MTEXT code stripper it powered is replaced by
+  `uncad::text`.
 - `ParseError::InvalidPath`: paths are no longer passed to C, so a path that is not
   UTF-8 or contains a NUL byte is no longer a distinct failure (the OS reports it
   through `ParseError::Io`).

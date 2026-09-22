@@ -702,7 +702,6 @@ dependencies = [
  "libc",
  "libredwg-sys",
  "png",
- "regex",
  "resvg",
  "serde",
  "serde_json",

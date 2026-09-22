@@ -223,6 +223,53 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     edges
 }
 
+/// The justification and style fields TEXT and ATTRIB share (same dynapi
+/// names on both types).
+struct TextLayout {
+    horizontal_alignment: u16,
+    vertical_alignment: u16,
+    alignment_point: Option<Point2D>,
+    width_factor: f64,
+    oblique_angle: f64,
+    style: String,
+}
+
+/// # Safety
+/// `dwg` must be the live `Dwg_Data` that owns `entity_ptr`, a `dxfname`
+/// entity's type-specific struct pointer.
+unsafe fn text_layout(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+) -> TextLayout {
+    let horizontal_alignment =
+        get_field::<u16>(entity_ptr, dxfname, "horiz_alignment").unwrap_or(0);
+    let vertical_alignment = get_field::<u16>(entity_ptr, dxfname, "vert_alignment").unwrap_or(0);
+    // dwg.h: alignment_pt is "optional, when dataflags & 2, i.e. 72/73 != 0";
+    // for left/baseline text the field holds whatever the decoder left.
+    let alignment_point = if horizontal_alignment != 0 || vertical_alignment != 0 {
+        get_field::<Point2D>(entity_ptr, dxfname, "alignment_pt")
+    } else {
+        None
+    };
+    // 0 is "unset" in a hand-written DXF; the width factor is never really 0.
+    let width_factor = get_field::<f64>(entity_ptr, dxfname, "width_factor")
+        .filter(|w| *w > 0.0)
+        .unwrap_or(1.0);
+    let oblique_angle = get_field::<f64>(entity_ptr, dxfname, "oblique_angle").unwrap_or(0.0);
+    let style = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "style")
+        .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+        .unwrap_or_default();
+    TextLayout {
+        horizontal_alignment,
+        vertical_alignment,
+        alignment_point,
+        width_factor,
+        oblique_angle,
+        style,
+    }
+}
+
 /// Resolves a WIPEOUT's clip boundary to local 2D points -- see
 /// [`crate::model::WipeoutEntity`] for the risk this carries.
 ///
@@ -360,12 +407,20 @@ unsafe fn convert_entity(
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
             let text = get_utf8_field(entity_ptr, "TEXT", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
+            let layout = unsafe { text_layout(dwg, entity_ptr, "TEXT") };
             Entity::Text(TextEntity {
                 common,
                 start_point,
                 text_height,
+                text_plain: crate::text::decode_text(&text).plain,
                 text,
                 rotation,
+                horizontal_alignment: layout.horizontal_alignment,
+                vertical_alignment: layout.vertical_alignment,
+                alignment_point: layout.alignment_point,
+                width_factor: layout.width_factor,
+                oblique_angle: layout.oblique_angle,
+                style: layout.style,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
@@ -456,12 +511,25 @@ unsafe fn convert_entity(
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
             let text = get_utf8_field(entity_ptr, "ATTRIB", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTRIB", "rotation").unwrap_or(0.0);
+            let tag = get_utf8_field(entity_ptr, "ATTRIB", "tag").unwrap_or_default();
+            // DXF 70: 1 invisible, 2 constant, 4 verification required, 8 preset.
+            let flags = get_field::<u8>(entity_ptr, "ATTRIB", "flags").unwrap_or(0);
+            let layout = unsafe { text_layout(dwg, entity_ptr, "ATTRIB") };
             Entity::Attrib(AttribEntity {
                 common,
                 start_point,
                 text_height,
+                text_plain: crate::text::decode_text(&text).plain,
                 text,
                 rotation,
+                tag,
+                invisible: flags & 1 != 0,
+                horizontal_alignment: layout.horizontal_alignment,
+                vertical_alignment: layout.vertical_alignment,
+                alignment_point: layout.alignment_point,
+                width_factor: layout.width_factor,
+                oblique_angle: layout.oblique_angle,
+                style: layout.style,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
@@ -508,12 +576,14 @@ unsafe fn convert_entity(
             let default_value =
                 get_utf8_field(entity_ptr, "ATTDEF", "default_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
+            let tag = get_utf8_field(entity_ptr, "ATTDEF", "tag").unwrap_or_default();
             Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
                 text_height,
                 default_value,
                 rotation,
+                tag,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {
@@ -564,20 +634,45 @@ unsafe fn convert_entity(
             let insertion_point = get_field::<Point3D>(entity_ptr, "MTEXT", "ins_pt")?;
             let text = get_utf8_field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
-            // dwg.h's comment on x_axis_dir says it "defines the rotation",
-            // and atan2(x_axis_dir.y, x_axis_dir.x) looks like the right
-            // derivation -- but with no verified reference to confirm it, this
-            // stays 0 rather than guessing. See docs/CAVEATS.md.
-            let rotation = 0.0;
+            // The baseline direction (DXF 11): its angle is the rotation. A
+            // zero vector (never written by AutoCAD, but seen in hand-made
+            // files) means "no rotation".
+            let x_axis_dir = get_field::<Point3D>(entity_ptr, "MTEXT", "x_axis_dir")
+                .filter(|d| d.x != 0.0 || d.y != 0.0)
+                .unwrap_or(Point3D {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                });
+            let rotation = x_axis_dir.y.atan2(x_axis_dir.x);
             let line_spacing_factor =
                 get_field::<f64>(entity_ptr, "MTEXT", "linespace_factor").unwrap_or(1.0);
+            let attachment = get_field::<u16>(entity_ptr, "MTEXT", "attachment")
+                .filter(|a| (1..=9).contains(a))
+                .unwrap_or(1);
+            let rect_width = get_field::<f64>(entity_ptr, "MTEXT", "rect_width").unwrap_or(0.0);
+            let extents_width =
+                get_field::<f64>(entity_ptr, "MTEXT", "extents_width").unwrap_or(0.0);
+            let extents_height =
+                get_field::<f64>(entity_ptr, "MTEXT", "extents_height").unwrap_or(0.0);
+            let style =
+                get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "MTEXT", "style")
+                    .and_then(|handle_ptr| resolve_handle_name(dwg, handle_ptr))
+                    .unwrap_or_default();
             Entity::MText(MTextEntity {
                 common,
                 insertion_point,
+                text_plain: crate::text::decode_mtext(&text).plain,
                 text,
                 text_height,
                 rotation,
                 line_spacing_factor,
+                attachment,
+                rect_width,
+                extents_width,
+                extents_height,
+                x_axis_dir,
+                style,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
@@ -741,6 +836,7 @@ unsafe fn convert_entity(
                 common,
                 insertion_point,
                 text_height,
+                text_plain: crate::text::decode_text(&text_value).plain,
                 text_value,
             })
         }

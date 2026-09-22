@@ -139,9 +139,18 @@ fn cp949_text_values_decode_through_the_file_code_page() {
         "no replacement characters may survive: {texts:?}"
     );
 
-    // MTEXT "방 101\P면적 32.5㎡" with a literal \P (the paragraph code is
-    // left for the text decoder, P2).
+    // MTEXT "방 101\P면적 32.5㎡": the raw string keeps the literal \P, the
+    // decoded one has the paragraph break.
     assert_eq!(mtexts, ["방 101\\P면적 32.5㎡"]);
+    let plain: Vec<&str> = db
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::MText(m) => Some(m.text_plain.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(plain, ["방 101\n면적 32.5㎡"]);
 }
 
 #[test]

@@ -56,15 +56,51 @@ pub struct CircleEntity {
     pub radius: f64,
 }
 
+/// Fields shared by the single-line text types (TEXT, ATTRIB): where the
+/// text is anchored and how it is justified. Added in 0.3.0; every field
+/// has a serde default so 0.2.0 JSON still loads.
+///
+/// AutoCAD's rule: when both alignments are 0 the text starts at
+/// `start_point` (DXF 10, the left end of the baseline); otherwise
+/// `alignment_point` (DXF 11) is the anchor and `start_point` is derived.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextEntity {
     pub common: EntityCommon,
     pub start_point: Point2D,
     pub text_height: f64,
+    /// The string as stored, `%%` codes and all.
     pub text: String,
+    /// [`text`](Self::text) decoded by [`crate::text::decode_text`]: `%%c`
+    /// as the diameter sign, `%%d` degree, `%%p` plus-minus, `\U+XXXX`
+    /// escapes resolved, `%%u`/`%%o` toggles removed.
+    #[serde(default)]
+    pub text_plain: String,
     /// Radians (DXF 50). TEXT stores this as a plain angle, unlike MTEXT,
     /// whose rotation is a direction vector (see [`MTextEntity::rotation`]).
     pub rotation: f64,
+    /// DXF 72: 0 left, 1 center, 2 right, 3 aligned, 4 middle, 5 fit.
+    #[serde(default)]
+    pub horizontal_alignment: u16,
+    /// DXF 73: 0 baseline, 1 bottom, 2 middle, 3 top.
+    #[serde(default)]
+    pub vertical_alignment: u16,
+    /// DXF 11, the anchor when either alignment is non-zero; `None` for
+    /// left/baseline text, whose anchor is `start_point`.
+    #[serde(default)]
+    pub alignment_point: Option<Point2D>,
+    /// DXF 41, relative character width; 1.0 when unset.
+    #[serde(default = "one")]
+    pub width_factor: f64,
+    /// DXF 51, radians.
+    #[serde(default)]
+    pub oblique_angle: f64,
+    /// The text style's name (DXF 7); empty if unresolvable.
+    #[serde(default)]
+    pub style: String,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,16 +164,40 @@ pub struct RayEntity {
     pub vector: Point3D,
 }
 
-/// ATTRIB shares TEXT's exact field shape: it is a block-attribute value
-/// attached to an INSERT, but geometrically just another piece of text.
+/// ATTRIB shares TEXT's field shape: it is a block-attribute value
+/// attached to an INSERT, but geometrically just another piece of text --
+/// plus the attribute's `tag`, the key its `text` is the value of.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttribEntity {
     pub common: EntityCommon,
     pub start_point: Point2D,
     pub text_height: f64,
     pub text: String,
+    /// See [`TextEntity::text_plain`].
+    #[serde(default)]
+    pub text_plain: String,
     /// Radians (DXF 50).
     pub rotation: f64,
+    /// DXF 2: the attribute's name, e.g. `ROOM_NO` for a value of `101`.
+    #[serde(default)]
+    pub tag: String,
+    /// DXF 70 bit 1: an invisible attribute, kept in the file but not
+    /// displayed.
+    #[serde(default)]
+    pub invisible: bool,
+    /// See [`TextEntity::horizontal_alignment`].
+    #[serde(default)]
+    pub horizontal_alignment: u16,
+    #[serde(default)]
+    pub vertical_alignment: u16,
+    #[serde(default)]
+    pub alignment_point: Option<Point2D>,
+    #[serde(default = "one")]
+    pub width_factor: f64,
+    #[serde(default)]
+    pub oblique_angle: f64,
+    #[serde(default)]
+    pub style: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -169,6 +229,10 @@ pub struct ToleranceEntity {
     pub insertion_point: Point3D,
     pub text_height: f64,
     pub text_value: String,
+    /// `text_value` with its `%%` codes decoded; the GD&T frame codes
+    /// themselves are left as they are.
+    #[serde(default)]
+    pub text_plain: String,
 }
 
 /// ACAD_TABLE -- the same field shape as [`InsertEntity`] minus `attribs`
@@ -201,6 +265,10 @@ pub struct AttdefEntity {
     /// kept for parity with ATTRIB and for callers reading `entities`
     /// directly.
     pub rotation: f64,
+    /// DXF 2: the attribute's name; what an INSERT's ATTRIB with the same
+    /// tag fills in.
+    #[serde(default)]
+    pub tag: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -233,15 +301,54 @@ pub struct SplineEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MTextEntity {
     pub common: EntityCommon,
+    /// DXF 10: the attachment point -- which corner or edge of the text
+    /// block it is depends on [`attachment`](Self::attachment).
     pub insertion_point: Point3D,
+    /// The string as stored, inline formatting codes and all.
     pub text: String,
+    /// [`text`](Self::text) decoded by [`crate::text::decode_mtext`]:
+    /// paragraphs as newlines, stacked fractions as `a/b`, format codes and
+    /// groups removed.
+    #[serde(default)]
+    pub text_plain: String,
     pub text_height: f64,
-    /// Radians. **Currently always `0.0`**: DWG stores MTEXT's rotation as
-    /// a direction vector (`x_axis_dir`) and `convert.rs` does not derive an
-    /// angle from it (`docs/CAVEATS.md`, "MTEXT rotation"). Callers must not
-    /// expect a rotated MTEXT to report as rotated.
+    /// Radians, derived from [`x_axis_dir`](Self::x_axis_dir) as
+    /// `atan2(y, x)` (the DXF group-11 direction vector). 0.2.0 always
+    /// reported 0.
     pub rotation: f64,
     pub line_spacing_factor: f64,
+    /// DXF 71: 1 top-left, 2 top-center, 3 top-right, 4 middle-left, 5
+    /// middle-center, 6 middle-right, 7 bottom-left, 8 bottom-center, 9
+    /// bottom-right. 1 when unset.
+    #[serde(default = "one_u16")]
+    pub attachment: u16,
+    /// DXF 41, the wrapping width in drawing units; 0 for no wrapping.
+    #[serde(default)]
+    pub rect_width: f64,
+    /// DXF 42/43: the text block's actual size as AutoCAD last laid it out
+    /// (0 when the file does not carry it).
+    #[serde(default)]
+    pub extents_width: f64,
+    #[serde(default)]
+    pub extents_height: f64,
+    /// DXF 11, the direction of the text's baseline.
+    #[serde(default = "x_axis")]
+    pub x_axis_dir: Point3D,
+    /// The text style's name (DXF 7); empty if unresolvable.
+    #[serde(default)]
+    pub style: String,
+}
+
+fn one_u16() -> u16 {
+    1
+}
+
+fn x_axis() -> Point3D {
+    Point3D {
+        x: 1.0,
+        y: 0.0,
+        z: 0.0,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

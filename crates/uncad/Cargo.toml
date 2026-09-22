@@ -16,7 +16,6 @@ workspace = true
 [dependencies]
 libredwg-sys = { path = "../libredwg-sys", version = "0.2.0" }
 libc = "0.2"
-regex = "1"
 resvg = "0.48"
 # Already in resvg's tree (tiny-skia encodes through it); named here for the
 # 8-bit RGB writer tiny-skia's own encode_png (RGBA only) does not offer.

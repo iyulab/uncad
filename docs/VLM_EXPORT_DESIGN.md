@@ -436,9 +436,13 @@ CP949 text, so `tests/fixtures/` ships DXF fixtures only); **P0 done**
 8000 px cap, white RGB background, pixel strokes, contrast-normalized palette,
 fonts loaded once, `ViewBox` + `px_per_unit` in every result) -- still open in
 P1: the bundled Latin + Hangul font, `font-family` on text, RAY/XLINE clipping,
-and pixel-sized symbols (POINT, arrowheads, dashes); the LWPOLYLINE closed-bit
-fix from **P4** and the `dwg_resolve_handle` binding P3 needs are in.
-Everything else below is still open.
+and pixel-sized symbols (POINT, arrowheads, dashes); **P2 done** (`uncad::text`
+decoder with all three stack separators and the `%%` codes, `text_plain` on
+every text type, TEXT/ATTRIB justification fields and ATTRIB `tag`, MTEXT
+attachment/width/extents/`x_axis_dir` with the rotation derived, renderer
+anchoring) except MTEXT word-wrapping at `rect_width`; the LWPOLYLINE
+closed-bit fix from **P4** and the `dwg_resolve_handle` binding P3 needs are
+in. Everything else below is still open.
 
 | Release | Phase | Files |
 |---|---|---|

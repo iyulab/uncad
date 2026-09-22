@@ -150,17 +150,16 @@ LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
 extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 
-## MTEXT rotation is always 0
+## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
-`dwg.h` says the `x_axis_dir` field "defines the rotation", and deriving an angle from it
-(`atan2(x_axis_dir.y, x_axis_dir.x)`) looks technically more accurate. Without a verified
-reference to confirm it, the value stays fixed at `0` rather than diverging on an
-unverified guess.
-
-**Update 2026-09-21**: rotated MTEXT is common (74-97 instances per sample drawing), so the
-fixed `0` is visibly wrong rather than merely imprecise. `x_axis_dir` is the standard DXF
-group-11 direction vector; deriving the angle from it is part of the redesign
-(`docs/VLM_EXPORT_DESIGN.md`).
+`MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
+group-11 direction vector, since 0.3.0; it was a fixed `0` before, which mis-placed the
+74-97 rotated MTEXTs found per sample drawing. Justified TEXT/ATTRIB is anchored at its
+alignment point with SVG `text-anchor`, and MTEXT at its attachment point, but the vertical
+offsets (a cap height of 0.72 em, a descender of 0.2 em) and the glyph widths come from the
+renderer's font, not from AutoCAD's SHX fonts, so the extent of a string is approximate
+even though its anchor is exact. MTEXT word-wrapping at `rect_width` is not performed:
+a paragraph is one line until `\P`.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 

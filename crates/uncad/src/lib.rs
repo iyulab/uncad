@@ -15,6 +15,7 @@ pub mod model;
 pub mod png;
 pub mod svg;
 pub mod tables;
+pub mod text;
 
 use std::mem::MaybeUninit;
 use std::path::Path;
