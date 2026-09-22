@@ -27,6 +27,10 @@ std::fs::write("drawing.svg", result.svg)?;
 
 let png = db.to_png(uncad::ToPngOptions::default())?;   // 1568 px long edge, white, 1.25 px strokes
 std::fs::write("drawing.png", png.png)?;                 // png.view_box + png.px_per_unit map pixels back
+
+// The LLM/VLM package: overview + tiles with sidecars + JSON records with exact numbers.
+let report = uncad::export::export_package(&db, std::path::Path::new("drawing_pkg"), &uncad::ExportOptions::default())?;
+println!("{} files, {} tiles", report.files.len(), report.counts.tiles);
 ```
 
 ## CLI
@@ -52,8 +56,12 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
    LibreDWG's own DXF importer is documented as working "for most objects", so
    it is less complete than its DWG reading ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
 3. **Output** — the parsed model as JSON (`to_json`), SVG (`to_svg`) or PNG
-   (`to_png`). Writing DWG/DXF is not offered; the write API that existed in
-   0.1.0 was removed (see [`CHANGELOG.md`](./CHANGELOG.md)).
+   (`to_png`), and the LLM/VLM package (`export::export_package`, `uncad export`):
+   an overview image sized for the model, overlapping zoom tiles with JSON
+   sidecars, and records with exact lengths, areas, dimension values and texts
+   ([`docs/VLM_EXPORT_DESIGN.md`](./docs/VLM_EXPORT_DESIGN.md)). Writing DWG/DXF
+   is not offered; the write API that existed in 0.1.0 was removed (see
+   [`CHANGELOG.md`](./CHANGELOG.md)).
 
 ## Platform
 

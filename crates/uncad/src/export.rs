@@ -266,7 +266,9 @@ pub struct LevelInfo {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct WrittenFile {
     pub path: String,
-    pub bytes: u64,
+    /// `None` for the three files written after the listing was made
+    /// (`manifest.json`, `README.txt`, `report.json` with its timings).
+    pub bytes: Option<u64>,
     pub kind: String,
 }
 
@@ -714,7 +716,7 @@ impl Writer<'_> {
         std::fs::write(&path, bytes).map_err(|source| ExportError::Io { path, source })?;
         self.files.push(WrittenFile {
             path: rel.to_string(),
-            bytes: bytes.len() as u64,
+            bytes: Some(bytes.len() as u64),
             kind: kind.to_string(),
         });
         Ok(())
@@ -930,14 +932,15 @@ pub fn export_package(
         let level_view_box = overview_view_box;
         let level_svg = svg::assemble(&rendered, &level_view_box, stroke_px / level.ppu);
         let tree = png::parse_tree(&level_svg)?;
-        for tile in tiles.iter().filter(|t| t.z == level.z && !t.empty) {
-            let bytes = png::render_region(
-                &tree,
-                level.ppu,
-                (f64::from(tile.origin_px.0), f64::from(tile.origin_px.1)),
-                tile.width,
-                tile.height,
-            )?;
+        let level_tiles: Vec<&Tile> = tiles
+            .iter()
+            .filter(|t| t.z == level.z && !t.empty)
+            .collect();
+        // Tiles of a level render in parallel (each one rasterizes the whole
+        // tree through its own transform); files are written afterwards in
+        // tile order so the listing is deterministic.
+        let rendered_tiles = render_tiles_parallel(&tree, level.ppu, &level_tiles)?;
+        for (tile, bytes) in level_tiles.iter().zip(rendered_tiles) {
             let png_path = format!(
                 "frames/f0/tiles/z{}/r{:02}_c{:02}.png",
                 tile.z, tile.row, tile.col
@@ -1553,6 +1556,8 @@ pub fn export_package(
         tiles: written_total,
     };
     let hidden_top_level: usize = hidden_by_reason.values().sum();
+    // Written after the manifest (its timings would change the byte count
+    // the manifest lists), so it is listed without a size.
     let report_value = json!({
         "$schema": SCHEMA,
         "excluded": crop_report.excluded,
@@ -1566,9 +1571,13 @@ pub fn export_package(
         "warnings": warnings,
         "timings_ms": { "total": started.elapsed().as_millis() as u64 },
     });
-    writer.write_json("report.json", &report_value, "report")?;
+    writer.files.push(WrittenFile {
+        path: "report.json".into(),
+        bytes: None,
+        kind: "report".into(),
+    });
 
-    // manifest.json and README.txt, last (they list the files)
+    // manifest.json, README.txt and report.json, last (they list the files)
     let legibility = json!({
         "target_px": options.target_text_px,
         "z_max": z_reached,
@@ -1588,12 +1597,12 @@ pub fn export_package(
     let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; tiles z1..zN are 2x zooms with 224 px overlap, row 0 at the top, and report.json lists what was left out and why.";
     writer.files.push(WrittenFile {
         path: "manifest.json".into(),
-        bytes: 0,
+        bytes: None,
         kind: "manifest".into(),
     });
     writer.files.push(WrittenFile {
         path: "README.txt".into(),
-        bytes: 0,
+        bytes: None,
         kind: "readme".into(),
     });
     let manifest = json!({
@@ -1634,6 +1643,11 @@ pub fn export_package(
             source,
         }
     })?;
+    let report_text = serde_json::to_string_pretty(&report_value)?;
+    std::fs::write(dir.join("report.json"), &report_text).map_err(|source| ExportError::Io {
+        path: dir.join("report.json"),
+        source,
+    })?;
 
     Ok(ExportReport {
         dir: dir.to_path_buf(),
@@ -1644,6 +1658,54 @@ pub fn export_package(
         counts,
         warnings,
     })
+}
+
+/// Renders `tiles` from `tree` on as many threads as the machine offers
+/// (at most one per tile), returning the PNG bytes in the tiles' order.
+fn render_tiles_parallel(
+    tree: &resvg::usvg::Tree,
+    ppu: f64,
+    tiles: &[&Tile],
+) -> Result<Vec<Vec<u8>>, ExportError> {
+    if tiles.is_empty() {
+        return Ok(Vec::new());
+    }
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .clamp(1, 16)
+        .min(tiles.len());
+    let chunk = tiles.len().div_ceil(threads);
+    let results: Vec<Result<Vec<Vec<u8>>, PngError>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = tiles
+            .chunks(chunk)
+            .map(|group| {
+                scope.spawn(move || {
+                    group
+                        .iter()
+                        .map(|tile| {
+                            png::render_region(
+                                tree,
+                                ppu,
+                                (f64::from(tile.origin_px.0), f64::from(tile.origin_px.1)),
+                                tile.width,
+                                tile.height,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a tile thread panicked"))
+            .collect()
+    });
+    let mut out = Vec::with_capacity(tiles.len());
+    for group in results {
+        out.extend(group?);
+    }
+    Ok(out)
 }
 
 fn area_unit(unit: &str) -> String {

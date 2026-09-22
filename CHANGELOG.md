@@ -10,6 +10,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- Tests and evaluation: `tests/corpus_sweep.rs` (ignored by default) parses and renders
+  every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
+  answers five agent questions from the package alone; `tests/export.rs` checks every
+  file, the tile grid, sidecar affines and byte-identical output on a second run.
+  `docs/EVAL.md` records the sweep, the timings and how to rerun them.
 - The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
   LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
   profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
@@ -27,8 +32,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   except for the timings in `report.json`.
 - The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
   is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
-  most `max(3, 1 %)` entities: the largest when they dwarf everything else 20x, or
-  those farther from the drawing's median centre than 100x its spread), and uses the
+  most `max(3, 1 %)` entities: the largest when they dwarf the rest of the drawing 20x,
+  or those more than 20 diagonals away from it), and uses the
   header `$EXTMIN/$EXTMAX` instead when those are sane and cover more; `Raw`, `Header`
   and `Fixed(rect)` are explicit. Padding is automatic (2 % of the longer side, at least
   24 px in a PNG) unless `padding: Some(units)`. PNG sizes are rounded up to a multiple

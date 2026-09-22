@@ -19,13 +19,23 @@ crates/
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
-                         convert.rs (raw Dwg_Data* -> model.rs's Entity) -> tables.rs
-                         (LAYER/BLOCK_RECORD/MLINESTYLE) -> color.rs (ACI/BYLAYER
-                         resolution) -> svg.rs (to_svg) / png.rs (to_png) / json.rs
-                         (to_json), with acis.rs for 3DSOLID wireframes. Read-only:
-                         there is no DWG/DXF write path.
-    tests/               integration tests against the public API (dxf_pipeline.rs,
-                         acis_sab.rs)
+                         convert.rs (raw Dwg_Data* -> model.rs's Entity, OCS applied
+                         through geom.rs) + header.rs (header variables, units) +
+                         tables.rs (LAYER with its state / BLOCK_RECORD / MLINESTYLE /
+                         DIMSTYLE) -> text.rs (MTEXT/%% decoding), dimension.rs
+                         (measurements and labels), visibility.rs (what is hidden) ->
+                         color.rs (ACI/BYLAYER resolution) -> svg.rs (to_svg, measures
+                         every entity's extent) + crop.rs (the viewBox rule) -> png.rs
+                         (to_png: fit, padding, lattice) -> export.rs (the package:
+                         overview, tiles, sidecars, records); json.rs (to_json) and
+                         acis.rs (3DSOLID wireframes) beside them. Read-only: there is
+                         no DWG/DXF write path.
+    tests/               integration tests against the public API, one file per
+                         concern (fixtures.rs, header.rs, codepage.rs, text_fields.rs,
+                         dimensions.rs, polyline_geometry.rs, visibility.rs, crop.rs,
+                         export.rs, acceptance.rs, ...); corpus_sweep.rs is ignored by
+                         default (minutes) -- see docs/EVAL.md
+    tests/fixtures/      this project's own R2000 DXF fixtures (make_fixtures.py)
     examples/            dump.rs / blocks.rs -- manual checks
   uncad-cli/             the CLI binary (uncad)
     tests/               documented_invocations.rs -- every call README and --help

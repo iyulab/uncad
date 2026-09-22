@@ -327,11 +327,11 @@ fn run_export(argv: &[String]) -> Result<(), String> {
                 i += 1;
             }
             "--max-levels" => {
-                options.max_levels = parse_pixels("--max-levels", &next()?)?;
+                options.max_levels = parse_count("--max-levels", &next()?)?;
                 i += 1;
             }
             "--max-tiles" => {
-                options.max_tiles = parse_pixels("--max-tiles", &next()?)? as usize;
+                options.max_tiles = parse_count("--max-tiles", &next()?)? as usize;
                 i += 1;
             }
             "--text-px" => {
@@ -433,6 +433,12 @@ fn parse_crop(value: &str) -> Result<CropMode, String> {
             "--crop x0,y0,x1,y1 needs four finite numbers with x1 > x0 and y1 > y0 (got '{value}')"
         )),
     }
+}
+
+fn parse_count(flag: &str, value: &str) -> Result<u32, String> {
+    value
+        .parse::<u32>()
+        .map_err(|_| format!("{flag} must be a whole number of 0 or more (got '{value}')"))
 }
 
 fn parse_non_negative(flag: &str, value: &str) -> Result<f64, String> {

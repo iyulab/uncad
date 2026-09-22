@@ -5,16 +5,16 @@
 //! left out and why. The rules, in order:
 //!
 //! 1. **Outlier guard** ([`outliers`]): at most `max(3, 1 %)` entities can
-//!    be outliers. The largest entities are *scale outliers* when even the
-//!    smallest of them has a diagonal over 20x that of everything else put
-//!    together (the 3256x-scaled INSERT of `example_2000.dwg` and
-//!    `example_2018.dwg`). Entities farther from the drawing's median centre
-//!    than 100x its typical spread (the median distance from that centre,
-//!    or the median entity diagonal when that is larger) are *far outliers* (a
-//!    stray point a million units away). More candidates than the limit
-//!    means the drawing really is that big, and nothing is excluded.
-//!    Nothing else is ever trimmed: the overview shows every entity that
-//!    is not one of those.
+//!    be outliers. Each pass sets aside the largest entities and the ones
+//!    farthest from the median centre (at most a quarter of the drawing)
+//!    and measures them against the *rest*: a candidate whose diagonal is
+//!    over 20x the rest's is a `scale_outlier` (the 3256x-scaled INSERT of
+//!    `example_2000.dwg` and `example_2018.dwg`); one more than 20 rest
+//!    diagonals away is a `far_outlier` (the attribute that INSERT drags a
+//!    million units out, a stray point) -- but never more than a fifth of
+//!    the drawing, so a notes block a drawing-width away stays. Passes
+//!    repeat until nothing changes. Nothing else is ever trimmed: the
+//!    overview shows every entity that is not one of those.
 //! 2. **Header candidate** ([`header_candidate`]): `$EXTMIN/$EXTMAX` is
 //!    accepted when finite, sane, containing at least 90 % of the kept
 //!    extents and at most 4x the content area; [`CropMode::Auto`] uses it
@@ -190,7 +190,7 @@ impl CropSource {
 pub enum ExcludeReason {
     /// Far larger than everything else put together (rule 1, 20x).
     ScaleOutlier,
-    /// Far away from the drawing's centre (rule 1, 100x its spread).
+    /// Far away from the rest of the drawing (rule 1, 20 diagonals).
     FarOutlier,
     /// Outside a header or fixed crop.
     OutsideCrop,
@@ -270,43 +270,69 @@ impl Choice {
 
 /// Rule 1: the indices of the extents the overview should not stretch to,
 /// each with its reason, in index order. Empty when everything belongs
-/// together. See the module docs for the two rules.
+/// together. See the module docs for the rules.
 pub fn outliers(extents: &[Extent]) -> Vec<(usize, ExcludeReason)> {
     let n = extents.len();
     if n < 3 {
         return Vec::new();
     }
     let limit = 3.max((n as f64 * 0.01).ceil() as usize);
+    let mut excluded: Vec<(usize, ExcludeReason)> = Vec::new();
+    // One pass can only judge what it set aside; a second huge entity hides
+    // behind the first until that one is out, so passes repeat until
+    // nothing changes (at most `limit` entities can go in total).
+    loop {
+        let remaining: Vec<usize> = (0..n)
+            .filter(|i| !excluded.iter().any(|(j, _)| j == i))
+            .collect();
+        let found = outlier_pass(extents, &remaining, limit - excluded.len().min(limit));
+        if found.is_empty() {
+            break;
+        }
+        excluded.extend(found);
+        if excluded.len() >= limit {
+            break;
+        }
+    }
+    excluded.sort_by_key(|(i, _)| *i);
+    excluded
+}
 
-    // Far candidates first: farther from the median centre than 100x the
-    // typical spread (medians, so up to half the entities could be off
-    // without moving them). They are left out of the "rest" the scale
-    // rule compares against, so an attribute a runaway INSERT dragged a
-    // million units away does not hide the INSERT's own size.
+/// One pass of the guard over `remaining` (indices into `extents`).
+///
+/// The candidates are the `k` largest entities and the `k` farthest from
+/// the median centre, `k = min(budget, remaining / 4)`, so that at least
+/// three quarters of the drawing stay as the *rest*. With `R` the rest's
+/// bounding box and `D` its diagonal (or the median entity diagonal when
+/// larger): a candidate whose own diagonal exceeds 20 D is a scale
+/// outlier; one whose gap to `R` exceeds 20 D is a far outlier. Far
+/// outliers are dropped only when there are at most `budget` of them and
+/// they are no more than a fifth of the drawing -- a notes block a
+/// drawing-width away is part of the drawing.
+fn outlier_pass(
+    extents: &[Extent],
+    remaining: &[usize],
+    budget: usize,
+) -> Vec<(usize, ExcludeReason)> {
+    let m = remaining.len();
+    let k = budget.min(m / 4);
+    if m < 4 || k == 0 {
+        return Vec::new();
+    }
     let centre = |i: usize| {
         let r = &extents[i].rect;
         ((r.min_x + r.max_x) / 2.0, (r.min_y + r.max_y) / 2.0)
     };
-    let mut xs: Vec<f64> = (0..n).map(|i| centre(i).0).collect();
-    let mut ys: Vec<f64> = (0..n).map(|i| centre(i).1).collect();
+    let mut xs: Vec<f64> = remaining.iter().map(|i| centre(*i).0).collect();
+    let mut ys: Vec<f64> = remaining.iter().map(|i| centre(*i).1).collect();
     xs.sort_by(f64::total_cmp);
     ys.sort_by(f64::total_cmp);
-    let (mx, my) = (xs[n / 2], ys[n / 2]);
+    let (mx, my) = (xs[m / 2], ys[m / 2]);
     let distance = |i: usize| {
         let (x, y) = centre(i);
         (x - mx).hypot(y - my)
     };
-    let mut distances: Vec<f64> = (0..n).map(distance).collect();
-    let mut diagonals: Vec<f64> = (0..n).map(|i| extents[i].rect.diagonal()).collect();
-    distances.sort_by(f64::total_cmp);
-    diagonals.sort_by(f64::total_cmp);
-    let spread = distances[n / 2].max(diagonals[n / 2]).max(1e-9);
-    let far: Vec<usize> = (0..n).filter(|i| distance(*i) > 100.0 * spread).collect();
-
-    // Scale outliers: the k largest (k <= limit, largest k first) are out
-    // when the smallest of them still dwarfs the bounds of the rest 20x.
-    let mut excluded: Vec<(usize, ExcludeReason)> = Vec::new();
-    let mut by_diag: Vec<usize> = (0..n).collect();
+    let mut by_diag: Vec<usize> = remaining.to_vec();
     by_diag.sort_by(|a, b| {
         extents[*b]
             .rect
@@ -314,32 +340,54 @@ pub fn outliers(extents: &[Extent]) -> Vec<(usize, ExcludeReason)> {
             .total_cmp(&extents[*a].rect.diagonal())
             .then(a.cmp(b))
     });
-    for k in (1..=limit.min(n - 1)).rev() {
-        let (top, rest) = by_diag.split_at(k);
-        let smallest_top = extents[top[k - 1]].rect.diagonal();
-        let rest_diag = Rect::bounding(
-            rest.iter()
-                .filter(|i| !far.contains(i))
-                .map(|i| &extents[*i].rect),
-        )
-        .map_or(0.0, |r| r.diagonal());
-        if smallest_top > 20.0 * rest_diag.max(1e-9) {
-            excluded.extend(top.iter().map(|i| (*i, ExcludeReason::ScaleOutlier)));
-            break;
+    let mut by_dist: Vec<usize> = remaining.to_vec();
+    by_dist.sort_by(|a, b| distance(*b).total_cmp(&distance(*a)).then(a.cmp(b)));
+    let mut candidates: Vec<usize> = by_diag[..k].to_vec();
+    for i in &by_dist[..k] {
+        if !candidates.contains(i) {
+            candidates.push(*i);
         }
     }
-
-    // Far outliers: the candidates not already out, unless there are more
-    // of them than the limit allows (then the drawing is just that big).
-    let far: Vec<usize> = far
-        .into_iter()
-        .filter(|i| !excluded.iter().any(|(j, _)| j == i))
+    let rest: Vec<usize> = remaining
+        .iter()
+        .copied()
+        .filter(|i| !candidates.contains(i))
         .collect();
-    if !far.is_empty() && far.len() <= limit {
-        excluded.extend(far.into_iter().map(|i| (i, ExcludeReason::FarOutlier)));
+    if rest.len() < 3 {
+        return Vec::new();
     }
-    excluded.sort_by_key(|(i, _)| *i);
-    excluded
+    let rest_box =
+        Rect::bounding(rest.iter().map(|i| &extents[*i].rect)).expect("rest is not empty");
+    let mut diagonals: Vec<f64> = rest.iter().map(|i| extents[*i].rect.diagonal()).collect();
+    diagonals.sort_by(f64::total_cmp);
+    let d = rest_box
+        .diagonal()
+        .max(diagonals[diagonals.len() / 2])
+        .max(1e-9);
+
+    let mut out: Vec<(usize, ExcludeReason)> = Vec::new();
+    let mut scale: Vec<usize> = candidates
+        .iter()
+        .copied()
+        .filter(|i| extents[*i].rect.diagonal() > 20.0 * d)
+        .collect();
+    scale.sort_by(|a, b| {
+        extents[*b]
+            .rect
+            .diagonal()
+            .total_cmp(&extents[*a].rect.diagonal())
+    });
+    scale.truncate(budget);
+    out.extend(scale.iter().map(|i| (*i, ExcludeReason::ScaleOutlier)));
+    let far: Vec<usize> = candidates
+        .iter()
+        .copied()
+        .filter(|i| !scale.contains(i) && extents[*i].rect.gap(&rest_box) > 20.0 * d)
+        .collect();
+    if !far.is_empty() && far.len() + scale.len() <= budget && far.len() * 5 <= m {
+        out.extend(far.into_iter().map(|i| (i, ExcludeReason::FarOutlier)));
+    }
+    out
 }
 
 /// The header's `$EXTMIN/$EXTMAX` as a rectangle, when sane.
@@ -602,20 +650,41 @@ mod tests {
         assert!(outliers(&square()[..2]).is_empty(), "fewer than 3: nothing");
     }
 
+    /// Three 10 x 10 squares side by side: twelve lines.
+    fn squares() -> Vec<Extent> {
+        let mut out = Vec::new();
+        for (n, dx) in [0.0, 20.0, 40.0].into_iter().enumerate() {
+            for (i, line) in square().into_iter().enumerate() {
+                let r = line.rect;
+                out.push(Extent {
+                    handle: format!("{}", n * 4 + i + 1),
+                    type_name: "LINE".into(),
+                    rect: Rect::new(r.min_x + dx, r.min_y, r.max_x + dx, r.max_y),
+                });
+            }
+        }
+        out
+    }
+
     #[test]
-    fn too_many_far_entities_are_a_big_drawing_not_outliers() {
-        // 4 lines near the origin, 3 dots a million units away in three
-        // directions: 3 is within the limit for 7 entities, so they are far
-        // outliers. A fourth far dot is one too many: the drawing spans it
-        // all and nothing is excluded.
-        let mut extents = square();
-        extents.push(ext("5", 1e6, 0.0, 1e6 + 1.0, 1.0));
-        extents.push(ext("6", 0.0, 1e6, 1.0, 1e6 + 1.0));
-        extents.push(ext("7", -1e6, -1e6, -1e6 + 1.0, -1e6 + 1.0));
-        let reasons: Vec<ExcludeReason> = outliers(&extents).into_iter().map(|(_, r)| r).collect();
-        assert_eq!(reasons, vec![ExcludeReason::FarOutlier; 3]);
-        extents.push(ext("8", 1e6, 1e6, 1e6 + 1.0, 1e6 + 1.0));
+    fn a_fifth_of_the_drawing_is_never_far() {
+        // Twelve lines and one dot a million units away: the dot is out.
+        let mut extents = squares();
+        extents.push(ext("d1", 1e6, 1e6, 1e6 + 1.0, 1e6 + 1.0));
+        assert_eq!(outliers(&extents), vec![(12, ExcludeReason::FarOutlier)]);
+        // Four dots out of sixteen are a quarter of the drawing: it is just
+        // that big, and nothing is excluded.
+        extents.push(ext("d2", 1e6, 0.0, 1e6 + 1.0, 1.0));
+        extents.push(ext("d3", 0.0, 1e6, 1.0, 1e6 + 1.0));
+        extents.push(ext("d4", -1e6, -1e6, -1e6 + 1.0, -1e6 + 1.0));
         assert!(outliers(&extents).is_empty());
+        // A sparse drawing: a few small lines and labels 30 diagonals out
+        // are one drawing (the labels are a third of it).
+        let mut sparse = square();
+        sparse.push(ext("t1", 0.0, 20.0, 0.0, 20.0));
+        sparse.push(ext("t2", 50.0, 50.0, 50.0, 50.0));
+        sparse.push(ext("t3", 100.0, 100.0, 100.0, 100.0));
+        assert!(outliers(&sparse).is_empty());
     }
 
     #[test]
@@ -689,7 +758,7 @@ mod tests {
     fn auto_uses_the_header_when_it_covers_more() {
         // The guard drops the far dot; a header that reaches it covers 5 > 4.
         let mut extents = square();
-        extents.push(ext("5", 1000.0, 1000.0, 1001.0, 1001.0));
+        extents.push(ext("5", 1e6, 1e6, 1e6 + 1.0, 1e6 + 1.0));
         // 4x the content area at most: content is 1001 x 1001 with the dot,
         // 10 x 10 without; the header must stay within 4x of the latter, so
         // a header reaching the dot is rejected... unless the content is the
@@ -697,7 +766,7 @@ mod tests {
         // a dot close enough to be a far outlier but inside 4x: impossible
         // by construction, so test the rule the other way round: the header
         // is rejected and content wins.
-        let header = header_with((0.0, 0.0), (1001.0, 1001.0));
+        let header = header_with((0.0, 0.0), (1e6 + 1.0, 1e6 + 1.0));
         let auto = choose(&extents, &header, CropMode::Auto);
         assert_eq!(auto.source, CropSource::Content);
         assert_eq!(auto.rect, Rect::new(0.0, 0.0, 10.0, 10.0));

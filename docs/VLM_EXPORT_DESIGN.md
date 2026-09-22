@@ -467,8 +467,11 @@ and inward-shifted edge tiles, sidecars with both affines and per-tile record
 lists, texts/dimensions/geometry/regions/blocks/strings/report/drawing JSON
 with sharding and a manifest, CLI `uncad export`; still open: frames, paper
 layouts, glyph-metric text boxes, NFKC, tile culling and parallel tiles, a
-bundled font). P8 (CLI and docs polish) and P9 (corpus sweep, goldens,
-acceptance questions) remain.
+bundled font); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
+(`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
+with five package questions, determinism test, `docs/EVAL.md`) are in --
+goldens (byte-exact reference packages) are not, since text rendering still
+depends on the host's fonts.
 
 | Release | Phase | Files |
 |---|---|---|

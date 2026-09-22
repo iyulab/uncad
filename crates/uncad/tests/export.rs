@@ -123,14 +123,19 @@ fn the_package_has_every_file_and_a_profile_sized_overview() {
     assert_eq!(manifest["counts"]["dimensions"], 10);
     assert_eq!(manifest["capabilities"]["dimension_values"], "exact");
 
-    // Every listed file exists with the listed size (manifest and README
-    // are listed without a size: they are written last).
+    // Every listed file exists with the listed size (manifest, README and
+    // report are listed without one: they are written last).
     for file in manifest["files"].as_array().unwrap() {
         let path = tmp.0.join(file["path"].as_str().unwrap());
         let meta = std::fs::metadata(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let bytes = file["bytes"].as_u64().unwrap();
-        if bytes > 0 {
+        if let Some(bytes) = file["bytes"].as_u64() {
             assert_eq!(meta.len(), bytes, "{}", path.display());
+        } else {
+            assert!(
+                ["manifest.json", "README.txt", "report.json"]
+                    .contains(&file["path"].as_str().unwrap()),
+                "{file}"
+            );
         }
     }
 }
