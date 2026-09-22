@@ -143,10 +143,20 @@ DIMENSION:
  "bbox":[10,20,12.5,24.8],"tiles":["f0/z1/r01_c03"],"px":{"ov":[420,910,470,930],"f0/z1/r01_c03":[88,310,420,362]}}
 ```
 
-- `measurement_source` in `{act_measurement, from_points, none}`.
-  `act_measurement == -1.0` exactly (or a negative value on any kind but
-  ORDINATE) means "not computed" and the value comes from the definition points
-  with confidence `exact`. ORDINATE keeps its sign.
+- `measurement_source` in `{act_measurement, from_points, none}`, with
+  `confidence` following it: `stored` for the file's own `act_measurement`,
+  `exact` for a value recomputed from the definition points, `unavailable` for
+  neither. A stored value is refused -- and the definition points used instead
+  -- when it is not a measurement this dimension could have: `-1.0` exactly
+  (R13/R14's "not computed"), `0.0` on any kind but ORDINATE (how an R13/R14
+  DXF, and any DXF without a group 42, leaves the field), a negative value on
+  any kind but ORDINATE, or one disagreeing with the definition points by more
+  than 1 % (the corpus's worst honest disagreement is 2.3e-7 relative).
+  ORDINATE keeps its sign, and may legitimately measure 0.
+- `capabilities.dimension_values` in `{exact, computed, text_only, none}`:
+  `exact` when at least one dimension carries the file's own measurement,
+  `computed` when every value was recomputed from the definition points (an
+  R13/R14 drawing), `text_only` when there are dimensions but no values.
 - Angular kinds (ANG3PT, ANG2LN): `act_measurement` is radians and is exported
   in degrees with `unit: "deg"`; DIMLFAC does not apply; the sector is the one
   containing `def_pt`; display follows DIMAUNIT/DIMADEC.
@@ -169,11 +179,17 @@ TEXT:
 Other records: **region** `{id, src, layer, area, area_unit, area_si | null,
 perimeter, centroid, bbox, vertex_count, simple, holes, hatch, labels,
 confidence, tiles, px}` where labels are the texts whose anchor lies inside the
-polygon and in no smaller region; **tile sidecar** `{id, png, z, row, col, px,
+polygon and in no smaller region, and `simple` is `null` (with `confidence:
+"estimated"`) for an outline of more than 2 000 vertices, whose pairwise
+self-intersection test is skipped rather than run at O(n^2); **tile sidecar** `{id, png, z, row, col, px,
 world, ppu, world_to_px, px_to_world, overlap_px, neighbors, parent, children,
-empty, layers_present, fits_profile, expected_encoded_px, resize_factor,
-norm_to_px, records: {texts: [[id, px, t]], dims: [[id, px, s, v]], blocks,
-regions}}`, capped at 32 KB with text truncated to 24 characters. Sidecars are
+empty, layers_present, layers_truncated, layers_total (only when trimmed),
+fits_profile, expected_encoded_px, resize_factor, norm_to_px, records: {texts:
+[[id, px, t]], dims: [[id, px, s, v]], blocks, regions}}`, capped at 32 KB with
+text truncated to 24 characters: the record rows are cut first
+(`records_truncated`), then the layer list (`layers_truncated`, with
+`layers_total` saying how many names there were), so the file always says which
+of the two a reader is missing. Sidecars are
 authoritative for "what is on this image"; shards hold the full record.
 `strings.json` normalisation is NFKC + case fold + whitespace collapse + a
 canonical fraction form + unit-suffix handling (m2, mm, ㎡, ㎜).
