@@ -21,3 +21,13 @@ dropped when this project moved to a native Rust implementation. That's also
 why the project license could move from AGPL-3.0 (required while combining a
 GPLv3+ component with an AGPL-3.0 one, per GPLv3 §13) back down to plain
 GPLv3-or-later.
+
+## Noto Sans KR (bundled font subset)
+
+`crates/uncad/fonts/UncadSans-Regular.otf` is a subset of Noto Sans KR Regular
+v2.004, Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font
+Name 'Source', licensed under the SIL Open Font License, Version 1.1. The
+licence text is `crates/uncad/fonts/OFL-NotoSansKR.txt`; the subset is a
+Modified Version renamed to "Uncad Sans" (`crates/uncad/fonts/README.md`
+records the exact steps). The font is embedded in every binary that links the
+`uncad` crate.

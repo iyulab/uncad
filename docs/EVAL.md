@@ -82,9 +82,10 @@ test`'s wall clock.
 
 - **Token counts per file** with the vendor tokenizer (the design's
   budget of about 3.5k tokens for the manifest is an estimate).
-- **Byte-exact goldens**: text is rendered with the host's fonts, so
-  tile PNGs differ between machines; the determinism test compares two runs
-  on the same machine only.
+- **Byte-exact goldens**: with the bundled font, tile PNGs should now be
+  identical across machines with the same resvg version, but no reference
+  package is checked in yet; the determinism test compares two runs on the
+  same machine only.
 - **Legibility**: whether the dominant text class really reads at 14 px in
   a given model is a judgement the `legibility.height_classes` block leaves
   to the agent; no VLM-in-the-loop check exists.

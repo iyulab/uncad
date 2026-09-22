@@ -155,10 +155,15 @@ extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
 `export_package` writes the directory the design describes (section 2) in
 its 0.3.0 form. Known gaps:
 
-- **Text boxes are estimates** (0.6 em per character from the anchor,
-  `bbox_confidence: "estimated"` on every text record); a tile's sidecar may
-  therefore list a label a few pixels off, or one whose last characters lie
-  on the neighbouring tile. Glyph-metric boxes are 0.4.0 work.
+- **Text boxes are measured, the crop is not.** `texts.json` boxes come from
+  a usvg pre-pass over the drawing's texts with the bundled font
+  (`bbox_confidence: "measured"`, the tight box of the glyph outlines;
+  rotated texts get the axis-aligned box of the rotated outlines). The
+  crop and the frames still use the 0.6-em estimate, since the crop is
+  decided before anything is laid out. usvg works in single precision, so
+  a box a million units from the origin is only exact to about 1/16 unit.
+  A character the bundled subset lacks is drawn as a box: the record says
+  `font_ok: false` with `unshaped_glyphs`, and the manifest warns.
 - **A tile rasterizes what touches it.** Each tile's SVG holds only the
   entities whose extent meets the tile grown by 16 px, so cost follows the
   content on the tile; a dense drawing whose every entity touches every
@@ -170,7 +175,13 @@ its 0.3.0 form. Known gaps:
   together share a frame, and a title block touching the plan joins it.
   Model space only: paper layouts are not exported (design section 4,
   step 10).
-- Text is rendered with the host's fonts (no bundled face).
+- Text is rendered with the bundled `Uncad Sans` (a Noto Sans KR subset:
+  Latin, Greek, the 2350 KS X 1001 Hangul syllables, CAD symbols -- see
+  `crates/uncad/fonts/README.md`), the same on every machine. Hanja, the
+  other syllables and `⌀` (U+2300) are outside it; `--fonts bundled+system`
+  lets the host's fonts fill them in at the cost of host-dependent output.
+  SHX fonts and the drawing's own text styles are not used: every text is
+  drawn in the one face.
 - Records for entities inside block references are limited to texts;
   geometry inside blocks is drawn but not listed (INSERT instances are).
 

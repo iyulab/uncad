@@ -82,8 +82,11 @@ well as Windows.
 ## License
 
 **GPLv3-or-later**. LibreDWG (GPLv3+) is the only third-party component linked
-in, and its license carries over. Copyright and license details for third-party
-components are in [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
+in, and its license carries over. The bundled font
+(`crates/uncad/fonts/UncadSans-Regular.otf`, a Noto Sans KR subset) is under the
+SIL Open Font License 1.1, with its licence text beside it. Copyright and
+license details for third-party components are in
+[`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
 
 ## Repository layout
 

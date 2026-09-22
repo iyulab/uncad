@@ -226,6 +226,9 @@ struct Ctx<'a> {
     depth: u32,
     scale: f64,
     inherited_color: String,
+    /// `"<insert>/"` chain of the block references being rendered, so a
+    /// text inside a block gets the id the export's records use.
+    id_prefix: String,
     transform: Transform,
     /// `<defs>` entries accumulated by HATCH rendering, emitted once into a
     /// top-level `<defs>` by [`to_svg`]. Persists across `render_block_ref`'s
@@ -256,6 +259,7 @@ impl<'a> Ctx<'a> {
             depth: 0,
             scale: 1.0,
             inherited_color: DEFAULT_COLOR.to_string(),
+            id_prefix: String::new(),
             transform: Transform::identity(),
             defs: Vec::new(),
             next_def_id: 0,
@@ -263,6 +267,12 @@ impl<'a> Ctx<'a> {
             include_hidden: false,
             hidden: 0,
         }
+    }
+
+    /// The package id of an entity drawn now: its handle behind the block
+    /// references it is nested in.
+    fn text_id(&self, handle: &str) -> String {
+        format!("{}{handle}", self.id_prefix)
     }
 
     fn reset_entity_bounds(&mut self) {
@@ -495,7 +505,12 @@ fn text_anchor(
 
 /// A single-line `<text>` -- TEXT, ATTRIB and TOLERANCE all render to this.
 /// `anchor` positions it (world space); `rotation` is about the anchor.
+/// `id` is the entity's package id (`handle`, or `insert/handle` inside a
+/// block reference): the export's metrics pre-pass finds the shaped text
+/// by it, and every `<text>` names the bundled family so an SVG consumer
+/// with the font gets the same glyphs.
 fn text_element(
+    id: &str,
     anchor: &TextAnchor,
     height: f64,
     rotation: f64,
@@ -512,7 +527,9 @@ fn text_element(
         format!(" text-anchor=\"{}\"", anchor.anchor)
     };
     format!(
-        "<text x=\"{x}\" y=\"{y}\" font-size=\"{height}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{}</text>",
+        "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{height}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{}</text>",
+        escape_xml(id),
+        crate::png::BUNDLED_FONT_FAMILY,
         rotate_transform_attr(rotation, x, y),
         escape_xml(text)
     )
@@ -605,7 +622,9 @@ fn resolve_entity_color(common: &EntityCommon, ctx: &Ctx) -> String {
 ///
 /// ATTDEF children are skipped: an attribute *template* is not drawn, and the
 /// real values are separate top-level ATTRIB entities already rendered.
+#[allow(clippy::too_many_arguments)]
 fn render_block_ref(
+    owner_handle: &str,
     block_name: &str,
     insertion_point: Point2D,
     x_scale: f64,
@@ -642,6 +661,8 @@ fn render_block_ref(
     let parent_depth = ctx.depth;
     let parent_scale = ctx.scale;
     let parent_inherited = std::mem::replace(&mut ctx.inherited_color, color.to_string());
+    let child_prefix = format!("{}{owner_handle}/", ctx.id_prefix);
+    let parent_prefix = std::mem::replace(&mut ctx.id_prefix, child_prefix);
 
     ctx.transform = compose(&parent_transform, &child_transform);
     ctx.depth = parent_depth + 1;
@@ -661,6 +682,7 @@ fn render_block_ref(
     ctx.depth = parent_depth;
     ctx.scale = parent_scale;
     ctx.inherited_color = parent_inherited;
+    ctx.id_prefix = parent_prefix;
 
     if body_parts.is_empty() {
         return String::new();
@@ -802,6 +824,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 t.vertical_alignment,
             ));
             Some(text_element(
+                &ctx.text_id(&t.common.handle),
                 &anchor,
                 t.text_height,
                 t.rotation,
@@ -830,6 +853,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 a.vertical_alignment,
             ));
             Some(text_element(
+                &ctx.text_id(&a.common.handle),
                 &anchor,
                 a.text_height,
                 a.rotation,
@@ -851,6 +875,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 baseline_drop: 0.0,
             };
             Some(text_element(
+                &ctx.text_id(&t.common.handle),
                 &anchor,
                 t.text_height,
                 0.0,
@@ -921,7 +946,9 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 );
             }
             Some(format!(
-                "<text x=\"{x}\" y=\"{y}\" font-size=\"{text_height}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
+                "<text id=\"{}\" x=\"{x}\" y=\"{y}\" font-size=\"{text_height}\" font-family=\"{}\" fill=\"{color}\" stroke=\"none\"{anchor_attr}{}>{tspans}</text>",
+                escape_xml(&ctx.text_id(&m.common.handle)),
+                crate::png::BUNDLED_FONT_FAMILY,
                 rotate_transform_attr(m.rotation, x, y)
             ))
         }
@@ -979,6 +1006,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
                 (i.scale.x, i.rotation)
             };
             Some(render_block_ref(
+                &i.common.handle,
                 &i.block_name,
                 Point2D {
                     x: i.insertion_point.x,
@@ -992,6 +1020,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             ))
         }
         Entity::AcadTable(a) => Some(render_block_ref(
+            &a.common.handle,
             &a.block_name,
             Point2D {
                 x: a.insertion_point.x,
@@ -1007,6 +1036,7 @@ fn render_shown_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
             // The cached geometry block is already in final world coordinates,
             // so it is drawn with an identity transform.
             let svg = render_block_ref(
+                &d.common.handle,
                 &d.block_name,
                 Point2D { x: 0.0, y: 0.0 },
                 1.0,
@@ -1438,6 +1468,7 @@ mod tests {
 
         let mut ctx = Ctx::new(&tables);
         let svg = render_block_ref(
+            "T",
             "R",
             Point2D { x: 0.0, y: 0.0 },
             1.0,

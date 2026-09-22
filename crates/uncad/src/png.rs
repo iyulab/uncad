@@ -82,6 +82,8 @@ pub struct ToPngOptions {
     /// grows on the right and bottom to match, so pixels and units stay in
     /// exact proportion. 0 turns it off. Default 28. Since 0.3.0.
     pub lattice: u32,
+    /// The fonts text is drawn with. Default [`Fonts::Bundled`]. Since 0.3.0.
+    pub fonts: Fonts,
 }
 
 impl Default for ToPngOptions {
@@ -93,6 +95,7 @@ impl Default for ToPngOptions {
             stroke_px: Some(1.25),
             max_edge: 8000,
             lattice: 28,
+            fonts: Fonts::Bundled,
         }
     }
 }
@@ -162,11 +165,9 @@ impl std::error::Error for PngError {}
 /// Renders `db` straight to PNG bytes -- the intermediate SVG text never
 /// touches disk.
 ///
-/// Fonts come from the host's installed system fonts, loaded once per
-/// process (`fontdb::Database::load_system_fonts`; this crate bundles no
-/// font of its own yet). A host with no matching font renders `<text>`
-/// entities (dimension/MTEXT labels) as blank rather than erroring -- usvg
-/// treats an unresolved glyph as empty, not a parse failure.
+/// Text is shaped with the bundled `Uncad Sans` face by default
+/// ([`Fonts`]), so the image is the same on every machine; a character the
+/// subset lacks is dropped with a warning in the log rather than an error.
 pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, PngError> {
     let rendered = svg::render(db, options.svg);
     let content = rendered.choice.rect;
@@ -226,7 +227,14 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
     };
     let svg_text = svg::assemble(&rendered, &view_box, stroke_width);
 
-    let png = rasterize(&svg_text, px_per_unit, width, height, options.background)?;
+    let png = rasterize(
+        &svg_text,
+        px_per_unit,
+        width,
+        height,
+        options.background,
+        options.fonts,
+    )?;
     Ok(ToPngResult {
         png,
         width,
@@ -245,7 +253,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
 /// cached [`crate::CadDatabase::to_svg`] call. [`to_png`] is the way to get
 /// a sized, opaque image with a known pixel scale.
 pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, PngError> {
-    let tree = parse_tree(svg)?;
+    let tree = parse_tree(svg, Fonts::Bundled)?;
     let size = tree.size();
     let width = (size.width() * scale).round() as u32;
     let height = (size.height() * scale).round() as u32;
@@ -267,8 +275,9 @@ fn rasterize(
     width: u32,
     height: u32,
     background: Background,
+    fonts: Fonts,
 ) -> Result<Vec<u8>, PngError> {
-    let tree = parse_tree(svg_text)?;
+    let tree = parse_tree(svg_text, fonts)?;
     let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or(PngError::EmptyCanvas)?;
     if background == Background::White {
         pixmap.fill(tiny_skia::Color::WHITE);
@@ -307,26 +316,60 @@ pub(crate) fn render_region(
     encode_rgb8(&pixmap)
 }
 
-pub(crate) fn parse_tree(svg_text: &str) -> Result<usvg::Tree, PngError> {
+/// Which fonts text is shaped and drawn with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Fonts {
+    /// The bundled `Uncad Sans` only (a Noto Sans KR subset: Latin, Greek,
+    /// the 2350 common Hangul syllables and the CAD symbols -- see
+    /// `crates/uncad/fonts/README.md`). The same pixels and the same text
+    /// boxes on every machine; a character outside the subset is dropped
+    /// with a warning in the log.
+    #[default]
+    Bundled,
+    /// The bundled face first, then the host's installed fonts for the
+    /// characters it lacks (Hanja, rare syllables). Slower to shape and
+    /// host-dependent.
+    BundledAndSystem,
+}
+
+/// The family name the bundled font is registered under.
+pub const BUNDLED_FONT_FAMILY: &str = "Uncad Sans";
+
+static UNCAD_SANS: &[u8] = include_bytes!("../fonts/UncadSans-Regular.otf");
+
+pub(crate) fn parse_tree(svg_text: &str, fonts: Fonts) -> Result<usvg::Tree, PngError> {
     let options = usvg::Options {
-        fontdb: font_database(),
+        fontdb: font_database(fonts),
+        // `<text>` without a font-family (0.2.0's SVGs) resolves to the
+        // bundled face rather than usvg's "Times New Roman".
+        font_family: BUNDLED_FONT_FAMILY.to_string(),
         ..Default::default()
     };
     usvg::Tree::from_str(svg_text, &options).map_err(PngError::InvalidSvg)
 }
 
-/// The system font database, loaded once per process: scanning the
-/// installed fonts cost 45-330 ms per call when it happened inside every
-/// `to_png`, which a tiled export would repeat per tile.
-fn font_database() -> Arc<fontdb::Database> {
-    static FONTS: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
-    FONTS
-        .get_or_init(|| {
-            let mut db = fontdb::Database::new();
+/// The font database for `fonts`, built once per process: the bundled
+/// face (zero-copy from the embedded bytes) as the sans-serif and serif
+/// generic families, plus the host's fonts when asked -- scanning those
+/// cost 45-330 ms per call when it happened inside every `to_png`, which a
+/// tiled export would repeat per tile.
+pub(crate) fn font_database(fonts: Fonts) -> Arc<fontdb::Database> {
+    static BUNDLED: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+    static WITH_SYSTEM: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+    let build = |system: bool| {
+        let mut db = fontdb::Database::new();
+        db.load_font_source(fontdb::Source::Binary(Arc::new(UNCAD_SANS)));
+        db.set_sans_serif_family(BUNDLED_FONT_FAMILY);
+        db.set_serif_family(BUNDLED_FONT_FAMILY);
+        if system {
             db.load_system_fonts();
-            Arc::new(db)
-        })
-        .clone()
+        }
+        Arc::new(db)
+    };
+    match fonts {
+        Fonts::Bundled => BUNDLED.get_or_init(|| build(false)).clone(),
+        Fonts::BundledAndSystem => WITH_SYSTEM.get_or_init(|| build(true)).clone(),
+    }
 }
 
 /// 8-bit RGB PNG of an opaque pixmap. tiny-skia stores premultiplied RGBA;

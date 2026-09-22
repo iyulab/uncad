@@ -186,3 +186,24 @@ fn attribs_carry_their_tag() {
         .collect();
     assert!(inserts_attribs.iter().all(|a| !a.tag.is_empty()));
 }
+
+#[test]
+fn nested_texts_carry_their_block_reference_in_the_id() {
+    // The dimlfac fixture's dimension draws its *D1 block, whose TEXT "120"
+    // has handle 42: the SVG id is "<dimension>/42".
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/dimlfac12_r2000.dxf"
+    );
+    let db = uncad::parse(fixture).expect("fixture must parse");
+    let svg = db.to_svg(Default::default()).svg;
+    let dim = db
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Dimension(d) => Some(d.common.handle.clone()),
+            _ => None,
+        })
+        .expect("a dimension");
+    assert!(svg.contains(&format!("id=\"{dim}/42\"")), "{svg}");
+}

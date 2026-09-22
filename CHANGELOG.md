@@ -10,6 +10,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- A bundled font and measured text boxes. `to_png`, the tiles and the package's text
+  metrics are shaped with `Uncad Sans`, a 370 KB subset of Noto Sans KR (OFL 1.1; Latin,
+  Greek, the 2350 KS X 1001 Hangul syllables, the CAD symbols `∅ ° ± ² ³ Ø ㎡ ㎜ ㎥`) embedded
+  in the crate, so images are the same on every machine and Hangul labels no longer
+  depend on the host (`Fonts::Bundled`, the default; `Fonts::BundledAndSystem` / CLI
+  `--fonts bundled+system` adds the host's fonts for characters the subset lacks). Every
+  `<text>` in the SVG carries `font-family="Uncad Sans"` and an `id` (its handle, or
+  `insert/handle` inside a block). `texts.json` boxes are measured from the shaped glyph
+  outlines through usvg (`bbox_confidence: "measured"`, `font_ok`, `unshaped_glyphs`), the
+  0.6-em estimate remaining only for the crop and for texts usvg drops.
 - Tests and evaluation: `tests/corpus_sweep.rs` (ignored by default) parses and renders
   every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
   answers five agent questions from the package alone; `tests/export.rs` checks every

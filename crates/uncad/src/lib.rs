@@ -33,7 +33,9 @@ pub use export::{ExportError, ExportOptions, ExportReport, Profile};
 pub use header::{Header, Units};
 pub use json::{JsonError, ToJsonOptions};
 pub use model::Entity;
-pub use png::{Background, PngError, PngSize, ToPngOptions, ToPngResult};
+pub use png::{
+    Background, Fonts, PngError, PngSize, ToPngOptions, ToPngResult, BUNDLED_FONT_FAMILY,
+};
 pub use svg::{Space, ToSvgOptions, ToSvgResult, ViewBox};
 pub use tables::Tables;
 

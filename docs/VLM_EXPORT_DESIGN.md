@@ -467,7 +467,8 @@ and inward-shifted edge tiles, sidecars with both affines and per-tile record
 lists, texts/dimensions/geometry/regions/blocks/strings/report/drawing JSON
 with sharding and a manifest, CLI `uncad export`; frames for detached
 groups, NFKC string keys, per-tile culling and parallel tiles landed after;
-still open: paper layouts, glyph-metric text boxes, a bundled font); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
+the bundled `Uncad Sans` and usvg-measured text boxes landed too; still
+open: paper layouts); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
 (`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
 with five package questions, determinism test, `docs/EVAL.md`) are in --
 goldens (byte-exact reference packages) are not, since text rendering still

@@ -44,7 +44,7 @@ use serde_json::{json, Map, Value};
 
 use crate::crop::{self, CropMode, CropReport, Extent, Rect};
 use crate::model::{Entity, InsertEntity, Point2D, Point3D};
-use crate::png::{self, PngError};
+use crate::png::{self, Fonts, PngError};
 use crate::svg::{self, Space, ToSvgOptions, ViewBox};
 use crate::text::{estimate_mtext_box, estimate_text_box};
 use crate::visibility::hidden_reason;
@@ -152,6 +152,8 @@ pub struct ExportOptions {
     /// The most frames written (the primary one included); further groups
     /// stay in the overview only and are listed as dropped. Default 8.
     pub max_frames: usize,
+    /// The fonts text is shaped and drawn with. Default [`Fonts::Bundled`].
+    pub fonts: Fonts,
 }
 
 impl Default for ExportOptions {
@@ -170,6 +172,7 @@ impl Default for ExportOptions {
             frame_gap: 0.05,
             min_frame_entities: 20,
             max_frames: 8,
+            fonts: Fonts::Bundled,
         }
     }
 }
@@ -363,7 +366,14 @@ struct PlacedText {
     height: f64,
     rotation: f64,
     anchor: Point2D,
+    /// The estimate at first; the metrics pre-pass replaces it with the
+    /// shaped glyphs' box.
     bbox: Rect,
+    /// `estimated` or `measured`.
+    bbox_confidence: &'static str,
+    /// Glyphs the font could not shape (drawn as .notdef boxes); 0 when
+    /// every character was covered.
+    unshaped: usize,
     style: String,
     tag: Option<String>,
 }
@@ -495,6 +505,8 @@ fn collect_texts(
                     t.horizontal_alignment,
                     t.vertical_alignment,
                 ),
+                bbox_confidence: "estimated",
+                unshaped: 0,
                 style: t.style.clone(),
                 tag: None,
             });
@@ -529,6 +541,8 @@ fn collect_texts(
                     a.horizontal_alignment,
                     a.vertical_alignment,
                 ),
+                bbox_confidence: "estimated",
+                unshaped: 0,
                 style: a.style.clone(),
                 tag: Some(a.tag.clone()),
             });
@@ -558,6 +572,8 @@ fn collect_texts(
                     m.extents_width * scale,
                     m.extents_height * scale,
                 ),
+                bbox_confidence: "estimated",
+                unshaped: 0,
                 style: m.style.clone(),
                 tag: None,
             });
@@ -820,7 +836,7 @@ pub fn export_package(
         stroke_px / fit.ppu,
     );
     let overview_png = png::render_region(
-        &png::parse_tree(&overview_svg)?,
+        &png::parse_tree(&overview_svg, options.fonts)?,
         fit.ppu,
         (0.0, 0.0),
         fit.width,
@@ -842,7 +858,14 @@ pub fn export_package(
         derived: db.header.luprec.clamp(3, 12) + 2,
     };
     let unit = db.header.units.name.clone();
-    let texts = placed_texts(db, visible);
+    let mut texts = placed_texts(db, visible);
+    let measured = measure_texts(&rendered, &content, &mut texts, options.fonts)?;
+    let unshaped_texts = texts.iter().filter(|t| t.unshaped > 0).count();
+    if unshaped_texts > 0 {
+        warnings.push(format!(
+            "UnshapedGlyphs: {unshaped_texts} texts hold characters the bundled font lacks (drawn as boxes); Fonts::BundledAndSystem / --fonts bundled+system uses the host's fonts for them"
+        ));
+    }
 
     // --- frames: the primary group and each detached group -----------------
     // Each tile rasterizes only the entities whose extent touches it (plus
@@ -948,7 +971,7 @@ pub fn export_package(
                 },
             );
             let bytes = png::render_region(
-                &png::parse_tree(&svg_text)?,
+                &png::parse_tree(&svg_text, options.fonts)?,
                 ov.ppu,
                 (0.0, 0.0),
                 ov.px[0],
@@ -970,6 +993,7 @@ pub fn export_package(
                 level.ppu,
                 stroke_px,
                 margin,
+                options.fonts,
                 &level_tiles,
             )?;
             for (tile, bytes) in level_tiles.iter().zip(rendered_tiles) {
@@ -1040,8 +1064,19 @@ pub fn export_package(
                 v.insert("style".into(), json!(t.style));
             }
             v.insert("bbox".into(), rounder.rect(&t.bbox));
-            v.insert("bbox_confidence".into(), json!("estimated"));
-            v.insert("why".into(), json!("0.6 em per character from the anchor"));
+            v.insert("bbox_confidence".into(), json!(t.bbox_confidence));
+            v.insert(
+                "why".into(),
+                json!(if t.bbox_confidence == "measured" {
+                    "usvg glyph outlines, bundled font"
+                } else {
+                    "0.6 em per character from the anchor"
+                }),
+            );
+            v.insert("font_ok".into(), json!(t.unshaped == 0));
+            if t.unshaped > 0 {
+                v.insert("unshaped_glyphs".into(), json!(t.unshaped));
+            }
             v.insert("tiles".into(), json!(tiles_for(&t.bbox)));
             v.insert("px".into(), px_map(&t.bbox));
             Record {
@@ -1622,7 +1657,8 @@ pub fn export_package(
     let capabilities = json!({
         "dimension_values": if dim_records.iter().any(|r| r.value.get("measurement").is_some_and(|m| !m.is_null())) { "exact" } else if dim_records.is_empty() { "none" } else { "text_only" },
         "areas": "exact",
-        "text_boxes": "estimated",
+        "text_boxes": if measured > 0 { "measured" } else if texts.is_empty() { "none" } else { "estimated" },
+        "fonts": match options.fonts { Fonts::Bundled => "bundled", Fonts::BundledAndSystem => "bundled+system" },
         "paper_layouts": "none",
         "frames": frame_reports.len(),
     });
@@ -1691,6 +1727,86 @@ pub fn export_package(
         counts,
         warnings,
     })
+}
+
+/// The metrics pre-pass: lays the text-bearing entities out once through
+/// usvg (the same shaping the images get) and gives every placed text the
+/// tight box of its glyph outlines, in world units, plus the count of
+/// glyphs the font could not shape. Texts usvg drops (whitespace-only, or
+/// no font at all) keep their estimate. Returns how many were measured.
+fn measure_texts(
+    rendered: &svg::Rendered,
+    content: &Rect,
+    texts: &mut [PlacedText],
+    fonts: Fonts,
+) -> Result<usize, ExportError> {
+    if texts.is_empty() {
+        return Ok(0);
+    }
+    // Parts are per top-level entity; a text's first id segment is the
+    // handle of the entity (or INSERT) whose part draws it.
+    let bearing: BTreeSet<&str> = texts
+        .iter()
+        .map(|t| t.id.split('/').next().unwrap_or(t.id.as_str()))
+        .collect();
+    let view_box = ViewBox::from_world(content);
+    let svg_text =
+        svg::assemble_subset(rendered, &view_box, 1.0, |handle| bearing.contains(handle));
+    let tree = png::parse_tree(&svg_text, fonts)?;
+    let mut boxes: std::collections::HashMap<String, (Rect, usize)> =
+        std::collections::HashMap::new();
+    collect_text_boxes(tree.root(), &view_box, &mut boxes);
+    let mut measured = 0;
+    for t in texts.iter_mut() {
+        if let Some((rect, unshaped)) = boxes.get(&t.id) {
+            t.bbox = *rect;
+            t.bbox_confidence = "measured";
+            t.unshaped = *unshaped;
+            measured += 1;
+        }
+    }
+    Ok(measured)
+}
+
+/// Walks a parsed tree for `<text id>` nodes: usvg keeps every text as a
+/// `Node::Text` carrying its id (inside the unnamed groups the viewBox and
+/// any `transform` add), and `abs_stroke_bounding_box` is the box of the
+/// flattened glyph outlines in canvas units -- user units minus the
+/// viewBox origin, y down.
+fn collect_text_boxes(
+    group: &resvg::usvg::Group,
+    view_box: &ViewBox,
+    out: &mut std::collections::HashMap<String, (Rect, usize)>,
+) {
+    use resvg::usvg::Node;
+    for node in group.children() {
+        match node {
+            Node::Group(g) => collect_text_boxes(g, view_box, out),
+            Node::Text(t) if !t.id().is_empty() => {
+                let b = t.abs_stroke_bounding_box();
+                let rect = Rect::new(
+                    f64::from(b.left()) + view_box.x,
+                    -(f64::from(b.bottom()) + view_box.y),
+                    f64::from(b.right()) + view_box.x,
+                    -(f64::from(b.top()) + view_box.y),
+                );
+                if ![rect.min_x, rect.min_y, rect.max_x, rect.max_y]
+                    .iter()
+                    .all(|v| v.is_finite())
+                {
+                    continue;
+                }
+                let unshaped = t
+                    .layouted()
+                    .iter()
+                    .flat_map(|span| span.positioned_glyphs.iter())
+                    .filter(|g| g.id.0 == 0)
+                    .count();
+                out.insert(t.id().to_string(), (rect, unshaped));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// An overview fitted to the profile: the pixel size within both the edge
@@ -1839,12 +1955,14 @@ fn build_frame(
 /// per tile), returning the PNG bytes in the tiles' order. Each tile gets
 /// its own SVG holding only the entities whose extent touches the tile
 /// grown by `margin` (entities without an extent are always included).
+#[allow(clippy::too_many_arguments)]
 fn render_tiles_parallel(
     rendered: &svg::Rendered,
     extent_of_handle: &std::collections::HashMap<&str, Rect>,
     ppu: f64,
     stroke_px: f64,
     margin: f64,
+    fonts: Fonts,
     tiles: &[&Tile],
 ) -> Result<Vec<Vec<u8>>, ExportError> {
     if tiles.is_empty() {
@@ -1868,7 +1986,7 @@ fn render_tiles_parallel(
                     .is_none_or(|rect| rect.intersects(&window))
             },
         );
-        let tree = png::parse_tree(&svg_text)?;
+        let tree = png::parse_tree(&svg_text, fonts)?;
         png::render_region(&tree, ppu, (0.0, 0.0), tile.width, tile.height)
     };
     let results: Vec<Result<Vec<Vec<u8>>, PngError>> = std::thread::scope(|scope| {

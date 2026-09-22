@@ -220,3 +220,36 @@ fn the_result_maps_pixels_back_to_the_drawing() {
         vb.x, vb.y, vb.width, vb.height
     )));
 }
+
+#[test]
+fn hangul_renders_with_the_bundled_font() {
+    let fixture = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/cp949_r2000.dxf"
+    );
+    let db = uncad::parse(fixture).expect("fixture must parse");
+    // The SVG names the bundled family and ids its texts.
+    let svg = db.to_svg(Default::default()).svg;
+    assert!(svg.contains("font-family=\"Uncad Sans\""), "{svg}");
+    assert!(svg.contains("id=\"23\""), "{svg}");
+    assert!(svg.contains(">\u{b3c4}\u{ba74}<"), "{svg}");
+
+    let bundled = db.to_png(ToPngOptions::default()).expect("renders");
+    let image = decode(&bundled.png);
+    let ink = image.count_pixels(|p| p != [255, 255, 255]);
+    // Five texts and a few padding lines at 1568 px: thousands of dark pixels.
+    assert!(
+        ink > 2000,
+        "only {ink} dark pixels: the text did not render"
+    );
+
+    let with_system = db
+        .to_png(ToPngOptions {
+            fonts: uncad::Fonts::BundledAndSystem,
+            ..Default::default()
+        })
+        .expect("renders");
+    let ink_system = decode(&with_system.png).count_pixels(|p| p != [255, 255, 255]);
+    // Every character is in the bundled face, so the host's fonts add nothing.
+    assert_eq!(ink, ink_system);
+}

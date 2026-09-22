@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::ExitCode;
 use uncad::{
-    Background, CadDatabase, CropMode, ExportOptions, PngSize, Profile, Rect, Space, ToJsonOptions,
-    ToPngOptions, ToSvgOptions,
+    Background, CadDatabase, CropMode, ExportOptions, Fonts, PngSize, Profile, Rect, Space,
+    ToJsonOptions, ToPngOptions, ToSvgOptions,
 };
 
 const USAGE: &str = "\
@@ -56,6 +56,9 @@ PNG options:
                                 (default: 8000)
   --lattice <px>              round the image size up to a multiple of this,
                                 the model's patch size (default: 28; 0 = off)
+  --fonts <which>             bundled (default: the embedded Uncad Sans, the same
+                                on every machine) or bundled+system (the host's
+                                fonts for characters the bundled face lacks)
 
 Export options (uncad export):
   --profile <name>            claude (default), claude-hires, openai-patch
@@ -89,6 +92,7 @@ struct Args {
     crop: String,
     padding: Option<String>,
     lattice: Option<String>,
+    fonts: String,
     include_hidden: bool,
     fit: Option<String>,
     ppu: Option<String>,
@@ -108,6 +112,7 @@ fn parse_args(argv: &[String]) -> Args {
         crop: "auto".to_string(),
         padding: None,
         lattice: None,
+        fonts: "bundled".to_string(),
         include_hidden: false,
         fit: None,
         ppu: None,
@@ -145,6 +150,12 @@ fn parse_args(argv: &[String]) -> Args {
             "--lattice" => {
                 i += 1;
                 args.lattice = argv.get(i).cloned();
+            }
+            "--fonts" => {
+                i += 1;
+                if let Some(v) = argv.get(i) {
+                    args.fonts = v.clone();
+                }
             }
             "--include-hidden" => args.include_hidden = true,
             "--fit" => {
@@ -312,6 +323,7 @@ fn run_export(argv: &[String]) -> Result<(), String> {
     let mut options = ExportOptions {
         crop: parse_crop(&args.crop)?,
         include_hidden: args.include_hidden,
+        fonts: parse_fonts(&args.fonts)?,
         source_name: Path::new(input)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned()),
@@ -454,6 +466,16 @@ fn parse_crop(value: &str) -> Result<CropMode, String> {
     }
 }
 
+fn parse_fonts(value: &str) -> Result<Fonts, String> {
+    match value {
+        "bundled" => Ok(Fonts::Bundled),
+        "bundled+system" | "system" => Ok(Fonts::BundledAndSystem),
+        other => Err(format!(
+            "unsupported --fonts value '{other}' (bundled or bundled+system)"
+        )),
+    }
+}
+
 fn parse_count(flag: &str, value: &str) -> Result<u32, String> {
     value
         .parse::<u32>()
@@ -520,6 +542,7 @@ fn png_options(args: &Args) -> Result<ToPngOptions, String> {
         stroke_px,
         max_edge,
         lattice,
+        fonts: parse_fonts(&args.fonts)?,
     })
 }
 

@@ -267,7 +267,9 @@ fn records_carry_exact_numbers_and_point_at_existing_tiles() {
     assert!(regions.iter().any(|r| r["id"] == "156"));
     let texts = records(&tmp.0, "texts");
     assert!(!texts.is_empty());
-    assert!(texts.iter().all(|t| t["bbox_confidence"] == "estimated"));
+    assert!(texts
+        .iter()
+        .all(|t| t["bbox_confidence"] == "measured" && t["font_ok"] == true));
 
     // Every record's tiles exist and were written; every record has an
     // overview pixel box.
@@ -488,4 +490,120 @@ fn a_detached_group_becomes_its_own_frame() {
     .expect("exports");
     assert_eq!(merged.frames.len(), 1);
     assert_eq!(merged.frames[0].overview.id, "ov");
+}
+
+/// One line and one TEXT saying `text`, in model space.
+fn drawing_with_text(text: &str) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point2D, Point3D, TextEntity};
+    let entities = vec![
+        uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: "L".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            end_point: Point3D {
+                x: 100.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }),
+        uncad::Entity::Text(TextEntity {
+            common: EntityCommon {
+                handle: "T".into(),
+                layer: "0".into(),
+                ..EntityCommon::default()
+            },
+            start_point: Point2D { x: 10.0, y: 10.0 },
+            text_height: 5.0,
+            text: text.into(),
+            text_plain: text.into(),
+            rotation: 0.0,
+            horizontal_alignment: 0,
+            vertical_alignment: 0,
+            alignment_point: None,
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            style: String::new(),
+        }),
+    ];
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn text_boxes_are_measured_with_the_bundled_font_and_gaps_are_reported() {
+    // Hangul, CP949-decoded, shaped by the bundled Noto Sans KR subset.
+    let db = uncad::parse(HIDDEN.replace("hidden_layers", "cp949")).expect("fixture must parse");
+    let tmp = TempDir::new("hangul");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let texts = records(&tmp.0, "texts");
+    assert_eq!(texts.len(), 5);
+    assert!(texts
+        .iter()
+        .all(|t| t["bbox_confidence"] == "measured" && t["font_ok"] == true));
+    // "도면" at height 2.5: two syllables about 2 units wide each, a box
+    // a little taller than the height (ascender to descender).
+    let domyeon = texts.iter().find(|t| t["id"] == "23").expect("TEXT 23");
+    assert_eq!(domyeon["text"], "\u{b3c4}\u{ba74}");
+    let b = domyeon["bbox"].as_array().unwrap();
+    let (w, h) = (
+        b[2].as_f64().unwrap() - b[0].as_f64().unwrap(),
+        b[3].as_f64().unwrap() - b[1].as_f64().unwrap(),
+    );
+    assert!(
+        (3.5..5.5).contains(&w) && (1.8..2.8).contains(&h),
+        "{w} x {h}"
+    );
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["capabilities"]["text_boxes"], "measured");
+    assert_eq!(manifest["capabilities"]["fonts"], "bundled");
+
+    // Hanja is outside the subset: the box is measured (as .notdef boxes),
+    // the record says the font failed, and the manifest warns.
+    let db = drawing_with_text("\u{6f22}\u{5b57} A");
+    let tmp = TempDir::new("hanja");
+    let report = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("UnshapedGlyphs")),
+        "{:?}",
+        report.warnings
+    );
+    let texts = records(&tmp.0, "texts");
+    let t = texts.iter().find(|t| t["id"] == "T").expect("the text");
+    assert_eq!(t["font_ok"], false);
+    assert_eq!(t["unshaped_glyphs"], 2);
+    assert_eq!(t["bbox_confidence"], "measured");
 }
