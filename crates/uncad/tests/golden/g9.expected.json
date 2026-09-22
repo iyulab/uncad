@@ -54,6 +54,7 @@
             "y": -45.0
           },
           "text_height": 3.5,
+          "tag": "DWGNO",
           "text": "BP-1042",
           "rotation": 0.0
         }
@@ -81,6 +82,7 @@
         "y": -45.0
       },
       "text_height": 3.5,
+      "tag": "DWGNO",
       "text": "BP-1042",
       "rotation": 0.0
     },
@@ -138,6 +140,7 @@
             "y": -45.0
           },
           "text_height": 3.5,
+          "tag": "DWGNO",
           "text": "BP-2077",
           "rotation": 0.0
         }
@@ -165,6 +168,7 @@
         "y": -45.0
       },
       "text_height": 3.5,
+      "tag": "DWGNO",
       "text": "BP-2077",
       "rotation": 0.0
     }
@@ -238,6 +242,7 @@
                   "y": -45.0
                 },
                 "text_height": 3.5,
+                "tag": "DWGNO",
                 "text": "BP-1042",
                 "rotation": 0.0
               }
@@ -297,6 +302,7 @@
                   "y": -45.0
                 },
                 "text_height": 3.5,
+                "tag": "DWGNO",
                 "text": "BP-2077",
                 "rotation": 0.0
               }
@@ -370,6 +376,7 @@
               "y": 15.0
             },
             "text_height": 3.5,
+            "tag": "DWGNO",
             "default_value": "-",
             "rotation": 0.0
           },
@@ -395,6 +402,7 @@
               "y": 8.0
             },
             "text_height": 3.5,
+            "tag": "REV",
             "default_value": "-",
             "rotation": 0.0
           },
@@ -420,6 +428,7 @@
               "y": 1.0
             },
             "text_height": 3.5,
+            "tag": "MATERIAL",
             "default_value": "-",
             "rotation": 0.0
           }

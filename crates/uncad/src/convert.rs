@@ -655,6 +655,8 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB => {
             let start_point = get_point2d(entity_ptr, "ATTRIB", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
+            // Read before `text` is shadowed by the value below.
+            let tag = text.field(entity_ptr, "ATTRIB", "tag").unwrap_or_default();
             let text = text
                 .field(entity_ptr, "ATTRIB", "text_value")
                 .unwrap_or_default();
@@ -663,6 +665,7 @@ unsafe fn convert_entity(
                 common,
                 start_point,
                 text_height,
+                tag,
                 text,
                 rotation,
             })
@@ -725,10 +728,12 @@ unsafe fn convert_entity(
                 .field(entity_ptr, "ATTDEF", "default_value")
                 .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
+            let tag = text.field(entity_ptr, "ATTDEF", "tag").unwrap_or_default();
             Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
                 text_height,
+                tag,
                 default_value,
                 rotation,
             })

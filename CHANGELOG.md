@@ -8,6 +8,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value
+  answers to. A title block's values were readable but not which field each one filled.
 - `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while
   reading, as a list of warning names (`WRONGCRC`, `UNHANDLEDCLASS`, `VALUEOUTOFBOUNDS`,
   ...) in bit order; `read_diagnostics_from_libredwg_bits` is the decoder. They used to
