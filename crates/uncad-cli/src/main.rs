@@ -1,8 +1,12 @@
-//! Command-line front end for `uncad`: `<input> [-o <output>]`.
+//! Command-line front end for `uncad`: `<input> [-o <output>]`, plus the
+//! `export` subcommand.
 //!
-//! Reading only -- with no `-o` it prints a summary, and the `-o` targets are
-//! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
-//! DWG/DXF output.
+//! Reading only -- with no `-o` it prints a summary, the `-o` targets are the
+//! parsed model as JSON or a rendering of it as SVG/PNG, and `uncad export
+//! <input> -o <dir>` writes the LLM/VLM package. There is no DWG/DXF output.
+//!
+//! One parser (`parse_args`) owns the flags of both commands, so an option is
+//! either understood wherever it stands or refused by name.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -20,8 +24,11 @@ Usage:
   uncad <input> -o <output.json>    export the parsed model (entities + tables)
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
-  uncad export <input> -o <dir>     write the LLM/VLM package (overview, tiles,
-                                    JSON records; see docs/VLM_EXPORT_DESIGN.md)
+  uncad export <input> -o <dir>     write the LLM/VLM package (an overview, a tile
+                                    pyramid per detached frame, a composited image
+                                    per paper layout, and JSON records; see
+                                    docs/VLM_EXPORT_DESIGN.md). Re-exporting into
+                                    the same directory replaces the previous package
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -32,9 +39,9 @@ SVG/PNG options:
                                 paper = sheet borders and title blocks
                                 all   = everything, in one document
   --crop <mode>               what the image shows (default: auto)
-                                auto   = the drawing's extents minus scale
-                                         outliers (or the header extents when
-                                         those cover more)
+                                auto   = the drawing's extents minus scale and
+                                         far outliers (or the header extents
+                                         when those cover more)
                                 raw    = every visible entity, outliers included
                                 header = $EXTMIN/$EXTMAX as stored
                                 x0,y0,x1,y1 = this world rectangle

@@ -39,8 +39,9 @@ use crate::svg::bounds::Box2D;
 /// JSON form: the `[x0, y0, x1, y1]` array the package documents for every
 /// box (`docs/VLM_EXPORT_DESIGN.md`, section 3), so a rectangle reads the
 /// same in `manifest.json`, `sheets.json`, `report.json` and the records.
-/// Reading accepts the `{min_x, min_y, max_x, max_y}` object 0.3.0's
-/// derived `Serialize` used to write as well.
+/// Reading also accepts the `{min_x, min_y, max_x, max_y}` object the
+/// derived `Serialize` wrote before this, so a package written by an earlier
+/// build still loads.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
     pub min_x: f64,

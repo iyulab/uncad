@@ -9,12 +9,12 @@ they land.
 
 Every file was written from scratch by `make_fixtures.py` in this directory
 on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin, the
-angular/ordinate, the hatched-viewport, the viewport-states, the radial and
-the infinite-lines fixtures on 2026-09-22) -- no third-party drawing was
-copied, so they are
-redistributable under the repository's GPL-3. All are
-R2000 (`$ACADVER AC1015`) text DXF with CRLF line endings, at most 2.5 KB
-each, and above the 256-byte minimum LibreDWG's `dwg_read_dxf` enforces.
+angular/ordinate, the hatched-viewport, the nested-attrib, the
+viewport-states, the radial and the infinite-lines fixtures on 2026-09-22)
+-- no third-party drawing was copied, so they are redistributable under the
+repository's GPL-3. All are R2000 (`$ACADVER AC1015`) text DXF with CRLF
+line endings, between 470 and 4387 bytes, and above the 256-byte minimum
+LibreDWG's `dwg_read_dxf` enforces.
 
 Ground truth below was read back through LibreDWG itself (a throw-away probe
 linked against `libredwg-sys`, reading `Dwg_Data.header.codepage` and every

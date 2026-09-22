@@ -10,150 +10,6 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
-- Paper layouts. `tables.layouts` holds every LAYOUT (`LayoutRecord`: tab order, the
-  block it draws, limits, extents, the active viewport) with its plot settings
-  (`PlotSettings`: paper name and size in mm, margins, units, rotation, plot type, scale)
-  read through LibreDWG's embedded-struct dynapi path, and `ViewportEntity` gains the view
-  fields (`view_center`, `view_size`, `view_target`, `view_direction`, `twist` in radians,
-  `status_flag`, `on`, `id`, `frozen_layers`) with `scale()`, `model_window()`,
-  `model_to_paper()` / `paper_to_model()` and `is_overall()`. `uncad export` writes
-  `sheets.json` and `sheets/<layout>/overview.png` for every paper layout: the sheet
-  (the layout's limits, else the paper size, else the paper entities) at the profile's size
-  with the layout's own entities and the model composited through each on, plan-view,
-  non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
-  layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
-  hide the border) still shows its window, only the border is left out (`--no-sheets`
-  skips it). The twisted-viewport fixture now carries a LAYOUT with A4 plot settings. `header.format` says `dwg` or `dxf`.
-- A bundled font and measured text boxes. `to_png`, the tiles and the package's text
-  metrics are shaped with `Uncad Sans`, a 370 KB subset of Noto Sans KR (OFL 1.1; Latin,
-  Greek, the 2350 KS X 1001 Hangul syllables, the CAD symbols `∅ ° ± ² ³ Ø ㎡ ㎜ ㎥`) embedded
-  in the crate, so images are the same on every machine and Hangul labels no longer
-  depend on the host (`Fonts::Bundled`, the default; `Fonts::BundledAndSystem` / CLI
-  `--fonts bundled+system` adds the host's fonts for characters the subset lacks). Every
-  `<text>` in the SVG carries `font-family="Uncad Sans"` and an `id` (its handle, or
-  `insert/handle` inside a block). `texts.json` boxes are measured from the shaped glyph
-  outlines through usvg (`bbox_confidence: "measured"`, `font_ok`, `unshaped_glyphs`), the
-  0.6-em estimate remaining only for the crop and for texts usvg drops.
-- Tests and evaluation: `tests/corpus_sweep.rs` (ignored by default) parses and renders
-  every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
-  answers five agent questions from the package alone; `tests/export.rs` checks every
-  file, the tile grid, sidecar affines and byte-identical output on a second run.
-  `tests/sheets_compositing.rs` pins which viewports a sheet composites and where the
-  paper lies for every plot rotation and paper unit, from the new
-  `viewport_states_r2000.dxf` fixture (one viewport per state, two page setups); the new
-  `radial_r2000.dxf` fixture and the corpus's `2000/TS1.dwg` cover the RADIUS, DIAMETER
-  and ANGULAR_3POINT dimensions no other test file has.
-  `docs/EVAL.md` records the sweep, the timings and how to rerun them.
-  `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
-  document -- the `export` subcommand and its options included -- and the parser's
-  refusals.
-- The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
-  LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
-  profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
-  pyramid (`frames/f0/tiles/z*/rRR_cCC.png`, 1092 px with 224 px overlap, edge tiles
-  shifted inward, empty tiles listed but not written, depth chosen so the dominant text
-  height reaches 14 px) with a JSON sidecar per tile (world rectangle, both affines,
-  neighbours, parent and children, the texts, dimensions, blocks and regions on it with
-  pixel boxes); and the records -- `texts.json` (block contents included, ids
-  `<insert>/<child>`), `dimensions.json`, `geometry.json`, `regions.json` (area,
-  perimeter, centroid, the texts inside), `blocks.json`, `strings.json` (normalised
-  string -> ids), `drawing.json`, `report.json` (excluded and hidden entities with
-  reasons), `tiles.json`, `README.txt`. `--svg` / `--full` add `drawing.svg` /
-  `entities.json`; record files above `--shard-kb` (96) are sharded and indexed in the
-  manifest; profiles `claude`, `claude-hires`, `openai-patch`. Output is deterministic
-  except for the timings in `report.json`. Each tile rasterizes only the entities whose
-  extent touches it, in parallel per level; `strings.json` keys are NFKC-normalised
-  (`㎡` -> `m2`, full-width digits, fraction slash) and every string is also indexed
-  without spaces. The renderer's text extents (and so the crop) use the same 0.6-em
-  estimate as `texts.json` (`uncad::text::estimate_text_box`) instead of the anchor
-  point alone. Frames: entities are grouped by proximity (closer than `frame_gap`, 5 % of
-  the crop diagonal, on a square grid); the largest group is the primary frame `f0` and
-  every detached group with `min_frame_entities` (20) entities or a text gets its own
-  overview and tile pyramid under `frames/fN/`, up to `max_frames` (8) -- a detail drawn
-  beside the plan is readable at its own scale. The manifest lists `frames` (content,
-  counts, overview, levels, per-frame legibility) and `frames_dropped`; a single
-  connected drawing keeps one frame whose overview is `overview.png` itself. CLI
-  `--frame-gap`, `--min-frame-entities`, `--max-frames`.
-- The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
-  is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
-  most `max(3, 1 %)` entities: the largest when they dwarf the rest of the drawing 20x,
-  or those more than 20 diagonals away from it), and uses the
-  header `$EXTMIN/$EXTMAX` instead when those are sane and cover more; `Raw`, `Header`
-  and `Fixed(rect)` are explicit. Padding is automatic (2 % of the longer side, at least
-  24 px in a PNG) unless `padding: Some(units)`. PNG sizes are rounded up to a multiple
-  of `ToPngOptions::lattice` (28 px, Claude's patch size; 0 = off) with the world
-  rectangle grown to match, so `view_box.width * px_per_unit == width` exactly and the
-  `ViewBox` affine round-trips. `ToSvgResult::crop` / `ToPngResult::crop` report the
-  source, the rectangle, the tight content bounds, the padding, the header extents and
-  every excluded entity with its reason (`scale_outlier`, `far_outlier`,
-  `outside_crop`). CLI: `--crop auto|raw|header|x0,y0,x1,y1`, `--padding`, `--lattice`;
-  `--no-trim` stays as `--crop raw`. The 3256x INSERT of `example_2000.dwg` /
-  `example_2018.dwg` is now a listed exclusion instead of a 3.4-million-unit viewBox.
-- Visibility (`uncad::visibility`): `hidden_reason(common, tables)` says why the drawing
-  does not show an entity -- its own invisible flag, the `DEFPOINTS` layer, a layer that
-  is off, frozen or non-plotting -- and `lineweight_mm` decodes the lineweight codes.
-  `LayerRecord` gains `on`, `frozen`, `locked`, `plot`, `lineweight_mm` and `linetype`;
-  `EntityCommon` gains `invisible`, `lineweight_mm`, `linetype` and `ltype_scale`. The
-  renderer leaves hidden entities out (block contents included) and reports how many in
-  `ToSvgResult::hidden` / `ToPngResult::hidden`; `ToSvgOptions::include_hidden` (CLI
-  `--include-hidden`) draws them at 50 % opacity instead. A layer's plot flag is trusted
-  from R2000+ DWG files only: LibreDWG's DXF reader cannot tell an omitted group 290 from
-  a cleared one, so DXF layers always read as plotting (`docs/CAVEATS.md`).
-- Polyline geometry (`uncad::geom`): `ocs_to_wcs` (the DXF arbitrary-axis algorithm),
-  `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
-  `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
-  `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
-  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()`,
-  `area()` and `signed_area()`; POLYLINE_2D bulges are collected from its VERTEX_2D
-  subentities. The renderer draws bulges as SVG arcs instead of chords (the 25-arc
-  revision cloud in `example_2000.dwg` was a 25-gon). The design document's worked
-  example -- a 100 x 50 outline with one 90-degree arc -- measures 305.536 around and
-  5356.748 in area.
-- `extrusion` on CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, INSERT and SOLID (serde default
-  `(0,0,1)`), so a consumer can tell a mirrored entity apart.
-- Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
-  LINEAR, ALIGNED, ANGULAR_3POINT, ANGULAR_2LINE, RADIUS, DIAMETER, ORDINATE, ARC_LENGTH
-  -- with its definition points), `measurement` (the stored `act_measurement`: drawing
-  units before DIMLFAC, degrees for angular kinds, `None` for the R14-era `-1`
-  sentinel), `measurement_from_points` (recomputed: LINEAR projected on its rotation,
-  ALIGNED/RADIUS/DIAMETER distances, angular sectors chosen by the arc point, ordinate
-  offsets, arc length), `user_text`, `display_text` with `display_text_raw` and
-  `display_source` (suppressed / user text with `<>` substituted / the cached `*D`
-  block's label / formatted by this crate), `definition_point`, `text_midpoint`,
-  `dimstyle` and the effective `dimlfac`. `tables.dimstyles` holds every DIMSTYLE's
-  formatting variables (`DimStyleRecord`). The built-in formatter handles decimal,
-  architectural and fractional units, DIMZIN trailing-zero suppression and decimal
-  degrees; the cached label is preferred whenever the file has one. Verified against
-  `example_2000.dwg`: every stored value equals the recomputed one to 1e-6 and the
-  labels read `1504,68` and `108°`.
-- Text decoding (`uncad::text`): `decode_mtext` and `decode_text` turn the stored
-  strings into readable ones -- `\P` paragraphs, `\S` stacked fractions in all three
-  forms (`1/2`, `1#2`, `+0.1^-0.2`) with a space after a preceding digit so
-  `3{\H0.7x;\S1#2;}"` reads `3 1/2"` (it rendered as `31/2"`), `{}` groups and
-  `\A`/`\H`/`\f`/`\C`/... format codes removed, `\U+XXXX`, and the `%%c` (diameter),
-  `%%d`, `%%p`, `%%%`, `%%nnn` symbol codes with `%%u`/`%%o` reported as decorations.
-  TEXT, ATTRIB, MTEXT and TOLERANCE carry the result as `text_plain` next to the raw
-  `text`; the renderer draws `text_plain`.
-- Text placement fields: TEXT and ATTRIB gain `horizontal_alignment`,
-  `vertical_alignment`, `alignment_point`, `width_factor`, `oblique_angle` and `style`;
-  ATTRIB and ATTDEF gain `tag` (the attribute's name), ATTRIB `invisible`; MTEXT gains
-  `attachment`, `rect_width`, `extents_width`, `extents_height`, `x_axis_dir` and
-  `style`. All have serde defaults, so 0.2.0 JSON still loads.
-- PNG sizing in pixels: `ToPngOptions { size: PngSize, background: Background,
-  stroke_px, max_edge }`. `PngSize::FitLongEdge(px)` (the default, 1568 px -- the
-  largest a Claude standard-tier image keeps unresized), `PxPerUnit(f64)` and
-  `Scale(f64)` (0.2.0's units-times-factor rule). `Background::White` (the default,
-  written as 8-bit RGB) or `Transparent` (8-bit RGBA). `stroke_px` (default 1.25)
-  sizes every stroke in output pixels. `max_edge` (default 8000) refuses larger images
-  with `PngError::TooLarge` instead of allocating them; `PngError::InvalidSize` rejects
-  a non-finite or non-positive size. `ToPngResult` gains `width`, `height`,
-  `view_box` and `px_per_unit`, and `ToSvgResult` gains `view_box`
-  (`uncad::ViewBox`, with `world_bounds`, `world_to_px` and `px_to_world`), so a
-  consumer can map a pixel back to drawing coordinates. CLI: `--fit <px>`,
-  `--ppu <n>`, `--bg white|transparent`, `--stroke <px>`, `--max-edge <px>`.
-- `uncad::color::contrast_on_white`: the renderer darkens colours whose luminance
-  exceeds 0.45 (ACI yellow `#ffff00` draws as `#828200`, cyan as `#00a4a4`) so they read
-  on the white page; the model and JSON keep the file's colours.
 - `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
   (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
   `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
@@ -176,229 +32,159 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `Dwg_Data`), `uncad_tv_to_utf8`/`uncad_entity_tv_to_utf8`/`uncad_free_string`
   (code-page to UTF-8 through LibreDWG's own `bit_TV_to_utf8`), and the
   `dwg_resolve_handle` binding.
-- Tests: `crates/uncad/tests/read_paths.rs` (a DWG and a DXF under a Korean directory
-  name, `parse` vs `parse_bytes` equality, error kinds).
+- Text decoding (`uncad::text`): `decode_mtext` and `decode_text` turn the stored
+  strings into readable ones -- `\P` paragraphs, `\S` stacked fractions in all three
+  forms (`1/2`, `1#2`, `+0.1^-0.2`) with a space after a preceding digit so
+  `3{\H0.7x;\S1#2;}"` reads `3 1/2"` (it rendered as `31/2"`), `{}` groups and
+  `\A`/`\H`/`\f`/`\C`/... format codes removed, `\U+XXXX`, and the `%%c` (diameter),
+  `%%d`, `%%p`, `%%%`, `%%nnn` symbol codes with `%%u`/`%%o` reported as decorations.
+  TEXT, ATTRIB, MTEXT and TOLERANCE carry the result as `text_plain` next to the raw
+  `text`; the renderer draws `text_plain`.
+- Text placement fields: TEXT and ATTRIB gain `horizontal_alignment`,
+  `vertical_alignment`, `alignment_point`, `width_factor`, `oblique_angle` and `style`;
+  ATTRIB and ATTDEF gain `tag` (the attribute's name), ATTRIB `invisible`; MTEXT gains
+  `attachment`, `rect_width`, `extents_width`, `extents_height`, `x_axis_dir` and
+  `style`. All have serde defaults, so 0.2.0 JSON still loads.
+- Dimension values (`uncad::dimension`, `DimensionEntity`): `geometry` (the kind --
+  LINEAR, ALIGNED, ANGULAR_3POINT, ANGULAR_2LINE, RADIUS, DIAMETER, ORDINATE, ARC_LENGTH
+  -- with its definition points), `measurement` (the stored `act_measurement`: drawing
+  units before DIMLFAC, degrees for angular kinds, `None` for the R14-era `-1`
+  sentinel), `measurement_from_points` (recomputed: LINEAR projected on its rotation,
+  ALIGNED/RADIUS/DIAMETER distances, angular sectors chosen by the arc point, ordinate
+  offsets, arc length), `user_text`, `display_text` with `display_text_raw` and
+  `display_source` (suppressed / user text with `<>` substituted / the cached `*D`
+  block's label / formatted by this crate), `definition_point`, `text_midpoint`,
+  `dimstyle` and the effective `dimlfac`. `tables.dimstyles` holds every DIMSTYLE's
+  formatting variables (`DimStyleRecord`). The built-in formatter handles decimal,
+  architectural and fractional units, DIMZIN trailing-zero suppression and decimal
+  degrees; the cached label is preferred whenever the file has one. Verified against
+  `example_2000.dwg`: every stored value equals the recomputed one to 1e-6 and the
+  labels read `1504,68` and `108°`.
+- Polyline geometry (`uncad::geom`): `ocs_to_wcs` (the DXF arbitrary-axis algorithm),
+  `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
+  `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
+  `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
+  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()`,
+  `area()` and `signed_area()`; POLYLINE_2D bulges are collected from its VERTEX_2D
+  subentities. The renderer draws bulges as SVG arcs instead of chords (the 25-arc
+  revision cloud in `example_2000.dwg` was a 25-gon). The design document's worked
+  example -- a 100 x 50 outline with one 90-degree arc -- measures 305.536 around and
+  5356.748 in area.
+- `extrusion` on CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, INSERT and SOLID (serde default
+  `(0,0,1)`), so a consumer can tell a mirrored entity apart.
+- Visibility (`uncad::visibility`): `hidden_reason(common, tables)` says why the drawing
+  does not show an entity -- its own invisible flag, the `DEFPOINTS` layer, a layer that
+  is off, frozen or non-plotting -- and `lineweight_mm` decodes the lineweight codes.
+  `LayerRecord` gains `on`, `frozen`, `locked`, `plot`, `lineweight_mm` and `linetype`;
+  `EntityCommon` gains `invisible`, `lineweight_mm`, `linetype` and `ltype_scale`. The
+  renderer leaves hidden entities out (block contents included) and reports how many in
+  `ToSvgResult::hidden` / `ToPngResult::hidden`; `ToSvgOptions::include_hidden` (CLI
+  `--include-hidden`) draws them at 50 % opacity instead. A layer's plot flag is trusted
+  from R2000+ DWG files only: LibreDWG's DXF reader cannot tell an omitted group 290 from
+  a cleared one, so DXF layers always read as plotting (`docs/CAVEATS.md`).
+- PNG sizing in pixels: `ToPngOptions { size: PngSize, background: Background,
+  stroke_px, max_edge }`. `PngSize::FitLongEdge(px)` (the default, 1568 px -- the
+  largest a Claude standard-tier image keeps unresized), `PxPerUnit(f64)` and
+  `Scale(f64)` (0.2.0's units-times-factor rule). `Background::White` (the default,
+  written as 8-bit RGB) or `Transparent` (8-bit RGBA). `stroke_px` (default 1.25)
+  sizes every stroke in output pixels. `max_edge` (default 8000) refuses larger images
+  with `PngError::TooLarge` instead of allocating them; `PngError::InvalidSize` rejects
+  a non-finite or non-positive size. `ToPngResult` gains `width`, `height`,
+  `view_box` and `px_per_unit`, and `ToSvgResult` gains `view_box`
+  (`uncad::ViewBox`, with `world_bounds`, `world_to_px` and `px_to_world`), so a
+  consumer can map a pixel back to drawing coordinates. CLI: `--fit <px>`,
+  `--ppu <n>`, `--bg white|transparent`, `--stroke <px>`, `--max-edge <px>`.
+- `uncad::color::contrast_on_white`: the renderer darkens colours whose luminance
+  exceeds 0.45 (ACI yellow `#ffff00` draws as `#828200`, cyan as `#00a4a4`) so they read
+  on the white page; the model and JSON keep the file's colours.
+- The crop rule (`uncad::crop`, design section 4): every visible entity's world extent
+  is measured while rendering; `CropMode::Auto` shows all of them minus *outliers* (at
+  most `max(3, 1 %)` entities: the largest when they dwarf the rest of the drawing 20x,
+  or those more than 20 diagonals away from it), and uses the
+  header `$EXTMIN/$EXTMAX` instead when those are sane and cover more; `Raw`, `Header`
+  and `Fixed(rect)` are explicit. Padding is automatic (2 % of the longer side, at least
+  24 px in a PNG) unless `padding: Some(units)`. PNG sizes are rounded up to a multiple
+  of `ToPngOptions::lattice` (28 px, Claude's patch size; 0 = off) with the world
+  rectangle grown to match, so `view_box.width * px_per_unit == width` exactly and the
+  `ViewBox` affine round-trips. `ToSvgResult::crop` / `ToPngResult::crop` report the
+  source, the rectangle, the tight content bounds, the padding, the header extents and
+  every excluded entity with its reason (`scale_outlier`, `far_outlier`,
+  `outside_crop`). CLI: `--crop auto|raw|header|x0,y0,x1,y1`, `--padding`, `--lattice`;
+  `--no-trim` stays as `--crop raw`. The 3256x INSERT of `example_2000.dwg` /
+  `example_2018.dwg` is now a listed exclusion instead of a 3.4-million-unit viewBox.
+- A bundled font and measured text boxes. `to_png`, the tiles and the package's text
+  metrics are shaped with `Uncad Sans`, a 370 KB subset of Noto Sans KR (OFL 1.1; Latin,
+  Greek, the 2350 KS X 1001 Hangul syllables, the CAD symbols `∅ ° ± ² ³ Ø ㎡ ㎜ ㎥`) embedded
+  in the crate, so images are the same on every machine and Hangul labels no longer
+  depend on the host (`Fonts::Bundled`, the default; `Fonts::BundledAndSystem` / CLI
+  `--fonts bundled+system` adds the host's fonts for characters the subset lacks). Every
+  `<text>` in the SVG carries `font-family="Uncad Sans"` and an `id` (its handle, or
+  `insert/handle` inside a block). `texts.json` boxes are measured from the shaped glyph
+  outlines through usvg (`bbox_confidence: "measured"`, `font_ok`, `unshaped_glyphs`), the
+  0.6-em estimate remaining only for the crop and for texts usvg drops.
+- The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
+  LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
+  profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
+  pyramid (`frames/f0/tiles/z*/rRR_cCC.png`, 1092 px with 224 px overlap, edge tiles
+  shifted inward, empty tiles listed but not written, depth chosen so the dominant text
+  height reaches 14 px) with a JSON sidecar per tile (world rectangle, both affines,
+  neighbours, parent and children, the texts, dimensions, blocks and regions on it with
+  pixel boxes); and the records -- `texts.json` (block contents included, ids
+  `<insert>/<child>`), `dimensions.json`, `geometry.json`, `regions.json` (area,
+  perimeter, centroid, the texts inside), `blocks.json`, `strings.json` (normalised
+  string -> ids), `drawing.json`, `report.json` (excluded and hidden entities with
+  reasons), `tiles.json`, `README.txt`. `--svg` / `--full` add `drawing.svg` /
+  `entities.json`; record files above `--shard-kb` (96) are sharded and indexed in the
+  manifest; profiles `claude`, `claude-hires`, `openai-patch`. Output is deterministic
+  except for the timings in `report.json`. Each tile rasterizes only the entities whose
+  extent touches it, in parallel per level; `strings.json` keys are NFKC-normalised
+  (`㎡` -> `m2`, full-width digits, fraction slash) and every string is also indexed
+  without spaces. The renderer's text extents (and so the crop) come from a
+  0.6-em-per-character estimate (`uncad::text::estimate_text_box`) instead of the anchor
+  point alone. Frames: entities are grouped by proximity (closer than `frame_gap`, 5 % of
+  the crop diagonal, on a square grid); the largest group is the primary frame `f0` and
+  every detached group with `min_frame_entities` (20) entities or a text gets its own
+  overview and tile pyramid under `frames/fN/`, up to `max_frames` (8) -- a detail drawn
+  beside the plan is readable at its own scale. The manifest lists `frames` (content,
+  counts, overview, levels, per-frame legibility) and `frames_dropped`; a single
+  connected drawing keeps one frame whose overview is `overview.png` itself. CLI
+  `--frame-gap`, `--min-frame-entities`, `--max-frames`.
+- Paper layouts. `tables.layouts` holds every LAYOUT (`LayoutRecord`: tab order, the
+  block it draws, limits, extents, the active viewport) with its plot settings
+  (`PlotSettings`: paper name and size in mm, margins, units, rotation, plot type, scale)
+  read through LibreDWG's embedded-struct dynapi path, and `ViewportEntity` gains the view
+  fields (`view_center`, `view_size`, `view_target`, `view_direction`, `twist` in radians,
+  `status_flag`, `on`, `id`, `frozen_layers`) with `scale()`, `model_window()`,
+  `model_to_paper()` / `paper_to_model()` and `is_overall()`. `uncad export` writes
+  `sheets.json` and `sheets/<layout>/overview.png` for every paper layout: the sheet
+  (the layout's limits, else the paper size, else the paper entities) at the profile's size
+  with the layout's own entities and the model composited through each on, plan-view,
+  non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
+  layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
+  hide the border) still shows its window, only the border is left out (`--no-sheets`
+  skips it). The twisted-viewport fixture now carries a LAYOUT with A4 plot settings. `header.format` says `dwg` or `dxf`.
+- Tests and evaluation: `tests/corpus_sweep.rs` (ignored by default) parses and renders
+  every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
+  answers five agent questions from the package alone; `tests/export.rs` checks every
+  file, the tile grid, sidecar affines and byte-identical output on a second run.
+  `tests/sheets_compositing.rs` pins which viewports a sheet composites and where the
+  paper lies for every plot rotation and paper unit, from the new
+  `viewport_states_r2000.dxf` fixture (one viewport per state, two page setups); the new
+  `radial_r2000.dxf` fixture and the corpus's `2000/TS1.dwg` cover the RADIUS, DIAMETER
+  and ANGULAR_3POINT dimensions no other test file has.
+  `docs/EVAL.md` records the sweep, the timings and how to rerun them.
+  `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
+  document -- the `export` subcommand and its options included -- and the parser's
+  refusals, and `tests/read_paths.rs` reads a DWG and a DXF under a Korean
+  directory name (`parse` against `parse_bytes`, error kinds).
 
-### Fixed
+### Changed
 
-- A panic inside the rasterizer took the process with it. tiny-skia's scan converter
-  asserts rather than returning an error when a path's coordinates overflow its
-  fixed-point edge list, and the export ran it on worker threads, where the panic came
-  back as an `expect` on the join. Every `resvg::render` call is now caught and reported
-  as `PngError::RenderPanic` with the panic's own message, and a tile thread that panics
-  ends the export with that error rather than aborting.
-- A RAY or an XLINE could kill the process. Both are infinite lines, and the renderer
-  drew them as a segment 1e6 drawing units long -- a length that is really a coordinate:
-  in a drawing a few thousandths of a unit across, or at a deep tile level, that endpoint
-  lands 1e12 pixels off the canvas, overflows tiny-skia's fixed-point scan converter and
-  panics inside the dependency (`assertion failed: edges[curr_idx].last_y >= curr_y`),
-  for the export inside a worker thread, which took the whole run down with it. An
-  infinite line is now drawn exactly as far as the image shows: the entity emits a
-  placeholder (like the stroke widths) carrying its base point, direction and the block
-  matrices above it, and every assembly path -- the SVG, a tile, a sheet's paper and the
-  model inside each viewport, where the viewport's own matrix is composed in -- clips it
-  to that document's viewBox grown by a small margin, dropping it entirely when the
-  window shows none of it. A RAY still starts at its base point and runs one way, an
-  XLINE both; the extent of either is still the base point alone, so neither enlarges the
-  crop, and both are now kept in a tile or a viewport whose window their extent misses
-  but their line crosses. New fixture `infinite_lines_r2000.dxf`.
-- The attribute values of a block reference nested inside another block -- a tag block
-  inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
-  `strings.json` listed only top-level attributes, so "which door is D-101" could not be
-  answered, and for DWG input (where the value hangs off the nested INSERT rather than
-  being a child of the block) the text was not even drawn. Both shapes are now collected
-  and rendered once each, under the id `<insert>/<attrib>`. New fixture
-  `nested_attrib_r2000.dxf`.
-- A long Hangul (or wide-glyph) text vanished from tiles it reaches: frames, frame
-  overviews and tiles are culled by the renderer's extents, which hold the 0.6-em
-  estimate, while `texts.json` lists a text's tiles from its measured glyph box -- so a
-  record said the text is on a tile the picture drew without it, and a detached group's
-  own frame could cut the string. The measured boxes now widen the drawn extents (per
-  top-level entity or INSERT) before the frames and the tile culling are computed.
-- A drawing whose whole content is one point -- a single POINT, coincident entities, or
-  only RAY/XLINE entities, which contribute just their base point -- was rendered into a
-  window 5e-11 units wide at 2.4e13 px/unit: every image blank, `crop.padding_units`
-  2e-11, and every `world` box in tiles.json and the sidecars collapsing to zero size
-  when it was rounded, so the affines no longer matched it. The padding of a zero-size
-  rectangle is now at least half a unit whatever scale it is seeded with (the plain PNG
-  path too), the package gives such content a ten-unit window, and the scale is capped,
-  so the entity is visible at a sane scale and the boxes are real rectangles.
-- Re-exporting into a directory that already held a package left the previous run's
-  files beside the new ones -- record shards (`texts.003.json`), deeper tile levels and
-  their sidecars, sheets of layouts that no longer exist -- all valid-looking and none of
-  them in the new `manifest.json`, so a consumer that walks the tree (as the generated
-  README.txt invites) mixed two exports. `export_package` now clears what the previous
-  `manifest.json` listed, and the `frames/`, `sheets/` directories that empties, before
-  it writes; a directory without an uncad manifest, and any file such a manifest does not
-  list, is left untouched.
-- A tile sidecar's `layers_present` listed only the layers of the texts, dimensions and
-  block instances on the tile, so a tile drawn from geometry alone -- the usual case --
-  reported no layers at all and an agent filtering tiles by layer skipped it. It now
-  covers every record the tile shows, geometry and regions included, and is computed
-  before the size trim so cutting rows never shortens the layer list.
-- `manifest.guidance` quoted "224 px overlap" whatever the profile was, contradicting
-  `frames[].levels[].overlap_px` (392 for `claude-hires`, 320 for `openai-patch`). The
-  sentence is built from the profile in use now and names the tile size as well.
-- Tile sidecars broke their own 32 KB cap: the trim loop measured the compact JSON but
-  the file was written pretty-printed, about 3.3x larger, so a dense drawing's sidecars
-  reached 100 KB *and* dropped a quarter of their record rows (`records_truncated: true`)
-  to satisfy a limit the file then exceeded threefold. Sidecars are written compact now,
-  like the record shards, so the measured and the written form are the same file.
-- A paper layout with no paper size, no limits and nothing but point-like content (a
-  lone POINT or a zero-length LINE in `*Paper_Space`, the R13/R14 and OBJECTS-less DXF
-  case) failed the whole export with `rendering failed: render size is zero`, leaving a
-  half-written directory with no manifest: the sheet was fitted with zero padding, so a
-  zero-size rectangle gave an infinite scale. Such a layout is skipped now with an
-  `UnusableSheet` warning naming it, and the rest of the package is written.
-- Two paper layouts whose names differ only outside `[A-Za-z0-9_-]` shared one sheet
-  image: the directory came from the sanitised name alone, so every all-Hangul name of
-  the same length (평면도 / 입면도, the usual Korean set) became `___`, the second layout's
-  `sheets/___/overview.png` overwrote the first's, both `sheets.json` entries pointed at
-  the survivor and `manifest.files` listed that path twice with two byte counts; an empty
-  layout name wrote `sheets//overview.png` into the manifest while the file landed
-  elsewhere. Sheet directories are unique now -- an empty name becomes `sheet`, a repeat
-  takes `_2`, `_3` in tab order -- so the manifest never lists a path twice.
-- The package wrote world rectangles in two shapes: `manifest.json`'s `overview.world`,
-  `frames[].content`, `crop.*` and everything in `sheets.json` came out of serde's derive
-  as `{"min_x": .., "min_y": .., "max_x": .., "max_y": ..}`, while tiles.json, every
-  sidecar `world`, every record `bbox` and `manifest.sheets[].rect` used the
-  `[x0, y0, x1, y1]` array the design documents -- the same layout's rectangle read one
-  way in the manifest and the other in `sheets.json`. `crop::Rect` serializes as that
-  array now, and reads both forms back, so an 0.3.0 document still loads.
-- The CLI took an option it did not know as the input file, or dropped it in silence.
-  `parse_args` matched only the render flags and ended in `other if input.is_none() =>
-  input = other` and `_ => {}`, while `uncad export` scanned its own eleven options in a
-  second loop that also ended in `_ => {}`: `uncad export --max-levels 2 d.dwg -o out`
-  failed with "cannot open input file '--max-levels'", `uncad export d.dwg -o out
-  --max-level 1 --sharkb 1` exited 0 and wrote the default package, and a second input
-  path or an option missing its value went the same way. One parser now owns every flag
-  of both commands, so an option is either understood wherever it stands or refused by
-  name: an unknown option, a second positional and a missing value are errors, an
-  option of the other command names the command it belongs to (`--fit` is not an export
-  option; `--max-levels` is one), and `--shard-kb`'s error says kilobytes instead of
-  pixels. `uncad export` accepts `--no-trim` and `--fonts` as the usage said it should.
-- Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
-  points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
-  stream order, so `line2_end` held the arc point and the sector probe lay on the line
-  itself (`example_2000.dxf` 43B measured 42.3 degrees from its points instead of 108),
-  and the ordinate's X/Y type -- bit 64 of group 70 in a DXF, the stream-only `flag2`
-  in a DWG -- was never read, so every DXF ordinate was a Y datum. `definition_point`
-  is the arc point (DXF 16) for `ANGULAR_2LINE` from both readers now, and the model
-  docs say so.
-- The sheet rectangle ignored the plot origin (DXF 46/47). `PlotSettings::sheet_rect`
-  placed the paper by the margins alone, so with the usual "origin = minus the margins"
-  page setup the exported sheet was shifted by a margin and the title block's top and
-  right edges fell off `sheets/<layout>/overview.png` (six of seven AutoCAD-written
-  samples). The export now takes the layout's own `LIMMIN`/`LIMMAX` first
-  (`rect_source: "layout_limits"`; AutoCAD keeps them equal to the paper's placement,
-  rotation included) and `sheet_rect` folds the offset in as ezdxf does for the
-  `paper_size` fallback.
-- `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
-  package's `area` / `orientation`) applied the bulge stored on the last vertex of an
-  *open* polyline to the straight segment that closes it for the area, which AutoCAD
-  leaves behind after BREAK/TRIM: a 0.77 x 0.45 in sketch reported 63646 in^2. The
-  helpers take the `closed` flag now, like `polyline_length` and `polyline_bounds`.
-- TOLERANCE (a GD&T feature control frame) rendered invisibly in every R2000+ file:
-  LibreDWG decodes its `height` for R13/R14 only, so `text_height` was 0 and the SVG
-  carried `font-size="0"`. The height is the DIMSTYLE's `DIMTXT` now (the new
-  `ToleranceEntity::dimstyle` names it), else the header's, else 1.0.
-- Polyline arcs were drawn as their mirror image across the chord: the renderer emitted
-  SVG sweep flag 1 for a positive (counter-clockwise) bulge, so every fillet, slot,
-  rounded corner and revision-cloud scallop bent the wrong way -- away from the space
-  the crop reserved for it (the ARC entity was right all along). A polyline in a
-  mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
-  vertices, since the reflection reverses each arc's turn; `bulges` are documented as
-  world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
-- Drawings far from the origin lost their lines and got garbled text in every PNG, tile
-  and sheet, silently: the SVG carried absolute world coordinates and usvg/tiny-skia keep
-  path points in `f32`, so at 1e7 units the 1.25 px strokes collapsed and at 2.5e8 (a
-  millimetre plan at projected coordinates) the glyph outlines were quantized to 16 mm.
-  The renderer now writes every coordinate relative to the drawing's own origin -- the
-  rounded per-axis median of its entities' reference points, used only when it exceeds
-  32768 units, so every drawing near the origin keeps its SVG byte for byte -- and
-  reports it as `ToSvgResult::origin` / `ToPngResult::origin` (SVG user units = world
-  minus origin; `view_box` and every JSON record stay in world units); the package's
-  `manifest.json` carries `drawing.svg`'s origin as `svg_origin`. A composited sheet
-  folds the model's and the paper's origins into the viewport matrix.
-- On a composited sheet the paper's and the model's hatch pattern definitions shared ids
-  (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
-  legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's
-  pattern lines were not scaled by the viewport, so a 1:16 viewport drew them 0.08 px
-  wide. A paper render prefixes its ids with `p`, and every composited viewport gets its
-  own copy of the model's defs (ids suffixed with the viewport handle) with the pattern
-  strokes scaled by its scale. New fixture `hatched_viewport_r2000.dxf`.
-- A rotated block nested inside a mirrored (negative x scale or extrusion `(0,0,-1)`)
-  or non-uniformly scaled block reference had its bounds, crop, tile membership,
-  `blocks.json` box and `texts.json` anchors reflected about the parent's insertion
-  point, although the picture (nested `<g transform>` groups) was right: the composed
-  transform added rotations and multiplied scales, which is only valid for a uniform
-  scale. Both the renderer's transform and the export's affine are full 2 x 3 matrices
-  composed by multiplication now. A nested text's estimated box goes through the same
-  matrix, and its `rotation_deg` is the orientation of its glyphs (the transformed up
-  axis), so an upright mirror-written label stays 0.
-- The extent of a CIRCLE, ARC, ELLIPSE or bulged polyline inside a block reference
-  rotated by other than a multiple of 90 degrees was measured from two corners of its
-  box, so a circle in a block inserted at 45 degrees had a zero-width extent and a
-  door swing lost its far half: `--crop raw` cut it off, `blocks.json` boxes were short
-  and the tiles the swing crossed were rendered blank. All four corners are measured
-  now (conservative by up to sqrt 2 at 45 degrees, never short).
-- Text was drawn 27 % too small: the CAD text height (the height of the capitals) was
-  used as the SVG em size. TEXT, ATTRIB, MTEXT, TOLERANCE and dimension labels are now
-  drawn at `font-size = height / 0.733`, the bundled face's cap-height ratio
-  (`png::BUNDLED_CAP_HEIGHT`, from the font's OS/2 table), so a height-2.5 label has
-  2.5-unit capitals; the justification offsets are one height for top and half for
-  middle. MTEXT baselines are spaced 5/3 of the height (AutoCAD's single spacing, and
-  what the extents estimate already assumed) instead of 1.2. `texts.json` records keep
-  the drawing's `height`; their measured boxes reflect the larger glyphs, and the 0.6-em
-  estimate (`text::CHAR_ADVANCE`) scales with the font size.
-- A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
-  `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
-  MTEXT already was.
-- The `TinyOverview` warning tested the overview's long edge, which the profile always
-  keeps at several hundred pixels, so it never fired; it now tests the short edge (a
-  500:1 drawing's 700 x 28 px overview is reported).
-- Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
-  offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
-  anchored at its left-baseline point, i.e. displaced by up to its own width (541 of
-  861 texts on one sample drawing). MTEXT is rotated by its `x_axis_dir` (always drawn
-  unrotated before, `docs/CAVEATS.md` "Text placement") and positioned by its
-  attachment point instead of always top-left. Invisible ATTRIBs are no longer drawn.
-- LWPOLYLINE `closed` is read from bit 512 of `flag`, LibreDWG's in-memory closed bit,
-  instead of bit 1 (which marks a stored extrusion). Every closed LWPOLYLINE in a DWG was
-  exported and drawn open before, and mirrored open ones as closed
-  (`docs/CAVEATS.md`, "The polyline closed flag").
-- A POLYLINE_PFACE face whose vertex index is 0 ("no vertex") made `parse()` panic
-  with an integer overflow in debug builds (`example_2000.dwg` and `example_2018.dwg`
-  from the LibreDWG corpus); release builds silently wrapped the index instead.
-- Text, layer names and block names in pre-R2007 DWGs and in pre-R2007 DXF input are now
-  decoded through the file's code page instead of lossily as UTF-8, so Korean text in
-  R2000/R2004 drawings and the plus-minus/degree signs in dimension text no longer come
-  out as U+FFFD; an unmappable character becomes U+FFFD instead of truncating the string,
-  and a corrupt code-page value in the file header no longer indexes LibreDWG's tables
-  out of bounds (`docs/CAVEATS.md`, "Fixed: pre-R2007 and DXF text ...").
-- An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
-  them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
-  selected. The same shim now converts them (same CAVEATS entry).
-- MTEXT text and `header.dimpost` of an R2007+ DXF were read as UTF-16 although LibreDWG
-  stores both 8-bit (MTEXT's text chunks are `strdup`'d with no version branch, and the
-  HEADER section is parsed before the version is known), so every MTEXT and the header's
-  `$DIMPOST` came back as CJK-looking garbage that carried bytes read past the end of the
-  allocation (`example_2018.dxf`'s only MTEXT read `"敔獫潴..."` instead of
-  `"Teksto granda nur por testi..."`). Those strings now go through an 8-bit path
-  (`uncad_bytes_to_utf8`) that decodes them as the file's own encoding -- UTF-8 for an
-  R2007+ DXF, the code page otherwise -- with the `\U+XXXX` escapes expanded.
-- The DOS-era BIG5 (24) and GB2312 (31) code pages paired every byte, ASCII included, so
-  a DWG or DXF declaring either lost all its table names and parsed to zero entities; they
-  now pair only bytes >= 0x80, GB2312's EUC-CN bytes are looked up in the 7-bit form its
-  table uses (so `中国` decodes instead of becoming U+FFFD), and CP932 (22, DOS Shift-JIS)
-  is decoded as the double-byte encoding it is instead of one byte at a time.
-- A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
-  code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
-  empty directory, because the SVG carried a character XML forbids. `text_plain` now marks
-  such a character with U+FFFD, `%%001`..`%%031` (other than 9/10/13) are left as written
-  like any other non-code, and the SVG writer strips whatever still reaches it.
-- `parse()` opens files under paths with non-ASCII characters on Windows
-  (`docs/CAVEATS.md`, "Fixed: a path with non-ASCII characters ...").
+- `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
+  requires prettyplease 0.3 -- see the commit for why the pair has to move
+  together. The generated bitfield accessors raise one more harmless clippy lint
+  (`manual_div_ceil`), allowed at crate level with the existing ones (see
+  `docs/CAVEATS.md`, "Clippy").
 
 ### Changed (breaking)
 
@@ -432,6 +218,227 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - `CadDatabase` has a third field, `header`; a struct literal without it no longer
   compiles (use `CadDatabase::new` or add `header: Header::default()`).
 
+### Fixed
+
+- A panic inside the rasterizer took the process with it. tiny-skia's scan converter
+  asserts rather than returning an error when a path's coordinates overflow its
+  fixed-point edge list, and the export ran it on worker threads, where the panic came
+  back as an `expect` on the join. Every `resvg::render` call is now caught and reported
+  as `PngError::RenderPanic` with the panic's own message, and a tile thread that panics
+  ends the export with that error rather than aborting.
+- A RAY or an XLINE could kill the process. Both are infinite lines, and the renderer
+  drew them as a segment 1e6 drawing units long -- a length that is really a coordinate:
+  in a drawing a few thousandths of a unit across, or at a deep tile level, that endpoint
+  lands 1e12 pixels off the canvas, overflows tiny-skia's fixed-point scan converter and
+  panics inside the dependency (`assertion failed: edges[curr_idx].last_y >= curr_y`),
+  for the export inside a worker thread, which took the whole run down with it. An
+  infinite line is now drawn exactly as far as the image shows: the entity emits a
+  placeholder (like the stroke widths) carrying its base point, direction and the block
+  matrices above it, and every assembly path -- the SVG, a tile, a sheet's paper and the
+  model inside each viewport, where the viewport's own matrix is composed in -- clips it
+  to that document's viewBox grown by a small margin, dropping it entirely when the
+  window shows none of it. A RAY still starts at its base point and runs one way, an
+  XLINE both; the extent of either is still the base point alone, so neither enlarges the
+  crop, and both are now kept in a tile or a viewport whose window their extent misses
+  but their line crosses. New fixture `infinite_lines_r2000.dxf`.
+- Text, layer names and block names in pre-R2007 DWGs and in pre-R2007 DXF input are now
+  decoded through the file's code page instead of lossily as UTF-8, so Korean text in
+  R2000/R2004 drawings and the plus-minus/degree signs in dimension text no longer come
+  out as U+FFFD; an unmappable character becomes U+FFFD instead of truncating the string,
+  and a corrupt code-page value in the file header no longer indexes LibreDWG's tables
+  out of bounds (`docs/CAVEATS.md`, "Fixed: pre-R2007 and DXF text ...").
+- An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
+  them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
+  selected. The same shim now converts them (same CAVEATS entry).
+- MTEXT text and `header.dimpost` of an R2007+ DXF were read as UTF-16 although LibreDWG
+  stores both 8-bit (MTEXT's text chunks are `strdup`'d with no version branch, and the
+  HEADER section is parsed before the version is known), so every MTEXT and the header's
+  `$DIMPOST` came back as CJK-looking garbage that carried bytes read past the end of the
+  allocation (`example_2018.dxf`'s only MTEXT read `"敔獫潴..."` instead of
+  `"Teksto granda nur por testi..."`). Those strings now go through an 8-bit path
+  (`uncad_bytes_to_utf8`) that decodes them as the file's own encoding -- UTF-8 for an
+  R2007+ DXF, the code page otherwise -- with the `\U+XXXX` escapes expanded.
+- The DOS-era BIG5 (24) and GB2312 (31) code pages paired every byte, ASCII included, so
+  a DWG or DXF declaring either lost all its table names and parsed to zero entities; they
+  now pair only bytes >= 0x80, GB2312's EUC-CN bytes are looked up in the 7-bit form its
+  table uses (so `中国` decodes instead of becoming U+FFFD), and CP932 (22, DOS Shift-JIS)
+  is decoded as the double-byte encoding it is instead of one byte at a time.
+- A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
+  code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
+  empty directory, because the SVG carried a character XML forbids. `text_plain` now marks
+  such a character with U+FFFD, `%%001`..`%%031` (other than 9/10/13) are left as written
+  like any other non-code, and the SVG writer strips whatever still reaches it.
+- `parse()` opens files under paths with non-ASCII characters on Windows
+  (`docs/CAVEATS.md`, "Fixed: a path with non-ASCII characters ...").
+- A POLYLINE_PFACE face whose vertex index is 0 ("no vertex") made `parse()` panic
+  with an integer overflow in debug builds (`example_2000.dwg` and `example_2018.dwg`
+  from the LibreDWG corpus); release builds silently wrapped the index instead.
+- LWPOLYLINE `closed` is read from bit 512 of `flag`, LibreDWG's in-memory closed bit,
+  instead of bit 1 (which marks a stored extrusion). Every closed LWPOLYLINE in a DWG was
+  exported and drawn open before, and mirrored open ones as closed
+  (`docs/CAVEATS.md`, "The polyline closed flag").
+- `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
+  package's `area` / `orientation`) applied the bulge stored on the last vertex of an
+  *open* polyline to the straight segment that closes it for the area, which AutoCAD
+  leaves behind after BREAK/TRIM: a 0.77 x 0.45 in sketch reported 63646 in^2. The
+  helpers take the `closed` flag now, like `polyline_length` and `polyline_bounds`.
+- Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
+  points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
+  stream order, so `line2_end` held the arc point and the sector probe lay on the line
+  itself (`example_2000.dxf` 43B measured 42.3 degrees from its points instead of 108),
+  and the ordinate's X/Y type -- bit 64 of group 70 in a DXF, the stream-only `flag2`
+  in a DWG -- was never read, so every DXF ordinate was a Y datum. `definition_point`
+  is the arc point (DXF 16) for `ANGULAR_2LINE` from both readers now, and the model
+  docs say so.
+- TOLERANCE (a GD&T feature control frame) rendered invisibly in every R2000+ file:
+  LibreDWG decodes its `height` for R13/R14 only, so `text_height` was 0 and the SVG
+  carried `font-size="0"`. The height is the DIMSTYLE's `DIMTXT` now (the new
+  `ToleranceEntity::dimstyle` names it), else the header's, else 1.0.
+- Polyline arcs were drawn as their mirror image across the chord: the renderer emitted
+  SVG sweep flag 1 for a positive (counter-clockwise) bulge, so every fillet, slot,
+  rounded corner and revision-cloud scallop bent the wrong way -- away from the space
+  the crop reserved for it (the ARC entity was right all along). A polyline in a
+  mirrored OCS (extrusion `(0,0,-1)`) now has its bulges negated together with its
+  vertices, since the reflection reverses each arc's turn; `bulges` are documented as
+  world-orientation values. New fixture `mirrored_bulge_r2000.dxf`.
+- The extent of a CIRCLE, ARC, ELLIPSE or bulged polyline inside a block reference
+  rotated by other than a multiple of 90 degrees was measured from two corners of its
+  box, so a circle in a block inserted at 45 degrees had a zero-width extent and a
+  door swing lost its far half: `--crop raw` cut it off, `blocks.json` boxes were short
+  and the tiles the swing crossed were rendered blank. All four corners are measured
+  now (conservative by up to sqrt 2 at 45 degrees, never short).
+- A rotated block nested inside a mirrored (negative x scale or extrusion `(0,0,-1)`)
+  or non-uniformly scaled block reference had its bounds, crop, tile membership,
+  `blocks.json` box and `texts.json` anchors reflected about the parent's insertion
+  point, although the picture (nested `<g transform>` groups) was right: the composed
+  transform added rotations and multiplied scales, which is only valid for a uniform
+  scale. Both the renderer's transform and the export's affine are full 2 x 3 matrices
+  composed by multiplication now. A nested text's estimated box goes through the same
+  matrix, and its `rotation_deg` is the orientation of its glyphs (the transformed up
+  axis), so an upright mirror-written label stays 0.
+- Text was drawn 27 % too small: the CAD text height (the height of the capitals) was
+  used as the SVG em size. TEXT, ATTRIB, MTEXT, TOLERANCE and dimension labels are now
+  drawn at `font-size = height / 0.733`, the bundled face's cap-height ratio
+  (`png::BUNDLED_CAP_HEIGHT`, from the font's OS/2 table), so a height-2.5 label has
+  2.5-unit capitals; the justification offsets are one height for top and half for
+  middle. MTEXT baselines are spaced 5/3 of the height (AutoCAD's single spacing, and
+  what the extents estimate already assumed) instead of 1.2. `texts.json` records keep
+  the drawing's `height`; their measured boxes reflect the larger glyphs, and the 0.6-em
+  estimate (`text::CHAR_ADVANCE`) scales with the font size.
+- A TEXT, ATTRIB or TOLERANCE whose stored height is 0 was written with
+  `font-size="0"` and silently dropped by the rasterizer; it is drawn at height 1, as
+  MTEXT already was.
+- Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
+  offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
+  anchored at its left-baseline point, i.e. displaced by up to its own width (541 of
+  861 texts on one sample drawing). MTEXT is rotated by its `x_axis_dir` (always drawn
+  unrotated before, `docs/CAVEATS.md` "Text placement") and positioned by its
+  attachment point instead of always top-left. Invisible ATTRIBs are no longer drawn.
+- Drawings far from the origin lost their lines and got garbled text in every PNG, tile
+  and sheet, silently: the SVG carried absolute world coordinates and usvg/tiny-skia keep
+  path points in `f32`, so at 1e7 units the 1.25 px strokes collapsed and at 2.5e8 (a
+  millimetre plan at projected coordinates) the glyph outlines were quantized to 16 mm.
+  The renderer now writes every coordinate relative to the drawing's own origin -- the
+  rounded per-axis median of its entities' reference points, used only when it exceeds
+  32768 units, so every drawing near the origin keeps its SVG byte for byte -- and
+  reports it as `ToSvgResult::origin` / `ToPngResult::origin` (SVG user units = world
+  minus origin; `view_box` and every JSON record stay in world units); the package's
+  `manifest.json` carries `drawing.svg`'s origin as `svg_origin`. A composited sheet
+  folds the model's and the paper's origins into the viewport matrix.
+- On a composited sheet the paper's and the model's hatch pattern definitions shared ids
+  (`hp0`, `hg0`, ...), so a paper-space hatch was filled with the model's pattern (the
+  legend swatches of `AutoCADSamples1.dwg`'s Layout1 came out blank), and the model's
+  pattern lines were not scaled by the viewport, so a 1:16 viewport drew them 0.08 px
+  wide. A paper render prefixes its ids with `p`, and every composited viewport gets its
+  own copy of the model's defs (ids suffixed with the viewport handle) with the pattern
+  strokes scaled by its scale. New fixture `hatched_viewport_r2000.dxf`.
+- The sheet rectangle ignored the plot origin (DXF 46/47). `PlotSettings::sheet_rect`
+  placed the paper by the margins alone, so with the usual "origin = minus the margins"
+  page setup the exported sheet was shifted by a margin and the title block's top and
+  right edges fell off `sheets/<layout>/overview.png` (six of seven AutoCAD-written
+  samples). The export now takes the layout's own `LIMMIN`/`LIMMAX` first
+  (`rect_source: "layout_limits"`; AutoCAD keeps them equal to the paper's placement,
+  rotation included) and `sheet_rect` folds the offset in as ezdxf does for the
+  `paper_size` fallback.
+- A paper layout with no paper size, no limits and nothing but point-like content (a
+  lone POINT or a zero-length LINE in `*Paper_Space`, the R13/R14 and OBJECTS-less DXF
+  case) failed the whole export with `rendering failed: render size is zero`, leaving a
+  half-written directory with no manifest: the sheet was fitted with zero padding, so a
+  zero-size rectangle gave an infinite scale. Such a layout is skipped now with an
+  `UnusableSheet` warning naming it, and the rest of the package is written.
+- Two paper layouts whose names differ only outside `[A-Za-z0-9_-]` shared one sheet
+  image: the directory came from the sanitised name alone, so every all-Hangul name of
+  the same length (평면도 / 입면도, the usual Korean set) became `___`, the second layout's
+  `sheets/___/overview.png` overwrote the first's, both `sheets.json` entries pointed at
+  the survivor and `manifest.files` listed that path twice with two byte counts; an empty
+  layout name wrote `sheets//overview.png` into the manifest while the file landed
+  elsewhere. Sheet directories are unique now -- an empty name becomes `sheet`, a repeat
+  takes `_2`, `_3` in tab order -- so the manifest never lists a path twice.
+- The attribute values of a block reference nested inside another block -- a tag block
+  inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
+  `strings.json` listed only top-level attributes, so "which door is D-101" could not be
+  answered, and for DWG input (where the value hangs off the nested INSERT rather than
+  being a child of the block) the text was not even drawn. Both shapes are now collected
+  and rendered once each, under the id `<insert>/<attrib>`. New fixture
+  `nested_attrib_r2000.dxf`.
+- A long Hangul (or wide-glyph) text vanished from tiles it reaches: frames, frame
+  overviews and tiles are culled by the renderer's extents, which hold the 0.6-em
+  estimate, while `texts.json` lists a text's tiles from its measured glyph box -- so a
+  record said the text is on a tile the picture drew without it, and a detached group's
+  own frame could cut the string. The measured boxes now widen the drawn extents (per
+  top-level entity or INSERT) before the frames and the tile culling are computed.
+- A drawing whose whole content is one point -- a single POINT, coincident entities, or
+  only RAY/XLINE entities, which contribute just their base point -- was rendered into a
+  window 5e-11 units wide at 2.4e13 px/unit: every image blank, `crop.padding_units`
+  2e-11, and every `world` box in tiles.json and the sidecars collapsing to zero size
+  when it was rounded, so the affines no longer matched it. The padding of a zero-size
+  rectangle is now at least half a unit whatever scale it is seeded with (the plain PNG
+  path too), the package gives such content a ten-unit window, and the scale is capped,
+  so the entity is visible at a sane scale and the boxes are real rectangles.
+- A tile sidecar's `layers_present` listed only the layers of the texts, dimensions and
+  block instances on the tile, so a tile drawn from geometry alone -- the usual case --
+  reported no layers at all and an agent filtering tiles by layer skipped it. It now
+  covers every record the tile shows, geometry and regions included, and is computed
+  before the size trim so cutting rows never shortens the layer list.
+- Tile sidecars broke their own 32 KB cap: the trim loop measured the compact JSON but
+  the file was written pretty-printed, about 3.3x larger, so a dense drawing's sidecars
+  reached 100 KB *and* dropped a quarter of their record rows (`records_truncated: true`)
+  to satisfy a limit the file then exceeded threefold. Sidecars are written compact now,
+  like the record shards, so the measured and the written form are the same file.
+- The package wrote world rectangles in two shapes: `manifest.json`'s `overview.world`,
+  `frames[].content`, `crop.*` and everything in `sheets.json` came out of serde's derive
+  as `{"min_x": .., "min_y": .., "max_x": .., "max_y": ..}`, while tiles.json, every
+  sidecar `world`, every record `bbox` and `manifest.sheets[].rect` used the
+  `[x0, y0, x1, y1]` array the design documents -- the same layout's rectangle read one
+  way in the manifest and the other in `sheets.json`. `crop::Rect` serializes as that
+  array now, and reads both forms back, so an 0.3.0 document still loads.
+- Re-exporting into a directory that already held a package left the previous run's
+  files beside the new ones -- record shards (`texts.003.json`), deeper tile levels and
+  their sidecars, sheets of layouts that no longer exist -- all valid-looking and none of
+  them in the new `manifest.json`, so a consumer that walks the tree (as the generated
+  README.txt invites) mixed two exports. `export_package` now clears what the previous
+  `manifest.json` listed, and the `frames/`, `sheets/` directories that empties, before
+  it writes; a directory without an uncad manifest, and any file such a manifest does not
+  list, is left untouched.
+- `manifest.guidance` quoted "224 px overlap" whatever the profile was, contradicting
+  `frames[].levels[].overlap_px` (392 for `claude-hires`, 320 for `openai-patch`). The
+  sentence is built from the profile in use now and names the tile size as well.
+- The `TinyOverview` warning tested the overview's long edge, which the profile always
+  keeps at several hundred pixels, so it never fired; it now tests the short edge (a
+  500:1 drawing's 700 x 28 px overview is reported).
+- The CLI took an option it did not know as the input file, or dropped it in silence.
+  `parse_args` matched only the render flags and ended in `other if input.is_none() =>
+  input = other` and `_ => {}`, while `uncad export` scanned its own eleven options in a
+  second loop that also ended in `_ => {}`: `uncad export --max-levels 2 d.dwg -o out`
+  failed with "cannot open input file '--max-levels'", `uncad export d.dwg -o out
+  --max-level 1 --sharkb 1` exited 0 and wrote the default package, and a second input
+  path or an option missing its value went the same way. One parser now owns every flag
+  of both commands, so an option is either understood wherever it stands or refused by
+  name: an unknown option, a second positional and a missing value are errors, an
+  option of the other command names the command it belongs to (`--fit` is not an export
+  option; `--max-levels` is one), and `--shard-kb`'s error says kilobytes instead of
+  pixels. `uncad export` accepts `--no-trim` and `--fonts` as the usage said it should.
+
 ### Removed
 
 - The `regex` dependency: the MTEXT code stripper it powered is replaced by
@@ -439,14 +446,6 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - `ParseError::InvalidPath`: paths are no longer passed to C, so a path that is not
   UTF-8 or contains a NUL byte is no longer a distinct failure (the OS reports it
   through `ParseError::Io`).
-
-### Changed
-
-- `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
-  requires prettyplease 0.3 -- see the commit for why the pair has to move
-  together. The generated bitfield accessors raise one more harmless clippy lint
-  (`manual_div_ceil`), allowed at crate level with the existing ones (see
-  `docs/CAVEATS.md`, "Clippy").
 
 ## [0.2.0] - 2026-09-17
 

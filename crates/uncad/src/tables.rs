@@ -1,5 +1,13 @@
-//! Conversion of the non-entity OBJECT-supertype tables an entity resolves
-//! against: LAYER, BLOCK_RECORD, MLINESTYLE and DIMSTYLE.
+//! Conversion of the non-entity OBJECT-supertype records an entity or a
+//! paper sheet resolves against: LAYER (with its on/frozen/locked/plot
+//! state, lineweight and linetype name), BLOCK_RECORD, MLINESTYLE, DIMSTYLE,
+//! and LAYOUT with its embedded plot settings.
+//!
+//! All of them are collected by one pass over the objects, dispatching on
+//! `dwg_object_get_fixedtype`. The named object dictionary is never walked,
+//! so a file whose LAYOUTs this pass does not see (pre-R2000, or a DXF with
+//! no OBJECTS section) simply has none. There is no LTYPE or STYLE record
+//! here: only the names layers and text entities carry survive.
 
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field, get_sub_field, get_sub_utf8_field};
