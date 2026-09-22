@@ -74,7 +74,7 @@ intended consumers are libraries and binaries (CLI, server, desktop app).
 `winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). The LibreDWG C
 sources are vendored into `crates/libredwg-sys/vendor/libredwg/`, so **building
 does not need the `lib/libredwg` submodule**. Running `cargo test --workspace`
-does: 16 of the 20 integration test files in `uncad` (plus `png.rs`'s own
+does: 18 of the 22 integration test files in `uncad` (plus `png.rs`'s own
 end-to-end test and `tests/documented_invocations.rs` in `uncad-cli`) read
 fixtures from that submodule's `test/test-data/`; the four that do not
 (`fixtures.rs`, `block_transforms.rs`, `control_chars.rs`,
@@ -85,11 +85,16 @@ well as Windows.
 
 ## License
 
-**GPLv3-or-later**. LibreDWG (GPLv3+) is the only third-party component linked
-in, and its license carries over. The bundled font
+**GPLv3-or-later**, because LibreDWG (GPLv3+) is linked in and its license
+carries over. It is the only bundled third-party source, carrying two local
+patches marked in it, but not the only third-party code in a binary: `uncad`
+also links `libc`, `resvg`, `png`, `serde`, `serde_json` and
+`unicode-normalization`, and through them 68 crates in all, every one of them
+under a permissive license. The bundled font
 (`crates/uncad/fonts/UncadSans-Regular.otf`, a Noto Sans KR subset) is under the
 SIL Open Font License 1.1, with its licence text beside it. Copyright and
-license details for third-party components are in
+license details, including which dependency notices have to travel with a
+redistributed binary, are in
 [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
 
 ## Repository layout
@@ -99,10 +104,11 @@ lib/libredwg/            LibreDWG upstream, as a git submodule. Not used by the 
                          it is the source vendor/ is regenerated from, and where the
                          real-file test fixtures (test/test-data/) come from
 crates/
-  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the unmodified
-                         subset of C sources actually compiled (for publishing to
-                         crates.io); shim/ holds the C accessors for opaque types, and
-                         vendor-config/config.h stands in for autotools
+  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the subset of C
+                         sources actually compiled (for publishing to crates.io), with
+                         two local patches marked "uncad local patch"; shim/ holds the C
+                         accessors for opaque types, and vendor-config/config.h stands
+                         in for autotools
   uncad/                 the safe API: parse() -> CadDatabase::{to_json,to_svg,to_png}()
   uncad-cli/             the CLI binary (uncad)
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
