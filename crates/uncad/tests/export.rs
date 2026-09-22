@@ -2292,3 +2292,90 @@ fn an_outline_too_big_to_test_says_so_instead_of_claiming_it_is_simple() {
     }
 }
 
+/// `count` layers with 45-character AIA-style names, one line each, all
+/// over the same patch of the drawing so that every tile sees nearly every
+/// layer: the shape (900 layers drawn across a whole plan) that made
+/// `layers_present` alone overrun the sidecar budget, at the entity count
+/// the budget actually depends on.
+fn layers_everywhere(count: usize) -> uncad::CadDatabase {
+    use uncad::model::{EntityCommon, LineEntity, Point3D};
+    let mut entities = Vec::new();
+    for i in 0..count {
+        let layer = format!("A-WALL-FULL-DIMS-ANNO-TEXT-IDENTITY-PATT-{i:04}");
+        assert_eq!(layer.len(), 45);
+        let (x, y) = (20.0 + (i % 17) as f64, 20.0 + (i % 13) as f64);
+        entities.push(uncad::Entity::Line(LineEntity {
+            common: EntityCommon {
+                handle: format!("{:X}", 0x1000 + i),
+                layer,
+                ..EntityCommon::default()
+            },
+            start_point: Point3D { x, y, z: 0.0 },
+            end_point: Point3D {
+                x: x + 8.0,
+                y: y + 6.0,
+                z: 0.0,
+            },
+        }));
+    }
+    let mut tables = uncad::Tables::default();
+    tables.block_records.insert(
+        "*Model_Space".into(),
+        uncad::tables::BlockRecord {
+            name: "*Model_Space".into(),
+            entities: entities.clone(),
+        },
+    );
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn a_tile_on_hundreds_of_layers_keeps_its_sidecar_under_the_cap() {
+    // The shrink loop cut the four row lists and stopped as soon as they
+    // were empty, so a tile carrying no text, dimension, block or region
+    // record -- just geometry on 900 layers -- wrote its whole layer list
+    // whatever it weighed: 43 866 bytes, 37 % over the 32 KB the design
+    // promises, with `records_truncated: false` saying nothing had been
+    // dropped. 900 names of 45 characters is 40 500 characters before the
+    // quoting and the rest of the file, so the list alone cannot fit.
+    let db = layers_everywhere(900);
+    let tmp = TempDir::new("layers_everywhere");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let (mut checked, mut trimmed) = (0, 0);
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let file = tmp.0.join(path);
+        let bytes = std::fs::metadata(&file).unwrap().len();
+        assert!(bytes <= 32 * 1024, "{path} is {bytes} bytes");
+        let sidecar = read_json(&file);
+        let present = sidecar["layers_present"].as_array().unwrap().len();
+        if sidecar["layers_truncated"] == true {
+            // The flag says what was dropped, and the total says how much
+            // of it the reader is missing.
+            let total = sidecar["layers_total"].as_u64().unwrap() as usize;
+            assert!(total > present, "{path}: {present} of {total}");
+            assert!(total <= 900, "{path}: {total} layers");
+            trimmed += 1;
+        } else {
+            assert!(sidecar["layers_total"].is_null());
+        }
+        // Nothing else was cut: there were no record rows to cut.
+        assert_eq!(sidecar["records_truncated"], false, "{path}");
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+    assert!(trimmed >= 1, "900 layers on one tile must overflow it");
+}
+

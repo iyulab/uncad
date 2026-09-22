@@ -2943,7 +2943,7 @@ fn sidecar(
     // layers at all, so filtering tiles by layer skipped it. Computed
     // before the truncation loop, so the layer set stays complete even
     // when rows are cut.
-    let mut layers: BTreeSet<String> = BTreeSet::new();
+    let mut layer_set: BTreeSet<String> = BTreeSet::new();
     for rec in on_tile(texts, &tile.world)
         .iter()
         .chain(on_tile(dims, &tile.world).iter())
@@ -2952,15 +2952,18 @@ fn sidecar(
         .chain(on_tile(geometry, &tile.world).iter())
     {
         if let Some(Value::String(l)) = rec.value.get("layer") {
-            layers.insert(l.clone());
+            layer_set.insert(l.clone());
         }
     }
+    let layers_total = layer_set.len();
+    let mut layers: Vec<String> = layer_set.into_iter().collect();
     let build = |text_rows: &[Value],
                  dim_rows: &[Value],
                  block_rows: &[Value],
                  region_rows: &[Value],
+                 layers: &[String],
                  truncated: bool| {
-        json!({
+        let mut value = json!({
             "$schema": SCHEMA,
             "id": img.id,
             "png": img.png,
@@ -2979,15 +2982,34 @@ fn sidecar(
             "children": children,
             "empty": tile.empty,
             "layers_present": layers,
+            "layers_truncated": layers.len() < layers_total,
             "records": { "texts": text_rows, "dims": dim_rows, "blocks": block_rows, "regions": region_rows },
             "records_truncated": truncated,
-        })
+        });
+        if layers.len() < layers_total {
+            value["layers_total"] = json!(layers_total);
+        }
+        value
     };
     let mut truncated = false;
-    let mut value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+    let mut value = build(
+        &text_rows,
+        &dim_rows,
+        &block_rows,
+        &region_rows,
+        &layers,
+        truncated,
+    );
+    // The shrink used to cut the four row lists and nothing else, and stop
+    // as soon as they were empty -- so a tile whose records were few but
+    // whose layers were many (a plan of 900 AIA-named layers, each drawn
+    // across the whole sheet) wrote a 44 KB sidecar, 37 % over the budget,
+    // with `records_truncated: false` to say the file was complete. The
+    // layer list is cut the same way once the rows are gone, and each list
+    // has its own flag, so the file always says which of the two the reader
+    // is missing.
     while serde_json::to_string(&value).map_or(0, |s| s.len()) > SIDECAR_LIMIT {
-        truncated = true;
-        let longest = [
+        let rows_left = [
             text_rows.len(),
             dim_rows.len(),
             block_rows.len(),
@@ -2996,19 +3018,34 @@ fn sidecar(
         .into_iter()
         .max()
         .unwrap_or(0);
-        if longest == 0 {
+        if rows_left > 0 {
+            truncated = true;
+            for rows in [
+                &mut text_rows,
+                &mut dim_rows,
+                &mut block_rows,
+                &mut region_rows,
+            ] {
+                let keep = rows.len() * 3 / 4;
+                rows.truncate(keep);
+            }
+        } else if !layers.is_empty() {
+            // Records first, layers after: a record is what a reader came
+            // for, the layer list is an index into them. Alphabetical, so
+            // which names survive is at least predictable.
+            let keep = layers.len() * 3 / 4;
+            layers.truncate(keep);
+        } else {
             break;
         }
-        for rows in [
-            &mut text_rows,
-            &mut dim_rows,
-            &mut block_rows,
-            &mut region_rows,
-        ] {
-            let keep = rows.len() * 3 / 4;
-            rows.truncate(keep);
-        }
-        value = build(&text_rows, &dim_rows, &block_rows, &region_rows, truncated);
+        value = build(
+            &text_rows,
+            &dim_rows,
+            &block_rows,
+            &region_rows,
+            &layers,
+            truncated,
+        );
     }
     value
 }
