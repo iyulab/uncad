@@ -227,6 +227,25 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A DXF of R2007 or later resolved no layer name and no block reference. Every entity
+  whose layer name was longer than one character came back with `layer: ""`, and every
+  INSERT with `block_name: ""`, so the renderer drew nothing for any block reference,
+  `blocks.json` listed no instances, ByLayer colour fell back to black and the
+  layer-off / frozen / non-plotting / DEFPOINTS rules never fired. `example_2018.dxf`
+  reported 65 of 72 entities on layer `""` and 0 hidden entities where the same drawing
+  as DWG reported 33. LibreDWG stores a table record's name as UTF-16 for R2007+ input
+  of *any* format but decodes it back only for DWG input, so the DXF reader's
+  name-to-handle lookups compared `"Tavolo 3"` as `"T"`. Fixed with a local patch to the
+  vendored `dwg.c`; see `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG".
+- A corrupt DWG could terminate the whole process instead of returning a `ParseError`.
+  LibreDWG hands every header date it decodes to `strftime()`, and Microsoft's UCRT
+  `strftime` fail-fasts the process (0xC0000409, reported as
+  STATUS_STACK_BUFFER_OVERRUN) when a `struct tm` field is out of range -- which a
+  corrupt `TIMEBLL` makes it. One changed byte in a corpus drawing was enough, and a
+  fuzz sweep hit it on 8 of 12 seeds. `cvt_TIMEBLL` in the vendored `common.c` now
+  returns a fully initialized, in-range `struct tm`. The same sweep now completes
+  cleanly, but a decoder that large stays a risk: `parse`/`parse_bytes` and
+  `docs/CAVEATS.md` now say to parse untrusted drawings in a separate process.
 - Every tile rectangle of a small drawing was the same rectangle. The world boxes in
   `tiles.json`, the sidecars and the records were rounded to `$LUPREC` decimals (3 at
   the least), which says how precisely the drawing's units are *displayed* and nothing

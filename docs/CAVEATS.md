@@ -140,6 +140,31 @@ A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
 
+**DXF parse time grows faster than the file does.** Reading a DXF costs roughly the square
+of its entity count, so sizes that are unremarkable for a real drawing take minutes. On
+DXFs of nothing but LINEs (release build, wall clock around `uncad <file>`, summary only,
+no rendering):
+
+| Entities | Bytes | Time |
+|---|---|---|
+| 25 000 | 2.1 MB | 0.8 s |
+| 50 000 | 4.2 MB | 1.4 s |
+| 100 000 | 8.5 MB | 4.6 s |
+| 400 000 | 34.5 MB | 204.5 s |
+
+All of that is inside the vendored LibreDWG reader, not this crate. Instrumenting
+`uncad_dxf_read_bytes` and the phases of `dwg_read_dxf` puts 4.6 of the 4.7 s at 100 000
+entities inside `dxf_entities_read` (the TABLES, BLOCKS and OBJECTS phases and the
+post-read fix-ups together are under 0.2 s), and this crate's own three conversion walks
+plus `dwg_free` are the linear remainder of well under a second. Inside that phase the
+super-linear term is LibreDWG re-resolving its *entire* object-reference vector every time
+`dwg_add_object` reallocates the object pool and dirties the refs: 26 calls over 3.0 M
+references at 100 000 entities, against 10 calls over 0.22 M at 25 000 -- the resolve work
+alone grows about as n^1.9 while the entity count doubles. There is nothing to fix on this
+side of the FFI boundary and the honest workaround is a DWG: the same drawing as DWG
+parses in linear time. A caller that must accept large DXFs should bound the work itself
+(a size or entity-count limit before calling `parse`, and a timeout).
+
 ## The polyline "closed" flag
 
 Fixed in 0.3.0. Until then LWPOLYLINE's `closed` was read from bit 1 of `flag`, the DXF
@@ -389,7 +414,87 @@ yet by an AutoCAD-written Korean DWG. A character the table cannot map becomes U
 an R2007+ **DXF** parsed to zero entities, because LibreDWG stores its strings as UTF-16 but
 hands them out unconverted for DXF input, so every block name was cut at the first NUL
 (`"*Model_Space"` read as `"*"`); and a corrupt or unknown code-page value in the file
-header is now replaced by ANSI_1252 instead of being used to index LibreDWG's tables.
+header is now replaced by ANSI_1252 instead of being used to index LibreDWG's tables. That
+restored the string *contents*; the same UTF-16 mismatch also broke every name-to-handle
+lookup the DXF reader makes -- see the next section.
+
+## Fixed: an R2007+ DXF resolved no layer and no block reference
+
+Until this was fixed, every entity of a DXF whose `$ACADVER` is AC1021 (R2007) or later
+came back with `layer: ""` unless its layer name was a single character, and every INSERT
+with `block_name: ""`. Nothing warned: the entity count looked right, but the renderer
+resolved no block record for any INSERT and drew none of their contents, `blocks.json`
+listed no instances, ByLayer colour fell back to black, and the layer-off / frozen /
+non-plotting / DEFPOINTS rules could never fire because no entity had a layer to match.
+`example_2018.dxf` reported 65 of its 72 entities on layer `""` and 0 hidden entities,
+where the same drawing as `example_2018.dwg` reported 33.
+
+The cause is the same UTF-16 mismatch as the text above, on the other side of the API.
+LibreDWG's dynapi *writes* a string field as UTF-16 as soon as `dwg->header.version >=
+R_2007`, whatever the input format, but *reads* it back as UTF-16 only under
+`IS_FROM_TU_DWG()`, which additionally demands the data did not come from a DXF or JSON
+import (`bits.h` admits the gap in its own comment: "only if from r2007+ DWG. not JSON,
+DXF (FIXME TABLE.name)"). So `dwg_find_tablehandle()` and its siblings compared the
+DXF's 8-bit group-8 / group-2 name against a UTF-16 buffer read as a C string, which stops
+at the first NUL: `"Tavolo 3"` compared as `"T"`. Only one-character names such as layer
+`0` matched, which is exactly the set of entities that survived. The entity's `layer` and
+the INSERT's `block_header` handle were then left NULL. Fixed by a local patch to the
+vendored `dwg.c` (see below); `crates/uncad/tests/r2007_dxf_handles.rs` compares
+`example_2018.dxf` against `example_2018.dwg` on layer assignment, block names and hidden
+entities, and checks that no R2007+ corpus DXF leaves an entity without a layer.
+
+## A corrupt DWG can abort the process below the FFI boundary
+
+`parse`/`parse_bytes` hand the file's bytes to LibreDWG's C decoder, and a malformed DWG
+can terminate the whole process there rather than returning `ParseError`. No Rust guard
+can intercept it: `catch_unwind`, the `LIBREDWG_LOCK` and the caught rasterizer panic all
+sit above the FFI boundary, and a C-level `abort()`/fail-fast unwinds nothing. **A service
+or agent tool that parses untrusted drawings should do it in a separate process** it can
+lose, not in the one serving other requests.
+
+One such abort is fixed -- see `cvt_TIMEBLL` below; before the fix a single changed byte in
+a corpus DWG (`2000/Helix.dwg`, offset 27644) killed the process with 0xC0000409 on every
+run, and a sweep of 24 corpus drawings x (5 truncations + 4 byte-flip mutations + a version
+tag) hit the same abort on 8 of 12 seeds. After the fix the same sweep over 12 seeds (5 760
+CLI runs: summary, PNG and `export`) plus 18 parse-only seeds (4 320 more runs) produced no
+abort at all. That is evidence, not a guarantee: the decoder is ~100 000 lines of C over
+attacker-controlled offsets and lengths, so treat the risk as still present. The sweep did
+find that a corrupt drawing can still make the *renderer* (not the parser) attempt a
+multi-gigabyte allocation and abort on the failure, which the same out-of-process advice
+covers.
+
+## Local patches to the vendored LibreDWG
+
+`crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
+`docs/ARCHITECTURE.md`, "Build"), and it now carries two local patches. Both are marked
+in the source with an `uncad local patch` comment saying why.
+**`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
+these two patches is part of any submodule update.**
+
+- **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
+  `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
+  for DXF and JSON input even when the record's name is stored as UTF-16 (see the section
+  above). They now share one helper, `uncad_record_name_utf8()`, whose predicate
+  `UNCAD_IS_TU_DWG()` mirrors what this crate's own shim does in `uncad_tv_to_utf8`. The
+  patch deliberately stops there: the strings `in_dxf.c` stores through
+  `dwg_add_u8_input()` (`DICTIONARY.texts`, `LTYPE.dashes[].text`) really are 8-bit for
+  DXF input, so `dwg_find_dictionary()` and `dwg_find_dicthandle()` keep the original
+  predicate. Upstream has the same gap; it is not reported there yet.
+- **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
+  and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
+  caller passes the result straight to `strftime()` (`dec_macros.h`'s `FIELD_TIMEBLL` and
+  the `DECODER` block in `header_variables.spec`, which runs at any log level), and
+  Microsoft's UCRT `strftime` *validates* its `struct tm`: measured against
+  `ucrtbase.dll`, a `tm_year` outside [-1900, 8099], `tm_mon` outside [0, 11], `tm_mday`
+  outside [1, 31], `tm_hour` outside [0, 23], `tm_min` outside [0, 59] or `tm_sec` outside
+  [0, 60] calls the invalid-parameter handler, which fail-fasts the process with
+  0xC0000409. Windows reports that code as STATUS_STACK_BUFFER_OVERRUN even though nothing
+  overran, which is why it looked like a stack smash. The patch zeroes the `struct tm` and
+  clamps every field into those ranges. A real drawing's date already satisfies them, so
+  no valid file's parse changes; the only visible difference is that the debug string for a
+  TDINDWG/TDUSRTIMER *duration* longer than a day now caps its hour at 23 (a `LOG_TRACE`
+  line this crate never enables, and `strftime` cannot print a larger hour anyway).
+  `crates/uncad/tests/corrupt_dwg.rs` is the regression.
 
 ## Fixed: a path with non-ASCII characters could not be opened on Windows
 
