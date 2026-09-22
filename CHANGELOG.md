@@ -181,6 +181,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A panic inside the rasterizer took the process with it. tiny-skia's scan converter
+  asserts rather than returning an error when a path's coordinates overflow its
+  fixed-point edge list, and the export ran it on worker threads, where the panic came
+  back as an `expect` on the join. Every `resvg::render` call is now caught and reported
+  as `PngError::RenderPanic` with the panic's own message, and a tile thread that panics
+  ends the export with that error rather than aborting.
 - The attribute values of a block reference nested inside another block -- a tag block
   inside an assembly, the standard CAD pattern -- reached no record: `texts.json` and
   `strings.json` listed only top-level attributes, so "which door is D-101" could not be
