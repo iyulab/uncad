@@ -1,0 +1,206 @@
+{
+  "entities": [
+    {
+      "type": "INSERT",
+      "common": {
+        "id": 269,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10D"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "0"
+        },
+        "color_index": 256,
+        "true_color": null
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "A"
+      },
+      "insertion_point": {
+        "x": 100.0,
+        "y": 100.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "rotation": 0.0,
+      "attribs": []
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7
+      }
+    },
+    "block_records": {
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "INSERT",
+            "common": {
+              "id": 269,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "A"
+            },
+            "insertion_point": {
+              "x": 100.0,
+              "y": 100.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "rotation": 0.0,
+            "attribs": []
+          }
+        ]
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": []
+      },
+      "A": {
+        "name": "A",
+        "entities": [
+          {
+            "type": "INSERT",
+            "common": {
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "B"
+            },
+            "insertion_point": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 2.0,
+              "y": 2.0,
+              "z": 2.0
+            },
+            "rotation": 0.0,
+            "attribs": []
+          }
+        ]
+      },
+      "B": {
+        "name": "B",
+        "entities": [
+          {
+            "type": "INSERT",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "C"
+            },
+            "insertion_point": {
+              "x": 5.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "rotation": 1.5707963267948966,
+            "attribs": []
+          }
+        ]
+      },
+      "C": {
+        "name": "C",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 10.0,
+              "y": 0.0,
+              "z": 0.0
+            }
+          }
+        ]
+      }
+    },
+    "mlinestyles": {}
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}
