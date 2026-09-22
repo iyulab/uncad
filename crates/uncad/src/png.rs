@@ -166,8 +166,13 @@ impl std::error::Error for PngError {}
 /// touches disk.
 ///
 /// Text is shaped with the bundled `Uncad Sans` face by default
-/// ([`Fonts`]), so the image is the same on every machine; a character the
-/// subset lacks is dropped with a warning in the log rather than an error.
+/// ([`Fonts`]), so the image is the same on every machine. A character the
+/// subset lacks is not an error and is not dropped: usvg keeps it as glyph
+/// 0, which the subset carries as a crossed `.notdef` box with its own
+/// advance, so it is drawn as a box and the rest of the string keeps its
+/// layout (the export counts it in `unshaped_glyphs`). usvg logs a
+/// `log::warn!` for it only when the embedding application installs a
+/// `log` implementation; this crate and the CLI install none.
 pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, PngError> {
     let rendered = svg::render(db, options.svg);
     let content = rendered.choice.rect;
@@ -322,8 +327,9 @@ pub enum Fonts {
     /// The bundled `Uncad Sans` only (a Noto Sans KR subset: Latin, Greek,
     /// the 2350 common Hangul syllables and the CAD symbols -- see
     /// `crates/uncad/fonts/README.md`). The same pixels and the same text
-    /// boxes on every machine; a character outside the subset is dropped
-    /// with a warning in the log.
+    /// boxes on every machine; a character outside the subset is drawn as
+    /// a crossed `.notdef` box (the subset keeps the notdef outline) and
+    /// counted as unshaped by the export -- see [`to_png`].
     #[default]
     Bundled,
     /// The bundled face first, then the host's installed fonts for the
