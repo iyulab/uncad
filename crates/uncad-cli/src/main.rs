@@ -379,7 +379,7 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let (unsupported, hidden, crop) = match extension.as_str() {
+    let (unsupported, hidden, crop, limits) = match extension.as_str() {
         "json" => {
             let json = db
                 .to_json(ToJsonOptions {
@@ -387,17 +387,27 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, json.as_bytes())?;
-            (Vec::new(), 0, None)
+            (Vec::new(), 0, None, Default::default())
         }
         "svg" => {
             let result = db.to_svg(svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
-            (result.unsupported_types, result.hidden, Some(result.crop))
+            (
+                result.unsupported_types,
+                result.hidden,
+                Some(result.crop),
+                result.limits,
+            )
         }
         "png" => {
             let result = db.to_png(png_options(args)?).map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
-            (result.unsupported_types, result.hidden, Some(result.crop))
+            (
+                result.unsupported_types,
+                result.hidden,
+                Some(result.crop),
+                result.limits,
+            )
         }
         other => {
             return Err(format!(
@@ -418,6 +428,9 @@ fn run(args: &Args) -> Result<(), String> {
             "note: {hidden} hidden entities left out (layers off, frozen or non-plotting, \
              DEFPOINTS, invisible); --include-hidden draws them at 50 %"
         );
+    }
+    if let Some(summary) = limits.summary() {
+        eprintln!("warning: the drawing hit the renderer's robustness limits: {summary}");
     }
     if let Some(crop) = crop {
         if !crop.excluded.is_empty() {

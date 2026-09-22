@@ -1099,6 +1099,10 @@ pub fn export_package(
         ..Default::default()
     };
     let rendered = svg::render(db, svg_options);
+    // Every cap the model render and (below) each sheet render engaged, so
+    // the package says what a malformed file cost it -- see
+    // [`crate::limits`].
+    let mut limits = rendered.limits.clone();
     let content = rendered.choice.rect;
     let top: Vec<&Entity> = svg::select_entities_for_space(db, Space::Model);
     // Records cover what the picture shows: neither hidden entities nor
@@ -1368,6 +1372,7 @@ pub fn export_package(
                 },
                 "p",
             );
+            limits.merge(&paper_rendered.limits);
             // The layout's own LIMMIN/LIMMAX first: AutoCAD keeps them equal
             // to the paper's placement (margins and plot origin folded in,
             // rotation included), which the page-setup formula in
@@ -2123,6 +2128,11 @@ pub fn export_package(
             }
         }
     }
+    if let Some(summary) = limits.summary() {
+        warnings.push(format!(
+            "the drawing hit the renderer's robustness limits: {summary}"
+        ));
+    }
     let crop_report = rendered.choice.report(fit.rect, padding);
     let counts = Counts {
         entities: top.len(),
@@ -2150,6 +2160,7 @@ pub fn export_package(
             "handles": hidden_handles,
         },
         "unsupported_types": rendered.unsupported_types(),
+        "limits": limits,
         "warnings": warnings,
         "timings_ms": { "total": started.elapsed().as_millis() as u64 },
     });

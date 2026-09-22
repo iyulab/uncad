@@ -121,6 +121,9 @@ pub struct ToPngResult {
     /// How the image's rectangle was chosen and what it leaves out; its
     /// `rect` is `view_box`'s world rectangle. Since 0.3.0.
     pub crop: CropReport,
+    /// What the robustness caps in [`crate::limits`] took away -- see
+    /// [`crate::ToSvgResult::limits`]. Since 0.3.0.
+    pub limits: crate::limits::LimitReport,
 }
 
 #[derive(Debug)]
@@ -287,6 +290,7 @@ pub fn to_png(db: &CadDatabase, options: ToPngOptions) -> Result<ToPngResult, Pn
         unsupported_types: rendered.unsupported_types(),
         hidden: rendered.hidden,
         crop: rendered.choice.report(rect, padding_units),
+        limits: rendered.limits,
     })
 }
 

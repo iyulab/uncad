@@ -449,6 +449,56 @@ angle made the arc-bounds walk (`geom::BulgeArc::bounds`, one step per quarter t
 spin forever -- `to_svg`, `to_png` and `export_package` never returned. That walk is now
 bounded at four quarter crossings by construction, which is all any arc can have.
 
+## Every number the renderer turns into an allocation is capped (since 0.3.0)
+
+A coordinate that is `NaN` costs one undrawn entity (the section above). A *count* that is
+wrong costs the process: it becomes an allocation size or a loop bound, and nothing in the
+arithmetic says how big is too big. One flipped byte of `lib/libredwg/test/test-data/`
+`example_2000.dwg` (offset 130005, `0x80` -> `0x4B`) redirects the `CIRKLO_PUNKTOJ` block
+record's owned-entity chain so the block holds eight INSERTs **of itself** beside its fifty
+drawable entities. The file parsed in 0.03 s and reported nothing odd; rendering it then
+spent three minutes growing one SVG string and aborted the process on a **12,074,460,607-byte**
+reallocation. A depth cap alone does not help -- eight self-references reach 8^20 instances
+long before twenty levels of nesting.
+
+`uncad::limits` now names every such bound in one place, with the reasoning on each
+constant:
+
+| Constant | Value | What it bounds |
+| --- | --- | --- |
+| `MAX_BLOCK_REF_DEPTH` | 20 | how deep block references may nest |
+| `MAX_BLOCK_REFS` | 100 000 | how many references one render expands in total (the *breadth* the depth cap cannot see) |
+| `MAX_SVG_BODY_BYTES` | 64 MiB | how large the emitted drawing body may grow -- the backstop behind the rest |
+| `MAX_ENTITY_POINTS` | 100 000 | how many file-supplied points one entity may draw with |
+| `MAX_HATCH_TILE_SPAN` | 16x the boundary | how much larger than the shape it fills a HATCH pattern's tile may be |
+
+Every cap engaging is *reported*, never silent: `ToSvgResult::limits` and
+`ToPngResult::limits` carry a `LimitReport`, the CLI prints it as a warning, and a package
+puts it in `report.json` under `limits` and in `warnings`. The same drawing now renders in
+1.4 s to a 67 MB SVG saying it dropped 3 496 block references and 869 entities.
+
+Two of these deserve their reasoning spelled out:
+
+- **The output budget is what actually bounds the allocation.** It is checked before each
+  entity, at every level of the block walk, so exhausting it unwinds the whole walk rather
+  than merely skipping one entity. The finished document can exceed it only by the last
+  entity drawn plus the `<g>` wrappers closing above it.
+- **A HATCH pattern's spacing is the SVG `<pattern>` tile's size in user units,** and resvg
+  allocates a pixmap for that tile at the *device* scale of the element being filled. A
+  corrupt spacing of 1e12 over a ten-unit boundary therefore asks for a pixmap around 1e11
+  pixels on a side. Such a tile can show at most one line anyway, so the pattern is dropped
+  and the hatch keeps its outline. The opposite direction (a spacing far *below* the pixel
+  grid) is safe without a cap: the tile rounds to a pixel or to nothing, and tiny-skia's
+  pattern shader costs one pass over the filled pixels however many repeats that is.
+
+The caps are far above any real drawing: the largest sample this project renders
+(`AutoCADSamples5.dwg`, ~40 000 entities) emits 18 MB of SVG, under a third of the output
+budget, and none of the corpus files or the seven AutoCAD samples engage any cap at all --
+their documents are byte-for-byte what they were before. `crates/uncad/tests/limits.rs` is
+the regression: the one-byte corruption above, a self-referencing block, a block chain
+deeper than the cap, a block fanning out below it, a polyline past `MAX_ENTITY_POINTS` and
+a hatch whose tile dwarfs its shape.
+
 ## Text placement is approximate (and MTEXT rotation was 0 until 0.3.0)
 
 `MTextEntity::rotation` is `atan2(x_axis_dir.y, x_axis_dir.x)`, the angle of the DXF
@@ -572,10 +622,12 @@ run, and a sweep of 24 corpus drawings x (5 truncations + 4 byte-flip mutations 
 tag) hit the same abort on 8 of 12 seeds. After the fix the same sweep over 12 seeds (5 760
 CLI runs: summary, PNG and `export`) plus 18 parse-only seeds (4 320 more runs) produced no
 abort at all. That is evidence, not a guarantee: the decoder is ~100 000 lines of C over
-attacker-controlled offsets and lengths, so treat the risk as still present. The sweep did
-find that a corrupt drawing can still make the *renderer* (not the parser) attempt a
-multi-gigabyte allocation and abort on the failure, which the same out-of-process advice
-covers.
+attacker-controlled offsets and lengths, so treat the risk as still present.
+
+The sweep also found that a corrupt drawing could make the *renderer* (not the parser)
+attempt a multi-gigabyte allocation and abort on the failure. That one was above the FFI
+boundary and is fixed -- see "Every number the renderer turns into an allocation is capped"
+above.
 
 ## Local patches to the vendored LibreDWG
 

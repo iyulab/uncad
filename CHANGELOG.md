@@ -10,6 +10,12 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Added
 
+- `uncad::limits`: the renderer's robustness caps (`MAX_BLOCK_REF_DEPTH`,
+  `MAX_BLOCK_REFS`, `MAX_SVG_BODY_BYTES`, `MAX_ENTITY_POINTS`, `MAX_HATCH_TILE_SPAN`) in
+  one documented place, and `LimitReport`, which says what they took away from a render.
+  It is carried by `ToSvgResult::limits` and `ToPngResult::limits`, printed by the CLI as
+  a warning, and written into a package's `report.json` under `limits` (and as a
+  `warnings` entry). Empty for every well-formed drawing.
 - `CadDatabase::header` (`uncad::Header`, module `uncad::header`): the file version
   (LibreDWG's name, e.g. `r2004`) and code page, `$INSUNITS` resolved to
   `uncad::Units { name, to_mm }` from the DXF reference table (0 = unitless = `"du"`),
@@ -227,6 +233,21 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- A corrupt drawing could make the *renderer* attempt a multi-gigabyte allocation and
+  abort the process on the failure. One flipped byte of `example_2000.dwg` (offset
+  130005) redirects a block record's owned-entity chain so the block holds eight INSERTs
+  of itself beside its fifty drawable entities; the file parsed in 0.03 s and rendering
+  it then spent three minutes growing one SVG string until a 12,074,460,607-byte
+  reallocation killed the process. Every number the renderer turns into an allocation
+  size or a loop bound is now capped, with the caps named and explained in one place
+  (`uncad::limits`): block-reference nesting (20) and total expansions (100 000), the
+  emitted drawing body (64 MiB, the backstop behind the rest), the points one entity may
+  draw with (100 000), and how much larger than the shape it fills a HATCH pattern's tile
+  may be (16x -- a corrupt spacing of 1e12 over a ten-unit boundary asks resvg for a
+  pixmap 1e11 pixels on a side). The same drawing now renders in 1.4 s. No corpus file
+  and none of the seven AutoCAD samples engages any cap: their documents are unchanged
+  byte for byte. See `docs/CAVEATS.md`, "Every number the renderer turns into an
+  allocation is capped".
 - A DXF of R2007 or later resolved no layer name and no block reference. Every entity
   whose layer name was longer than one character came back with `layer: ""`, and every
   INSERT with `block_name: ""`, so the renderer drew nothing for any block reference,

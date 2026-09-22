@@ -107,6 +107,9 @@ pub struct ToSvgResult {
     pub hidden: usize,
     /// How the viewBox was chosen and what it leaves out. Since 0.3.0.
     pub crop: CropReport,
+    /// What the robustness caps in [`crate::limits`] took away -- empty for
+    /// every well-formed drawing. Since 0.3.0.
+    pub limits: LimitReport,
 }
 
 /// An SVG `viewBox`, in SVG coordinates: `x`/`y` are the top-left corner and
@@ -286,14 +289,9 @@ fn compose(parent: &Transform, child: &Transform) -> Transform {
 
 // --- render context ----------------------------------------------------
 
-/// Generous enough for any real drawing this project has been checked against
-/// while still cutting off combinatorial block-reference blowup quickly: 10
-/// INSERTs per level exhausts it by nesting level 6, long before the 20-level
-/// depth cap could engage.
-const BLOCK_REF_BUDGET: u32 = 1_000_000;
-
-/// How deep block references may nest before rendering gives up.
-const MAX_BLOCK_REF_DEPTH: u32 = 20;
+use crate::limits::{
+    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES,
+};
 
 struct Ctx<'a> {
     ent_min_x: f64,
@@ -333,6 +331,14 @@ struct Ctx<'a> {
     /// block at every level can still fan out combinatorially before the depth
     /// cap is ever reached.
     block_ref_budget: u32,
+    /// Bytes of drawing body emitted so far, kept equal to the length of
+    /// the strings [`render_entity`] has handed back. The backstop behind
+    /// every other cap: once it reaches [`MAX_SVG_BODY_BYTES`] nothing
+    /// further is drawn, so no file can make this render grow a string
+    /// without bound. See [`crate::limits`].
+    emitted: usize,
+    /// What the caps in [`crate::limits`] took away from this render.
+    limits: LimitReport,
     /// [`ToSvgOptions::include_hidden`].
     include_hidden: bool,
     /// Entities [`render_entity`] found hidden.
@@ -358,7 +364,9 @@ impl<'a> Ctx<'a> {
             defs: Vec::new(),
             next_def_id: 0,
             def_prefix: String::new(),
-            block_ref_budget: BLOCK_REF_BUDGET,
+            block_ref_budget: MAX_BLOCK_REFS,
+            emitted: 0,
+            limits: LimitReport::default(),
             include_hidden: false,
             hidden: 0,
         }
@@ -814,7 +822,15 @@ fn render_block_ref(
     let Some(block) = ctx.tables.block_records.get(block_name) else {
         return String::new();
     };
-    if block.entities.is_empty() || ctx.depth > MAX_BLOCK_REF_DEPTH || ctx.block_ref_budget == 0 {
+    if block.entities.is_empty() {
+        return String::new();
+    }
+    // Two file-supplied numbers meet here: how deeply a block reference
+    // nests, and how many references there are. A block that references
+    // itself makes both unbounded, so both are capped and the drop is
+    // counted -- see [`crate::limits`].
+    if ctx.depth >= MAX_BLOCK_REF_DEPTH || ctx.block_ref_budget == 0 {
+        ctx.limits.block_refs_dropped += 1;
         return String::new();
     }
     ctx.block_ref_budget -= 1;
@@ -967,14 +983,69 @@ fn render_block_ref(
 /// while `consider` separately tracks world-space bounds through that same
 /// transform.
 fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
-    if crate::visibility::hidden_reason(e.common(), ctx.tables).is_some() {
+    // The two caps that stand between a malformed file and an unbounded
+    // allocation (see [`crate::limits`]). Both are checked before any work
+    // is done for this entity, so exhausting the budget unwinds the whole
+    // walk -- however deep inside nested block references it happens.
+    if ctx.emitted >= MAX_SVG_BODY_BYTES {
+        ctx.limits.entities_dropped += 1;
+        return None;
+    }
+    if drawn_point_count(e) > MAX_ENTITY_POINTS {
+        ctx.limits.oversized_entities += 1;
+        return None;
+    }
+    let before = ctx.emitted;
+    let svg = if crate::visibility::hidden_reason(e.common(), ctx.tables).is_some() {
         ctx.hidden += 1;
         if !ctx.include_hidden {
             return None;
         }
-        return render_shown_entity(e, ctx).map(|svg| format!("<g opacity=\"0.5\">{svg}</g>"));
+        render_shown_entity(e, ctx).map(|svg| format!("<g opacity=\"0.5\">{svg}</g>"))
+    } else {
+        render_shown_entity(e, ctx)
+    };
+    // The string handed back *contains* everything the children below this
+    // call already charged, so the running total is set to its length
+    // rather than incremented by it -- nothing is counted twice, and the
+    // total stays exactly the size of the body built so far.
+    if let Some(svg) = &svg {
+        ctx.emitted = before + svg.len();
     }
-    render_shown_entity(e, ctx)
+    svg
+}
+
+/// How many points from the file this entity would put into the picture --
+/// the count [`MAX_ENTITY_POINTS`] bounds.
+///
+/// Only the arrays a malformed file can make arbitrarily long are counted;
+/// a fixed-shape entity (a LINE, a CIRCLE, a TEXT) is always 0 here, and an
+/// INSERT is 0 because what it draws is bounded by the block-reference caps
+/// instead. A bulged polyline draws one arc per segment, which is a
+/// constant factor on the vertex count, so the vertex count is the measure.
+fn drawn_point_count(e: &Entity) -> usize {
+    use crate::model::HatchBoundaryPath;
+    match e {
+        Entity::LwPolyline(p) | Entity::Polyline2D(p) => p.vertices.len(),
+        Entity::Polyline3D(p) => p.vertices.len(),
+        Entity::Spline(s) => s.fit_points.len() + s.control_points.len(),
+        Entity::Leader(l) => l.vertices.len(),
+        Entity::MultiLeader(m) => m.lines.iter().map(Vec::len).sum(),
+        Entity::MLine(l) => l.vertices.len(),
+        Entity::Wipeout(w) => w.boundary.len(),
+        Entity::Solid3D(s) => s.wireframe_edges.len(),
+        Entity::Region(r) => r.wireframe_edges.len(),
+        Entity::PolylinePFace(p) => p.wireframe_edges.len(),
+        Entity::Hatch(h) => h
+            .boundary_paths
+            .iter()
+            .map(|path| match path {
+                HatchBoundaryPath::Polyline(v) => v.len(),
+                HatchBoundaryPath::Edges(edges) => edges.len(),
+            })
+            .sum(),
+        _ => 0,
+    }
 }
 
 /// [`render_entity`] once visibility is settled.
@@ -1711,6 +1782,8 @@ pub(crate) struct Rendered {
     /// (a tile, a viewport) must keep these whatever their extent says --
     /// [`infinite::resolve`] cuts them to that window anyway.
     pub(crate) unbounded: HashSet<String>,
+    /// What the caps in [`crate::limits`] took away from this render.
+    pub(crate) limits: LimitReport,
 }
 
 impl Rendered {
@@ -1888,6 +1961,7 @@ pub(crate) fn render_selected(
         extents,
         origin,
         unbounded,
+        limits: ctx.limits,
     }
 }
 
@@ -2178,6 +2252,7 @@ pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
         crop: rendered
             .choice
             .report(rendered.padded_rect, rendered.padding_units),
+        limits: rendered.limits,
     }
 }
 
