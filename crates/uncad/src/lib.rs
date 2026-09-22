@@ -180,7 +180,19 @@ impl Format {
 ///
 /// How complete DXF reading is depends on the entity type: LibreDWG's own
 /// DXF reader is documented as working "for most objects" rather than being
-/// feature-complete the way DWG reading is. See `docs/CAVEATS.md`.
+/// feature-complete the way DWG reading is. Reading a DXF also costs roughly
+/// the square of its entity count inside that reader, so a 34 MB one takes
+/// minutes. See `docs/CAVEATS.md`.
+///
+/// # A corrupt drawing can abort the process
+///
+/// Decoding happens in LibreDWG's C code, and a malformed DWG can terminate
+/// the process there instead of returning [`ParseError`] -- an `abort()` or
+/// a C runtime fail-fast unwinds nothing, so `catch_unwind` around this call
+/// cannot help and none is attempted. **Parse untrusted drawings in a
+/// separate process** you can afford to lose. See `docs/CAVEATS.md`, "A
+/// corrupt DWG can abort the process below the FFI boundary", for what has
+/// been fuzzed and what that does and does not prove.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     let path = path.as_ref();
     let format = Format::from_path(path);
@@ -191,6 +203,11 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
 /// Parses a drawing already held in memory. This is what [`parse`] calls
 /// after reading the file; it is public for callers that receive drawings
 /// over the network or from an archive and never have a path.
+///
+/// Same caveat as [`parse`]: a corrupt DWG can abort the process inside
+/// LibreDWG's decoder, below the FFI boundary, where no Rust guard reaches
+/// it. Untrusted bytes -- exactly what a caller reading from the network
+/// has -- belong in a separate process. See `docs/CAVEATS.md`.
 pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseError> {
     // See LIBREDWG_LOCK: the whole read/convert/free cycle must run without
     // another thread's LibreDWG call interleaved. Recovering from a poisoned
