@@ -85,6 +85,26 @@ pub const MAX_SVG_BODY_BYTES: usize = 64 * 1024 * 1024;
 /// circumference in micrometres is 4e13.
 pub const MAX_WORLD_COORDINATE: f64 = 1e15;
 
+/// How many bytes of drawing body one *top-level* entity may emit before
+/// it is left out of the picture altogether.
+///
+/// [`MAX_SVG_BODY_BYTES`] bounds the document; this bounds any one part of
+/// it, and it is the package that needs it. A tile rasterizes every part
+/// whose extent touches it, so one INSERT that expanded into a
+/// picture-wide 60 MB part is re-assembled and re-parsed for every tile at
+/// every zoom level, on up to sixteen threads at once: a fuzzed
+/// `example_2000.dwg` made `uncad export` peak at 5.7 GB and run for 132 s
+/// that way. The largest real drawing has 18 MB of body but spread over
+/// 40 000 small parts, so each tile keeps only a handful and the same
+/// export peaks at 402 MB in 3.2 s -- it is one entity covering everything
+/// that costs, not a large drawing.
+///
+/// Rendering stops at the cap, so building the part is bounded work; the
+/// part is then dropped whole rather than shown half-drawn, and counted in
+/// [`LimitReport::oversized_parts`]. Four MiB is tens of thousands of
+/// elements from a single entity -- far past anything a real one draws.
+pub const MAX_ENTITY_SVG_BYTES: usize = 4 * 1024 * 1024;
+
 /// How many points one entity may contribute to the picture.
 ///
 /// A polyline's vertex count, a spline's control points, a hatch boundary's
@@ -125,6 +145,9 @@ pub struct LimitReport {
     /// Entities not drawn at all because [`MAX_SVG_BODY_BYTES`] was already
     /// spent when their turn came.
     pub entities_dropped: usize,
+    /// Entities left out because drawing one of them would have taken more
+    /// than [`MAX_ENTITY_SVG_BYTES`].
+    pub oversized_parts: usize,
 }
 
 impl LimitReport {
@@ -166,6 +189,13 @@ impl LimitReport {
                 MAX_SVG_BODY_BYTES / (1024 * 1024)
             ));
         }
+        if self.oversized_parts > 0 {
+            parts.push(format!(
+                "{} entities that would each have drawn more than {} MiB",
+                self.oversized_parts,
+                MAX_ENTITY_SVG_BYTES / (1024 * 1024)
+            ));
+        }
         Some(parts.join("; "))
     }
 
@@ -176,6 +206,7 @@ impl LimitReport {
         self.block_refs_dropped += other.block_refs_dropped;
         self.hatch_patterns_dropped += other.hatch_patterns_dropped;
         self.entities_dropped += other.entities_dropped;
+        self.oversized_parts += other.oversized_parts;
     }
 }
 
@@ -197,12 +228,14 @@ mod tests {
             block_refs_dropped: 2,
             hatch_patterns_dropped: 3,
             entities_dropped: 4,
+            oversized_parts: 5,
         };
         let s = r.summary().expect("engaged");
         assert!(s.contains("1 entities over"), "{s}");
         assert!(s.contains("2 block references"), "{s}");
         assert!(s.contains("3 hatch patterns"), "{s}");
         assert!(s.contains("4 entities past"), "{s}");
+        assert!(s.contains("5 entities that would each"), "{s}");
     }
 
     #[test]
@@ -212,6 +245,7 @@ mod tests {
             block_refs_dropped: 1,
             hatch_patterns_dropped: 1,
             entities_dropped: 1,
+            oversized_parts: 1,
         };
         a.merge(&a.clone());
         assert_eq!(
@@ -221,6 +255,7 @@ mod tests {
                 block_refs_dropped: 2,
                 hatch_patterns_dropped: 2,
                 entities_dropped: 2,
+                oversized_parts: 2,
             }
         );
     }

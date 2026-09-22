@@ -618,8 +618,15 @@ fn p2(p: Point3D) -> Point2D {
 /// references (ids `<insert>/<child>`), transformed to world coordinates.
 fn placed_texts(db: &CadDatabase, top: &[&Entity]) -> Vec<PlacedText> {
     let mut out = Vec::new();
+    // The same expansion budget the renderer's block walk carries, and for
+    // the same reason: [`MAX_BLOCK_DEPTH`] bounds nesting but not breadth,
+    // so a block holding eight references to itself reaches 8^8 expansions
+    // without ever exceeding it -- and this walk's only other stop is
+    // [`MAX_PLACED_TEXTS`], i.e. 200 000 copies of the same string. See
+    // [`crate::limits`].
+    let mut budget = crate::limits::MAX_BLOCK_REFS;
     for e in top {
-        collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut out);
+        collect_texts(db, e, &Affine::IDENTITY, "", 0, &mut budget, &mut out);
     }
     // One text can be reached twice: a DXF whose ATTRIB is owned by the
     // block record gives the containing block an ATTRIB child *and* (from
@@ -637,6 +644,7 @@ fn collect_texts(
     affine: &Affine,
     prefix: &str,
     depth: u32,
+    budget: &mut u32,
     out: &mut Vec<PlacedText>,
 ) {
     if out.len() >= MAX_PLACED_TEXTS || hidden_reason(e.common(), &db.tables).is_some() {
@@ -761,12 +769,13 @@ fn collect_texts(
             });
         }
         Entity::Insert(i) => {
-            if depth >= MAX_BLOCK_DEPTH {
+            if depth >= MAX_BLOCK_DEPTH || *budget == 0 {
                 return;
             }
             let Some(block) = db.tables.block_records.get(&i.block_name) else {
                 return;
             };
+            *budget -= 1;
             let child_affine = Affine::for_insert(i).then(affine);
             let child_prefix = id(&i.common.handle);
             // A *nested* INSERT's attribute values hang off the INSERT
@@ -779,7 +788,15 @@ fn collect_texts(
             // draws them with.
             if depth > 0 {
                 for a in &i.attribs {
-                    collect_texts(db, &Entity::Attrib(a.clone()), affine, prefix, depth, out);
+                    collect_texts(
+                        db,
+                        &Entity::Attrib(a.clone()),
+                        affine,
+                        prefix,
+                        depth,
+                        budget,
+                        out,
+                    );
                 }
             }
             for child in &block.entities {
@@ -790,7 +807,15 @@ fn collect_texts(
                 if matches!(child, Entity::Attdef(_)) {
                     continue;
                 }
-                collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
+                collect_texts(
+                    db,
+                    child,
+                    &child_affine,
+                    &child_prefix,
+                    depth + 1,
+                    budget,
+                    out,
+                );
             }
         }
         Entity::AcadTable(t) => {
@@ -802,12 +827,13 @@ fn collect_texts(
             // value they can see in a cell found nothing. The frame is the
             // INSERT one without the extrusion flip: the renderer passes
             // the table's `scale.x` through as it stands.
-            if depth >= MAX_BLOCK_DEPTH {
+            if depth >= MAX_BLOCK_DEPTH || *budget == 0 {
                 return;
             }
             let Some(block) = db.tables.block_records.get(&t.block_name) else {
                 return;
             };
+            *budget -= 1;
             let child_affine =
                 Affine::placement(p2(t.insertion_point), t.scale.x, t.scale.y, t.rotation)
                     .then(affine);
@@ -816,7 +842,15 @@ fn collect_texts(
                 if matches!(child, Entity::Attdef(_)) {
                     continue;
                 }
-                collect_texts(db, child, &child_affine, &child_prefix, depth + 1, out);
+                collect_texts(
+                    db,
+                    child,
+                    &child_affine,
+                    &child_prefix,
+                    depth + 1,
+                    budget,
+                    out,
+                );
             }
         }
         Entity::Tolerance(t) => {
@@ -1105,13 +1139,18 @@ pub fn export_package(
     let mut limits = rendered.limits.clone();
     let content = rendered.choice.rect;
     let top: Vec<&Entity> = svg::select_entities_for_space(db, Space::Model);
-    // Records cover what the picture shows: neither hidden entities nor
-    // the ones the crop left out (they are listed in report.json).
+    // Records cover what the picture shows: not the hidden entities, not
+    // the ones the crop left out (they are listed in report.json), and not
+    // the ones the renderer refused as oversized -- a block reference that
+    // expanded over the whole drawing is not in the picture, and its
+    // hundreds of thousands of repeated strings do not belong in the text
+    // records either.
     let excluded_handles: BTreeSet<&str> = rendered
         .choice
         .excluded
         .iter()
         .map(|e| e.handle.as_str())
+        .chain(rendered.oversized.iter().map(String::as_str))
         .collect();
     let shown: Vec<&Entity> = top
         .iter()

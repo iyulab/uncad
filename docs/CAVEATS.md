@@ -469,6 +469,7 @@ constant:
 | `MAX_BLOCK_REF_DEPTH` | 20 | how deep block references may nest |
 | `MAX_BLOCK_REFS` | 100 000 | how many references one render expands in total (the *breadth* the depth cap cannot see) |
 | `MAX_SVG_BODY_BYTES` | 64 MiB | how large the emitted drawing body may grow -- the backstop behind the rest |
+| `MAX_ENTITY_SVG_BYTES` | 4 MiB | how much one top-level entity may draw before it is left out altogether |
 | `MAX_ENTITY_POINTS` | 100 000 | how many file-supplied points one entity may draw with |
 | `MAX_HATCH_TILE_SPAN` | 16x the boundary | how much larger than the shape it fills a HATCH pattern's tile may be |
 | `MAX_WORLD_COORDINATE` | 1e15 | the largest coordinate, radius or size an entity may be drawn with |
@@ -498,7 +499,24 @@ allocation caps landed, on drawings that produced a perfectly small SVG:
   included, so it was the arc-to-bezier conversion and not the pixel count. A radius that
   large is a straight line, and is now drawn as one. (This was 0.46 s after the fix.)
 
-Two of the caps deserve their reasoning spelled out:
+Three of the caps deserve their reasoning spelled out:
+
+- **One entity covering the whole picture is what costs a package, not a large drawing.**
+  A tile rasterizes every part whose extent touches it, so a single INSERT that expanded
+  into a picture-wide part is re-assembled and re-parsed for every tile at every zoom
+  level, on up to sixteen threads at once. The 18 MB of body the largest real sample emits
+  is spread over 40 000 small parts, so each tile keeps a handful and `uncad export` peaks
+  at 402 MB in 3.2 s; a fuzzed `example_2000.dwg` whose body was the same order of
+  magnitude but held in a few huge parts peaked at **5.7 GB over 132 s**. So rendering one
+  part stops at `MAX_ENTITY_SVG_BYTES` -- which bounds the work -- and the part is then
+  dropped whole rather than shown half-drawn. The package excludes such an entity from its
+  *records* too, on the same rule the crop and the hidden-entity screen already follow:
+  records cover what the picture shows. That file now exports in 3.6 s at 344 MB, and its
+  package is 2.8 MB instead of 150 MB (it had been writing 200 000 text records -- the same
+  string repeated by the self-referencing block -- across 1 502 shard files). The
+  package's own text walk carries the expansion budget too, for the same
+  breadth-versus-depth reason.
+
 
 - **The output budget is what actually bounds the allocation.** It is checked before each
   entity, at every level of the block walk, so exhausting it unwinds the whole walk rather

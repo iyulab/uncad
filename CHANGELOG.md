@@ -243,6 +243,16 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   the POLYLINE subentity walks carry the same length bound. See `docs/CAVEATS.md`, which
   also records the unchecked null dereference this exposed in the vendored
   `get_next_owned_subentity`, left in place as a below-the-boundary fix.
+- A corrupt drawing could make `uncad export` peak at 5.7 GB over 132 s. A tile
+  rasterizes every part whose extent touches it, so one INSERT that expanded into a
+  picture-wide part is re-assembled and re-parsed for every tile at every zoom level, on
+  up to sixteen threads at once -- where the largest real sample's 18 MB of body is spread
+  over 40 000 small parts and exports in 3.2 s at 402 MB. Rendering one top-level entity
+  now stops at `limits::MAX_ENTITY_SVG_BYTES` (4 MiB) and the part is dropped whole rather
+  than shown half-drawn; the package leaves such an entity out of its records as well, on
+  the rule the crop and the hidden-entity screen already follow. Its text walk gained the
+  block-expansion budget too. The same file now exports in 3.6 s at 344 MB, with a 2.8 MB
+  package instead of a 150 MB one holding 200 000 copies of the same string.
 - A corrupt drawing could make the *rasterizer* run for minutes on a small SVG. Two
   finite-but-absurd numbers did it, both found by re-running the fuzz sweep after the
   allocation caps landed. A coordinate of 1e150 is finite, and one entity carrying it

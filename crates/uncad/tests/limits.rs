@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use uncad::limits::{
-    MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES,
-    MAX_WORLD_COORDINATE,
+    MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
+    MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
 };
 use uncad::model::{
     Entity, EntityCommon, HatchBoundaryPath, HatchEntity, HatchPatternLine, InsertEntity,
@@ -176,28 +176,74 @@ fn a_block_record_corrupted_into_referencing_itself_renders_bounded_and_says_so(
 // --- the caps, one at a time -------------------------------------------
 
 #[test]
-fn a_block_that_references_itself_stops_at_the_output_budget() {
+fn a_block_that_references_itself_is_left_out_of_the_picture() {
     // The shape the corrupted file above happens to produce, built by hand
     // so the cap is tested without depending on any one file: a block that
     // both draws something and references itself several times, so every
-    // level of the walk adds to the document.
+    // level of the walk adds to the document. Rendering stops at
+    // MAX_ENTITY_SVG_BYTES, which bounds the work, and the half-drawn part
+    // is then left out whole -- one entity covering the whole picture is
+    // not a picture, and a package would re-parse it for every tile.
     let mut children: Vec<Entity> = (0..40).map(|i| line("C", i as f64, 0.0)).collect();
     children.extend((0..8).map(|i| insert("I", "R", i as f64)));
-    let drawing = db(vec![insert("T", "R", 0.0)], vec![block("R", children)]);
+    let drawing = db(
+        vec![insert("T", "R", 0.0), line("KEEP", 0.0, 0.0)],
+        vec![block("R", children)],
+    );
 
     let started = Instant::now();
     let result = drawing.to_svg(ToSvgOptions::default());
     let elapsed = started.elapsed();
 
+    assert_eq!(
+        result.limits.oversized_parts, 1,
+        "the runaway block reference should have been left out: {:?}",
+        result.limits
+    );
     assert!(
-        result.svg.len() < MAX_SVG_BODY_BYTES + SLACK,
+        result.svg.len() < MAX_ENTITY_SVG_BYTES,
         "the document grew to {} bytes",
         result.svg.len()
     );
     assert!(
-        result.limits.entities_dropped > 0,
-        "the output budget is what should have stopped this: {:?}",
+        result.svg.contains("<line "),
+        "the rest of the drawing must still be drawn"
+    );
+    assert!(elapsed.as_secs() < 120, "took {elapsed:?}");
+}
+
+#[test]
+fn many_ordinary_entities_still_stop_at_the_whole_documents_budget() {
+    // MAX_ENTITY_SVG_BYTES bounds one part; this is the other bound, the
+    // one on the document. Nothing here is individually oversized -- it is
+    // the sheer count of small entities, which a corrupt object list can
+    // claim as easily as a corrupt block can nest.
+    // A `<line>` is about 55 bytes, so a block of 4 000 of them is a part
+    // of ~220 KB -- comfortably under MAX_ENTITY_SVG_BYTES -- and 400
+    // references to it come to ~88 MB, comfortably over
+    // MAX_SVG_BODY_BYTES.
+    let children: Vec<Entity> = (0..4_000).map(|i| line("C", i as f64, 0.0)).collect();
+    let tops: Vec<Entity> = (0..400).map(|i| insert("T", "B", i as f64)).collect();
+    let drawing = db(tops, vec![block("B", children)]);
+
+    let started = Instant::now();
+    let result = drawing.to_svg(ToSvgOptions::default());
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        result.limits.oversized_parts, 0,
+        "no single part is oversized here: {:?}",
         result.limits
+    );
+    assert!(
+        result.limits.entities_dropped > 0,
+        "the document budget is what should have stopped this: {:?}",
+        result.limits
+    );
+    assert!(
+        result.svg.len() < MAX_SVG_BODY_BYTES + SLACK,
+        "the document grew to {} bytes",
+        result.svg.len()
     );
     assert!(elapsed.as_secs() < 120, "took {elapsed:?}");
 }

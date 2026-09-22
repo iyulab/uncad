@@ -290,8 +290,8 @@ fn compose(parent: &Transform, child: &Transform) -> Transform {
 // --- render context ----------------------------------------------------
 
 use crate::limits::{
-    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_SVG_BODY_BYTES,
-    MAX_WORLD_COORDINATE,
+    LimitReport, MAX_BLOCK_REFS, MAX_BLOCK_REF_DEPTH, MAX_ENTITY_POINTS, MAX_ENTITY_SVG_BYTES,
+    MAX_SVG_BODY_BYTES, MAX_WORLD_COORDINATE,
 };
 
 struct Ctx<'a> {
@@ -338,6 +338,12 @@ struct Ctx<'a> {
     /// further is drawn, so no file can make this render grow a string
     /// without bound. See [`crate::limits`].
     emitted: usize,
+    /// [`emitted`](Self::emitted) when the current *top-level* entity
+    /// started, so one part can be bounded by [`MAX_ENTITY_SVG_BYTES`] as
+    /// well as the document by [`MAX_SVG_BODY_BYTES`]. The package needs
+    /// the per-part bound: a tile re-assembles and re-parses every part
+    /// that touches it.
+    entity_start: usize,
     /// What the caps in [`crate::limits`] took away from this render.
     limits: LimitReport,
     /// [`ToSvgOptions::include_hidden`].
@@ -367,6 +373,7 @@ impl<'a> Ctx<'a> {
             def_prefix: String::new(),
             block_ref_budget: MAX_BLOCK_REFS,
             emitted: 0,
+            entity_start: 0,
             limits: LimitReport::default(),
             include_hidden: false,
             hidden: 0,
@@ -1017,6 +1024,13 @@ fn render_entity(e: &Entity, ctx: &mut Ctx) -> Option<String> {
     // walk -- however deep inside nested block references it happens.
     if ctx.emitted >= MAX_SVG_BODY_BYTES {
         ctx.limits.entities_dropped += 1;
+        return None;
+    }
+    if ctx.emitted - ctx.entity_start >= MAX_ENTITY_SVG_BYTES {
+        // Inside a top-level entity that has already drawn more than one
+        // entity may. Building stops here, which bounds the work; the part
+        // is then dropped whole by `render_selected`, which is also where
+        // it is counted.
         return None;
     }
     if drawn_point_count(e) > MAX_ENTITY_POINTS {
@@ -1812,6 +1826,10 @@ pub(crate) struct Rendered {
     pub(crate) unbounded: HashSet<String>,
     /// What the caps in [`crate::limits`] took away from this render.
     pub(crate) limits: LimitReport,
+    /// The handles of the entities [`MAX_ENTITY_SVG_BYTES`] left out. The
+    /// package excludes them from its records too: the records cover what
+    /// the picture shows, and this is not in it.
+    pub(crate) oversized: HashSet<String>,
 }
 
 impl Rendered {
@@ -1930,6 +1948,7 @@ pub(crate) fn render_selected(
     let mut extents: Vec<Extent> = Vec::new();
     let mut body: Vec<(String, String)> = Vec::new();
     let mut unbounded: HashSet<String> = HashSet::new();
+    let mut oversized: HashSet<String> = HashSet::new();
 
     let mut ctx = Ctx::new(&db.tables);
     ctx.include_hidden = options.include_hidden;
@@ -1943,8 +1962,18 @@ pub(crate) fn render_selected(
         // A hidden entity never affects the crop, drawn faded or not.
         let hidden = crate::visibility::hidden_reason(e.common(), &db.tables).is_some();
         ctx.reset_entity_bounds();
+        ctx.entity_start = ctx.emitted;
         if let Some(svg) = render_entity(e, &mut ctx) {
-            if !svg.is_empty() {
+            if svg.len() >= MAX_ENTITY_SVG_BYTES {
+                // One entity that drew more than any entity may. It is left
+                // out whole rather than shown half-drawn: a part this size
+                // is a block reference that expanded over the entire
+                // picture, and a package re-assembles and re-parses every
+                // part each of its tiles touches. See [`crate::limits`].
+                ctx.limits.oversized_parts += 1;
+                ctx.emitted = ctx.entity_start;
+                oversized.insert(e.common().handle.clone());
+            } else if !svg.is_empty() {
                 if svg.contains(infinite::MARKER) {
                     unbounded.insert(e.common().handle.clone());
                 }
@@ -1989,6 +2018,7 @@ pub(crate) fn render_selected(
         extents,
         origin,
         unbounded,
+        oversized,
         limits: ctx.limits,
     }
 }
@@ -2357,9 +2387,17 @@ mod tests {
             !svg.is_empty(),
             "the shallow levels within budget should still render something"
         );
-        assert_eq!(
-            ctx.block_ref_budget, 0,
-            "the budget, not the depth cap, should be what stopped this combinatorial blowup"
+        // A 5-ary tree 20 levels deep is 5^20 (~9.5e13) instantiations, so
+        // the depth cap cannot be what ended this walk: one of the budgets
+        // did, and the part it produced is bounded either way.
+        assert!(
+            ctx.block_ref_budget < MAX_BLOCK_REFS,
+            "the walk should have spent some of its expansion budget"
+        );
+        assert!(
+            svg.len() < MAX_ENTITY_SVG_BYTES * 2,
+            "the emitted part grew to {} bytes",
+            svg.len()
         );
     }
 
