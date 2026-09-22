@@ -830,8 +830,13 @@ pub struct DimensionEntity {
     pub geometry: DimensionGeometry,
     /// The measurement AutoCAD stored (DXF 42): drawing units before
     /// `DIMLFAC` for linear kinds, degrees for angular kinds, the arc length
-    /// for an arc-length dimension. `None` when the file holds none (R14-era
-    /// dimensions store -1).
+    /// for an arc-length dimension. `None` when the stored value cannot be a
+    /// measurement of this dimension: the R14-era -1 sentinel, the 0 a DXF
+    /// without a group 42 leaves behind, a value at or below zero on a kind
+    /// whose measurement can be neither (every kind but ORDINATE, a signed
+    /// offset), or a value disagreeing with the definition points by more
+    /// than 1 %. Then `measurement_from_points` is the one to use, and
+    /// [`crate::dimension::usable_stored_measurement`] is the whole rule.
     #[serde(default)]
     pub measurement: Option<f64>,
     /// The same quantity recomputed from `geometry` by

@@ -2556,12 +2556,16 @@ const MAX_PPU: f64 = 1e9;
 /// The smallest world window an image of degenerate content gets, in
 /// drawing units. Content with no size at all -- a lone POINT, coincident
 /// entities, the base points of RAY/XLINE, which is all those entities
-/// contribute -- gives the fit nothing to scale to. Half a unit of
-/// padding around it would put the scale in the thousands of pixels per
-/// unit, where the 1e6-unit line the renderer draws a RAY with reaches
-/// billions of device pixels and tiny-skia's scan converter gives up; ten
-/// units keeps it in the hundreds, and the point itself (drawn half a
-/// unit across) is still ~50 px wide on a 1092 px overview.
+/// contribute -- gives the fit nothing to scale to: the padded window comes
+/// out zero-size, the scale infinite, and every `world` rectangle the
+/// package writes collapses to one set of numbers once it is rounded, so
+/// the affine beside it no longer matches. Such content therefore gets a
+/// window of its own, sized so the picture still reads as a drawing: at ten
+/// units the scale stays in the hundreds of pixels per unit and the point
+/// itself (drawn half a unit across) is ~50 px wide on a 1092 px tile,
+/// where half a unit would put the scale in the thousands and leave the dot
+/// filling the frame. The `ppu` cap in [`fit_overview`] is the other half of
+/// the same guard, for a window that is small rather than empty.
 const MIN_CONTENT_EXTENT: f64 = 10.0;
 
 fn fit_overview(content: &Rect, profile: &Profile, padding: Option<f64>) -> OverviewFit {

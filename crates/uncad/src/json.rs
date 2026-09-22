@@ -1,9 +1,10 @@
 //! JSON export of the parsed model -- [`CadDatabase::to_json`].
 //!
 //! The output is a direct serde serialization of [`CadDatabase`] (`entities` +
-//! `tables`): exactly the model `to_svg()` renders from, so a consumer sees the
-//! same drawing the SVG shows. It round-trips for any database whose `f64`
-//! fields are all finite (everything `parse()` has produced so far):
+//! `tables` + `header`): exactly the model `to_svg()` renders from, so a
+//! consumer sees the same drawing the SVG shows. It round-trips for any
+//! database whose `f64` fields are all finite (everything `parse()` has
+//! produced so far):
 //! `serde_json::from_str::<CadDatabase>` gives back a database equal
 //! (`PartialEq`) to the one serialized -- exactly when the reader's
 //! `serde_json` has its `float_roundtrip` feature on, and otherwise to within

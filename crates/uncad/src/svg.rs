@@ -17,7 +17,8 @@
 //! Submodules hold the parts that stand on their own -- [`format`] (number and
 //! string formatting), [`hatch`] (HATCH fills), [`infinite`] (RAY and XLINE,
 //! which are clipped to the picture once the viewBox is known) and [`bounds`]
-//! (per-entity boxes and proximity clustering). The viewBox is
+//! (the per-entity box this module fills in as it draws; grouping those boxes
+//! into frames is [`crate::crop::detached_groups`]). The viewBox is
 //! [`crate::crop`]'s decision, taken from the extents this module measures
 //! while it draws.
 
