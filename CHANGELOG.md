@@ -173,6 +173,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Re-exporting into a directory that already held a package left the previous run's
+  files beside the new ones -- record shards (`texts.003.json`), deeper tile levels and
+  their sidecars, sheets of layouts that no longer exist -- all valid-looking and none of
+  them in the new `manifest.json`, so a consumer that walks the tree (as the generated
+  README.txt invites) mixed two exports. `export_package` now clears what the previous
+  `manifest.json` listed, and the `frames/`, `sheets/` directories that empties, before
+  it writes; a directory without an uncad manifest, and any file such a manifest does not
+  list, is left untouched.
 - A tile sidecar's `layers_present` listed only the layers of the texts, dimensions and
   block instances on the tile, so a tile drawn from geometry alone -- the usual case --
   reported no layers at all and an agent filtering tiles by layer skipped it. It now

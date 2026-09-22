@@ -1303,3 +1303,129 @@ fn the_guidance_quotes_the_profile_in_use() {
         }
     }
 }
+
+#[test]
+fn re_exporting_clears_the_previous_package_but_nothing_else() {
+    // A second export with other options used to leave the first run's
+    // files beside the new ones: deeper tile levels with sidecars whose
+    // `parent`/`children` describe a pyramid the new manifest does not
+    // have, and record shards (`texts.003.json`) holding ids the new
+    // `texts.json` also holds. Both look valid, so a consumer walking the
+    // tree -- which README.txt invites -- mixes two exports.
+    let db = labelled_grid(0.0);
+    let small = Profile {
+        name: "claude-small",
+        overview_edge: 784,
+        overview_patches: 784,
+        ..Profile::CLAUDE
+    };
+    let tmp = TempDir::new("reexport");
+    let first = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 2,
+            shard_kb: 4,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert!(first.frames[0].levels.len() == 2, "{:?}", first.frames);
+    assert!(tmp.0.join("frames/f0/tiles/z2").exists());
+    assert!(tmp.0.join("texts.001.json").exists(), "sharded");
+
+    // Something the export did not write: not ours to remove.
+    let sentinel = tmp.0.join("notes.txt");
+    std::fs::write(&sentinel, b"mine").unwrap();
+    let kept_tile = tmp.0.join("frames/f0/tiles/z2/keep.txt");
+    std::fs::write(&kept_tile, b"mine too").unwrap();
+
+    let second = export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports again");
+    assert_eq!(second.frames[0].levels.len(), 1);
+
+    // Everything on disk is either the new package or the files placed by
+    // hand: no z2 tile, no stale shard.
+    let mut on_disk: BTreeSet<String> = BTreeSet::new();
+    let mut stack = vec![tmp.0.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                on_disk.insert(
+                    path.strip_prefix(&tmp.0)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    let listed: BTreeSet<String> = second.files.iter().map(|f| f.path.clone()).collect();
+    let extra: Vec<&String> = on_disk.difference(&listed).collect();
+    assert_eq!(
+        extra,
+        [
+            &"frames/f0/tiles/z2/keep.txt".to_string(),
+            &"notes.txt".to_string()
+        ],
+        "stale files: {extra:?}"
+    );
+    assert!(listed.iter().all(|p| on_disk.contains(p)), "{listed:?}");
+    assert!(
+        !on_disk.iter().any(|p| p.starts_with("texts.0")),
+        "{on_disk:?}"
+    );
+    assert_eq!(std::fs::read(&sentinel).unwrap(), b"mine");
+
+    // A directory that only held the old package's files is gone; one that
+    // still holds something stays.
+    assert!(tmp.0.join("frames/f0/tiles/z1").exists());
+    assert!(
+        tmp.0.join("frames/f0/tiles/z2").exists(),
+        "keep.txt is in it"
+    );
+    std::fs::remove_file(&kept_tile).unwrap();
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports a third time");
+    assert!(!tmp.0.join("frames/f0/tiles/z2").exists(), "now empty");
+
+    // A directory that is not an uncad package is never touched.
+    let foreign = TempDir::new("foreign");
+    std::fs::create_dir_all(&foreign.0).unwrap();
+    std::fs::write(foreign.0.join("manifest.json"), br#"{"schema":"other"}"#).unwrap();
+    std::fs::write(foreign.0.join("important.bin"), b"keep").unwrap();
+    export_package(
+        &db,
+        &foreign.0,
+        &ExportOptions {
+            max_levels: 0,
+            profile: small,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    assert_eq!(
+        std::fs::read(foreign.0.join("important.bin")).unwrap(),
+        b"keep"
+    );
+}

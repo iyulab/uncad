@@ -911,8 +911,12 @@ struct Tile {
     empty: bool,
 }
 
-/// Writes the package for `db` into `dir` (created if needed; existing
-/// files with the same names are overwritten).
+/// Writes the package for `db` into `dir` (created if needed). A previous
+/// uncad package in `dir` is cleared first -- every file its
+/// `manifest.json` listed, and the directories under `frames/` and
+/// `sheets/` that empties -- so a re-export with other options leaves no
+/// stale shards or tiles behind; nothing a manifest did not list is
+/// touched.
 pub fn export_package(
     db: &CadDatabase,
     dir: &Path,
@@ -924,6 +928,7 @@ pub fn export_package(
         path: dir.to_path_buf(),
         source,
     })?;
+    clear_previous_package(dir);
     let mut warnings: Vec<String> = Vec::new();
 
     // --- render once, decide the crop ---------------------------------
@@ -2052,6 +2057,67 @@ pub fn export_package(
         counts,
         warnings,
     })
+}
+
+/// Removes what a previous uncad package in `dir` left behind, so a second
+/// export with other options does not leave stale shards, tile PNGs and
+/// sidecars beside the new ones: they look valid (same schema, same record
+/// ids) and a consumer that walks the tree -- as the generated README.txt
+/// invites -- would mix two exports, following `parent`/`children` links
+/// into a pyramid the new manifest does not have.
+///
+/// Only the files the previous `manifest.json` lists are removed, and only
+/// when it is an uncad manifest: a directory holding anything else is left
+/// alone, and a listed path that is not a plain relative path inside `dir`
+/// is ignored. Directories under `frames/` and `sheets/` go when they are
+/// left empty. Every failure is ignored -- the write that follows reports
+/// what actually matters.
+fn clear_previous_package(dir: &Path) {
+    let Ok(text) = std::fs::read_to_string(dir.join("manifest.json")) else {
+        return;
+    };
+    let Ok(manifest) = serde_json::from_str::<Value>(&text) else {
+        return;
+    };
+    let ours = manifest
+        .get("$schema")
+        .and_then(Value::as_str)
+        .is_some_and(|s| s.starts_with("uncad-package/"));
+    if !ours {
+        return;
+    }
+    let files = manifest.get("files").and_then(Value::as_array);
+    for file in files.into_iter().flatten() {
+        let Some(rel) = file.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let inside = !rel.is_empty()
+            && Path::new(rel)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if inside {
+            let _ = std::fs::remove_file(dir.join(rel));
+        }
+    }
+    for sub in ["frames", "sheets"] {
+        remove_empty_dirs(&dir.join(sub));
+    }
+}
+
+/// Removes `dir` and every directory under it that is empty once its own
+/// empty children are gone; a directory still holding a file stays (with
+/// everything above it).
+fn remove_empty_dirs(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            remove_empty_dirs(&entry.path());
+        }
+    }
+    // Fails, harmlessly, when anything is left in it.
+    let _ = std::fs::remove_dir(dir);
 }
 
 /// The metrics pre-pass: lays the text-bearing entities out once through
