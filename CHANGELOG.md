@@ -194,6 +194,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 - An R2007+ DXF parsed to zero entities: LibreDWG stores its strings as UTF-16 but hands
   them out unconverted for DXF input, so `"*Model_Space"` read as `"*"` and no entity was
   selected. The same shim now converts them (same CAVEATS entry).
+- A control character in a text (a raw byte below 0x20 other than tab/LF/CR, or a `%%nnn`
+  code for one) made `to_png` fail with `InvalidSvg` and `export_package` abort with an
+  empty directory, because the SVG carried a character XML forbids. `text_plain` now marks
+  such a character with U+FFFD, `%%001`..`%%031` (other than 9/10/13) are left as written
+  like any other non-code, and the SVG writer strips whatever still reaches it.
 - `parse()` opens files under paths with non-ASCII characters on Windows
   (`docs/CAVEATS.md`, "Fixed: a path with non-ASCII characters ...").
 
