@@ -39,6 +39,7 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
 | `nested_attrib_r2000.dxf` | 2174 | 3 model-space entities, 2 blocks (6 entities) | A block with an ATTDEF inserted inside another block, its ATTRIB value owned by the block record: the attribute of a *nested* block reference, which the export used to drop |
 | `infinite_lines_r2000.dxf` | 673 | 4 | An XLINE and a RAY through the middle of a drawing 0.002 units across: the two entities with no end, at a scale where drawing them a fixed 1e6 units long panicked the rasterizer |
+| `title_block_r2000.dxf` | 2939 | 4 entities, 3 block records, 1 layout | A drawing whose every string is in *paper* space: a title TEXT and a title-block INSERT on an A4 sheet over a model with no text at all -- the shape that made a package answer "this drawing contains no text" |
 
 ## cp949_r2000.dxf
 
@@ -539,6 +540,41 @@ document, which is how the bug stayed hidden). The corpus's
 `2000/ConstructionLine.dwg` holds one XLINE and survives only because its
 crop is around 1 unit wide.
 
+## title_block_r2000.dxf
+
+The drawing whose name is not in the drawing. Written by
+`make_fixtures.py`'s `title_block()` on 2026-09-23 for the paper-space text
+index. HEADER: `$INSUNITS 4`. TABLES: a LAYER table with `0`, and
+BLOCK_RECORDs `1F` `*Model_Space`, `1C` `*Paper_Space` (LAYOUT `2B`) and
+`40` `TITLEBLOCK`. BLOCKS: the two spaces plus `TITLEBLOCK`. OBJECTS: the
+named object dictionary, `ACAD_LAYOUT` and one LAYOUT `Layout1`, A4
+landscape (`ISO_A4_(210.00_x_297.00_MM)`, rotation 1, 6.35 mm margins, no
+plot origin).
+
+| Handle | Space | Entity | Groups | uncad |
+|---|---|---|---|---|
+| `24` | model | LINE | `10` (0,0), `11` (100,50) | the whole model: no text anywhere in it |
+| `25` | paper | TEXT | `10` (150,20), `40` 8, `1` `GARDEN PAVILION` | the drawing's title |
+| `26` | paper | INSERT `TITLEBLOCK` | `10` (200,10) | the title block |
+| `42` | in `TITLEBLOCK` | TEXT | `10` (10,10), `40` 5, `1` `SHEET 1 OF 2` | drawn at (210,20); record id `26/42` |
+| `43` | in `TITLEBLOCK` | LINE | `10` (0,5), `11` (90,5) | the rule under it |
+| `2A` | paper | VIEWPORT | `10` (150,120), `40/41` 200 x 120, `12` (50,25), `45` 60 | the model at 2 paper units per model unit |
+
+What the fixture pins (`tests/export.rs`, `tests/sheets.rs`):
+
+| Item | uncad |
+|---|---|
+| sheet rectangle | `layout_limits` `[-6.35, -6.35, 290.65, 203.65]`: 297 x 210 with the printable corner at the origin |
+| `texts.json` | two records, `25` and `26/42`, each `space: "paper"`, `sheet: "Layout1"`, `tiles: []` and a `px` entry for `sheet:Layout1` |
+| `strings.json` | `garden pavilion` -> `["25"]`, `sheet 1 of 2` -> `["26/42"]` |
+| `manifest.counts` | `texts` 2, `texts_paper` 2 (before the paper-space index: 0 and no such field) |
+| viewport mapping | `frame` `[50, 60, 250, 180]`, `scale` 2.0, `model_window` `[[0,-5],[100,-5],[100,55],[0,55]]`: `frame[0] + (x - model_window[0][0]) * scale` maps the model window onto the frame exactly |
+
+The model-space LINE is what keeps the package honest: the crop, the
+overview and the tiles are all of the model, so the sheet image is the only
+picture the strings appear in -- and before 0.3.0's paper-space index they
+appeared in no JSON at all, while `capabilities.text_boxes` read `none`.
+
 ## What did not work
 
 1. **`cp949_r2000.dwg` via LibreDWG's add/write API**: `dwg_add_Document`,
@@ -580,7 +616,7 @@ crop is around 1 unit wide.
 python crates/uncad/tests/fixtures/make_fixtures.py                    # the shipped files (a name such as `mirrored-bulge`, `hatched-viewport` or `nested-attrib` writes only that one)
 python crates/uncad/tests/fixtures/make_fixtures.py . dimlfac-minimal  # the ENTITIES-only draft (unbound *D1)
 python crates/uncad/tests/fixtures/make_fixtures.py . viewport-minimal # the ENTITIES-only draft (model-space VIEWPORT)
-python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, radial, viewport-states, infinite-lines, cp949, mirrored, dimlfac, viewport, hidden)
+python crates/uncad/tests/fixtures/make_fixtures.py . plot-origin      # one file (also angular-ordinate, radial, viewport-states, infinite-lines, title-block, cp949, mirrored, dimlfac, viewport, hidden)
 ```
 
 The default mode is meant to reproduce the shipped bytes exactly; check with

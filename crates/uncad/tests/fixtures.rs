@@ -79,10 +79,15 @@ const INFINITE_LINES: &str = concat!(
     "/tests/fixtures/infinite_lines_r2000.dxf"
 );
 
+const TITLE_BLOCK: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/title_block_r2000.dxf"
+);
+
 /// Every shipped fixture, so the checks that must hold for all of them
 /// (parsing, the JSON round trip) cover each new file from the day it
 /// lands.
-const ALL: [&str; 13] = [
+const ALL: [&str; 14] = [
     CP949,
     MIRRORED,
     DIMLFAC12,
@@ -96,6 +101,7 @@ const ALL: [&str; 13] = [
     VIEWPORT_STATES,
     RADIAL,
     INFINITE_LINES,
+    TITLE_BLOCK,
 ];
 
 fn parse(path: &str) -> uncad::CadDatabase {
@@ -721,4 +727,43 @@ fn a_deep_tile_pyramid_keeps_the_construction_lines_and_does_not_panic() {
         "only {crossed_by_the_ray} of {deepest_tiles} deep tiles show the RAY down them"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ------------------------------------------------------------ title_block
+
+#[test]
+fn the_title_block_fixture_keeps_every_string_in_paper_space() {
+    // The shape the paper-space text index exists for: the model holds one
+    // LINE and nothing else, while the sheet carries the drawing's name.
+    // Read off `make_fixtures.py`'s `title_block()`, which writes these
+    // four entities and this one block.
+    let db = parse(TITLE_BLOCK);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("INSERT", 1), ("LINE", 1), ("TEXT", 1), ("VIEWPORT", 1)])
+    );
+    let model = &db.tables.block_records["*Model_Space"];
+    assert_eq!(model.entities.len(), 1);
+    assert!(matches!(model.entities[0], uncad::Entity::Line(_)));
+    let paper = &db.tables.block_records["*Paper_Space"];
+    let paper_texts: Vec<&str> = paper
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            uncad::Entity::Text(t) => Some(t.text_plain.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(paper_texts, ["GARDEN PAVILION"]);
+    let block = &db.tables.block_records["TITLEBLOCK"];
+    let inside: Vec<&str> = block
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            uncad::Entity::Text(t) => Some(t.text_plain.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(inside, ["SHEET 1 OF 2"]);
+    assert_eq!(db.tables.layouts.len(), 1);
 }
