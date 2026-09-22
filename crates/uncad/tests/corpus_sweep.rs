@@ -259,7 +259,31 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
 /// point.
 #[test]
 fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
-    let path = Path::new(CORPUS).join("example_2000.dwg");
+    // Two unrelated drawings, so the mapping is not one file's accident.
+    angular_groups_match_the_twin(
+        "example_2000.dwg",
+        (490.6216519543077, 4118.24274338716),
+        (-276.8548009664508, 4701.847034571434),
+        (172.7442546208081, 3207.985617767696),
+        (3.542714605046057, 4128.871501442696),
+    );
+    angular_groups_match_the_twin(
+        "2000/TS1.dwg",
+        (24.13153389940095, 44.46327921516783),
+        (28.70342522096354, 44.46327921516783),
+        (24.13153389940095, 44.46327921516783),
+        (27.19496793714468, 44.94887381898933),
+    );
+}
+
+fn angular_groups_match_the_twin(
+    drawing: &str,
+    g13: (f64, f64),
+    g14: (f64, f64),
+    g15: (f64, f64),
+    g16: (f64, f64),
+) {
+    let path = Path::new(CORPUS).join(drawing);
     let db = uncad::parse(&path).expect("the corpus drawing parses");
     let dim = db
         .entities
@@ -284,22 +308,10 @@ fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
             want.1
         );
     };
-    near(
-        dim.points.extension1,
-        (490.6216519543077, 4118.24274338716),
-        13,
-    );
-    near(
-        dim.points.extension2,
-        (-276.8548009664508, 4701.847034571434),
-        14,
-    );
-    near(
-        dim.points.radial,
-        (172.7442546208081, 3207.985617767696),
-        15,
-    );
-    near(dim.points.arc, (3.542714605046057, 4128.871501442696), 16);
+    near(dim.points.extension1, g13, 13);
+    near(dim.points.extension2, g14, 14);
+    near(dim.points.radial, g15, 15);
+    near(dim.points.arc, g16, 16);
     // Group 10 is the one this library does not keep for this subtype.
     assert_eq!(dim.definition_point, None);
 }
