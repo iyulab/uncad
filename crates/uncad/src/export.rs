@@ -10,28 +10,31 @@
 //! ```text
 //! dir/
 //!   README.txt        reading order
-//!   manifest.json     source, units, profile, crop, overview, frames, sheets, legibility, capabilities, counts, warnings, files, shard_index, guidance
-//!   drawing.json      header, units, layers with their state, blocks, counts
+//!   manifest.json     source, units, profile, crop, overview, frames, frames_dropped, sheets, legibility, capabilities, counts, warnings, files, shard_index, legend, guidance
+//!   drawing.json      header, units, layers with their state, the block definitions, counts
 //!   overview.png      the whole crop, fitted to the profile (Claude: <= 1568 px edge, <= 1568 patches)
 //!   frames/fN/tiles/z{z}/r{rr}_c{cc}.png + .json   tiles (1092 px, 224 px overlap) and sidecars
 //!   frames/fN/overview.png   one per frame when the drawing splits into several; a single-frame drawing has overview.png alone
-//!   tiles.json        every tile of every level and frame, written or empty
-//!   sheets.json       the paper layouts: sheet rectangle and its source, plot settings, viewports
+//!   tiles.json        every tile of every level and frame, written (with its bytes and sha256) or empty (with a reason)
+//!   sheets.json       the paper layouts: sheet rectangle and its source, plot settings, viewports, model-to-paper mapping
 //!   sheets/<layout>/overview.png   each layout, with the model composited through its viewports
-//!   texts.json        TEXT/MTEXT/ATTRIB, block contents included, with world boxes and tiles
+//!   texts.json        TEXT/MTEXT/ATTRIB, block contents included, with world boxes and tiles; the paper layouts' own texts with `space: "paper"`, their sheet and that sheet's pixel box
 //!   dimensions.json   measured value, display string, definition points
 //!   geometry.json     every other visible entity: key points, length, area, bbox, tiles
 //!   regions.json      closed polylines: area, perimeter, centroid, the texts inside
-//!   blocks.json       block definitions and INSERT instances with attributes
+//!   blocks.json       the INSERT instances with their attributes (the definitions are drawing.json's `blocks`)
 //!   strings.json      NFKC-normalised string -> record ids
 //!   report.json       excluded and hidden entities with reasons, unsupported types, timings
 //!   drawing.svg       with `svg: true`;  entities.json  with `full: true`
 //! ```
 //!
-//! Two manifest fields are worth knowing about: `capabilities` says which
-//! questions this package answers exactly, and `svg_origin` is the origin
-//! `drawing.svg` is written relative to -- set only when the drawing sits
-//! far enough from zero that single-precision rasterizing would lose it.
+//! Three manifest fields are worth knowing about: `capabilities` says
+//! which questions this package answers exactly *for this drawing* (every
+//! entry is derived from the records, none is a constant), `legend` says
+//! what the records' own vocabularies mean and which records carry them,
+//! and `svg_origin` is the origin `drawing.svg` is written relative to --
+//! set only when the drawing sits far enough from zero that
+//! single-precision rasterizing would lose it.
 //!
 //! Every JSON file carries `"$schema": "uncad-package/1"` and a `units`
 //! block; record files above `shard_kb` are split into `name.NNN.json` and
@@ -169,10 +172,13 @@ pub struct ExportOptions {
     /// the same group; a detached group becomes its own frame. Default 0.05.
     pub frame_gap: f64,
     /// A detached group needs this many entities, or one text, to become a
-    /// frame. Default 20.
+    /// frame. A group that does not stays in the overview only and is
+    /// listed in `frames_dropped` with the reason `below_min_entities`.
+    /// Default 20.
     pub min_frame_entities: usize,
     /// The most frames written (the primary one included); further groups
-    /// stay in the overview only and are listed as dropped. Default 8.
+    /// stay in the overview only and are listed in `frames_dropped` with
+    /// the reason `max_frames`. Default 8.
     pub max_frames: usize,
     /// The fonts text is shaped and drawn with. Default [`Fonts::Bundled`].
     pub fonts: Fonts,
@@ -281,13 +287,35 @@ impl ImageInfo {
     }
 
     /// A world rectangle in this image's pixels, `[x0, y0, x1, y1]` with y
-    /// down, rounded to whole pixels.
+    /// down, rounded to whole pixels and **clipped to the image**.
+    ///
+    /// A record is listed on an image whenever its world box merely meets
+    /// it, so the unclipped box of a record that continues past the edge
+    /// named pixels the image does not have: a dimension whose text sits
+    /// on the next tile was quoted as `[945, 790, 9207, 1174]` on a
+    /// 1092 px tile, 8115 px beyond its right edge, and a reader cropping
+    /// to it got an error or a sliver. The record's full extent is its
+    /// world `bbox`, and the rest of it is on the other tiles in its
+    /// `tiles` list.
     fn px_box(&self, r: &Rect) -> [i64; 4] {
         let x0 = ((r.min_x - self.world.min_x) * self.ppu).floor();
         let x1 = ((r.max_x - self.world.min_x) * self.ppu).ceil();
         let y0 = ((self.world.max_y - r.max_y) * self.ppu).floor();
         let y1 = ((self.world.max_y - r.min_y) * self.ppu).ceil();
-        [x0 as i64, y0 as i64, x1 as i64, y1 as i64]
+        let (w, h) = (i64::from(self.px[0]), i64::from(self.px[1]));
+        let clamp = |v: f64, hi: i64| -> i64 {
+            if v.is_nan() {
+                0
+            } else {
+                (v.clamp(-9e15, 9e15) as i64).clamp(0, hi)
+            }
+        };
+        [
+            clamp(x0, w),
+            clamp(y0, h),
+            clamp(x1, w).max(clamp(x0, w)),
+            clamp(y1, h).max(clamp(y0, h)),
+        ]
     }
 }
 
@@ -392,11 +420,19 @@ pub struct WrittenFile {
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Counts {
     pub entities: usize,
+    /// Every text record, model space and paper space together.
     pub texts: usize,
+    /// The part of `texts` that is paper-space text (a sheet's title
+    /// block): records with `space: "paper"` and a `sheet`.
+    pub texts_paper: usize,
     pub dimensions: usize,
     pub geometry: usize,
     pub regions: usize,
     pub blocks: usize,
+    /// Every hidden entity the renderer skipped, those inside block
+    /// definitions included -- the same number `report.json` prints as
+    /// `hidden.count`, whose `top_level` / `inside_blocks` split says how
+    /// many of them the reason walk could name.
     pub hidden: usize,
     pub excluded: usize,
     pub tiles: usize,
@@ -423,6 +459,7 @@ pub struct ExportReport {
 // ---------------------------------------------------------------- records
 
 /// One entity's export record before its images are known.
+#[derive(Clone)]
 struct Record {
     id: String,
     bbox: Rect,
@@ -582,8 +619,24 @@ impl Affine {
     }
 }
 
-const MAX_BLOCK_DEPTH: u32 = 8;
+/// How deep this walk follows block references -- the renderer's own depth
+/// ([`crate::limits::MAX_BLOCK_REF_DEPTH`]), and it has to be: between a
+/// shallower cap here and the renderer's, a TEXT would be *drawn* in the
+/// overview and the tiles while getting no record in `texts.json` and no
+/// key in `strings.json`, so the documented "look its text up in
+/// strings.json" path failed for a string plainly in the picture. It was 8
+/// against the renderer's 20, which a bound XREF of an assembly of
+/// assemblies reaches.
+const MAX_BLOCK_DEPTH: u32 = crate::limits::MAX_BLOCK_REF_DEPTH;
 const MAX_PLACED_TEXTS: usize = 200_000;
+
+/// The most entries `manifest.frames_dropped` lists (the count is always
+/// exact in `frames_dropped_total`).
+const MAX_DROPPED_FRAMES: usize = 100;
+
+/// The most handles `report.json`'s `hidden.handles` lists; the file says
+/// so with `handles_limit` and `handles_truncated`.
+const MAX_HIDDEN_HANDLES: usize = 100;
 
 /// The most vertices an outline may have before its self-intersection test
 /// is skipped. [`crate::geom::is_simple`] compares every pair of
@@ -891,6 +944,68 @@ fn collect_texts(
     }
 }
 
+/// One text's record, for `texts.json`.
+///
+/// `space` is `model` or `paper`; a paper-space text also names the
+/// `sheet` it is on and carries that sheet image's pixel box instead of
+/// tiles, since the model tile pyramid does not cover the paper. Its
+/// `bbox` and `anchor` are in the layout's paper units, not world units --
+/// the only records in the package that are.
+fn text_record(
+    t: &PlacedText,
+    rounder: &Rounder,
+    space: &str,
+    sheet: Option<&str>,
+    tiles: Value,
+    px: Value,
+) -> Record {
+    let mut v = Map::new();
+    v.insert("id".into(), json!(t.id));
+    v.insert("kind".into(), json!(t.kind));
+    v.insert("text".into(), json!(t.text));
+    if t.raw != t.text {
+        v.insert("raw".into(), json!(t.raw));
+    }
+    if let Some(tag) = &t.tag {
+        v.insert("tag".into(), json!(tag));
+    }
+    v.insert("space".into(), json!(space));
+    if let Some(name) = sheet {
+        v.insert("sheet".into(), json!(name));
+    }
+    v.insert("layer".into(), json!(t.layer));
+    v.insert("height".into(), json!(rounder.derived(t.height)));
+    v.insert(
+        "rotation_deg".into(),
+        json!(rounder.derived(t.rotation.to_degrees())),
+    );
+    v.insert("anchor".into(), rounder.pt2(t.anchor));
+    if !t.style.is_empty() {
+        v.insert("style".into(), json!(t.style));
+    }
+    v.insert("bbox".into(), rounder.rect(&t.bbox));
+    v.insert("bbox_confidence".into(), json!(t.bbox_confidence));
+    v.insert(
+        "why".into(),
+        json!(if t.bbox_confidence == "measured" {
+            "usvg glyph outlines, bundled font"
+        } else {
+            "0.6 em per character from the anchor"
+        }),
+    );
+    v.insert("font_ok".into(), json!(t.unshaped == 0));
+    if t.unshaped > 0 {
+        v.insert("unshaped_glyphs".into(), json!(t.unshaped));
+    }
+    v.insert("tiles".into(), tiles);
+    v.insert("px".into(), px);
+    Record {
+        id: t.id.clone(),
+        bbox: t.bbox,
+        value: v,
+    }
+}
+
 // ------------------------------------------------------------- rounding
 
 fn round_to(v: f64, decimals: u16) -> f64 {
@@ -1077,11 +1192,21 @@ impl Writer<'_> {
             });
             let text = serde_json::to_string(&value)?;
             self.write_bytes(&file, text.as_bytes(), kind)?;
+            // `first_id`/`last_id` alone are unusable as an index: they are
+            // hex handles of varying length written as JSON strings but
+            // ordered by their numeric value, so the string comparison a
+            // consumer would reach for picks the wrong shard or none ("109B3"
+            // sorts above every geometry shard of AutoCADSamples1, whose
+            // first_ids start with '3' or '4', though the record is in
+            // geometry.040.json). `first_key`/`last_key` publish the order
+            // itself: the number `id_key` sorts by.
             self.shard_index.push(json!({
                 "file": file,
                 "kind": kind,
                 "first_id": shard.first().map(|r| r.id.as_str()),
                 "last_id": shard.last().map(|r| r.id.as_str()),
+                "first_key": shard.first().map(|r| id_key(&r.id).0),
+                "last_key": shard.last().map(|r| id_key(&r.id).0),
                 "count": shard.len(),
                 "bytes": text.len(),
             }));
@@ -1216,7 +1341,7 @@ pub fn export_package(
     };
     let unit = db.header.units.name.clone();
     let mut texts = placed_texts(db, visible);
-    let measured = measure_texts(&rendered, &content, &mut texts, options.fonts)?;
+    measure_texts(&rendered, &content, &mut texts, options.fonts)?;
     let unshaped_texts = texts.iter().filter(|t| t.unshaped > 0).count();
     if unshaped_texts > 0 {
         warnings.push(format!(
@@ -1250,28 +1375,55 @@ pub fn export_package(
         |g: &[usize]| Rect::bounding(g.iter().map(|i| &extents[*i].rect)).expect("non-empty");
     let group_texts = |r: &Rect| texts.iter().filter(|t| r.intersects(&t.bbox)).count();
     let mut specs: Vec<(String, &str, Rect, usize)> = Vec::new();
+    // Every group that did not become a frame, with the reason -- not just
+    // the ones past `max_frames`. A group below `min_frame_entities` used
+    // to be skipped in silence, so its entities carried `tiles: []` with
+    // `frames_dropped: []` and `warnings: []` beside them: nothing told a
+    // reader whether that part of the drawing was off-drawing, omitted on
+    // purpose or an export bug. The list is capped (a drawing of scattered
+    // symbols can have thousands of groups) and `frames_dropped_total`
+    // says how many there were.
     let mut dropped: Vec<Value> = Vec::new();
+    let mut dropped_total = 0usize;
+    let mut dropped_small = 0usize;
+    let mut dropped_over_max = 0usize;
     if groups.len() <= 1 {
         specs.push(("f0".to_string(), "primary", content, extents.len()));
     } else {
         for (n, g) in groups.iter().enumerate() {
             let r = group_rect(g);
             let qualifies = n == 0 || g.len() >= options.min_frame_entities || group_texts(&r) > 0;
-            if !qualifies {
+            let reason = if !qualifies {
+                dropped_small += 1;
+                "below_min_entities"
+            } else if specs.len() >= options.max_frames.max(1) {
+                dropped_over_max += 1;
+                "max_frames"
+            } else {
+                let id = format!("f{}", specs.len());
+                specs.push((id, if n == 0 { "primary" } else { "detached" }, r, g.len()));
                 continue;
+            };
+            dropped_total += 1;
+            if dropped.len() < MAX_DROPPED_FRAMES {
+                dropped.push(json!({
+                    "content": rounder.rect(&r),
+                    "entities": g.len(),
+                    "texts": group_texts(&r),
+                    "reason": reason,
+                }));
             }
-            if specs.len() >= options.max_frames.max(1) {
-                dropped.push(json!({ "content": rounder.rect(&r), "entities": g.len(), "texts": group_texts(&r) }));
-                continue;
-            }
-            let id = format!("f{}", specs.len());
-            specs.push((id, if n == 0 { "primary" } else { "detached" }, r, g.len()));
         }
-        if !dropped.is_empty() {
+        if dropped_over_max > 0 {
             warnings.push(format!(
-                "MaxFrames: {} detached groups beyond the {} frames written stay in the overview only",
-                dropped.len(),
+                "MaxFrames: {dropped_over_max} detached groups beyond the {} frames written stay in the overview only (frames_dropped)",
                 options.max_frames
+            ));
+        }
+        if dropped_small > 0 {
+            warnings.push(format!(
+                "SmallGroups: {dropped_small} detached groups hold fewer than {} entities and no text; they stay in the overview only, so their records carry `tiles: []` (frames_dropped)",
+                options.min_frame_entities
             ));
         }
     }
@@ -1324,6 +1476,8 @@ pub fn export_package(
     };
     writer.write_bytes("overview.png", &overview_png, "image")?;
     let mut tile_images: Vec<ImageInfo> = Vec::new();
+    // Tile id -> its PNG's byte count and SHA-256, for `tiles.json`.
+    let mut tile_png: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut frame_overviews: Vec<ImageInfo> = Vec::new();
     for build in &frame_builds {
         // The frame's own overview, unless it is the whole crop already.
@@ -1372,6 +1526,7 @@ pub fn export_package(
                     "frames/{}/tiles/z{}/r{:02}_c{:02}.png",
                     tile.frame, tile.z, tile.row, tile.col
                 );
+                tile_png.insert(tile.id.clone(), (bytes.len() as u64, sha256_hex(&bytes)));
                 writer.write_bytes(&png_path, &bytes, "tile")?;
                 tile_images.push(ImageInfo::new(
                     &tile.id,
@@ -1392,6 +1547,16 @@ pub fn export_package(
         .collect();
     let mut sheet_reports: Vec<SheetReport> = Vec::new();
     let mut sheet_dirs: BTreeSet<String> = BTreeSet::new();
+    // The texts a sheet draws -- the drawing's title, the title block, the
+    // sheet notes -- with the index of the sheet they are on. They are
+    // drawn into sheets/<layout>/overview.png and were in no record file
+    // at all, so a package whose sheet image reads "THE PROVENCE" said
+    // `counts.texts: 0`, `capabilities.text_boxes: "none"` and an empty
+    // strings.json: the one question the package exists to answer was
+    // unanswerable from the JSON, and answered wrongly. Their boxes are in
+    // the layout's paper units, so they carry the sheet image's pixel box
+    // instead of model tiles.
+    let mut paper_texts: Vec<(PlacedText, usize)> = Vec::new();
     if options.sheets {
         for spec in sheet_specs(db) {
             let block = &db.tables.block_records[&spec.block];
@@ -1522,6 +1687,19 @@ pub fn export_package(
                     frozen_layers: v.frozen_layers.clone(),
                 })
                 .collect();
+            // The sheet's own texts, measured through the same shaping the
+            // sheet image got (the paper render, so the boxes are in paper
+            // units). A text drawn by an entity the renderer refused as
+            // oversized is not in the picture and does not become a record.
+            let sheet_index = sheet_reports.len();
+            let mut sheet_texts = placed_texts(db, &paper_entities);
+            sheet_texts.retain(|t| {
+                !paper_rendered
+                    .oversized
+                    .contains(t.id.split('/').next().unwrap_or(t.id.as_str()))
+            });
+            measure_texts(&paper_rendered, &fit.rect, &mut sheet_texts, options.fonts)?;
+            paper_texts.extend(sheet_texts.into_iter().map(|t| (t, sheet_index)));
             sheet_reports.push(SheetReport {
                 name: spec.name.clone(),
                 tab_order: spec.tab_order,
@@ -1569,50 +1747,38 @@ pub fn export_package(
     let mut text_records: Vec<Record> = texts
         .iter()
         .map(|t| {
-            let mut v = Map::new();
-            v.insert("id".into(), json!(t.id));
-            v.insert("kind".into(), json!(t.kind));
-            v.insert("text".into(), json!(t.text));
-            if t.raw != t.text {
-                v.insert("raw".into(), json!(t.raw));
-            }
-            if let Some(tag) = &t.tag {
-                v.insert("tag".into(), json!(tag));
-            }
-            v.insert("layer".into(), json!(t.layer));
-            v.insert("height".into(), json!(rounder.derived(t.height)));
-            v.insert(
-                "rotation_deg".into(),
-                json!(rounder.derived(t.rotation.to_degrees())),
-            );
-            v.insert("anchor".into(), rounder.pt2(t.anchor));
-            if !t.style.is_empty() {
-                v.insert("style".into(), json!(t.style));
-            }
-            v.insert("bbox".into(), rounder.rect(&t.bbox));
-            v.insert("bbox_confidence".into(), json!(t.bbox_confidence));
-            v.insert(
-                "why".into(),
-                json!(if t.bbox_confidence == "measured" {
-                    "usvg glyph outlines, bundled font"
-                } else {
-                    "0.6 em per character from the anchor"
-                }),
-            );
-            v.insert("font_ok".into(), json!(t.unshaped == 0));
-            if t.unshaped > 0 {
-                v.insert("unshaped_glyphs".into(), json!(t.unshaped));
-            }
-            v.insert("tiles".into(), json!(tiles_for(&t.bbox)));
-            v.insert("px".into(), px_map(&t.bbox));
-            Record {
-                id: t.id.clone(),
-                bbox: t.bbox,
-                value: v,
-            }
+            text_record(
+                t,
+                &rounder,
+                "model",
+                None,
+                json!(tiles_for(&t.bbox)),
+                px_map(&t.bbox),
+            )
         })
         .collect();
     text_records.sort_by_key(|r| id_key(&r.id));
+    // The paper-space texts, each with its sheet and that sheet image's
+    // pixel box -- the only route in the package from a record to a sheet
+    // pixel. They are kept out of `text_records` proper because that list
+    // is what the tile sidecars are built from, and a paper box in paper
+    // units would otherwise be matched against model tiles.
+    let paper_text_records: Vec<Record> = paper_texts
+        .iter()
+        .map(|(t, sheet)| {
+            let image = &sheet_reports[*sheet].overview;
+            let mut px = Map::new();
+            px.insert(image.id.clone(), json!(image.px_box(&t.bbox)));
+            text_record(
+                t,
+                &rounder,
+                "paper",
+                Some(&sheet_reports[*sheet].name),
+                json!([]),
+                Value::Object(px),
+            )
+        })
+        .collect();
 
     // dimensions
     let mut dim_records: Vec<Record> = Vec::new();
@@ -1843,6 +2009,13 @@ pub fn export_package(
                         r.insert("centroid".into(), rounder.pt2(centroid));
                         r.insert("vertex_count".into(), json!(p.vertices.len()));
                         r.insert("simple".into(), json!(simple));
+                        // The same `confidence` *and the same `why`* as the
+                        // geometry record this region is built from: the
+                        // self-intersecting case used to ship a bare
+                        // "unavailable" beside an ordinary-looking `area`,
+                        // and regions.json is the file a reader is sent to
+                        // for areas -- so the one field that explains the
+                        // number was missing exactly where it is needed.
                         r.insert(
                             "confidence".into(),
                             json!(match simple {
@@ -1851,8 +2024,17 @@ pub fn export_package(
                                 None => "estimated",
                             }),
                         );
-                        if simple.is_none() {
-                            r.insert("why".into(), json!(UNTESTED_OUTLINE));
+                        match simple {
+                            Some(true) => {}
+                            Some(false) => {
+                                r.insert(
+                                    "why".into(),
+                                    json!("self-intersecting outline: the area has no meaning"),
+                                );
+                            }
+                            None => {
+                                r.insert("why".into(), json!(UNTESTED_OUTLINE));
+                            }
                         }
                         r.insert("bbox".into(), rounder.rect(&bbox));
                         r.insert("tiles".into(), json!(tiles_for(&bbox)));
@@ -2019,6 +2201,9 @@ pub fn export_package(
     for t in &texts {
         index(&t.text, &t.id);
     }
+    for (t, _) in &paper_texts {
+        index(&t.text, &t.id);
+    }
     for r in &dim_records {
         if let Some(Value::String(d)) = r.value.get("display") {
             index(d, &r.id);
@@ -2035,27 +2220,41 @@ pub fn export_package(
     }
 
     // --- write the JSON files ----------------------------------------------
-    writer.write_records("texts", "text", &text_records)?;
+    // Model and paper texts in one record file, ordered by id like every
+    // other kind, so `shard_index` resolves either of them.
+    let mut written_texts: Vec<Record> =
+        Vec::with_capacity(text_records.len() + paper_text_records.len());
+    written_texts.extend(text_records.iter().cloned());
+    written_texts.extend(paper_text_records.iter().cloned());
+    written_texts.sort_by_key(|r| id_key(&r.id));
+    writer.write_records("texts", "text", &written_texts)?;
     writer.write_records("dimensions", "dimension", &dim_records)?;
     writer.write_records("geometry", "geometry", &geo_records)?;
     writer.write_records("regions", "region", &region_records)?;
-    let blocks_value = json!({
-        "$schema": SCHEMA,
-        "units": writer.units,
-        "definitions": definitions,
-        "instances": block_records.iter().map(|r| Value::Object(r.value.clone())).collect::<Vec<_>>(),
-    });
-    writer.write_json("blocks.json", &blocks_value, "blocks")?;
+    // The INSERT instances are records like any other kind: they go
+    // through the same shard rule README.txt states, and land in
+    // `shard_index` so an id from strings.json resolves to a file. Written
+    // whole, `blocks.json` was the one file that could be ten times the
+    // stated budget (964 KB on AutoCADSamples6, against 97 KB for the
+    // largest shard of anything else). The definitions -- a table, not a
+    // per-entity record -- are in drawing.json, beside the layer table.
+    writer.write_records("blocks", "blocks", &block_records)?;
     let strings_value = json!({
         "$schema": SCHEMA,
         "normalization": "NFKC, fraction slash to '/', case fold, whitespace collapsed; each string also under its key with spaces removed",
+        "ids": "record ids: a hexadecimal handle, or `<insert>/<child>` for a text drawn inside a block. The kind is not in the id -- resolve it with manifest.shard_index, whose `first_key`/`last_key` bracket each file's ids as numbers (`int(id.split('/')[0], 16)`). One id can be in two kinds at once: a closed polyline is both a geometry and a region record.",
         "strings": strings,
     });
     writer.write_json("strings.json", &strings_value, "strings")?;
     if options.sheets {
         let sheets_value = json!({
             "$schema": SCHEMA,
-            "twist_convention": "model_to_paper = C + s (R(twist) (p - T) - V), a positive twist turning the picture counter-clockwise (ezdxf's rule; not checked against a plotted sheet)",
+            // Stated in the fields this file publishes, not in symbols
+            // that appear nowhere in the package: the old wording,
+            // "model_to_paper = C + s (R(twist) (p - T) - V)", left a
+            // reader to bind C, T and V to fields no viewport record has.
+            "model_to_paper": "Per composited viewport: the similarity that maps its four `model_window` corners (lower-left, lower-right, upper-right, upper-left as they sit on the sheet) onto the four corners of its `frame`, i.e. a rotation by `twist_deg` and `scale` paper units per model unit. With twist_deg 0 that is paper = [frame[0] + (x - model_window[0][0]) * scale, frame[1] + (y - model_window[0][1]) * scale] for a model point (x, y). Then apply this sheet's overview `world_to_px` to get pixels in sheets/<layout>/overview.png.",
+            "twist_convention": "`twist_deg` is the viewport's VIEWTWIST in degrees, positive turning the model counter-clockwise on the sheet (ezdxf's rule; not checked against a plotted sheet, and every composited viewport in the corpus has twist 0).",
             "sheets": sheet_reports,
         });
         writer.write_json("sheets.json", &sheets_value, "sheets")?;
@@ -2076,8 +2275,20 @@ pub fn export_package(
                 "world": rounder.rect(&tile.world),
                 "empty": tile.empty,
             });
+            if tile.empty {
+                // The design promises a reason on every empty tile, and a
+                // reader following `children` or a record's `tiles` needs
+                // to know an absent file was meant to be absent. There is
+                // one reason a planned tile is not written: nothing visible
+                // reaches it.
+                entry["reason"] = json!("no_visible_entity_on_tile");
+            }
             if let Some(img) = image {
                 entry["png"] = json!(img.png);
+                if let Some((bytes, sha)) = tile_png.get(&tile.id) {
+                    entry["bytes"] = json!(bytes);
+                    entry["sha256"] = json!(sha);
+                }
                 let sidecar = sidecar(
                     img,
                     tile,
@@ -2132,12 +2343,16 @@ pub fn export_package(
             })
         })
         .collect();
+    // `blocks` here is the block *table*: one row per definition, with the
+    // ids of its instances. The instances themselves are records, in the
+    // sharded blocks.json. (Model and paper space are blocks too; they are
+    // left out, as drawing.json's own `counts` and sheets.json cover them.)
     let drawing_value = json!({
         "$schema": SCHEMA,
         "units": writer.units,
         "header": serde_json::to_value(&db.header)?,
         "layers": layers,
-        "blocks": db.tables.block_records.values().map(|b| json!({"name": b.name, "entity_count": b.entities.len()})).collect::<Vec<_>>(),
+        "blocks": definitions,
         "counts": { "model_space": top.len(), "by_type": type_counts },
     });
     writer.write_json("drawing.json", &drawing_value, "drawing")?;
@@ -2162,7 +2377,7 @@ pub fn export_package(
             *hidden_by_reason
                 .entry(reason.as_str().to_string())
                 .or_default() += 1;
-            if hidden_handles.len() < 100 {
+            if hidden_handles.len() < MAX_HIDDEN_HANDLES {
                 hidden_handles.push(e.common().handle.clone());
             }
         }
@@ -2175,7 +2390,8 @@ pub fn export_package(
     let crop_report = rendered.choice.report(fit.rect, padding);
     let counts = Counts {
         entities: top.len(),
-        texts: text_records.len(),
+        texts: written_texts.len(),
+        texts_paper: paper_text_records.len(),
         dimensions: dim_records.len(),
         geometry: geo_records.len(),
         regions: region_records.len(),
@@ -2187,16 +2403,26 @@ pub fn export_package(
         sheets: sheet_reports.len(),
     };
     let hidden_top_level: usize = hidden_by_reason.values().sum();
-    // Written after the manifest (its timings would change the byte count
-    // the manifest lists), so it is listed without a size.
+    // `count` is the same number `manifest.counts.hidden` prints, because
+    // it is the same word: the two used to disagree (1206 against 0 on
+    // AutoCADSamples6) because this one counted only the top-level
+    // entities while the manifest counted every hidden entity the renderer
+    // skipped, those inside block definitions included. The split is
+    // published instead of hidden behind one of the two totals, and
+    // `by_reason` and `handles` say which part of it they cover -- the
+    // walk that names reasons only sees the top level.
     let report_value = json!({
         "$schema": SCHEMA,
         "excluded": crop_report.excluded,
         "hidden": {
-            "count": hidden_top_level,
+            "count": rendered.hidden,
+            "top_level": hidden_top_level,
             "inside_blocks": rendered.hidden.saturating_sub(hidden_top_level),
+            "covers": "top_level",
             "by_reason": hidden_by_reason,
             "handles": hidden_handles,
+            "handles_limit": MAX_HIDDEN_HANDLES,
+            "handles_truncated": hidden_top_level > hidden_handles.len(),
         },
         "unsupported_types": rendered.unsupported_types(),
         "limits": limits,
@@ -2219,19 +2445,69 @@ pub fn export_package(
             .iter()
             .any(|r| r.value.get("measurement_source").is_some_and(|s| s == want))
     };
+    // `areas` says what the region records say, the way `dimension_values`
+    // does. It was the literal "exact" whatever the data held, so a package
+    // in which 3875 of 4073 areas are marked "self-intersecting outline:
+    // the area has no meaning" still invited a reader to total them.
+    let area_confidence = |want: &str| {
+        region_records
+            .iter()
+            .filter(|r| r.value.get("confidence").is_some_and(|c| c == want))
+            .count()
+    };
+    let (areas_exact, areas_estimated, areas_unavailable) = (
+        area_confidence("exact"),
+        area_confidence("estimated"),
+        area_confidence("unavailable"),
+    );
+    // Measured boxes are per record, and a package can hold both: the model
+    // texts go through the metrics pass, and so does every sheet's own
+    // text, but a text usvg drops keeps its estimate.
+    let measured_total = written_texts
+        .iter()
+        .filter(|r| {
+            r.value
+                .get("bbox_confidence")
+                .is_some_and(|c| c == "measured")
+        })
+        .count();
     let capabilities = json!({
         "dimension_values": if dim_records.is_empty() { "none" } else if dim_source("act_measurement") { "exact" } else if dim_source("from_points") { "computed" } else { "text_only" },
-        "areas": "exact",
-        "text_boxes": if measured > 0 { "measured" } else if texts.is_empty() { "none" } else { "estimated" },
+        "areas": if region_records.is_empty() { "none" } else if areas_exact == region_records.len() { "exact" } else if areas_exact > 0 { "mixed" } else if areas_unavailable > 0 && areas_estimated == 0 { "unavailable" } else { "estimated" },
+        "areas_by_confidence": { "exact": areas_exact, "estimated": areas_estimated, "unavailable": areas_unavailable },
+        "text_boxes": if written_texts.is_empty() { "none" } else if measured_total == written_texts.len() { "measured" } else if measured_total == 0 { "estimated" } else { "mixed" },
         "fonts": match options.fonts { Fonts::Bundled => "bundled", Fonts::BundledAndSystem => "bundled+system" },
         "paper_layouts": if sheet_reports.is_empty() { "none" } else { "composited" },
+        "paper_text": if sheet_reports.is_empty() { "none" } else if paper_text_records.is_empty() { "empty" } else { "indexed" },
         "frames": frame_reports.len(),
+    });
+    // What the package's own vocabularies mean, in the package. The
+    // guidance used to say "each record's `confidence` says how the value
+    // was obtained" while text and block records carry none, and no file
+    // enumerated the values any of them can take.
+    let legend = json!({
+        "confidence": {
+            "carried_by": ["geometry", "region", "dimension"],
+            "exact": "computed from the file's own coordinates",
+            "stored": "the value the file stores (a dimension's act_measurement)",
+            "estimated": "approximated, or a check that was skipped; `why` says which",
+            "unavailable": "no meaningful value; `why` says why, and any number beside it is not to be used",
+            "none": "there was nothing to compute (used by capabilities, not by records)",
+        },
+        "text_records": "texts carry `bbox_confidence` (`measured` from the shaped glyph outlines, or `estimated` at 0.6 em per character) and no `confidence`; block instances carry neither. `space` is `model` or `paper`; a paper text names its `sheet` and is measured in that layout's paper units.",
+        "measurement_source": ["act_measurement", "from_points", "none"],
+        "display_source": ["user_text", "cached_block", "formatted_basic", "formatted", "suppressed"],
+        "region_labels": "`labels` holds the ids of the text records whose anchor falls inside the region",
+        "px_boxes": "`px` maps an image id to [x0, y0, x1, y1] in that image's pixels, y down, clipped to the image; the record's full extent is its world `bbox`, and the rest of it is on the other images it lists",
+        "tile_sidecar": "`records` holds positional rows described by the sidecar's own `columns`; `counts` is the true number of records of each kind on the tile, which `records_truncated` does not affect, and `geometry_by_kind` summarises the geometry whether or not its rows fit",
+        "shard_lookup": "manifest.shard_index resolves a record id to its file: the entry whose [first_key, last_key] contains int(id.split('/')[0], 16). `first_id`/`last_id` are the same bounds as handles and do not compare as strings",
+        "legibility": "`target_met` is whether every text height class reaches `target_px` in the deepest image of that frame; `pyramid_complete` is whether the tile budget let the pyramid reach the depth the text asked for",
     });
     // The tile and overlap numbers come from the profile in use, not from
     // the prose: --profile claude-hires writes 1932 px tiles with 392 px of
     // overlap, and the sentence used to say 224 whatever the levels said.
     let guidance = format!(
-        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; each record's `confidence` says how the value was obtained. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), open the record in the file shard_index names for its kind, then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; report.json lists what was left out and why.",
+        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; `legend` says what `confidence` and the package's other vocabularies mean and which records carry them. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), resolve the id through shard_index -- the entry whose [first_key, last_key] contains int(id.split('/')[0], 16), since the id does not say its kind and one id can be in two -- then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes, its own `columns` legend and a `counts` object that stays exact when rows are cut. Pixel boxes are clipped to the image they are quoted in; the record's world `bbox` is its full extent. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; a group too small to be framed is in `frames_dropped` and its records carry `tiles: []`. The drawing's title and title block are paper-space text: those records carry `space: \"paper\"` and a `sheet`, and their pixel box is on that sheet's image, not on a tile. report.json lists what was left out and why.",
         profile.tile, profile.overlap
     );
     writer.files.push(WrittenFile {
@@ -2260,10 +2536,18 @@ pub fn export_package(
         "overview": overview,
         "frames": frame_reports,
         "frames_dropped": dropped,
-        "sheets": sheet_reports.iter().map(|s| json!({"name": s.name, "tab_order": s.tab_order, "png": s.overview.png, "px": s.overview.px, "rect": rounder.rect(&s.rect), "units": s.units, "viewports": s.viewports.len()})).collect::<Vec<_>>(),
-        "legibility": { "target_px": options.target_text_px, "per_frame": frame_reports.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "reached": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
+        "frames_dropped_total": dropped_total,
+        "sheets": sheet_reports.iter().map(|s| json!({"name": s.name, "tab_order": s.tab_order, "png": s.overview.png, "px": s.overview.px, "rect": rounder.rect(&s.rect), "units": s.units, "viewports": s.viewports.len(), "texts": paper_text_records.iter().filter(|r| r.value.get("sheet").is_some_and(|n| n == s.name.as_str())).count()})).collect::<Vec<_>>(),
+        // `reached` used to be published here, beside `target_px`, where it
+        // reads as "the target size was reached" while it only ever meant
+        // "the tile budget did not cut the pyramid short": a frame whose
+        // deepest image draws its text at 3.9 px against a 14 px target
+        // said `reached: true`. Both facts are worth having, under names
+        // that say which is which.
+        "legibility": { "target_px": options.target_text_px, "per_frame": frame_reports.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "target_met": f.height_classes.iter().all(|c| c.legible), "pyramid_complete": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
         "counts": counts,
         "capabilities": capabilities,
+        "legend": legend,
         "guidance": guidance,
         "files": writer.files,
         "shard_index": writer.shard_index,
@@ -2271,7 +2555,7 @@ pub fn export_package(
     });
     let manifest_text = serde_json::to_string_pretty(&manifest)?;
     let readme = format!(
-        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines\n  2. strings.json    find a text or a number, get record ids\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index)\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window; sheets/<layout>/overview.png\n  6. report.json     what was left out and why\n\ndrawing.json holds the header, units and layer states; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines; `legend` explains the record vocabularies, `guidance` how to look something up\n  2. strings.json    find a text or a number, get record ids; shard_index turns an id into a file (compare int(id, 16) against first_key/last_key, not the strings)\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index); blocks.json holds the INSERT instances, drawing.json the block definitions\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars; tiles.json lists every tile, written or empty with a reason, with its size and sha256\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window, and how a model point maps onto the sheet; sheets/<layout>/overview.png. The title and title block are paper-space texts in texts.json (`space: \"paper\"`, with a `sheet` and that sheet's pixel box)\n  6. report.json     what was left out and why\n\nAll other records are model space. drawing.json holds the header, units, layer states and block definitions; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
     );
     std::fs::write(dir.join("README.txt"), readme.as_bytes()).map_err(|source| {
@@ -2986,13 +3270,18 @@ fn sidecar(
     geometry: &[Record],
     rounder: &Rounder,
 ) -> Value {
+    // Only tiles that were *written*: an empty tile gets no .png and no
+    // .json, and `empty` describes this tile, not its neighbours, so a
+    // reader panning by `neighbors` used to be sent to files that do not
+    // exist with nothing in the package explaining them. tiles.json still
+    // lists the empty ones, with their reason.
     let find = |z: u32, row: i64, col: i64| -> Option<String> {
         if row < 0 || col < 0 {
             return None;
         }
         tiles
             .iter()
-            .find(|t| t.z == z && i64::from(t.row) == row && i64::from(t.col) == col)
+            .find(|t| t.z == z && i64::from(t.row) == row && i64::from(t.col) == col && !t.empty)
             .map(|t| t.id.clone())
     };
     let (r, c) = (i64::from(tile.row), i64::from(tile.col));
@@ -3010,6 +3299,7 @@ fn sidecar(
         .iter()
         .find(|t| {
             t.z + 1 == tile.z
+                && !t.empty
                 && t.world.min_x <= centre.x
                 && centre.x <= t.world.max_x
                 && t.world.min_y <= centre.y
@@ -3035,7 +3325,14 @@ fn sidecar(
             s.to_string()
         }
     };
-    let mut text_rows: Vec<Value> = on_tile(texts, &tile.world)
+    let (on_texts, on_dims, on_blocks, on_regions, on_geometry) = (
+        on_tile(texts, &tile.world),
+        on_tile(dims, &tile.world),
+        on_tile(blocks, &tile.world),
+        on_tile(regions, &tile.world),
+        on_tile(geometry, &tile.world),
+    );
+    let mut text_rows: Vec<Value> = on_texts
         .iter()
         .map(|rec| {
             json!([
@@ -3045,7 +3342,7 @@ fn sidecar(
             ])
         })
         .collect();
-    let mut dim_rows: Vec<Value> = on_tile(dims, &tile.world)
+    let mut dim_rows: Vec<Value> = on_dims
         .iter()
         .map(|rec| {
             json!([
@@ -3061,7 +3358,7 @@ fn sidecar(
             ])
         })
         .collect();
-    let mut block_rows: Vec<Value> = on_tile(blocks, &tile.world)
+    let mut block_rows: Vec<Value> = on_blocks
         .iter()
         .map(|rec| {
             json!([
@@ -3071,7 +3368,7 @@ fn sidecar(
             ])
         })
         .collect();
-    let mut region_rows: Vec<Value> = on_tile(regions, &tile.world)
+    let mut region_rows: Vec<Value> = on_regions
         .iter()
         .map(|rec| {
             json!([
@@ -3081,18 +3378,52 @@ fn sidecar(
             ])
         })
         .collect();
+    // The geometry records -- LINE/ARC/CIRCLE/LWPOLYLINE/HATCH/SOLID/...,
+    // the bulk of every tile. They used to contribute to `layers_present`
+    // and nothing else, so a dense wall-and-stair tile reported 41
+    // annotation rows, `records_truncated: false`, and looked exactly like
+    // a tile with no geometry on it -- while 3990 geometry records named
+    // that tile in their own `tiles` list. They are cut first when the file
+    // has to shrink (a text or a dimension is what a reader came for), so
+    // `counts` below, which is never truncated, is what says how much is
+    // really there.
+    let mut geometry_rows: Vec<Value> = on_geometry
+        .iter()
+        .map(|rec| {
+            json!([
+                rec.id,
+                img.px_box(&rec.bbox),
+                rec.value.get("type").cloned().unwrap_or(Value::Null)
+            ])
+        })
+        .collect();
+    // A bounded summary of the same geometry, so a truncated file still
+    // answers "what is drawn here": entity type -> count on this tile.
+    let mut geometry_by_kind: BTreeMap<String, usize> = BTreeMap::new();
+    for rec in &on_geometry {
+        if let Some(Value::String(t)) = rec.value.get("type") {
+            *geometry_by_kind.entry(t.clone()).or_default() += 1;
+        }
+    }
+    let counts = json!({
+        "texts": on_texts.len(),
+        "dims": on_dims.len(),
+        "blocks": on_blocks.len(),
+        "regions": on_regions.len(),
+        "geometry": on_geometry.len(),
+    });
     // Every record the tile draws, geometry and regions included: geometry
     // is the bulk of a tile, and a tile full of walls used to report no
     // layers at all, so filtering tiles by layer skipped it. Computed
     // before the truncation loop, so the layer set stays complete even
     // when rows are cut.
     let mut layer_set: BTreeSet<String> = BTreeSet::new();
-    for rec in on_tile(texts, &tile.world)
+    for rec in on_texts
         .iter()
-        .chain(on_tile(dims, &tile.world).iter())
-        .chain(on_tile(blocks, &tile.world).iter())
-        .chain(on_tile(regions, &tile.world).iter())
-        .chain(on_tile(geometry, &tile.world).iter())
+        .chain(on_dims.iter())
+        .chain(on_blocks.iter())
+        .chain(on_regions.iter())
+        .chain(on_geometry.iter())
     {
         if let Some(Value::String(l)) = rec.value.get("layer") {
             layer_set.insert(l.clone());
@@ -3104,6 +3435,7 @@ fn sidecar(
                  dim_rows: &[Value],
                  block_rows: &[Value],
                  region_rows: &[Value],
+                 geometry_rows: &[Value],
                  layers: &[String],
                  truncated: bool| {
         let mut value = json!({
@@ -3126,7 +3458,20 @@ fn sidecar(
             "empty": tile.empty,
             "layers_present": layers,
             "layers_truncated": layers.len() < layers_total,
-            "records": { "texts": text_rows, "dims": dim_rows, "blocks": block_rows, "regions": region_rows },
+            // What each positional row holds, beside the rows themselves:
+            // the package used to ship these compact forms with no legend
+            // at all, so a reader had to guess whether the number on a
+            // region row was its area or its perimeter.
+            "columns": {
+                "texts": ["id", "px_box", "text"],
+                "dims": ["id", "px_box", "display", "measurement"],
+                "blocks": ["id", "px_box", "block"],
+                "regions": ["id", "px_box", "area"],
+                "geometry": ["id", "px_box", "type"],
+            },
+            "counts": counts,
+            "geometry_by_kind": geometry_by_kind,
+            "records": { "texts": text_rows, "dims": dim_rows, "blocks": block_rows, "regions": region_rows, "geometry": geometry_rows },
             "records_truncated": truncated,
         });
         if layers.len() < layers_total {
@@ -3140,6 +3485,7 @@ fn sidecar(
         &dim_rows,
         &block_rows,
         &region_rows,
+        &geometry_rows,
         &layers,
         truncated,
     );
@@ -3161,7 +3507,17 @@ fn sidecar(
         .into_iter()
         .max()
         .unwrap_or(0);
-        if rows_left > 0 {
+        if !geometry_rows.is_empty() {
+            // Geometry first: it is the bulk of a dense tile and the least
+            // of it is lost to a summary (`counts.geometry` and
+            // `geometry_by_kind` survive whatever is cut), while a text or
+            // a dimension row is the thing a reader came to the sidecar
+            // for. Halved rather than quartered, so a tile of 4 000 lines
+            // does not re-serialize the file thirty times to get there.
+            truncated = true;
+            let keep = geometry_rows.len() / 2;
+            geometry_rows.truncate(keep);
+        } else if rows_left > 0 {
             truncated = true;
             for rows in [
                 &mut text_rows,
@@ -3186,11 +3542,86 @@ fn sidecar(
             &dim_rows,
             &block_rows,
             &region_rows,
+            &geometry_rows,
             &layers,
             truncated,
         );
     }
     value
+}
+
+/// SHA-256 of `data` as lower-case hex (FIPS 180-4), for the per-tile
+/// hashes `tiles.json` publishes: a package verifier can check a tile PNG
+/// it was handed against the manifest without re-running the export, and a
+/// reader can tell two tiles that render the same picture apart from two
+/// that do not. Written out here rather than pulled in: the workspace has
+/// no hash dependency, and this is 40 lines of a fully specified function,
+/// pinned by the standard test vectors in this file's tests.
+fn sha256_hex(data: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    let mut padded = Vec::with_capacity(data.len() + 72);
+    padded.extend_from_slice(data);
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+    for block in padded.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (word, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
+            *word = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        for i in 16..64 {
+            let (a, b) = (w[i - 15], w[i - 2]);
+            let s0 = a.rotate_right(7) ^ a.rotate_right(18) ^ (a >> 3);
+            let s1 = b.rotate_right(17) ^ b.rotate_right(19) ^ (b >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh] = h;
+        for (k, wi) in K.iter().zip(w.iter()) {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let t1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(*k)
+                .wrapping_add(*wi);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        for (x, y) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+            *x = x.wrapping_add(y);
+        }
+    }
+    h.iter().map(|v| format!("{v:08x}")).collect()
 }
 
 /// Area-weighted centroid of a polygon's vertices (straight segments).
@@ -3491,5 +3922,39 @@ mod tests {
         assert!((c.x - 2.0).abs() < 1e-12 && (c.y - 1.0).abs() < 1e-12);
         assert!(point_in_polygon(Point2D { x: 1.0, y: 1.0 }, &sq));
         assert!(!point_in_polygon(Point2D { x: 5.0, y: 1.0 }, &sq));
+    }
+
+    #[test]
+    fn sha256_matches_the_published_vectors() {
+        // FIPS 180-4's own examples, plus the one-block/two-block boundary
+        // (55, 56 and 64 bytes, where the padding runs into a second
+        // block): the hash `tiles.json` publishes is only worth anything if
+        // it is the hash everyone else computes.
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+        assert_eq!(
+            sha256_hex(&[b'a'; 1000]),
+            "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3"
+        );
+        for len in [55, 56, 63, 64, 65] {
+            let hash = sha256_hex(&vec![0u8; len]);
+            assert_eq!(hash.len(), 64, "{len} bytes");
+            assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+        // The two 64-byte-boundary cases, from the same published set.
+        assert_eq!(
+            sha256_hex(&[b'a'; 56]),
+            "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
+        );
     }
 }

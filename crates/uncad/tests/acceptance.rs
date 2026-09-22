@@ -83,19 +83,20 @@ fn the_five_questions_are_answerable_from_the_package_alone() {
         .all(|d| !d["display"].as_str().unwrap().is_empty()));
     assert!(dims.iter().all(|d| d["measurement"].is_number()));
 
-    // Q2: "How many CIRKLO_PUNKTOJ blocks are placed, and where?" ->
-    // blocks.json definitions and instances.
-    let blocks = read_json(&dir.0.join("blocks.json"));
-    let definition = blocks["definitions"]
+    // Q2: "How many CIRKLO_PUNKTOJ blocks are placed, and where?" -> the
+    // block table in drawing.json for the definition, and the INSERT
+    // instances, which are records of kind `blocks` read through
+    // shard_index like every other kind.
+    let drawing = read_json(&dir.0.join("drawing.json"));
+    let definition = drawing["blocks"]
         .as_array()
         .unwrap()
         .iter()
         .find(|b| b["name"] == "CIRKLO_PUNKTOJ")
         .expect("the block definition");
     assert_eq!(definition["instances"], 8);
-    let placed: Vec<&Value> = blocks["instances"]
-        .as_array()
-        .unwrap()
+    let instances = records(&dir.0, &manifest, "blocks");
+    let placed: Vec<&Value> = instances
         .iter()
         .filter(|i| i["block"] == "CIRKLO_PUNKTOJ")
         .collect();
@@ -107,9 +108,7 @@ fn the_five_questions_are_answerable_from_the_package_alone() {
         .iter()
         .all(|i| !i["tiles"].as_array().unwrap().is_empty()));
     // The attribute of the other block reads as text.
-    let bloko = blocks["instances"]
-        .as_array()
-        .unwrap()
+    let bloko = instances
         .iter()
         .find(|i| i["block"] == "bloko")
         .expect("the bloko instance inside the crop");
@@ -189,10 +188,13 @@ fn the_five_questions_are_answerable_from_the_package_alone() {
     assert_eq!(insert["reason"], "scale_outlier");
     assert_eq!(insert["handle"], "756");
     assert!(geometry.iter().all(|g| g["id"] != "756"));
-    assert!(blocks["instances"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|i| i["id"] != "756"));
+    assert!(instances.iter().all(|i| i["id"] != "756"));
     assert_eq!(report["hidden"]["by_reason"]["layer_frozen"], 1);
+    // The manifest and report.json count the same hidden entities under
+    // the same word; the report says how many of them it could name.
+    assert_eq!(
+        report["hidden"]["count"].as_u64().unwrap(),
+        manifest["counts"]["hidden"].as_u64().unwrap()
+    );
+    assert_eq!(report["hidden"]["top_level"], 1);
 }

@@ -348,8 +348,7 @@ fn records_carry_exact_numbers_and_point_at_existing_tiles() {
     assert!(cloud["area"].as_f64().unwrap() > 0.0);
     assert_eq!(cloud["confidence"], "exact");
     // The 3256x INSERT is not a record: it is outside the crop.
-    let blocks = read_json(&tmp.0.join("blocks.json"));
-    let instances = blocks["instances"].as_array().unwrap();
+    let instances = records(&tmp.0, "blocks");
     assert!(instances.iter().all(|i| i["id"] != "756"), "{instances:?}");
     assert!(instances.iter().any(|i| i["block"] == "CIRKLO_PUNKTOJ"));
 
@@ -380,8 +379,19 @@ fn records_carry_exact_numbers_and_point_at_existing_tiles() {
     let report = read_json(&tmp.0.join("report.json"));
     assert_eq!(report["excluded"].as_array().unwrap().len(), 2);
     // One top-level entity on the frozen layer; the dimension blocks hold
-    // the definition points on Defpoints.
-    assert_eq!(report["hidden"]["count"], 1);
+    // the definition points on Defpoints. `count` is every hidden entity,
+    // the same number the manifest prints under the same word -- the two
+    // used to disagree, with report.json saying 0 where the manifest said
+    // 1206 on a sample with hidden block contents.
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(
+        report["hidden"]["count"].as_u64().unwrap(),
+        manifest["counts"]["hidden"].as_u64().unwrap()
+    );
+    assert_eq!(report["hidden"]["top_level"], 1);
+    assert_eq!(report["hidden"]["covers"], "top_level");
+    assert_eq!(report["hidden"]["handles"].as_array().unwrap().len(), 1);
+    assert_eq!(report["hidden"]["handles_truncated"], false);
     assert_eq!(report["hidden"]["by_reason"]["layer_frozen"], 1);
     assert!(report["hidden"]["inside_blocks"].as_u64().unwrap() > 1);
 }
@@ -1421,15 +1431,12 @@ fn a_sidecar_lists_the_layers_of_everything_on_its_tile() {
     let mut expected: std::collections::BTreeMap<String, BTreeSet<String>> = Default::default();
     let mut geometry_layers: BTreeSet<String> = BTreeSet::new();
     for kind in ["texts", "dimensions", "geometry", "regions", "blocks"] {
-        let rows = if kind == "blocks" {
-            read_json(&tmp.0.join("blocks.json"))["instances"]
-                .as_array()
-                .unwrap()
-                .clone()
-        } else {
-            records(&tmp.0, kind)
-        };
-        for record in rows {
+        for record in records(&tmp.0, kind) {
+            // Paper-space texts are on a sheet, not on a model tile: their
+            // `tiles` list is empty and they name no layer of any tile.
+            if record["space"] == "paper" {
+                continue;
+            }
             let layer = record["layer"].as_str().unwrap().to_string();
             if kind == "geometry" {
                 geometry_layers.insert(layer.clone());
@@ -2331,9 +2338,10 @@ fn layers_everywhere(count: usize) -> uncad::CadDatabase {
 
 #[test]
 fn a_tile_on_hundreds_of_layers_keeps_its_sidecar_under_the_cap() {
-    // The shrink loop cut the four row lists and stopped as soon as they
-    // were empty, so a tile carrying no text, dimension, block or region
-    // record -- just geometry on 900 layers -- wrote its whole layer list
+    // The shrink loop cut the row lists and stopped as soon as they were
+    // empty, so a tile carrying no text, dimension, block or region record
+    // -- just geometry on 900 layers, which the sidecar did not list at
+    // all then -- wrote its whole layer list
     // whatever it weighed: 43 866 bytes, 37 % over the 32 KB the design
     // promises, with `records_truncated: false` saying nothing had been
     // dropped. 900 names of 45 characters is 40 500 characters before the
@@ -2371,8 +2379,17 @@ fn a_tile_on_hundreds_of_layers_keeps_its_sidecar_under_the_cap() {
         } else {
             assert!(sidecar["layers_total"].is_null());
         }
-        // Nothing else was cut: there were no record rows to cut.
-        assert_eq!(sidecar["records_truncated"], false, "{path}");
+        // 900 geometry rows are cut before the layer list is touched, so a
+        // trimmed layer list means the rows went first: the two flags stay
+        // independent and the counts stay true whatever was cut.
+        if sidecar["layers_truncated"] == true {
+            assert_eq!(sidecar["records_truncated"], true, "{path}");
+        }
+        assert!(
+            sidecar["records"]["geometry"].as_array().unwrap().len()
+                <= sidecar["counts"]["geometry"].as_u64().unwrap() as usize,
+            "{path}: more rows than records"
+        );
         checked += 1;
     }
     assert!(checked >= 2, "{checked} sidecars");
@@ -2533,4 +2550,777 @@ fn record_building_does_not_grow_with_the_square_of_the_entity_count() {
         "50 000 entities took {big:.2}s against {small:.2}s for 12 500 ({:.1}x)",
         big / small
     );
+}
+
+// ------------------------------------------------- the consumer's pointers
+
+const SAMPLE_2000_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/sample_2000.dwg"
+);
+const TITLE_BLOCK: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/title_block_r2000.dxf"
+);
+
+/// A drawing from the crate's own JSON form of its entities and block
+/// records, so a test can state the drawing it needs instead of filling in
+/// every field of every struct. The header is the default one.
+fn from_json(entities: &str, block_records: Value) -> uncad::CadDatabase {
+    let entities: Vec<uncad::Entity> =
+        serde_json::from_str(entities).expect("the test entities are valid uncad JSON");
+    let tables: uncad::Tables = serde_json::from_value(serde_json::json!({
+        "layers": {},
+        "mlinestyles": {},
+        "block_records": block_records,
+    }))
+    .expect("the test tables are valid uncad JSON");
+    uncad::CadDatabase::new(entities, tables)
+}
+
+#[test]
+fn the_title_and_the_title_block_are_records_on_their_sheet() {
+    // Every record file held model space only, so a drawing whose title is
+    // on the paper -- the usual place for it -- exported `counts.texts: 0`,
+    // `capabilities.text_boxes: "none"` and an empty strings.json, and an
+    // agent asked "what is this drawing called?" answered "it contains no
+    // text at all" while the package's own sheet image read GARDEN
+    // PAVILION. The fixture's model space holds one LINE and no text.
+    let db = uncad::parse(TITLE_BLOCK).expect("fixture must parse");
+    let tmp = TempDir::new("paper_text");
+    export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+
+    let texts = records(&tmp.0, "texts");
+    assert_eq!(texts.len(), 2, "{texts:?}");
+    let title = texts.iter().find(|t| t["id"] == "25").expect("the title");
+    assert_eq!(title["text"], "GARDEN PAVILION");
+    assert_eq!(title["space"], "paper");
+    assert_eq!(title["sheet"], "Layout1");
+    assert!(title["tiles"].as_array().unwrap().is_empty());
+    // The text inside the title block, through the INSERT: id
+    // `<insert>/<text>`.
+    let sheet_no = texts
+        .iter()
+        .find(|t| t["id"] == "26/42")
+        .expect("the sheet number");
+    assert_eq!(sheet_no["text"], "SHEET 1 OF 2");
+    assert_eq!(sheet_no["space"], "paper");
+
+    // strings.json finds both, which is the path the guidance names.
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(strings["strings"]["garden pavilion"][0], "25");
+    assert_eq!(strings["strings"]["sheet 1 of 2"][0], "26/42");
+
+    // The pixel box is on the sheet image and nowhere else, and it is where
+    // the fixture's own numbers put it: the title is anchored at (150, 20)
+    // in paper units on a sheet whose image maps world to pixels at `ppu`,
+    // so its left edge is (150 - world.min_x) * ppu, its baseline
+    // (world.max_y - 20) * ppu, and its height a fraction of the 8 * ppu an
+    // 8-unit capital spans.
+    let sheets = read_json(&tmp.0.join("sheets.json"));
+    let image = &sheets["sheets"][0]["overview"];
+    let ppu = image["ppu"].as_f64().unwrap();
+    let min_x = image["world"][0].as_f64().unwrap();
+    let max_y = image["world"][3].as_f64().unwrap();
+    let px = title["px"]["sheet:Layout1"].as_array().unwrap();
+    let (x0, y0, x1, y1) = (
+        px[0].as_f64().unwrap(),
+        px[1].as_f64().unwrap(),
+        px[2].as_f64().unwrap(),
+        px[3].as_f64().unwrap(),
+    );
+    assert!(
+        (x0 - (150.0 - min_x) * ppu).abs() <= 4.0,
+        "left edge {x0} against {}",
+        (150.0 - min_x) * ppu
+    );
+    assert!(
+        (y1 - (max_y - 20.0) * ppu).abs() <= 4.0,
+        "baseline {y1} against {}",
+        (max_y - 20.0) * ppu
+    );
+    let (w, h) = (x1 - x0, y1 - y0);
+    assert!(
+        h > 0.4 * 8.0 * ppu && h < 1.5 * 8.0 * ppu,
+        "{h} px for an 8-unit text at {ppu} px per unit"
+    );
+    assert!(w > h, "15 characters are wider than they are tall: {w}x{h}");
+    let (iw, ih) = (
+        image["px"][0].as_f64().unwrap(),
+        image["px"][1].as_f64().unwrap(),
+    );
+    assert!(x1 <= iw && y1 <= ih, "{px:?} on a {iw}x{ih} image");
+    assert_eq!(title["px"].as_object().unwrap().len(), 1);
+
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["counts"]["texts"], 2);
+    assert_eq!(manifest["counts"]["texts_paper"], 2);
+    assert_eq!(manifest["capabilities"]["paper_text"], "indexed");
+    assert_ne!(manifest["capabilities"]["text_boxes"], "none");
+}
+
+/// Two closed polylines, one of each area kind: a 100 x 50 rectangle whose
+/// area is exact, and a self-crossing quadrilateral whose area is not an
+/// area at all.
+fn rectangle_and_bowtie() -> uncad::CadDatabase {
+    // Shoelace by hand. Rectangle (0,0) (100,0) (100,50) (0,50): 5000.
+    // Bowtie (0,0) (100,0) (20,60) (80,80), whose edges (100,0)-(20,60) and
+    // (80,80)-(0,0) cross at (42.86, 42.86): the sum of
+    // x_i y_(i+1) - x_(i+1) y_i is 0 + 6000 - 3200 + 0 = 2800, half of it
+    // 1400.
+    let body = r#"[
+        {"type": "LWPOLYLINE",
+         "common": {"handle": "10", "layer": "PLOT", "color_index": 256, "true_color": null},
+         "closed": true,
+         "vertices": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 100, "y": 50}, {"x": 0, "y": 50}]},
+        {"type": "LWPOLYLINE",
+         "common": {"handle": "11", "layer": "PLOT", "color_index": 256, "true_color": null},
+         "closed": true,
+         "vertices": [{"x": 0, "y": 0}, {"x": 100, "y": 0}, {"x": 20, "y": 60}, {"x": 80, "y": 80}]}
+    ]"#;
+    let model: Value = serde_json::from_str(body).expect("the model entities");
+    from_json(
+        body,
+        serde_json::json!({"*Model_Space": {"name": "*Model_Space", "entities": model}}),
+    )
+}
+
+#[test]
+fn a_region_says_why_its_area_is_unavailable_and_the_manifest_says_how_many() {
+    // regions.json is the file the guidance sends a reader to for areas. A
+    // self-intersecting outline's area means nothing, and the geometry
+    // record said so in `why` -- but the region record dropped the `why`
+    // and published `area`, `perimeter` and `centroid` beside a bare
+    // "unavailable", so a reader had nothing to choose by. Meanwhile
+    // `capabilities.areas` was the literal string "exact" whatever the
+    // records held (3875 of 4073 areas unusable on AutoCADSamples5).
+    let db = rectangle_and_bowtie();
+    let tmp = TempDir::new("areas");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let regions = records(&tmp.0, "regions");
+    assert_eq!(regions.len(), 2);
+    let good = regions.iter().find(|r| r["id"] == "10").unwrap();
+    assert_eq!(good["confidence"], "exact");
+    assert_eq!(good["area"].as_f64().unwrap(), 5000.0);
+    assert!(good["why"].is_null());
+    let bad = regions.iter().find(|r| r["id"] == "11").unwrap();
+    assert_eq!(bad["confidence"], "unavailable");
+    assert_eq!(bad["simple"], false);
+    assert_eq!(bad["area"].as_f64().unwrap(), 1400.0);
+    assert!(
+        bad["why"]
+            .as_str()
+            .is_some_and(|w| w.contains("self-intersecting")),
+        "{bad}"
+    );
+    // The geometry record it is built from says exactly the same thing.
+    let geometry = records(&tmp.0, "geometry");
+    let source = geometry.iter().find(|g| g["id"] == "11").unwrap();
+    assert_eq!(source["why"], bad["why"]);
+
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["capabilities"]["areas"], "mixed");
+    assert_eq!(
+        manifest["capabilities"]["areas_by_confidence"],
+        serde_json::json!({"exact": 1, "estimated": 0, "unavailable": 1})
+    );
+}
+
+/// `levels` blocks nested one inside the next, the innermost holding a
+/// TEXT, with one INSERT of the outermost in model space.
+fn nested_blocks(levels: usize) -> uncad::CadDatabase {
+    let mut blocks = serde_json::Map::new();
+    for i in 0..levels {
+        let child = if i + 1 == levels {
+            serde_json::json!({
+                "type": "TEXT", "start_point": {"x": 1.0, "y": 1.0}, "text_height": 2.5,
+                "text": "DEEPTEXT", "text_plain": "DEEPTEXT", "rotation": 0.0,
+                "common": {"handle": format!("{:X}", 0x200 + i), "layer": "0",
+                           "color_index": 256, "true_color": null}
+            })
+        } else {
+            serde_json::json!({
+                "type": "INSERT", "block_name": format!("L{}", i + 1),
+                "insertion_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "rotation": 0.0, "attribs": [],
+                "common": {"handle": format!("{:X}", 0x200 + i), "layer": "0",
+                           "color_index": 256, "true_color": null}
+            })
+        };
+        blocks.insert(
+            format!("L{i}"),
+            serde_json::json!({"name": format!("L{i}"), "entities": [child]}),
+        );
+    }
+    let top = serde_json::json!({
+        "type": "INSERT", "block_name": "L0",
+        "insertion_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "rotation": 0.0, "attribs": [],
+        "common": {"handle": "100", "layer": "0", "color_index": 256, "true_color": null}
+    });
+    // A line, so the drawing has an extent that does not depend on the text.
+    let line = serde_json::json!({
+        "type": "LINE", "start_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "end_point": {"x": 40.0, "y": 20.0, "z": 0.0},
+        "common": {"handle": "101", "layer": "0", "color_index": 256, "true_color": null}
+    });
+    blocks.insert(
+        "*Model_Space".into(),
+        serde_json::json!({"name": "*Model_Space", "entities": [top, line]}),
+    );
+    from_json(
+        &serde_json::json!([top, line]).to_string(),
+        Value::Object(blocks),
+    )
+}
+
+#[test]
+fn a_text_twelve_blocks_deep_is_drawn_and_indexed_by_the_same_rule() {
+    // The record walk stopped at 8 nested blocks while the renderer follows
+    // 20, so between those depths a string was drawn in the overview and
+    // the tiles with no record in texts.json and no key in strings.json --
+    // the one documented way to find it. A bound XREF of an assembly of
+    // assemblies reaches nine levels easily; this is twelve.
+    let db = nested_blocks(12);
+    let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
+    assert_eq!(
+        svg.matches("DEEPTEXT").count(),
+        1,
+        "the renderer draws it, so the index has to hold it"
+    );
+
+    let tmp = TempDir::new("deep_blocks");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let texts = records(&tmp.0, "texts");
+    assert_eq!(texts.len(), 1, "{texts:?}");
+    assert_eq!(texts[0]["text"], "DEEPTEXT");
+    // The id is the chain of INSERT handles -- the top-level one and the
+    // eleven nested ones -- ending in the text's own handle.
+    let id = texts[0]["id"].as_str().unwrap();
+    assert_eq!(id.split('/').count(), 13, "{id}");
+    let strings = read_json(&tmp.0.join("strings.json"));
+    assert_eq!(strings["strings"]["deeptext"][0], id);
+}
+
+#[test]
+fn every_record_id_resolves_to_its_file_through_the_shard_index() {
+    // `first_id`/`last_id` are hex handles of varying length ordered by
+    // their numeric value, so the string comparison a JSON consumer reaches
+    // for picks the wrong shard or none: "109B3" sorts above every geometry
+    // shard of a package whose first_ids start with '3'. `first_key` and
+    // `last_key` publish the order itself. Block instances were not in the
+    // index at all -- blocks.json was written whole, never sharded.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("shard_lookup");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            shard_kb: 1,
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let index = manifest["shard_index"].as_array().unwrap();
+    let kinds: BTreeSet<&str> = index.iter().map(|s| s["kind"].as_str().unwrap()).collect();
+    assert!(kinds.contains("blocks"), "{kinds:?}");
+    assert!(
+        index.iter().filter(|s| s["kind"] == "blocks").count() > 1,
+        "1 KB shards split nine INSERT records"
+    );
+
+    // The lookup the manifest describes, run over every record of every
+    // kind: parse the id's first segment as hex and take the one shard of
+    // that kind whose key range holds it. It must be the file the record is
+    // actually in.
+    let mut checked = 0;
+    for (kind, name) in [
+        ("text", "texts"),
+        ("dimension", "dimensions"),
+        ("geometry", "geometry"),
+        ("region", "regions"),
+        ("blocks", "blocks"),
+    ] {
+        for record in records(&tmp.0, name) {
+            let id = record["id"].as_str().unwrap();
+            let key = u64::from_str_radix(id.split('/').next().unwrap(), 16).unwrap();
+            let found: Vec<&str> = index
+                .iter()
+                .filter(|s| {
+                    s["kind"] == kind
+                        && s["first_key"].as_u64().unwrap() <= key
+                        && key <= s["last_key"].as_u64().unwrap()
+                })
+                .map(|s| s["file"].as_str().unwrap())
+                .collect();
+            assert_eq!(found.len(), 1, "{id} of kind {kind} resolved to {found:?}");
+            let shard = read_json(&tmp.0.join(found[0]));
+            assert!(
+                shard["records"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["id"] == id),
+                "{id} is not in {}",
+                found[0]
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 50, "{checked} records");
+}
+
+#[test]
+fn a_sidecar_accounts_for_the_geometry_on_its_tile() {
+    // The sidecar's `records` held texts, dims, blocks and regions only,
+    // while the manifest told the reader "every tile's .json sidecar lists
+    // what is on it" and `records_truncated: false` said the list was
+    // complete. A dense wall-and-stair tile therefore reported 41
+    // annotation objects and looked exactly like a tile with nothing drawn
+    // on it, with 3990 geometry records naming it in their own `tiles`.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("sidecar_geometry");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    // What each tile holds, counted from the records' own `tiles` lists --
+    // the same membership the sidecar reports, derived from the other side.
+    let mut expected: std::collections::BTreeMap<String, usize> = Default::default();
+    for record in records(&tmp.0, "geometry") {
+        for tile in record["tiles"].as_array().unwrap() {
+            *expected
+                .entry(tile.as_str().unwrap().to_string())
+                .or_default() += 1;
+        }
+    }
+    assert!(
+        expected.values().any(|n| *n > 3),
+        "the test needs a tile with several entities on it"
+    );
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let id = entry["id"].as_str().unwrap();
+        let sidecar = read_json(&tmp.0.join(path));
+        let want = expected.get(id).copied().unwrap_or(0);
+        assert_eq!(
+            sidecar["counts"]["geometry"].as_u64().unwrap() as usize,
+            want,
+            "{id}"
+        );
+        let rows = sidecar["records"]["geometry"].as_array().unwrap();
+        if sidecar["records_truncated"] == false {
+            assert_eq!(rows.len(), want, "{id}");
+        }
+        // The summary covers the same records whether or not the rows fit.
+        let by_kind: usize = sidecar["geometry_by_kind"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .sum();
+        assert_eq!(by_kind, want, "{id}");
+        checked += 1;
+    }
+    assert!(checked >= 2, "{checked} sidecars");
+}
+
+#[test]
+fn every_pointer_in_a_sidecar_leads_somewhere_and_every_box_is_on_the_image() {
+    // Two ways the sidecars sent a reader nowhere. `neighbors` was resolved
+    // against the whole tile plan, so a neighbour culled as empty (no .png,
+    // no .json) was named like any other and gave two file-not-found
+    // errors. And a record's pixel box was its whole world box mapped into
+    // the tile's frame without clipping, so a dimension on a 1092 px tile
+    // was quoted at [945, 790, 9207, 1174] -- 8115 px past the right edge.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("pointers");
+    export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let written: BTreeSet<String> = tiles["tiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["empty"] == false)
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    let empty = tiles["tiles"].as_array().unwrap().len() - written.len();
+    assert!(empty > 0, "the test needs a package with culled tiles");
+
+    let mut boxes = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let sidecar = read_json(&tmp.0.join(path));
+        let mut pointers: Vec<&Value> = ["n", "s", "e", "w"]
+            .iter()
+            .map(|d| &sidecar["neighbors"][*d])
+            .collect();
+        pointers.push(&sidecar["parent"]);
+        pointers.extend(sidecar["children"].as_array().unwrap());
+        for pointer in pointers {
+            let Some(id) = pointer.as_str() else { continue };
+            assert!(written.contains(id), "{path} points at {id}, never written");
+            let entry = tiles["tiles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["id"] == id)
+                .expect("a tile");
+            assert!(tmp.0.join(entry["png"].as_str().unwrap()).exists());
+            assert!(tmp.0.join(entry["sidecar"].as_str().unwrap()).exists());
+        }
+        let (w, h) = (
+            sidecar["px"][0].as_i64().unwrap(),
+            sidecar["px"][1].as_i64().unwrap(),
+        );
+        for group in ["texts", "dims", "blocks", "regions", "geometry"] {
+            for row in sidecar["records"][group].as_array().unwrap() {
+                let v: Vec<i64> = row[1]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|n| n.as_i64().unwrap())
+                    .collect();
+                assert!(
+                    0 <= v[0]
+                        && v[0] <= v[2]
+                        && v[2] <= w
+                        && 0 <= v[1]
+                        && v[1] <= v[3]
+                        && v[3] <= h,
+                    "{path}: {group} {row} on a {w}x{h} image"
+                );
+                boxes += 1;
+            }
+        }
+    }
+    assert!(boxes > 20, "{boxes} boxes");
+
+    // A record listed on more than one tile is the case that used to
+    // overflow: its box on each of them is clipped to that tile.
+    let mut spanning = 0;
+    for record in records(&tmp.0, "geometry") {
+        if record["tiles"].as_array().unwrap().len() < 2 {
+            continue;
+        }
+        spanning += 1;
+        for (id, value) in record["px"].as_object().unwrap() {
+            if !written.contains(id.as_str()) {
+                continue;
+            }
+            let v: Vec<i64> = value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_i64().unwrap())
+                .collect();
+            assert!(
+                v[0] >= 0 && v[1] >= 0 && v[2] <= 1092 && v[3] <= 1092,
+                "{record} on {id}"
+            );
+        }
+    }
+    assert!(spanning > 0, "no record spans two tiles");
+}
+
+#[test]
+fn the_package_explains_its_own_compact_forms() {
+    // The sidecars' record rows are positional arrays whose shape varies by
+    // group, with no legend anywhere in the package -- a reader had to
+    // guess whether the number on a region row was the area or the
+    // perimeter -- and the manifest's guidance claimed "each record's
+    // `confidence` says how the value was obtained" while text records
+    // carry `bbox_confidence` and block instances carry neither.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("legend");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let legend = &manifest["legend"];
+    for key in [
+        "confidence",
+        "text_records",
+        "measurement_source",
+        "display_source",
+        "region_labels",
+        "px_boxes",
+        "tile_sidecar",
+        "shard_lookup",
+        "legibility",
+    ] {
+        assert!(!legend[key].is_null(), "the legend is missing {key}");
+    }
+    // The vocabulary the records use is the one the legend lists.
+    let confidence = legend["confidence"].as_object().unwrap();
+    for record in records(&tmp.0, "geometry")
+        .iter()
+        .chain(records(&tmp.0, "regions").iter())
+        .chain(records(&tmp.0, "dimensions").iter())
+    {
+        let value = record["confidence"].as_str().expect("a confidence");
+        assert!(
+            confidence.contains_key(value),
+            "{value} is not in the legend"
+        );
+    }
+    // And the guidance no longer promises one on every record: the kinds
+    // that carry none are named instead.
+    assert!(manifest["guidance"].as_str().unwrap().contains("legend"));
+    for record in records(&tmp.0, "blocks") {
+        assert!(record["confidence"].is_null(), "{record}");
+    }
+
+    // Every sidecar row has exactly the columns its own legend names.
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    let mut checked = 0;
+    for entry in tiles["tiles"].as_array().unwrap() {
+        let Some(path) = entry["sidecar"].as_str() else {
+            continue;
+        };
+        let sidecar = read_json(&tmp.0.join(path));
+        let columns = sidecar["columns"].as_object().expect("a columns legend");
+        assert_eq!(columns.len(), 5, "{path}");
+        for (group, names) in columns {
+            let arity = names.as_array().unwrap().len();
+            assert_eq!(names[0], "id");
+            assert_eq!(names[1], "px_box");
+            for row in sidecar["records"][group].as_array().unwrap() {
+                assert_eq!(row.as_array().unwrap().len(), arity, "{path}: {group}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 20, "{checked} rows");
+}
+
+#[test]
+fn a_group_too_small_to_frame_is_listed_as_dropped() {
+    // A detached group below `min_frame_entities` became no frame, was not
+    // in `frames_dropped` (which only ever held the groups past
+    // `max_frames`) and raised no warning, so its records carried
+    // `tiles: []` with nothing in the package saying whether that meant
+    // off-drawing, omitted on purpose or an export bug. sample_2000.dwg has
+    // two such groups: a circle and a 100 x 140 rectangle, both plainly in
+    // overview.png.
+    let db = uncad::parse(SAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("small_groups");
+    export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let dropped = manifest["frames_dropped"].as_array().unwrap();
+    assert_eq!(dropped.len(), 2, "{dropped:?}");
+    assert_eq!(manifest["frames_dropped_total"], 2);
+    assert!(dropped.iter().all(|d| d["reason"] == "below_min_entities"));
+    assert!(manifest["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w.as_str().unwrap().starts_with("SmallGroups:")));
+
+    // Every record with no tile is inside one of the dropped rectangles,
+    // which is what makes the list an answer and not just a note.
+    let mut without_tiles = 0;
+    for record in records(&tmp.0, "geometry") {
+        if !record["tiles"].as_array().unwrap().is_empty() {
+            continue;
+        }
+        without_tiles += 1;
+        let b: Vec<f64> = record["bbox"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        assert!(
+            dropped.iter().any(|d| {
+                let r: Vec<f64> = d["content"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap())
+                    .collect();
+                b[0] >= r[0] - 1e-6
+                    && b[1] >= r[1] - 1e-6
+                    && b[2] <= r[2] + 1e-6
+                    && b[3] <= r[3] + 1e-6
+            }),
+            "{record} is in none of {dropped:?}"
+        );
+    }
+    assert_eq!(without_tiles, 2);
+}
+
+#[test]
+fn legibility_says_whether_the_target_was_met_not_whether_the_budget_held() {
+    // `reached` was published inside `legibility`, beside `target_px`,
+    // where it reads as "the target size was reached" -- while it only ever
+    // meant "the tile budget did not cut the pyramid short". A frame whose
+    // deepest image draws its text at 3.9 px against a 14 px target said
+    // `reached: true`.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("legibility");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            target_text_px: 1000.0,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let legibility = &manifest["legibility"];
+    assert_eq!(legibility["target_px"], 1000.0);
+    let frame = &legibility["per_frame"][0];
+    assert!(frame["reached"].is_null(), "the ambiguous name is gone");
+    // One level of a drawing whose text is a few units high cannot reach
+    // 1000 px: the pyramid is complete, the target is not met, and each is
+    // said in its own field.
+    assert_eq!(frame["pyramid_complete"], true);
+    assert_eq!(frame["target_met"], false);
+    let classes = frame["height_classes"].as_array().unwrap();
+    assert!(!classes.is_empty());
+    assert!(classes
+        .iter()
+        .all(|c| c["legible"] == false && c["px_at_zmax"].as_f64().unwrap() < 1000.0));
+    // `target_met` is exactly "every class is legible", recomputed here
+    // from the classes the same object publishes.
+    assert_eq!(
+        frame["target_met"].as_bool().unwrap(),
+        classes.iter().all(|c| c["legible"] == true)
+    );
+}
+
+#[test]
+fn tiles_json_says_how_big_each_tile_is_and_why_an_empty_one_is_not_there() {
+    // The design promises "tiles.json  every frame/level/tile, including
+    // empty ones with a reason; sha256 and bytes"; the file carried ten
+    // keys, none of them those, so a package verifier had nothing to check
+    // a tile PNG against and an absent file had no explanation.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("tile_hashes");
+    export_package(&db, &tmp.0, &ExportOptions::default()).expect("exports");
+    let tiles = read_json(&tmp.0.join("tiles.json"));
+    // The hash by the content it is of: equal bytes must hash equally and
+    // different bytes must not.
+    let mut hashes: std::collections::BTreeMap<Vec<u8>, String> = Default::default();
+    let (mut written, mut empty) = (0, 0);
+    for entry in tiles["tiles"].as_array().unwrap() {
+        if entry["empty"] == true {
+            empty += 1;
+            assert_eq!(entry["reason"], "no_visible_entity_on_tile");
+            assert!(entry["png"].is_null());
+            continue;
+        }
+        written += 1;
+        let path = tmp.0.join(entry["png"].as_str().unwrap());
+        let content = std::fs::read(&path).unwrap();
+        assert_eq!(
+            entry["bytes"].as_u64().unwrap(),
+            content.len() as u64,
+            "{path:?}"
+        );
+        let sha = entry["sha256"].as_str().expect("a hash").to_string();
+        assert_eq!(sha.len(), 64);
+        assert!(sha
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        if let Some(other) = hashes.get(&content) {
+            assert_eq!(*other, sha, "{path:?}");
+        }
+        assert!(
+            hashes.iter().all(|(k, v)| k == &content || v != &sha),
+            "two different tiles share a hash"
+        );
+        hashes.insert(content, sha);
+    }
+    assert!(written > 5 && empty > 0, "{written} written, {empty} empty");
+}
+
+#[test]
+fn hidden_entities_are_counted_the_same_way_in_both_files() {
+    // manifest.counts.hidden was every hidden entity and report.json's
+    // hidden.count only the top-level ones, so the two printed different
+    // numbers under the same word (1206 against 0 on AutoCADSamples6) and
+    // report.json -- "what was left out and why" -- could not be reconciled
+    // with the manifest a reader had just been told to trust.
+    let db = uncad::parse(HIDDEN).expect("fixture must parse");
+    let tmp = TempDir::new("hidden_agree");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    let report = read_json(&tmp.0.join("report.json"));
+    let hidden = &report["hidden"];
+    assert_eq!(
+        hidden["count"].as_u64().unwrap(),
+        manifest["counts"]["hidden"].as_u64().unwrap()
+    );
+    assert_eq!(
+        hidden["top_level"].as_u64().unwrap() + hidden["inside_blocks"].as_u64().unwrap(),
+        hidden["count"].as_u64().unwrap()
+    );
+    // The fixture hides one LINE per state; `by_reason` and `handles` cover
+    // the top level, and the file says so rather than leaving a reader to
+    // find it out.
+    let by_reason: u64 = hidden["by_reason"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|v| v.as_u64().unwrap())
+        .sum();
+    assert_eq!(by_reason, hidden["top_level"].as_u64().unwrap());
+    assert!(by_reason > 0);
+    assert_eq!(hidden["covers"], "top_level");
+    assert_eq!(
+        hidden["handles"].as_array().unwrap().len(),
+        hidden["top_level"].as_u64().unwrap() as usize
+    );
+    assert_eq!(hidden["handles_truncated"], false);
+    assert_eq!(hidden["handles_limit"], 100);
 }
