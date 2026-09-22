@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use uncad::export::{export_package, ExportOptions, Profile};
+use uncad::export::{export_package, ExportError, ExportOptions, Profile};
 
 const EXAMPLE_2000_DWG: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -990,4 +990,37 @@ fn a_drawing_far_from_the_origin_rasterizes_like_one_at_the_origin() {
             );
         }
     }
+}
+
+#[test]
+fn exporting_onto_an_existing_file_reports_the_path_it_could_not_write() {
+    // `export_package` creates its directory; when the path is a file, the
+    // very first `create_dir_all` fails and the error names that path.
+    let db = uncad::parse(EXAMPLE_2000_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("io");
+    std::fs::create_dir_all(&tmp.0).expect("a writable directory");
+    let file = tmp.0.join("not-a-directory");
+    std::fs::write(&file, b"in the way").expect("writable");
+    let err = export_package(&db, &file, &ExportOptions::default())
+        .expect_err("a file is not a directory");
+    match &err {
+        ExportError::Io { path, source } => {
+            assert_eq!(path, &file);
+            assert!(
+                matches!(
+                    source.kind(),
+                    std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::NotADirectory
+                ),
+                "{source:?}"
+            );
+        }
+        other => panic!("expected an Io error, got {other:?}"),
+    }
+    let message = err.to_string();
+    assert!(
+        message.starts_with(&format!("cannot write {}", file.display())),
+        "{message}"
+    );
+    // Nothing was written next to the file that blocked it.
+    assert!(file.is_file());
 }

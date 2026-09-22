@@ -7,7 +7,7 @@
 
 use std::io::Cursor;
 
-use uncad::{Background, PngError, PngSize, ToPngOptions, ViewBox};
+use uncad::{Background, PngError, PngSize, ToPngOptions, ToSvgOptions, ViewBox};
 
 const CIRCLE_DWG: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -335,4 +335,62 @@ fn a_character_outside_the_bundled_subset_is_drawn_as_a_notdef_box() {
         above_line > 500,
         "only {above_line} dark pixels above the line: the missing glyphs were not drawn"
     );
+}
+
+#[test]
+fn the_size_cap_names_the_size_it_refused() {
+    let db = circle();
+    // Measure the drawing with no padding and no lattice at one pixel per
+    // unit: the image is then exactly the content box, so any other scale's
+    // pixel size follows from it.
+    let plain = |size: PngSize, max_edge: u32| ToPngOptions {
+        size,
+        svg: ToSvgOptions {
+            padding: Some(0.0),
+            ..Default::default()
+        },
+        lattice: 0,
+        max_edge,
+        ..Default::default()
+    };
+    let base = db
+        .to_png(plain(PngSize::PxPerUnit(1.0), 8000))
+        .expect("renders");
+    let content = base.crop.content.expect("the circle was drawn");
+    let (w, h) = (content.width(), content.height());
+    assert_eq!(
+        (base.width, base.height),
+        (w.round() as u32, h.round() as u32)
+    );
+
+    // Ask for exactly one pixel more than the cap on the long edge.
+    let cap = 500u32;
+    let over = f64::from(cap + 1) / w.max(h);
+    let err = db
+        .to_png(plain(PngSize::PxPerUnit(over), cap))
+        .expect_err("one pixel over the cap is over the cap");
+    let message = err.to_string();
+    let PngError::TooLarge {
+        width,
+        height,
+        max_edge,
+    } = err
+    else {
+        panic!("expected TooLarge, got {err:?}");
+    };
+    assert_eq!((width.max(height), max_edge), (cap + 1, cap));
+    assert_eq!(
+        message,
+        format!(
+            "render size {width}x{height} exceeds the {cap} px limit \
+             (raise max_edge, or use a smaller --fit/--scale)"
+        )
+    );
+
+    // One pixel less is fine, so the cap is the only thing refusing it.
+    let under = f64::from(cap) / w.max(h);
+    let ok = db
+        .to_png(plain(PngSize::PxPerUnit(under), cap))
+        .expect("at the cap it renders");
+    assert_eq!(ok.width.max(ok.height), cap);
 }
