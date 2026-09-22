@@ -125,3 +125,159 @@ fn how_many_drawings_both_readers_open_is_what_it_was_when_last_measured() {
         "\nthe two readers' agreement moved; measured now:\n{report}"
     );
 }
+
+/// Whether the second reader can say "this reference points at nothing".
+///
+/// This crate's model tells three states apart -- a name that resolved, a
+/// reference the file makes that nothing answers to, and no reference at
+/// all -- because a consumer that cannot tell them apart will read a made-up
+/// name as a real one. The question here is whether a second reader's own
+/// model carries enough for those three states to be recovered from it.
+///
+/// The probe is a file naming a block it does not define, which is the same
+/// case this crate's own reference tests use.
+#[test]
+fn what_the_second_reader_says_about_a_reference_to_a_missing_block() {
+    let pairs: &[(u16, &str)] = &[
+        (0, "SECTION"),
+        (2, "BLOCKS"),
+        (0, "BLOCK"),
+        (8, "0"),
+        (2, "REAL"),
+        (70, "0"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (3, "REAL"),
+        (0, "LINE"),
+        (8, "0"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (11, "1.0"),
+        (21, "0.0"),
+        (31, "0.0"),
+        (0, "ENDBLK"),
+        (8, "0"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "INSERT"),
+        (8, "0"),
+        (2, "REAL"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (0, "INSERT"),
+        (8, "0"),
+        (2, "NOBLOCK"),
+        (10, "5.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    let text: String = pairs
+        .iter()
+        .map(|(code, value)| format!("{code:>3}\n{value}\n"))
+        .collect();
+    let path = std::env::temp_dir().join(format!(
+        "uncad-{}-second-reader-dangling-block.dxf",
+        std::process::id()
+    ));
+    std::fs::write(&path, text).expect("temp dir writable");
+
+    let reader =
+        acadrust::DxfReader::from_file(&path).expect("the second reader should open the probe");
+    let document = reader.read().expect("the second reader should read it");
+    let names: Vec<String> = document
+        .entities()
+        .filter_map(|entity| match entity {
+            acadrust::EntityType::Insert(insert) => Some(insert.block_name.clone()),
+            _ => None,
+        })
+        .collect();
+    let _ = std::fs::remove_file(&path);
+
+    // Measured, not required: the second reader carries block references as
+    // plain names, so the block it cannot find comes back as the name the
+    // file wrote. That is the right answer for a *name*, and it is also the
+    // reason a consumer cannot tell it from a block that exists -- nothing
+    // in the value says which. Recovering the third state from this model
+    // means asking the document whether a block of that name is defined.
+    assert_eq!(names, vec!["REAL".to_string(), "NOBLOCK".to_string()]);
+    assert!(
+        document.block_records.contains("REAL"),
+        "the defined block should be in the block table"
+    );
+    assert!(
+        !document.block_records.contains("NOBLOCK"),
+        "the undefined block must not be in the block table -- that absence \
+         is what a consumer would have to consult to recover the third state"
+    );
+}
+
+/// Where the two readers stand on layer references, per version.
+///
+/// This crate carries a layer reference as three states. The second reader
+/// carries it as a name, and its DWG path fills a name it could not resolve
+/// with the literal `"0"` -- a layer name every drawing really has. So a
+/// failed resolution and a genuine layer 0 are the same value there, and the
+/// handle that would tell them apart is not kept on the entity (its linetype
+/// handle is, which is what makes the omission visible rather than a matter
+/// of taste).
+///
+/// The corpus is clean, so the collapse is latent here, not active: this
+/// pins that both readers agree on every drawing in it. A disagreement
+/// appearing later is either a real defect or the latent case arriving.
+#[test]
+fn the_two_readers_agree_on_every_layer_name_in_the_corpus() {
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let (Ok(ours), Some(theirs)) = (uncad::parse(&path), second_reader_layers(&path))
+            else {
+                continue;
+            };
+            let mut our_names: Vec<String> = ours
+                .all_entities()
+                .filter_map(|e| e.common().layer.resolved().cloned())
+                .collect();
+            our_names.sort_unstable();
+            our_names.dedup();
+            let mut their_names = theirs;
+            their_names.sort_unstable();
+            their_names.dedup();
+            compared += 1;
+            if our_names != their_names {
+                disagreements.push(format!(
+                    "{}: ours {our_names:?} vs theirs {their_names:?}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    assert!(compared > 0, "no drawing was read by both");
+    assert!(
+        disagreements.is_empty(),
+        "{} of {compared} drawings disagree on the set of layer names:
+{}",
+        disagreements.len(),
+        disagreements.join(
+            "
+"
+        )
+    );
+}
+
+fn second_reader_layers(path: &Path) -> Option<Vec<String>> {
+    let mut reader = acadrust::DwgReader::from_file(path).ok()?;
+    let document = reader.read().ok()?;
+    Some(
+        document
+            .entities()
+            .map(|entity| entity.common().layer.clone())
+            .collect(),
+    )
+}
