@@ -2144,3 +2144,53 @@ fn exporting_onto_an_existing_file_reports_the_path_it_could_not_write() {
     // Nothing was written next to the file that blocked it.
     assert!(file.is_file());
 }
+
+/// The same drawing as `EXAMPLE_2000_DWG`, saved in a format that predates
+/// `act_measurement`.
+const EXAMPLE_R14_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_r14.dwg"
+);
+
+#[test]
+fn a_package_says_when_its_dimension_values_were_recomputed() {
+    // An R14 file stores no measurement, and the records used to present
+    // the 0.0 it leaves behind as one: `measurement: 0`, `confidence:
+    // "stored"`, `capabilities.dimension_values: "exact"`, beside a
+    // `display` of "1504,68". The values now come from the definition
+    // points, and every place that says where a number came from says so.
+    let db = uncad::parse(EXAMPLE_R14_DWG).expect("corpus file must parse");
+    let tmp = TempDir::new("r14");
+    export_package(
+        &db,
+        &tmp.0,
+        &ExportOptions {
+            max_levels: 1,
+            ..Default::default()
+        },
+    )
+    .expect("exports");
+
+    let dims = records(&tmp.0, "dimensions");
+    assert_eq!(dims.len(), 10);
+    for d in &dims {
+        assert_eq!(d["measurement_source"], "from_points", "{}", d["id"]);
+        assert_eq!(d["confidence"], "exact", "{}", d["id"]);
+        // The value is the one the points give, and it is not 0.
+        assert_eq!(
+            d["measurement"], d["measurement_from_points"],
+            "{}",
+            d["id"]
+        );
+        assert!(
+            d["measurement"].as_f64().is_some_and(|m| m.abs() > 1.0),
+            "{} measures {}",
+            d["id"],
+            d["measurement"]
+        );
+        // Nothing stored means nothing to compare against.
+        assert!(d["delta"].is_null(), "{}", d["id"]);
+    }
+    let manifest = read_json(&tmp.0.join("manifest.json"));
+    assert_eq!(manifest["capabilities"]["dimension_values"], "computed");
+}

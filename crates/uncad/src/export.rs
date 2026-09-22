@@ -1495,10 +1495,15 @@ pub fn export_package(
             )
         });
         let angular = d.geometry.is_angular();
-        let (measurement, source) = match (d.measurement, d.measurement_from_points) {
-            (Some(m), _) => (Some(m), "act_measurement"),
-            (None, Some(p)) => (Some(p), "from_points"),
-            (None, None) => (None, "none"),
+        // `confidence` follows the source, not merely "there is a number":
+        // a value the definition points gave is exact arithmetic on what
+        // the file stores, but it is not what the drawing was measured at,
+        // and a reader deciding whether to trust the number over the label
+        // needs the two kept apart.
+        let (measurement, source, confidence) = match (d.measurement, d.measurement_from_points) {
+            (Some(m), _) => (Some(m), "act_measurement", "stored"),
+            (None, Some(p)) => (Some(p), "from_points", "exact"),
+            (None, None) => (None, "none", "unavailable"),
         };
         let delta = match (d.measurement, d.measurement_from_points) {
             (Some(m), Some(p)) => Some(rounder.derived(m - p)),
@@ -1541,14 +1546,7 @@ pub fn export_package(
         v.insert("geometry".into(), serde_json::to_value(&d.geometry)?);
         v.insert("definition_point".into(), rounder.pt3(d.definition_point));
         v.insert("text_at".into(), rounder.pt2(d.text_midpoint));
-        v.insert(
-            "confidence".into(),
-            json!(if measurement.is_some() {
-                "stored"
-            } else {
-                "unavailable"
-            }),
-        );
+        v.insert("confidence".into(), json!(confidence));
         v.insert("bbox".into(), rounder.rect(&bbox));
         v.insert("tiles".into(), json!(tiles_for(&bbox)));
         v.insert("px".into(), px_map(&bbox));
@@ -2060,8 +2058,17 @@ pub fn export_package(
     });
 
     // manifest.json, README.txt and report.json, last (they list the files)
+    // "exact" is reserved for values the file itself measured: a package of
+    // an R13/R14 drawing (no act_measurement anywhere) carries values this
+    // crate recomputed from the definition points, and used to advertise
+    // them as the drawing's own.
+    let dim_source = |want: &str| {
+        dim_records
+            .iter()
+            .any(|r| r.value.get("measurement_source").is_some_and(|s| s == want))
+    };
     let capabilities = json!({
-        "dimension_values": if dim_records.iter().any(|r| r.value.get("measurement").is_some_and(|m| !m.is_null())) { "exact" } else if dim_records.is_empty() { "none" } else { "text_only" },
+        "dimension_values": if dim_records.is_empty() { "none" } else if dim_source("act_measurement") { "exact" } else if dim_source("from_points") { "computed" } else { "text_only" },
         "areas": "exact",
         "text_boxes": if measured > 0 { "measured" } else if texts.is_empty() { "none" } else { "estimated" },
         "fonts": match options.fonts { Fonts::Bundled => "bundled", Fonts::BundledAndSystem => "bundled+system" },

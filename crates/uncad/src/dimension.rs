@@ -54,6 +54,75 @@ impl EffectiveStyle {
     }
 }
 
+/// How far a stored measurement may sit from the one the definition points
+/// give before it is treated as not a measurement of this dimension at all.
+///
+/// Derived from the corpus, not chosen: across all 26 `example_*` /
+/// `sample_*` files and the nine `AutoCADSamples*.dwg`, every DIMENSION
+/// whose file wrote a real `act_measurement` agrees with
+/// [`measurement_from_points`] to better than 2.3e-7 relative (one
+/// dimension in `example_20xx` differs at all; the rest are exact). The
+/// values this rejects are off by 100 %. 1 % leaves four orders of
+/// magnitude of headroom over the worst honest disagreement.
+const MEASUREMENT_DISAGREEMENT: f64 = 0.01;
+
+/// The measurement a DIMENSION stores (DXF group 42, `act_measurement`)
+/// when it can be believed, in the unit [`DimensionEntity::measurement`]
+/// uses: degrees for angular kinds, drawing units (before `DIMLFAC`)
+/// otherwise. `None` means "ask the definition points instead".
+///
+/// AutoCAD writes the field from R2000 on. Before that -- and in a DXF
+/// that simply omits group 42 -- the field is not a measurement, and the
+/// two ways it is left say so differently: an R13/R14 DWG holds exactly
+/// -1.0 ("not computed"), while an R13/R14 DXF, and any DXF without a 42,
+/// leaves it at 0.0. Only the first was rejected, so every DIMENSION in
+/// `example_r13.dwg`, `example_r14.dwg` and `example_r13.dxf` exported a
+/// measurement of 0 with confidence "stored" beside a label reading
+/// "1504,68".
+///
+/// So a stored value is refused when
+/// - it is not finite, or is exactly the -1.0 sentinel;
+/// - it is negative and the kind's measurement cannot be (every kind but
+///   ORDINATE, which is a signed offset from a datum);
+/// - it is zero and the kind's measurement cannot be (same exception: a
+///   feature may sit exactly on the datum). A genuinely degenerate
+///   dimension loses nothing but the "stored" label: the definition points
+///   give the same 0;
+/// - it disagrees with the definition points by more than
+///   [`MEASUREMENT_DISAGREEMENT`]. Magnitudes are compared, so a sign
+///   convention this crate reconstructs differently (ORDINATE's datum
+///   axis) does not throw a good value away, and a computed value of 0 is
+///   no evidence against a stored one -- the suspicion there runs the
+///   other way.
+pub fn usable_stored_measurement(
+    stored: Option<f64>,
+    geometry: &DimensionGeometry,
+    from_points: Option<f64>,
+) -> Option<f64> {
+    let stored = stored.filter(|v| v.is_finite())?;
+    // Before the unit conversion: the sentinel is the raw field.
+    if stored == -1.0 {
+        return None;
+    }
+    // ORDINATE stores a signed offset; every other kind stores a size.
+    let signed = matches!(geometry, DimensionGeometry::Ordinate { .. });
+    let value = if geometry.is_angular() {
+        stored.to_degrees()
+    } else {
+        stored
+    };
+    if !signed && value <= 0.0 {
+        return None;
+    }
+    if let Some(computed) = from_points {
+        let (a, b) = (value.abs(), computed.abs());
+        if b != 0.0 && (a - b).abs() > MEASUREMENT_DISAGREEMENT * a.max(b) {
+            return None;
+        }
+    }
+    Some(value)
+}
+
 /// The quantity a dimension's definition points measure, with the same
 /// meaning as [`DimensionEntity::measurement`]: drawing units for linear
 /// kinds (before `DIMLFAC`), degrees for angular kinds, the arc length for
@@ -587,4 +656,59 @@ mod tests {
         resolve_display(&mut d, &style(), None);
         assert_eq!(d.display_source, DisplaySource::None);
     }
+    #[test]
+    fn a_stored_measurement_that_cannot_be_this_dimensions_is_refused() {
+        // Expected values come from the geometry, not from the function:
+        // the ALIGNED pair (0,0)-(3,4) is 5 units apart (3-4-5), and the
+        // ORDINATE offset is `feature.y - def_pt.y` = 4 - 1.
+        let aligned = DimensionGeometry::Aligned {
+            xline1: p(0.0, 0.0),
+            xline2: p(3.0, 4.0),
+        };
+        let ordinate = DimensionGeometry::Ordinate {
+            feature: p(2.0, 4.0),
+            leader_end: p(6.0, 4.0),
+            x_datum: false,
+        };
+        let take = usable_stored_measurement;
+
+        // What the fix is about: 0.0 is how an R13/R14 file and a DXF
+        // without group 42 say "not computed", and a length of 0 is not a
+        // measurement this dimension could have.
+        assert_eq!(take(Some(0.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(0.0), &aligned, None), None);
+        // The older sentinel, and any other impossible sign.
+        assert_eq!(take(Some(-1.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(-5.0), &aligned, Some(5.0)), None);
+        assert_eq!(take(Some(f64::NAN), &aligned, Some(5.0)), None);
+        assert_eq!(take(None, &aligned, Some(5.0)), None);
+        // A value that measures something else entirely.
+        assert_eq!(take(Some(500.0), &aligned, Some(5.0)), None);
+        // A believable one survives, disagreement inside the tolerance
+        // included (5.02 is 0.4 % off 5.0, the corpus's worst honest
+        // disagreement is 2.3e-5 %).
+        assert_eq!(take(Some(5.0), &aligned, Some(5.0)), Some(5.0));
+        assert_eq!(take(Some(5.02), &aligned, Some(5.0)), Some(5.02));
+        assert_eq!(take(Some(5.0), &aligned, None), Some(5.0));
+
+        // An ORDINATE is a signed offset from a datum, so 0 and a negative
+        // value are both measurements it can have ...
+        assert_eq!(take(Some(0.0), &ordinate, Some(0.0)), Some(0.0));
+        assert_eq!(take(Some(-3.0), &ordinate, Some(3.0)), Some(-3.0));
+        assert_eq!(take(Some(3.0), &ordinate, Some(-3.0)), Some(3.0));
+        // ... but not one that disagrees with the points by 100 %.
+        assert_eq!(take(Some(0.0), &ordinate, Some(3.0)), None);
+
+        // Angular kinds store radians and are reported in degrees.
+        let angular = DimensionGeometry::Angular3Point {
+            center: p(0.0, 0.0),
+            xline1: p(1.0, 0.0),
+            xline2: p(0.0, 1.0),
+        };
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let got = take(Some(quarter), &angular, Some(90.0)).expect("a right angle");
+        assert!((got - 90.0).abs() < 1e-9, "{got}");
+        assert_eq!(take(Some(0.0), &angular, Some(90.0)), None);
+    }
+
 }
