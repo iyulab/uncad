@@ -54,9 +54,11 @@ fn circle() -> uncad::CadDatabase {
     uncad::parse(CIRCLE_DWG).expect("corpus file must parse")
 }
 
+/// Sizing rules without the 28 px lattice, so each promises an exact count.
 fn options(size: PngSize) -> ToPngOptions {
     ToPngOptions {
         size,
+        lattice: 0,
         ..Default::default()
     }
 }
@@ -82,6 +84,16 @@ fn every_size_rule_produces_the_pixel_count_it_promises() {
         .to_png(options(PngSize::FitLongEdge(400)))
         .expect("renders");
     assert_eq!(fit.width.max(fit.height), 400);
+    // With the default lattice the fit rounds down to a multiple of 28.
+    let snapped = db
+        .to_png(ToPngOptions {
+            size: PngSize::FitLongEdge(400),
+            ..Default::default()
+        })
+        .expect("renders");
+    assert_eq!(snapped.width.max(snapped.height), 392);
+    assert_eq!(snapped.width % 28, 0);
+    assert_eq!(snapped.height % 28, 0);
 
     let one_to_one = db.to_png(options(PngSize::Scale(1.0))).expect("renders");
     assert_eq!(
@@ -198,9 +210,11 @@ fn the_result_maps_pixels_back_to_the_drawing() {
     // And back.
     let (wx, wy) = vb.px_to_world(px, py, result.px_per_unit);
     assert!((wx - max_x).abs() < 1e-9 && (wy - min_y).abs() < 1e-9);
-    // The SVG carries the same viewBox.
+    // The SVG's viewBox is its own (2 % padding, no lattice) but shows the
+    // same content, and its attribute is the reported one.
     let svg = circle().to_svg(Default::default());
-    assert_eq!(svg.view_box, vb);
+    assert_eq!(svg.crop.content, result.crop.content);
+    let vb = svg.view_box;
     assert!(svg.svg.contains(&format!(
         "viewBox=\"{} {} {} {}\"",
         vb.x, vb.y, vb.width, vb.height
