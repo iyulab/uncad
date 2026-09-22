@@ -93,7 +93,7 @@ fn sweep() -> Sweep {
             if db.read_diagnostics.is_clean() {
                 s.clean_dwg += 1;
             }
-            for name in &db.read_diagnostics.libredwg_errors {
+            for name in &db.read_diagnostics.warnings {
                 *s.diagnostics.entry(name.clone()).or_default() += 1;
             }
         }
@@ -132,7 +132,7 @@ fn sweep() -> Sweep {
             }
         }
 
-        let svg = db.to_svg(ToSvgOptions::default());
+        let svg = uncad::to_svg(&db, ToSvgOptions::default());
         if !svg.empty_blocks.is_empty() {
             s.files_with_empty_blocks += 1;
             s.empty_blocks

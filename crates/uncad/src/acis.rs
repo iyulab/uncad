@@ -11,8 +11,9 @@
 //! not interpreted at all: the result is always a wireframe, never a filled or
 //! shaded shape.
 
-use crate::dynapi::{get_field, Point3D};
+use crate::dynapi::get_field;
 use std::ffi::{c_void, CStr};
+use uncad_model::model::Point3D;
 
 struct SatRecord {
     type_name: String,

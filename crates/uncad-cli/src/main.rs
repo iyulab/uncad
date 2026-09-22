@@ -121,7 +121,7 @@ fn run(args: &Args) -> Result<(), String> {
         eprintln!(
             "warning: LibreDWG read '{input}' with non-fatal problems ({}); \
              objects it could not decode are missing from the result",
-            db.read_diagnostics.libredwg_errors.join(", ")
+            db.read_diagnostics.warnings.join(", ")
         );
     }
 
@@ -147,17 +147,19 @@ fn run(args: &Args) -> Result<(), String> {
             (Vec::new(), Vec::new())
         }
         "svg" => {
-            let result = db.to_svg(svg_options(args)?);
+            let result = uncad::to_svg(&db, svg_options(args)?);
             write_output(output, result.svg.as_bytes())?;
             (result.unsupported_types, result.empty_blocks)
         }
         "png" => {
-            let result = db
-                .to_png(ToPngOptions {
+            let result = uncad::to_png(
+                &db,
+                ToPngOptions {
                     svg: svg_options(args)?,
                     scale: parse_scale(&args.scale)?,
-                })
-                .map_err(|e| e.to_string())?;
+                },
+            )
+            .map_err(|e| e.to_string())?;
             write_output(output, &result.png)?;
             (result.unsupported_types, result.empty_blocks)
         }

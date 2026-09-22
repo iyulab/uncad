@@ -3,9 +3,10 @@
 
 use super::format::{clean, neg};
 use super::Ctx;
-use crate::dynapi::Point2D;
-use crate::model::{HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine};
 use std::fmt::Write as _;
+use uncad_model::model::{
+    HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine, Point2D,
+};
 
 /// Renders one HATCH: always an outline of its boundary paths, plus -- in
 /// priority order -- a gradient fill, a translucent solid fill, or tiled

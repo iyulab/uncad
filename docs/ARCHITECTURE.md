@@ -19,11 +19,12 @@ crates/
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
-                         convert.rs (raw Dwg_Data* -> model.rs's Entity) -> tables.rs
-                         (LAYER/BLOCK_RECORD/MLINESTYLE) -> color.rs (ACI/BYLAYER
-                         resolution) -> svg.rs (to_svg) / png.rs (to_png) / json.rs
-                         (to_json), with acis.rs for 3DSOLID wireframes. Read-only:
-                         there is no DWG/DXF write path.
+                         convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
+                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE) -> color.rs
+                         (BYLAYER/BYBLOCK resolution for rendering) -> svg.rs (to_svg)
+                         / png.rs (to_png), with acis.rs for 3DSOLID wireframes. The
+                         model and its JSON form are the uncad-model crate's.
+                         Read-only: there is no DWG/DXF write path.
     tests/               integration tests against the public API (dxf_pipeline.rs,
                          acis_sab.rs)
     examples/            dump.rs / blocks.rs -- manual checks
@@ -162,21 +163,31 @@ The LibreDWG C library is not thread-safe: it has non-reentrant global state suc
 API. Using `libredwg-sys` directly means upholding that constraint yourself -- concurrent
 calls have reproducibly caused `STATUS_HEAP_CORRUPTION`.
 
-## Model: one `Entity`/`Tables`, with `Dwg_Data` living only inside `parse()`
+## Model: `uncad-model`'s `CadDatabase`, with `Dwg_Data` living only inside `parse()`
 
-`CadDatabase` is a plain Rust value holding `entities` (what the model and paper spaces
-own) and `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE). It derives `Debug`, `Clone`,
-`PartialEq`, `serde::Serialize` and `Deserialize`, and can be constructed directly. The
-`Dwg_Data` that LibreDWG filled in through `dwg_read_file`/`dxf_read_file` is walked twice
-inside `parse()` (`convert_entities`, then `convert_tables`), freed with `dwg_free`
-immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one
-model -> several outputs" is therefore this Rust model, and the outputs are `to_json()`
-(serde, `json.rs`), `to_svg()` and `to_png()` (rasterized from the SVG).
+The model is not this crate's: `CadDatabase`, `Entity`, `Tables` and their JSON form are
+the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT, pure data), which
+this crate depends on by version and re-exports as `uncad::model` / `uncad::tables` /
+`uncad::json`. `CadDatabase` is a plain Rust value holding `entities` (what the model and
+paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_diagnostics`
+(the reader's non-fatal warnings). The `Dwg_Data` that LibreDWG filled in through
+`dwg_read_file`/`dxf_read_file` is walked twice inside `parse()` (`convert_entities`, then
+`convert_tables`), freed with `dwg_free` immediately afterwards, and never reaches the
+return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
+crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`),
+`to_svg(&db, ..)` and `to_png(&db, ..)` (rasterized from the SVG, here).
 
-The model is deliberately lossy: it keeps the fields rendering needs and nothing else --
-no linetypes, lineweights, layer on/off state, text styles, object dictionaries or header
-variables. It cannot be used to write a DWG/DXF back out, and this project offers no
-writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see `CHANGELOG.md`).
+Coordinates cross that boundary by conversion, not by sharing a type: `dynapi.rs` reads
+LibreDWG's point fields into its own `#[repr(C)]` `RawPoint2D`/`RawPoint3D` (whose layout
+is pinned to `dwg.h`'s) and converts them into the model's plain `Point2D`/`Point3D`. The
+`DwgRaw` marker trait bounds every dynapi accessor, so a model type can never be used to
+read C memory by accident -- the compiler refuses it.
+
+The model is deliberately lossy: it keeps what consumers of the drawing's content need and
+nothing else -- no linetypes, lineweights, layer on/off state, text styles, object
+dictionaries or header variables. It cannot be used to write a DWG/DXF back out, and this
+project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
+`CHANGELOG.md`).
 
 The C build still includes the encoder sources and defines `USE_WRITE`, because reading
 depends on them: `dwg.c` gates `dxf_read_file()` on `USE_WRITE`, `in_dxf.c` uses
@@ -207,7 +218,7 @@ but not into the entity list of the block that owns the INSERT.
 `BLOCK_HEADER.name` holds only an abbreviated name for anonymous blocks (`*D` for
 dimension caches, and so on). The disambiguating name (`*D30`) lives on the `BLOCK` entity
 the block owns, reached through `BLOCK_HEADER`'s `block_entity` handle field.
-`tables::resolve_block_name` shares that logic between INSERT and DIMENSION.
+`table_convert::resolve_block_name` shares that logic between INSERT and DIMENSION.
 
 ## 3DSOLID/REGION ACIS wireframes (`acis.rs`)
 

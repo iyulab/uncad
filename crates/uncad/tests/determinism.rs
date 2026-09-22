@@ -116,7 +116,7 @@ fn unsupported_types_are_reported_in_sorted_order_on_every_run() {
     let db = uncad::parse(&fixture.0).expect("the minimal DXF should parse");
 
     for run in 0..RUNS {
-        let result = db.to_svg(uncad::ToSvgOptions::default());
+        let result = uncad::to_svg(&db, uncad::ToSvgOptions::default());
         assert_eq!(
             result.unsupported_types, EXPECTED_UNSUPPORTED,
             "run {run}: unsupported_types must not depend on hash iteration order"
@@ -133,7 +133,7 @@ fn repeated_parse_and_export_are_byte_identical() {
         let json = db
             .to_json(uncad::ToJsonOptions::default())
             .expect("the model should serialize");
-        let svg = db.to_svg(uncad::ToSvgOptions::default());
+        let svg = uncad::to_svg(&db, uncad::ToSvgOptions::default());
         (json, svg.svg, svg.unsupported_types)
     };
 
@@ -166,7 +166,7 @@ fn a_trace_is_read_and_drawn_like_a_solid() {
         assert_eq!((got.x, got.y), want);
     }
 
-    let result = db.to_svg(uncad::ToSvgOptions::default());
+    let result = uncad::to_svg(&db, uncad::ToSvgOptions::default());
     assert!(
         !result.unsupported_types.iter().any(|t| t == "TRACE"),
         "a TRACE must not be reported as left out: {:?}",

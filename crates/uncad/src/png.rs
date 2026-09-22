@@ -10,10 +10,10 @@
 //! crates.
 
 use crate::svg::{to_svg, ToSvgOptions};
-use crate::CadDatabase;
 use resvg::tiny_skia;
 use resvg::usvg::{self, fontdb};
 use std::sync::Arc;
+use uncad_model::CadDatabase;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ToPngOptions {
@@ -167,9 +167,7 @@ mod tests {
             "/../../lib/libredwg/test/test-data/2000/circle.dwg"
         );
         let db = crate::parse(path).expect("parse should succeed");
-        let result = db
-            .to_png(ToPngOptions::default())
-            .expect("to_png should succeed");
+        let result = to_png(&db, ToPngOptions::default()).expect("to_png should succeed");
         assert!(result.png.starts_with(b"\x89PNG\r\n\x1a\n"));
         let (width, height) = png_dimensions(&result.png);
         assert!(width > 0 && height > 0);

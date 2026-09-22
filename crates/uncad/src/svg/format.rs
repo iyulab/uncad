@@ -2,10 +2,10 @@
 //! SVG-y-down flip, coordinate cleanup, XML escaping and MTEXT's inline
 //! formatting codes. Pure functions, no renderer state.
 
-use crate::dynapi::{Point2D, Point3D};
 use regex::Regex;
 use std::fmt::Write as _;
 use std::sync::LazyLock;
+use uncad_model::model::{Point2D, Point3D};
 
 /// Snaps a subnormal `f64` (magnitude roughly below 2.2e-308) to exactly
 /// `0.0`. Rust's `f64` `Display` never switches to scientific notation, so a

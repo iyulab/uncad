@@ -1,67 +1,20 @@
 //! Conversion of the non-entity OBJECT-supertype tables an entity resolves
-//! against: LAYER, BLOCK_RECORD and MLINESTYLE.
+//! against: LAYER, BLOCK_RECORD and MLINESTYLE -- from LibreDWG's structures
+//! into the model's [`Tables`].
 
 use crate::convert::owned_entities;
 use crate::dynapi::{get_array_field, get_field};
-use crate::model::Entity;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LayerRecord {
-    pub name: String,
-    /// Same raw semantics as `EntityCommon::color_index`: negative means
-    /// "off", otherwise the layer's own ACI palette index. It should never be
-    /// 0 or 256 in practice (BYLAYER/BYBLOCK are entity-level concepts a layer
-    /// cannot resolve against itself), but LibreDWG's `bit_read_CMC` does hand
-    /// back a raw `256` "no palette match" sentinel for some real files -- see
-    /// [`resolve_layer_color_index`] for the recovery applied first.
-    pub color_index: i16,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BlockRecord {
-    pub name: String,
-    /// Every entity directly owned by this block (via
-    /// `get_first_owned_entity`/`get_next_owned_entity`), regardless of
-    /// whether the block is `*Model_Space`/`*Paper_Space*` or a named
-    /// block definition referenced by INSERT elsewhere -- unlike
-    /// `CadDatabase::entities`, which only includes the former. This is
-    /// what an INSERT's `block_name` resolves against to find what it
-    /// actually draws.
-    pub entities: Vec<Entity>,
-}
-
-/// The three maps are `BTreeMap`s, not `HashMap`s, so iteration -- and
-/// therefore `to_json()`'s key order -- is deterministic: the same input
-/// file serializes to the same bytes on every run and every machine.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct Tables {
-    /// Layer name -> record. Deliberately does *not* expose a layer's
-    /// `Dwg_Color.rgb`: only `color_index` is trustworthy for BYLAYER
-    /// resolution (see `docs/CAVEATS.md` and [`crate::color`]).
-    pub layers: BTreeMap<String, LayerRecord>,
-    /// Block name -> record, every `BLOCK_HEADER` in the file (including
-    /// `*Model_Space`/`*Paper_Space*`, which also show up flattened into
-    /// `CadDatabase::entities` -- see that field's doc comment).
-    pub block_records: BTreeMap<String, BlockRecord>,
-    /// MLINESTYLE name -> each parallel line's `offset` (distance from the
-    /// MLINE centerline), in LibreDWG's own storage order. There is no
-    /// separate line-identity field, so array order is the only correspondence
-    /// between a style's lines and an MLINE's vertices. Per-line color and
-    /// linetype are not read: nothing renders them.
-    pub mlinestyles: BTreeMap<String, Vec<f64>>,
-}
+use uncad_model::tables::{BlockRecord, LayerRecord, Tables};
 
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
 /// `Dwg_Data`, and the caller must hold `LIBREDWG_LOCK` (see lib.rs) for
 /// the whole call -- this walks LibreDWG's non-reentrant C API directly.
 ///
-/// `pub(crate)`, not `pub`: `parse()` is the only intended caller. The module
-/// itself has to be public so `LayerRecord`/`BlockRecord` are nameable, but
-/// exporting a `*mut Dwg_Data` entry point would bypass the lock and leak
+/// `pub(crate)`, not `pub`: `parse()` is the only intended caller. Exporting
+/// a `*mut Dwg_Data` entry point would bypass the lock and leak
 /// `libredwg_sys` types into the public surface.
 pub(crate) unsafe fn convert_tables(dwg: *mut libredwg_sys::Dwg_Data) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };

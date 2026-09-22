@@ -10,24 +10,114 @@
 use std::ffi::{c_void, CStr, CString};
 use std::mem::MaybeUninit;
 
+use uncad_model::{Point2D, Point3D};
+
+/// A type whose Rust layout is exactly the C layout of the LibreDWG field it
+/// is read from, so that `dwg_dynapi_*_value`'s `memcpy` into it is sound.
+///
+/// # Safety
+/// Implement only for `#[repr(C)]` types (and primitives / raw pointers)
+/// that mirror a `dwg.h` field byte for byte. The model's own types are
+/// deliberately *not* implementors: `uncad_model::Point3D` is a plain Rust
+/// struct with no layout guarantee, and a `get_field::<Point3D>` call site
+/// must fail to compile rather than read C memory through it.
+pub unsafe trait DwgRaw: Copy {}
+
+// SAFETY: primitives and raw pointers have the layout C gives them.
+unsafe impl DwgRaw for u8 {}
+unsafe impl DwgRaw for u16 {}
+unsafe impl DwgRaw for u32 {}
+unsafe impl DwgRaw for i16 {}
+unsafe impl DwgRaw for f64 {}
+unsafe impl DwgRaw for [i16; 4] {}
+unsafe impl<T> DwgRaw for *const T {}
+unsafe impl<T> DwgRaw for *mut T {}
+// SAFETY: bindgen generates these as `#[repr(C)]` mirrors of dwg.h.
+unsafe impl DwgRaw for libredwg_sys::Dwg_Color {}
+unsafe impl DwgRaw for libredwg_sys::Dwg_HATCH_Path {}
+unsafe impl DwgRaw for libredwg_sys::Dwg_HATCH_DefLine {}
+unsafe impl DwgRaw for libredwg_sys::Dwg_HATCH_Color {}
+unsafe impl DwgRaw for libredwg_sys::Dwg_MLINE_vertex {}
+unsafe impl DwgRaw for libredwg_sys::Dwg_MLINESTYLE_line {}
+
 /// A DWG 3D point/vector field (BITCODE_3BD, BE, ...): plain C structs of
-/// 3 `double`s with no padding.
+/// 3 `double`s with no padding. Converted into the model's own [`Point3D`]
+/// at the boundary -- the model type carries no layout promise.
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Point3D {
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RawPoint3D {
     pub x: f64,
     pub y: f64,
     pub z: f64,
 }
 
+// SAFETY: `#[repr(C)]`, three `double`s, matching BITCODE_3BD.
+unsafe impl DwgRaw for RawPoint3D {}
+
+impl From<RawPoint3D> for Point3D {
+    fn from(p: RawPoint3D) -> Self {
+        Point3D {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+        }
+    }
+}
+
 /// A DWG 2D point field (BITCODE_2RD, 2BD, 2DPOINT, ...): plain C structs
 /// of 2 `double`s -- 2RD (raw) and 2BD (bitcode-compressed on disk) are
 /// identical once decoded into memory, so one Rust type covers both.
+/// Converted into the model's own [`Point2D`] at the boundary.
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Point2D {
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RawPoint2D {
     pub x: f64,
     pub y: f64,
+}
+
+// SAFETY: `#[repr(C)]`, two `double`s, matching BITCODE_2RD.
+unsafe impl DwgRaw for RawPoint2D {}
+
+impl From<RawPoint2D> for Point2D {
+    fn from(p: RawPoint2D) -> Self {
+        Point2D { x: p.x, y: p.y }
+    }
+}
+
+/// [`get_field`] for a 3D point field, handed back as the model's type.
+pub fn get_point3d(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Point3D> {
+    get_field::<RawPoint3D>(entity, dxfname, field).map(Point3D::from)
+}
+
+/// [`get_field`] for a 2D point field, handed back as the model's type.
+pub fn get_point2d(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Point2D> {
+    get_field::<RawPoint2D>(entity, dxfname, field).map(Point2D::from)
+}
+
+/// [`get_array_field`] for an array of 3D points, as the model's type.
+pub fn get_point3d_array<C: DwgRaw + TryInto<usize>>(
+    entity: *mut c_void,
+    dxfname: &str,
+    count_field: &str,
+    array_field: &str,
+) -> Vec<Point3D> {
+    get_array_field::<C, RawPoint3D>(entity, dxfname, count_field, array_field)
+        .into_iter()
+        .map(Point3D::from)
+        .collect()
+}
+
+/// [`get_array_field`] for an array of 2D points, as the model's type.
+pub fn get_point2d_array<C: DwgRaw + TryInto<usize>>(
+    entity: *mut c_void,
+    dxfname: &str,
+    count_field: &str,
+    array_field: &str,
+) -> Vec<Point2D> {
+    get_array_field::<C, RawPoint2D>(entity, dxfname, count_field, array_field)
+        .into_iter()
+        .map(Point2D::from)
+        .collect()
 }
 
 /// `Dwg_SPLINE_control_point`'s exact layout: a leading `parent` pointer back
@@ -73,6 +163,9 @@ impl Default for SplineControlPoint {
 const _: () = {
     ["Size of SplineControlPoint"][std::mem::size_of::<SplineControlPoint>() - 40];
 };
+
+// SAFETY: `#[repr(C)]`, mirrors Dwg_SPLINE_control_point (size pinned above).
+unsafe impl DwgRaw for SplineControlPoint {}
 
 impl From<SplineControlPoint> for Point3D {
     fn from(p: SplineControlPoint) -> Self {
@@ -132,7 +225,7 @@ fn field_write_size_matches<T>(
 /// confirm the sizes agree. Checking afterwards (as an earlier version did,
 /// with a post-call `debug_assert_eq!`) is too late -- in a release build the
 /// C-side write has already overrun a too-small `MaybeUninit<T>`.
-pub fn get_field<T: Copy>(entity: *mut c_void, dxfname: &str, field: &str) -> Option<T> {
+pub fn get_field<T: DwgRaw>(entity: *mut c_void, dxfname: &str, field: &str) -> Option<T> {
     if entity.is_null() {
         return None;
     }
@@ -183,7 +276,7 @@ pub fn get_field<T: Copy>(entity: *mut c_void, dxfname: &str, field: &str) -> Op
 /// can walk backward from either the type-specific or common struct
 /// pointer to find the owning `Dwg_Object`, so callers never need to track
 /// which pointer flavor they have.
-pub fn get_common_field<T: Copy>(entity: *mut c_void, field: &str) -> Option<T> {
+pub fn get_common_field<T: DwgRaw>(entity: *mut c_void, field: &str) -> Option<T> {
     if entity.is_null() {
         return None;
     }
@@ -365,7 +458,7 @@ pub fn get_utf8_field(entity: *mut c_void, dxfname: &str, field: &str) -> Option
 /// `C` is the count field's own C integer type -- `BITCODE_BL` (u32) for most
 /// `num_X` fields, but e.g. SPLINE's `num_fit_pts` is `BITCODE_BS` (u16, *not*
 /// i16), so one count width cannot be hardcoded for every caller.
-pub fn get_array_field<C: Copy + TryInto<usize>, T: Copy>(
+pub fn get_array_field<C: DwgRaw + TryInto<usize>, T: DwgRaw>(
     entity: *mut c_void,
     dxfname: &str,
     count_field: &str,

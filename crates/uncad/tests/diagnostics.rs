@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 
 use uncad::model::{EntityCommon, InsertEntity, LineEntity, Point3D, Ref};
 use uncad::tables::{BlockRecord, Tables};
-use uncad::{CadDatabase, Entity, ReadDiagnostics, Space, ToSvgOptions};
+use uncad::{
+    read_diagnostics_from_libredwg_bits, CadDatabase, Entity, ReadDiagnostics, Space, ToSvgOptions,
+};
 
 const CORPUS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -22,9 +24,8 @@ fn libredwg_non_fatal_bits_are_reported_and_named() {
     // this file and still reads it. Before, both bits were thrown away.
     let db =
         uncad::parse(format!("{CORPUS}/example_2018.dwg")).expect("the corpus DWG should parse");
-    assert_eq!(db.read_diagnostics.libredwg_error_bits, 0x44);
     assert_eq!(
-        db.read_diagnostics.libredwg_errors,
+        db.read_diagnostics.warnings,
         vec!["UNHANDLEDCLASS".to_string(), "VALUEOUTOFBOUNDS".to_string()]
     );
     assert!(!db.read_diagnostics.is_clean());
@@ -44,16 +45,16 @@ fn a_clean_read_reports_nothing() {
 
 #[test]
 fn bit_names_follow_dwg_h_and_unknown_bits_are_not_dropped() {
-    let d = ReadDiagnostics::from_libredwg_bits(1 | 2 | 64);
+    let d = read_diagnostics_from_libredwg_bits(1 | 2 | 64);
     assert_eq!(
-        d.libredwg_errors,
+        d.warnings,
         ["WRONGCRC", "NOTYETSUPPORTED", "VALUEOUTOFBOUNDS"]
     );
     // A bit this crate has no name for is still listed, never silently lost.
-    let d = ReadDiagnostics::from_libredwg_bits(1 << 20);
-    assert_eq!(d.libredwg_errors, ["BIT20"]);
+    let d = read_diagnostics_from_libredwg_bits(1 << 20);
+    assert_eq!(d.warnings, ["BIT20"]);
     assert_eq!(
-        ReadDiagnostics::from_libredwg_bits(0),
+        read_diagnostics_from_libredwg_bits(0),
         ReadDiagnostics::default()
     );
 }
@@ -139,10 +140,13 @@ fn a_block_reference_that_draws_nothing_is_named_and_one_that_draws_is_not() {
     };
 
     // Space::All: this synthetic model has no *Model_Space record to select by.
-    let result = db.to_svg(ToSvgOptions {
-        space: Space::All,
-        ..ToSvgOptions::default()
-    });
+    let result = uncad::to_svg(
+        &db,
+        ToSvgOptions {
+            space: Space::All,
+            ..ToSvgOptions::default()
+        },
+    );
     assert_eq!(result.empty_blocks, vec!["EMPTY".to_string()]);
     assert!(
         result.svg.contains("<line") || result.svg.contains("<path"),

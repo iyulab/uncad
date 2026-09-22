@@ -22,10 +22,10 @@ println!("{} entities", db.entities.len());
 let json = db.to_json(uncad::ToJsonOptions { pretty: true })?;   // the model, serialized as-is
 std::fs::write("drawing.json", json)?;
 
-let result = db.to_svg(uncad::ToSvgOptions::default());
+let result = uncad::to_svg(&db, uncad::ToSvgOptions::default());
 std::fs::write("drawing.svg", result.svg)?;
 
-let png = db.to_png(uncad::ToPngOptions::default())?;   // via to_svg(); no SVG touches disk
+let png = uncad::to_png(&db, uncad::ToPngOptions::default())?;   // via to_svg(); no SVG touches disk
 std::fs::write("drawing.png", png.png)?;
 ```
 
@@ -52,9 +52,16 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
    DXF and every DWG version are unaffected.
    LibreDWG's own DXF importer is documented as working "for most objects", so
    it is less complete than its DWG reading ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
-3. **Output** — the parsed model as JSON (`to_json`), SVG (`to_svg`) or PNG
-   (`to_png`). Writing DWG/DXF is not offered; the write API that existed in
-   0.1.0 was removed (see [`CHANGELOG.md`](./CHANGELOG.md)).
+3. **Output** — the parsed model as JSON (`CadDatabase::to_json`, from
+   `uncad-model`), SVG (`to_svg`) or PNG (`to_png`). Writing DWG/DXF is not
+   offered; the write API that existed in 0.1.0 was removed (see
+   [`CHANGELOG.md`](./CHANGELOG.md)).
+
+The model itself -- `CadDatabase`, `Entity`, `Tables` and their JSON form -- is
+the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT), re-exported
+here as `uncad::model` / `uncad::tables` / `uncad::json`. This crate is one backend
+that fills it; anything that only needs to *read* a drawing depends on the model
+crate alone and inherits nothing from this crate's license.
 
 ## Platform
 
@@ -89,7 +96,7 @@ crates/
                          subset of C sources actually compiled (for publishing to
                          crates.io); shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
-  uncad/                 the safe API: parse() -> CadDatabase::{to_json,to_svg,to_png}()
+  uncad/                 the safe API: parse() -> uncad_model::CadDatabase -> to_svg()/to_png()
   uncad-cli/             the CLI binary (uncad)
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
                          manual-check tools, and #[cfg(test)] blocks inside src/*.rs are

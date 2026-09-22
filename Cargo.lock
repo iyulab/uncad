@@ -705,6 +705,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "uncad-model",
 ]
 
 [[package]]
@@ -713,6 +714,14 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "uncad",
+]
+
+[[package]]
+name = "uncad-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

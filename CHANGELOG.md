@@ -8,11 +8,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
-- `CadDatabase::read_diagnostics`: the non-fatal error bits LibreDWG reported while
-  reading (`WRONGCRC`, `UNHANDLEDCLASS`, `VALUEOUTOFBOUNDS`, ...), as the raw bit set and
-  as names. They used to be discarded, so a file LibreDWG read while skipping objects it
-  could not decode was indistinguishable from a clean read. Every corpus example DWG in
-  fact comes back with `UNHANDLEDCLASS` set. The field is serialized with the model and
+- `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while
+  reading, as a list of warning names (`WRONGCRC`, `UNHANDLEDCLASS`, `VALUEOUTOFBOUNDS`,
+  ...) in bit order; `read_diagnostics_from_libredwg_bits` is the decoder. They used to
+  be discarded, so a file LibreDWG read while skipping objects it could not decode was
+  indistinguishable from a clean read. Every corpus example DWG in fact comes back with
+  `UNHANDLEDCLASS` set. The field is serialized with the model (`{"warnings":[..]}`) and
   defaults to "clean" when absent from older JSON; the CLI prints a warning when it is
   not clean.
 - `ToSvgResult::empty_blocks` / `ToPngResult::empty_blocks`: names of blocks an INSERT
@@ -22,8 +23,7 @@ Notable changes to this project are recorded here. The format follows
   turned into wireframe segments. A solid with no `wireframe_edges` and a non-zero count
   here was not read, not empty; the edges used to be skipped in silence.
 - TRACE is read and drawn: `Entity::Trace`, which reuses `SolidEntity` the way `XLine`
-  reuses `RayEntity`. It used to arrive as `Entity::Unknown`. `Entity` is
-  `#[non_exhaustive]`, so this is not a breaking change.
+  reuses `RayEntity`. It used to arrive as `Entity::Unknown`.
 - All three crates declare `rust-version = "1.88"`. Until now the minimum was whatever
   happened to build. The value is measured (1.87 fails, 1.88 passes) and CI has an `msrv`
   job that checks the workspace with exactly the declared toolchain.
@@ -69,6 +69,28 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **The entity model is now the `uncad-model` crate.** `CadDatabase`, `Entity`, every
+  `*Entity` struct, `Ref`, `Tables`/`LayerRecord`/`BlockRecord`, `ReadDiagnostics`, the ACI
+  palette and the JSON serialization (`CadDatabase::to_json`, `ToJsonOptions`, `JsonError`)
+  moved to [`uncad-model`](https://github.com/iyulab/uncad-model) (MIT), which this crate
+  depends on and re-exports as `uncad::model`, `uncad::tables` and `uncad::json` -- so
+  paths such as `uncad::model::Ref` and `uncad::Entity` keep working. What changes:
+  - `to_svg` and `to_png` are free functions, `uncad::to_svg(&db, options)` and
+    `uncad::to_png(&db, options)`, no longer methods on `CadDatabase` (a type this crate
+    no longer defines). `CadDatabase::to_json` stays a method, in the model crate.
+  - `Point2D`/`Point3D` are the model's plain structs. They are no longer `#[repr(C)]`
+    mirrors of LibreDWG's layout; `dynapi.rs` keeps private `RawPoint2D`/`RawPoint3D`
+    for the C reads and converts at the boundary, and a `DwgRaw` marker trait on every
+    dynapi accessor makes reading C memory through a model type a compile error.
+  - `Entity`, `HatchEdge` and `HatchBoundaryPath` are no longer `#[non_exhaustive]`: a
+    new entity kind must reach every consumer that matches on them as a compile error,
+    not as a wildcard arm that quietly ignores it. Adding a variant is a 0.x minor bump.
+  - `ReadDiagnostics` is `{ warnings: Vec<String> }` -- the model does not carry a
+    LibreDWG bit set; the bit-to-name decoding is `read_diagnostics_from_libredwg_bits`
+    in this crate. (The field was unreleased, so no published JSON shape changes.)
+  - `color.rs` keeps only what rendering needs (BYLAYER/BYBLOCK resolution, the
+    white-background flip, hex formatting); the palette itself is
+    `uncad_model::color::ACI_PALETTE`.
 - **Reference fields are three-state values, not strings.** `EntityCommon::layer`,
   `InsertEntity::block_name`, `DimensionEntity::block_name`, `AcadTableEntity::block_name`
   and `MLineEntity::mlinestyle_name` are now `Ref<String>`: `Resolved(name)`, `Absent` (the

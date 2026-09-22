@@ -11,10 +11,12 @@
 //! scan over every object silently over-collects those.
 
 use crate::dynapi::{
-    get_array_field, get_common_field, get_field, get_utf8_field, is_pre_r13, resolve_handle_name,
-    resolve_table_entry_name, Point2D, Point3D, SplineControlPoint,
+    get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
+    get_point3d_array, get_utf8_field, is_pre_r13, resolve_handle_name, resolve_table_entry_name,
+    SplineControlPoint,
 };
-use crate::model::{
+use std::ffi::CStr;
+use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, DimensionEntity,
     EllipseEntity, Entity, EntityCommon, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity,
     HatchGradient, HatchPatternLine, InsertEntity, LeaderEntity, LightEntity, LineEntity,
@@ -22,7 +24,7 @@ use crate::model::{
     PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
     ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
-use std::ffi::CStr;
+use uncad_model::model::{Point2D, Point3D};
 
 /// The polyline `flag` bit checked for "closed", shared by LWPOLYLINE,
 /// POLYLINE_2D and POLYLINE_3D. `dwg.h`'s own field comment documents bit 512
@@ -181,7 +183,7 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
         if !sub_entity_ptr.is_null() {
             if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE {
-                if let Some(p) = get_field::<Point3D>(sub_entity_ptr, "VERTEX_PFACE", "point") {
+                if let Some(p) = get_point3d(sub_entity_ptr, "VERTEX_PFACE", "point") {
                     positions.push(p);
                 }
             } else if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE {
@@ -231,21 +233,21 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
 /// are already one-pixel-length vectors in the entity's local space, not
 /// normalized directions.
 fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
-    let Some(pt0) = get_field::<Point3D>(entity_ptr, "WIPEOUT", "pt0") else {
+    let Some(pt0) = get_point3d(entity_ptr, "WIPEOUT", "pt0") else {
         return Vec::new();
     };
-    let uvec = get_field::<Point3D>(entity_ptr, "WIPEOUT", "uvec").unwrap_or(Point3D {
+    let uvec = get_point3d(entity_ptr, "WIPEOUT", "uvec").unwrap_or(Point3D {
         x: 1.0,
         y: 0.0,
         z: 0.0,
     });
-    let vvec = get_field::<Point3D>(entity_ptr, "WIPEOUT", "vvec").unwrap_or(Point3D {
+    let vvec = get_point3d(entity_ptr, "WIPEOUT", "vvec").unwrap_or(Point3D {
         x: 0.0,
         y: 1.0,
         z: 0.0,
     });
     let clip_verts: Vec<Point2D> =
-        get_array_field::<u32, _>(entity_ptr, "WIPEOUT", "num_clip_verts", "clip_verts");
+        get_point2d_array::<u32>(entity_ptr, "WIPEOUT", "num_clip_verts", "clip_verts");
     // BITCODE_BS ("1 rect, 2 polygon"). An unreadable or unset value is
     // treated like "polygon", not assumed to be "rect".
     let clip_boundary_type =
@@ -262,8 +264,8 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     } else if !clip_verts.is_empty() {
         clip_verts
     } else {
-        let size = get_field::<Point2D>(entity_ptr, "WIPEOUT", "image_size")
-            .unwrap_or(Point2D { x: 0.0, y: 0.0 });
+        let size =
+            get_point2d(entity_ptr, "WIPEOUT", "image_size").unwrap_or(Point2D { x: 0.0, y: 0.0 });
         vec![
             Point2D { x: 0.0, y: 0.0 },
             Point2D { x: size.x, y: 0.0 },
@@ -335,8 +337,8 @@ unsafe fn convert_entity(
 
     Some(match fixedtype {
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LINE => {
-            let start_point = get_field::<Point3D>(entity_ptr, "LINE", "start")?;
-            let end_point = get_field::<Point3D>(entity_ptr, "LINE", "end")?;
+            let start_point = get_point3d(entity_ptr, "LINE", "start")?;
+            let end_point = get_point3d(entity_ptr, "LINE", "end")?;
             Entity::Line(LineEntity {
                 common,
                 start_point,
@@ -344,7 +346,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_CIRCLE => {
-            let center = get_field::<Point3D>(entity_ptr, "CIRCLE", "center")?;
+            let center = get_point3d(entity_ptr, "CIRCLE", "center")?;
             let radius = get_field::<f64>(entity_ptr, "CIRCLE", "radius")?;
             Entity::Circle(CircleEntity {
                 common,
@@ -353,7 +355,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
-            let start_point = get_field::<Point2D>(entity_ptr, "TEXT", "ins_pt")?;
+            let start_point = get_point2d(entity_ptr, "TEXT", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
             let text = get_utf8_field(entity_ptr, "TEXT", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
@@ -367,7 +369,7 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
             let vertices: Vec<Point2D> =
-                get_array_field::<u32, _>(entity_ptr, "LWPOLYLINE", "num_points", "points");
+                get_point2d_array::<u32>(entity_ptr, "LWPOLYLINE", "num_points", "points");
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
             Entity::LwPolyline(LwPolylineEntity {
                 common,
@@ -376,7 +378,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
-            let center = get_field::<Point3D>(entity_ptr, "ARC", "center")?;
+            let center = get_point3d(entity_ptr, "ARC", "center")?;
             let radius = get_field::<f64>(entity_ptr, "ARC", "radius")?;
             let start_angle = get_field::<f64>(entity_ptr, "ARC", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ARC", "end_angle")?;
@@ -389,8 +391,8 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ELLIPSE => {
-            let center = get_field::<Point3D>(entity_ptr, "ELLIPSE", "center")?;
-            let major_axis_endpoint = get_field::<Point3D>(entity_ptr, "ELLIPSE", "sm_axis")?;
+            let center = get_point3d(entity_ptr, "ELLIPSE", "center")?;
+            let major_axis_endpoint = get_point3d(entity_ptr, "ELLIPSE", "sm_axis")?;
             let axis_ratio = get_field::<f64>(entity_ptr, "ELLIPSE", "axis_ratio")?;
             let start_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "end_angle")?;
@@ -415,10 +417,10 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SOLID => {
-            let corner1 = get_field::<Point2D>(entity_ptr, "SOLID", "corner1")?;
-            let corner2 = get_field::<Point2D>(entity_ptr, "SOLID", "corner2")?;
-            let corner3 = get_field::<Point2D>(entity_ptr, "SOLID", "corner3")?;
-            let corner4 = get_field::<Point2D>(entity_ptr, "SOLID", "corner4")?;
+            let corner1 = get_point2d(entity_ptr, "SOLID", "corner1")?;
+            let corner2 = get_point2d(entity_ptr, "SOLID", "corner2")?;
+            let corner3 = get_point2d(entity_ptr, "SOLID", "corner3")?;
+            let corner4 = get_point2d(entity_ptr, "SOLID", "corner4")?;
             Entity::Solid(SolidEntity {
                 common,
                 corner1,
@@ -430,10 +432,10 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TRACE => {
             // Dwg_Entity_TRACE has exactly SOLID's fields (dwg.h), and DXF
             // gives both the same group codes.
-            let corner1 = get_field::<Point2D>(entity_ptr, "TRACE", "corner1")?;
-            let corner2 = get_field::<Point2D>(entity_ptr, "TRACE", "corner2")?;
-            let corner3 = get_field::<Point2D>(entity_ptr, "TRACE", "corner3")?;
-            let corner4 = get_field::<Point2D>(entity_ptr, "TRACE", "corner4")?;
+            let corner1 = get_point2d(entity_ptr, "TRACE", "corner1")?;
+            let corner2 = get_point2d(entity_ptr, "TRACE", "corner2")?;
+            let corner3 = get_point2d(entity_ptr, "TRACE", "corner3")?;
+            let corner4 = get_point2d(entity_ptr, "TRACE", "corner4")?;
             Entity::Trace(SolidEntity {
                 common,
                 corner1,
@@ -443,8 +445,8 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
-            let point = get_field::<Point3D>(entity_ptr, "RAY", "point")?;
-            let vector = get_field::<Point3D>(entity_ptr, "RAY", "vector")?;
+            let point = get_point3d(entity_ptr, "RAY", "point")?;
+            let vector = get_point3d(entity_ptr, "RAY", "vector")?;
             Entity::Ray(RayEntity {
                 common,
                 point,
@@ -455,8 +457,8 @@ unsafe fn convert_entity(
             // Same underlying C struct as RAY (Dwg_Entity_XLINE is a typedef
             // of Dwg_Entity_RAY), but dynapi is keyed by dxfname, so "XLINE"
             // is required here.
-            let point = get_field::<Point3D>(entity_ptr, "XLINE", "point")?;
-            let vector = get_field::<Point3D>(entity_ptr, "XLINE", "vector")?;
+            let point = get_point3d(entity_ptr, "XLINE", "point")?;
+            let vector = get_point3d(entity_ptr, "XLINE", "vector")?;
             Entity::XLine(RayEntity {
                 common,
                 point,
@@ -464,7 +466,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB => {
-            let start_point = get_field::<Point2D>(entity_ptr, "ATTRIB", "ins_pt")?;
+            let start_point = get_point2d(entity_ptr, "ATTRIB", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
             let text = get_utf8_field(entity_ptr, "ATTRIB", "text_value").unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTRIB", "rotation").unwrap_or(0.0);
@@ -485,10 +487,10 @@ unsafe fn convert_entity(
                     "block_header",
                 ),
                 c"BLOCK",
-                crate::tables::resolve_block_name,
+                crate::table_convert::resolve_block_name,
             );
-            let insertion_point = get_field::<Point3D>(entity_ptr, "INSERT", "ins_pt")?;
-            let scale = get_field::<Point3D>(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
+            let insertion_point = get_point3d(entity_ptr, "INSERT", "ins_pt")?;
+            let scale = get_point3d(entity_ptr, "INSERT", "scale").unwrap_or(Point3D {
                 x: 1.0,
                 y: 1.0,
                 z: 1.0,
@@ -518,7 +520,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTDEF => {
-            let start_point = get_field::<Point2D>(entity_ptr, "ATTDEF", "ins_pt")?;
+            let start_point = get_point2d(entity_ptr, "ATTDEF", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "ATTDEF", "height")?;
             let default_value =
                 get_utf8_field(entity_ptr, "ATTDEF", "default_value").unwrap_or_default();
@@ -532,7 +534,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {
-            let center = get_field::<Point3D>(entity_ptr, "VIEWPORT", "center")?;
+            let center = get_point3d(entity_ptr, "VIEWPORT", "center")?;
             let width = get_field::<f64>(entity_ptr, "VIEWPORT", "width")?;
             let height = get_field::<f64>(entity_ptr, "VIEWPORT", "height")?;
             Entity::Viewport(ViewportEntity {
@@ -543,10 +545,10 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DFACE => {
-            let corner1 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner1")?;
-            let corner2 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner2")?;
-            let corner3 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner3")?;
-            let corner4 = get_field::<Point3D>(entity_ptr, "3DFACE", "corner4")?;
+            let corner1 = get_point3d(entity_ptr, "3DFACE", "corner1")?;
+            let corner2 = get_point3d(entity_ptr, "3DFACE", "corner2")?;
+            let corner3 = get_point3d(entity_ptr, "3DFACE", "corner3")?;
+            let corner4 = get_point3d(entity_ptr, "3DFACE", "corner4")?;
             Entity::Face3D(Face3DEntity {
                 common,
                 corner1,
@@ -559,7 +561,7 @@ unsafe fn convert_entity(
             // num_fit_pts is BITCODE_BS (u16), unlike most other num_X fields
             // (BITCODE_BL/u32) -- see get_array_field's doc comment.
             let fit_points: Vec<Point3D> =
-                get_array_field::<u16, _>(entity_ptr, "SPLINE", "num_fit_pts", "fit_pts");
+                get_point3d_array::<u16>(entity_ptr, "SPLINE", "num_fit_pts", "fit_pts");
             let control_points: Vec<Point3D> = get_array_field::<u32, SplineControlPoint>(
                 entity_ptr,
                 "SPLINE",
@@ -576,7 +578,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MTEXT => {
-            let insertion_point = get_field::<Point3D>(entity_ptr, "MTEXT", "ins_pt")?;
+            let insertion_point = get_point3d(entity_ptr, "MTEXT", "ins_pt")?;
             let text = get_utf8_field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
             // dwg.h's comment on x_axis_dir says it "defines the rotation",
@@ -645,7 +647,7 @@ unsafe fn convert_entity(
                 dwg,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "block"),
                 c"BLOCK",
-                crate::tables::resolve_block_name,
+                crate::table_convert::resolve_block_name,
             );
             Entity::Dimension(DimensionEntity { common, block_name })
         }
@@ -659,10 +661,10 @@ unsafe fn convert_entity(
                 dwg,
                 get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "TABLE", "block_header"),
                 c"BLOCK",
-                crate::tables::resolve_block_name,
+                crate::table_convert::resolve_block_name,
             );
-            let insertion_point = get_field::<Point3D>(entity_ptr, "TABLE", "ins_pt")?;
-            let scale = get_field::<Point3D>(entity_ptr, "TABLE", "scale").unwrap_or(Point3D {
+            let insertion_point = get_point3d(entity_ptr, "TABLE", "ins_pt")?;
+            let scale = get_point3d(entity_ptr, "TABLE", "scale").unwrap_or(Point3D {
                 x: 1.0,
                 y: 1.0,
                 z: 1.0,
@@ -758,7 +760,7 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {
-            let insertion_point = get_field::<Point3D>(entity_ptr, "TOLERANCE", "ins_pt")?;
+            let insertion_point = get_point3d(entity_ptr, "TOLERANCE", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TOLERANCE", "height").unwrap_or(1.0);
             let text_value =
                 get_utf8_field(entity_ptr, "TOLERANCE", "text_value").unwrap_or_default();
@@ -774,8 +776,8 @@ unsafe fn convert_entity(
             Entity::Wipeout(WipeoutEntity { common, boundary })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LIGHT => {
-            let position = get_field::<Point3D>(entity_ptr, "LIGHT", "position")?;
-            let target = get_field::<Point3D>(entity_ptr, "LIGHT", "target").unwrap_or(position);
+            let position = get_point3d(entity_ptr, "LIGHT", "position")?;
+            let target = get_point3d(entity_ptr, "LIGHT", "target").unwrap_or(position);
             // type: distant=1, point=2, spot=3 (dwg.h, BITCODE_BL) -- only
             // distant/spot actually aim at `target`.
             let light_type = get_field::<u32>(entity_ptr, "LIGHT", "type").unwrap_or(2);
@@ -797,7 +799,7 @@ unsafe fn convert_entity(
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
             let vertices: Vec<Point3D> =
-                get_array_field::<u32, _>(entity_ptr, "LEADER", "num_points", "points");
+                get_point3d_array::<u32>(entity_ptr, "LEADER", "num_points", "points");
             // arrowhead_type is BITCODE_BS (u16, not a bit flag): any nonzero
             // value means an arrowhead is drawn.
             let has_arrowhead =

@@ -22,14 +22,13 @@ mod format;
 mod hatch;
 
 use crate::color::{resolve_color, DEFAULT_COLOR};
-use crate::dynapi::{Point2D, Point3D};
-use crate::model::{Entity, EntityCommon, MLineVertex};
-use crate::tables::Tables;
-use crate::CadDatabase;
 use bounds::{dominant_cluster_box, Box2D};
 use format::{escape_xml, neg, points_attr, rotate_transform_attr, strip_mtext_formatting, xy};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
+use uncad_model::model::{Entity, EntityCommon, MLineVertex, Point2D, Point3D};
+use uncad_model::tables::Tables;
+use uncad_model::CadDatabase;
 
 /// Which of a drawing's spaces to render.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -938,7 +937,7 @@ fn select_entities_for_space(db: &CadDatabase, space: Space) -> Vec<&Entity> {
 /// `stroke_width` defaults to ~1/6000th of the computed viewBox diagonal
 /// rather than a fixed value; see [`stroke_width_placeholder`] for how nested
 /// block references keep a constant visual weight.
-pub(crate) fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
+pub fn to_svg(db: &CadDatabase, options: ToSvgOptions) -> ToSvgResult {
     let mut entity_boxes: Vec<Box2D> = Vec::new();
     let mut body: Vec<String> = Vec::new();
 
@@ -1016,9 +1015,9 @@ mod tests {
 
     #[test]
     fn render_block_ref_budget_caps_combinatorial_blowup_from_self_referencing_blocks() {
-        use crate::model::{InsertEntity, Ref};
         use crate::tables::BlockRecord;
         use std::collections::BTreeMap;
+        use uncad_model::model::{InsertEntity, Ref};
 
         // Block "R" contains 5 INSERTs of itself. The depth cap alone bounds
         // recursion depth, but a full 5-ary tree 20 levels deep is 5^20

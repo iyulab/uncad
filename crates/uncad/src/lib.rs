@@ -1,32 +1,31 @@
-//! Safe DWG/DXF parsing on top of `libredwg-sys`, plus JSON/SVG/PNG export
-//! of the parsed model.
+//! Safe DWG/DXF parsing on top of `libredwg-sys`, into the shared
+//! [`uncad_model`] entity model, plus SVG/PNG rendering of that model.
 //!
 //! Reading only -- this crate does not write DWG or DXF. The shape is
-//! `DWG/DXF -> CadDatabase (entities + tables) -> to_json() | to_svg() |
-//! to_png()`.
+//! `DWG/DXF -> CadDatabase (entities + tables) -> CadDatabase::to_json() |
+//! to_svg(&db, ..) | to_png(&db, ..)`. The model and its JSON form are
+//! `uncad-model`'s; this crate is one backend that fills it.
 
 mod acis;
 pub mod color;
 mod convert;
 mod dynapi;
-pub mod json;
-pub mod model;
 pub mod png;
 pub mod svg;
-pub mod tables;
+mod table_convert;
 
 use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::path::Path;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+// The model this crate fills lives in `uncad-model`; it is re-exported whole
+// so `uncad::model::...` / `uncad::tables::...` keep naming the same types.
+pub use uncad_model::{json, model, tables};
+pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, ToJsonOptions};
 
-pub use json::{JsonError, ToJsonOptions};
-pub use model::Entity;
-pub use png::{PngError, ToPngOptions, ToPngResult};
-pub use svg::{Space, ToSvgOptions, ToSvgResult};
-pub use tables::Tables;
+pub use png::{to_png, PngError, ToPngOptions, ToPngResult};
+pub use svg::{to_svg, Space, ToSvgOptions, ToSvgResult};
 
 /// LibreDWG's C code has non-reentrant global state (the `loglevel` global
 /// read and written throughout `decode.c`/`bits.c`, and likely more).
@@ -40,110 +39,37 @@ pub use tables::Tables;
 /// `libredwg-sys` exists, let alone serialize around it themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
-/// A parsed CAD drawing: the model, and nothing else.
-///
-/// `entities` holds what the drawing shows (everything owned by the
-/// `*Model_Space`/`*Paper_Space*` blocks, see [`crate::model`]) and `tables`
-/// the LAYER / BLOCK_RECORD / MLINESTYLE tables it resolves against. This is
-/// what [`to_json`](Self::to_json) serializes verbatim and what
-/// [`to_svg`](Self::to_svg)/[`to_png`](Self::to_png) render from.
-///
-/// It is a plain Rust value: LibreDWG's own `Dwg_Data` is freed inside
-/// [`parse`] as soon as these two fields have been built from it, so a
-/// `CadDatabase` owns no C memory, is `Clone`/`PartialEq`/`Send`/`Sync`
-/// without ceremony, and can be constructed directly or deserialized from
-/// the JSON `to_json` produced. It is deliberately *not* a round-trip
-/// representation of the file (no linetypes, lineweights, styles,
-/// dictionaries, header variables...): the model keeps the fields rendering
-/// needs, and this crate has no write path that would need more.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct CadDatabase {
-    pub entities: Vec<Entity>,
-    pub tables: Tables,
-    /// What LibreDWG reported while reading but did not fail on. Defaults to
-    /// "nothing reported" when absent from JSON written before this field
-    /// existed.
-    #[serde(default)]
-    pub read_diagnostics: ReadDiagnostics,
-}
+/// Names for the non-critical `DWG_ERROR` bits, in bit order (dwg.h).
+const NON_CRITICAL_BIT_NAMES: [&str; 7] = [
+    "WRONGCRC",
+    "NOTYETSUPPORTED",
+    "UNHANDLEDCLASS",
+    "INVALIDTYPE",
+    "INVALIDHANDLE",
+    "INVALIDEED",
+    "VALUEOUTOFBOUNDS",
+];
 
-/// Non-fatal problems LibreDWG reported while reading the file.
+/// Turns a LibreDWG read result that was below the critical threshold into
+/// the model's [`ReadDiagnostics`]: one warning per set bit, by its dwg.h
+/// name (`WRONGCRC`, `NOTYETSUPPORTED`, `UNHANDLEDCLASS`, `INVALIDTYPE`,
+/// `INVALIDHANDLE`, `INVALIDEED`, `VALUEOUTOFBOUNDS`), in ascending bit
+/// order so the same read always lists them the same way. A bit this crate
+/// does not know the name of is listed as `BIT<n>`, never dropped.
 ///
-/// `dwg_read_file`/`dxf_read_file` return a bit set (`DWG_ERROR` in dwg.h);
-/// bits at or above `DWG_ERR_CLASSESNOTFOUND` make [`parse`] fail with
-/// [`ParseError::Critical`], and the rest used to be discarded. They are kept
-/// here because "read with warnings" and "read cleanly" are different
-/// outcomes: a file that came back with `UNHANDLEDCLASS` set may be missing
-/// objects that LibreDWG did not know how to decode, and nothing else in the
-/// result says so.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct ReadDiagnostics {
-    /// The non-critical bits exactly as LibreDWG returned them; `0` when the
-    /// read was clean.
-    pub libredwg_error_bits: i32,
-    /// The same bits by their dwg.h names (`WRONGCRC`, `NOTYETSUPPORTED`,
-    /// `UNHANDLEDCLASS`, `INVALIDTYPE`, `INVALIDHANDLE`, `INVALIDEED`,
-    /// `VALUEOUTOFBOUNDS`), in ascending bit order so the same read always
-    /// lists them the same way. A bit this crate does not know the name of
-    /// is listed as `BIT<n>`.
-    pub libredwg_errors: Vec<String>,
-}
-
-impl ReadDiagnostics {
-    /// Names for the non-critical `DWG_ERROR` bits, in bit order.
-    const NON_CRITICAL_BIT_NAMES: [&'static str; 7] = [
-        "WRONGCRC",
-        "NOTYETSUPPORTED",
-        "UNHANDLEDCLASS",
-        "INVALIDTYPE",
-        "INVALIDHANDLE",
-        "INVALIDEED",
-        "VALUEOUTOFBOUNDS",
-    ];
-
-    /// Decodes a LibreDWG read result that was below the critical threshold.
-    pub fn from_libredwg_bits(bits: i32) -> Self {
-        let mut libredwg_errors = Vec::new();
-        for bit in 0..31 {
-            if bits & (1 << bit) != 0 {
-                libredwg_errors.push(match Self::NON_CRITICAL_BIT_NAMES.get(bit) {
-                    Some(name) => (*name).to_string(),
-                    None => format!("BIT{bit}"),
-                });
-            }
-        }
-        ReadDiagnostics {
-            libredwg_error_bits: bits,
-            libredwg_errors,
+/// The bits used to be discarded, so a file LibreDWG read while skipping
+/// objects it could not decode was indistinguishable from a clean read.
+pub fn read_diagnostics_from_libredwg_bits(bits: i32) -> ReadDiagnostics {
+    let mut warnings = Vec::new();
+    for bit in 0..31 {
+        if bits & (1 << bit) != 0 {
+            warnings.push(match NON_CRITICAL_BIT_NAMES.get(bit) {
+                Some(name) => (*name).to_string(),
+                None => format!("BIT{bit}"),
+            });
         }
     }
-
-    /// `true` when LibreDWG reported nothing at all.
-    pub fn is_clean(&self) -> bool {
-        self.libredwg_error_bits == 0
-    }
-}
-
-impl CadDatabase {
-    /// Serializes this parsed drawing (`entities` + `tables`) to JSON text --
-    /// see the [`json`] module doc for the exact shape.
-    pub fn to_json(&self, options: ToJsonOptions) -> Result<String, JsonError> {
-        json::to_json(self, options)
-    }
-
-    /// Renders this parsed drawing to SVG. `&self`, so the same database can
-    /// be rendered repeatedly with different options (e.g. once per
-    /// [`Space`]).
-    pub fn to_svg(&self, options: ToSvgOptions) -> ToSvgResult {
-        svg::to_svg(self, options)
-    }
-
-    /// Renders this parsed drawing straight to PNG bytes, via
-    /// [`to_svg`](Self::to_svg) internally -- the intermediate SVG text never
-    /// touches disk.
-    pub fn to_png(&self, options: ToPngOptions) -> Result<ToPngResult, PngError> {
-        png::to_png(self, options)
-    }
+    ReadDiagnostics { warnings }
 }
 
 #[derive(Debug)]
@@ -248,12 +174,12 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // Below the critical threshold the bits still mean something (an
     // UNHANDLEDCLASS read may be missing objects); they travel with the
     // result instead of being dropped here.
-    let read_diagnostics = ReadDiagnostics::from_libredwg_bits(error);
+    let read_diagnostics = read_diagnostics_from_libredwg_bits(error);
 
     // Two walks over the live C structure, neither of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
     let entities = unsafe { convert::convert_entities(dwg.as_mut()) };
-    let tables = unsafe { tables::convert_tables(dwg.as_mut()) };
+    let tables = unsafe { table_convert::convert_tables(dwg.as_mut()) };
 
     // Nothing needs LibreDWG's structure past this point: this crate has no
     // write path, and the model above is what every export reads. Freeing it
