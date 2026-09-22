@@ -119,8 +119,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `--no-trim` stays as `--crop raw`. The 3256x INSERT of `example_2000.dwg` /
   `example_2018.dwg` is now a listed exclusion instead of a 3.4-million-unit viewBox.
 - A bundled font and measured text boxes. `to_png`, the tiles and the package's text
-  metrics are shaped with `Uncad Sans`, a 370 KB subset of Noto Sans KR (OFL 1.1; Latin,
-  Greek, the 2350 KS X 1001 Hangul syllables, the CAD symbols `∅ ° ± ² ³ Ø ㎡ ㎜ ㎥`) embedded
+  metrics are shaped with `Uncad Sans`, a 370 KB, 2755-glyph subset of Noto Sans KR
+  (OFL 1.1; Latin, Greek, the 2350 KS X 1001 Hangul syllables and the CAD symbols
+  `∅ ° ± ² ³ × Ø ㎡ ㎜ ㎥ ㎝ ㎞ ← ↑ → ↓ φ Δ Ω`, see `crates/uncad/fonts/README.md`) embedded
   in the crate, so images are the same on every machine and Hangul labels no longer
   depend on the host (`Fonts::Bundled`, the default; `Fonts::BundledAndSystem` / CLI
   `--fonts bundled+system` adds the host's fonts for characters the subset lacks). Every
@@ -168,7 +169,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   non-overall viewport at its scale and twist, clipped to its frame, per-viewport frozen
   layers honoured; a viewport on an off, frozen or non-plotting layer (the usual way to
   hide the border) still shows its window, only the border is left out (`--no-sheets`
-  skips it). The twisted-viewport fixture now carries a LAYOUT with A4 plot settings. `header.format` says `dwg` or `dxf`.
+  skips it). The twisted-viewport fixture now carries a LAYOUT with A4 plot settings,
+  and `header.format` says `dwg` or `dxf`.
 - Tests and evaluation: `tests/corpus_sweep.rs` (ignored by default) parses and renders
   every file under LibreDWG's `test/test-data` and fails on any panic; `tests/acceptance.rs`
   answers five agent questions from the package alone; `tests/export.rs` checks every
@@ -177,7 +179,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   paper lies for every plot rotation and paper unit, from the new
   `viewport_states_r2000.dxf` fixture (one viewport per state, two page setups); the new
   `radial_r2000.dxf` fixture and the corpus's `2000/TS1.dwg` cover the RADIUS, DIAMETER
-  and ANGULAR_3POINT dimensions no other test file has.
+  and ANGULAR_3POINT dimensions no other test file has; `tests/r2007_dxf_handles.rs`
+  compares `example_2018.dxf` against its DWG twin on layers, block names and hidden
+  entities and checks that no R2007+ corpus DXF leaves an entity without a layer; and
+  `tests/corrupt_dwg.rs` parses a one-byte-corrupted and a truncated drawing and
+  requires an error rather than a dead process.
   `docs/EVAL.md` records the sweep, the timings and how to rerun them.
   `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
   document -- the `export` subcommand and its options included -- and the parser's
@@ -193,6 +199,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Changed
 
+- Two new dependencies of `uncad`: `png` 0.18, for the 8-bit RGB writer tiny-skia's
+  own `encode_png` (RGBA only) does not offer, and `unicode-normalization` 0.1, for
+  the NFKC keys of `strings.json`. Neither reaches the public API -- `PngError::Encode`
+  carries the encoder's message as a `String` -- so the public dependencies are still
+  `serde`, `serde_json` and `resvg` (`PngError::InvalidSvg` carries a `usvg::Error`).
+  Counting what they pull in, a binary linking `uncad` now carries 68 third-party
+  crates besides `libredwg-sys`, all permissively licensed; the ones whose notice has
+  to travel with a redistributed binary are listed in `docs/THIRD_PARTY_NOTICES.md`.
 - `libredwg-sys` generates its bindings with bindgen 0.73 (was 0.72), which also
   requires prettyplease 0.3 -- see the commit for why the pair has to move
   together. The generated bitfield accessors raise one more harmless clippy lint
@@ -342,7 +356,6 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   TRACE, POLYLINE_MESH, SHAPE, BODY and OLE2FRAME are not converted either, and draw
   nothing; they are reported through `unsupported_types` like any other unsupported type.
   The documentation now says so.
-
 - Every DIMENSION of an R13/R14 drawing exported a measurement of 0. Only an
   `act_measurement` of exactly -1.0 was taken as "not computed", but an R13/R14 DXF
   (and any DXF without a group 42) leaves the field at 0.0 instead, and that 0 was
@@ -375,7 +388,8 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   block record looked its entity's extent up with a linear scan over all of them,
   although the map the tiles are culled with was already built: a generated
   100 000-LINE drawing spent 59 s in the export phase where 25 000 spent 8.6 s, and now
-  spends 12 s. The largest sample (`AutoCADSamples5.dwg`) went from 27.0 s to 17.6 s.
+  spends 12 s. `docs/EVAL.md` has the timings of the real files, the 19 853-geometry
+  and 4073-region `AutoCADSamples5.dwg` among them.
 - One large closed polyline could hold the whole export. The self-intersection test
   compares every pair of segments, and ran on every closed polyline whatever its size:
   a single 64 000-vertex contour (a surveyed boundary, a GIS import) took 175 s for the
