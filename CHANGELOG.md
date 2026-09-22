@@ -39,6 +39,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   answers five agent questions from the package alone; `tests/export.rs` checks every
   file, the tile grid, sidecar affines and byte-identical output on a second run.
   `docs/EVAL.md` records the sweep, the timings and how to rerun them.
+  `uncad-cli/tests/documented_invocations.rs` runs every flag the README and `--help`
+  document -- the `export` subcommand and its options included -- and the parser's
+  refusals.
 - The package (`uncad::export::export_package`, CLI `uncad export <input> -o <dir>`): the
   LLM/VLM output directory of the design -- `manifest.json`; `overview.png` fitted to the
   profile's edge and patch budget (Claude: 1568 px / 1568 patches of 28 px); a tile
@@ -236,6 +239,18 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `[x0, y0, x1, y1]` array the design documents -- the same layout's rectangle read one
   way in the manifest and the other in `sheets.json`. `crop::Rect` serializes as that
   array now, and reads both forms back, so an 0.3.0 document still loads.
+- The CLI took an option it did not know as the input file, or dropped it in silence.
+  `parse_args` matched only the render flags and ended in `other if input.is_none() =>
+  input = other` and `_ => {}`, while `uncad export` scanned its own eleven options in a
+  second loop that also ended in `_ => {}`: `uncad export --max-levels 2 d.dwg -o out`
+  failed with "cannot open input file '--max-levels'", `uncad export d.dwg -o out
+  --max-level 1 --sharkb 1` exited 0 and wrote the default package, and a second input
+  path or an option missing its value went the same way. One parser now owns every flag
+  of both commands, so an option is either understood wherever it stands or refused by
+  name: an unknown option, a second positional and a missing value are errors, an
+  option of the other command names the command it belongs to (`--fit` is not an export
+  option; `--max-levels` is one), and `--shard-kb`'s error says kilobytes instead of
+  pixels. `uncad export` accepts `--no-trim` and `--fonts` as the usage said it should.
 - Two-line angular and ordinate DIMENSIONs read from DXF input got the wrong definition
   points: LibreDWG's DXF reader maps groups by code where its DWG decoder follows the
   stream order, so `line2_end` held the arc point and the sector probe lay on the line
