@@ -59,9 +59,13 @@ schema from a separate crate. DXF input is flagged `input_fidelity:
 ```
 dir/
   README.txt          reading order; entities.json and drawing.svg are tool inputs, not LLM inputs
-  manifest.json       <= 12 KB: source{version,codepage,producer,input_fidelity}, units, crop, frames[],
-                      overview{png,px,affine}, levels[], legibility{height_classes}, counts, capabilities,
-                      guidance, shard_index, warnings[]   (per-tile hashes live in tiles.json, not here)
+  manifest.json       source{version,codepage,name}, units, profile, crop, frames[] (each with its own
+                      levels[] and legibility), frames_dropped[], overview{png,px,world,both affines},
+                      legibility{height_classes}, counts, capabilities, sheets[], svg_origin, generator,
+                      guidance, shard_index, warnings[], files[]  (per-tile hashes live in tiles.json).
+                      17 KB to 90 KB on the nine drawings docs/EVAL.md measures, not the 12 KB this
+                      proposal budgeted: files[] holds one entry per written file with its byte count
+                      (89 for example_2000.dwg, 771 for example_2018.dxf) and is most of the weight
   drawing.json        header variables, units, layers[] (state flags, hex + rendered_hex, entity counts),
                       block definitions (xref/dynamic flags), layouts[] (paper size, per-viewport scale and model window)
   overview.png        fitted to the profile budget (claude: <= 1568 px edge and <= 1568 patches), opaque white
@@ -85,10 +89,13 @@ dir/
 
 Every JSON file follows one `--shard-kb` rule (default 96) and sorts records by
 id, so `manifest.shard_index {file, kind, first_id, last_id, count, bytes}`
-resolves any id to one file. A typical question costs the manifest (~3.5k
-tokens) + `strings.json` lookup + one shard + one sidecar + one tile (1521
-tokens). Token counts per file are measured with the vendor tokenizer in the
-evaluation harness, not estimated.
+resolves any id to one file. A typical question costs the manifest +
+`strings.json` lookup + one shard + one sidecar + one tile (1521 tokens). The
+manifest is the largest of the JSON reads and the one this proposal sized
+wrongly: 16 728 bytes on `example_2000.dwg` and 89 532 on `example_2018.dxf`,
+against the ~3.5k tokens estimated here. Token counts per file are still
+estimated; measuring them with the vendor tokenizer is open (`docs/EVAL.md`,
+section 4).
 
 ## 3. JSON conventions and example records
 
@@ -449,7 +456,7 @@ dominates parse time.
 
 Effort in person-days is the review panel's estimate.
 
-Implementation status (2026-09-22, see `CHANGELOG.md` "Unreleased"): **P-1 done**
+Implementation status (2026-09-23, see `CHANGELOG.md` "Unreleased"): **P-1 done**
 except the AutoCAD-written Korean DWG fixture (LibreDWG's own writer mangles
 CP949 text, so `tests/fixtures/` ships DXF fixtures only); **P0 done**
 (`CadDatabase::header`); **P1 mostly done** (`PngSize` fit-to-pixels with the
@@ -495,8 +502,15 @@ lists, texts/dimensions/geometry/regions/blocks/strings/report/drawing JSON
 with sharding and a manifest, CLI `uncad export`; frames for detached
 groups, NFKC string keys, per-tile culling and parallel tiles landed after;
 the bundled `Uncad Sans`, usvg-measured text boxes and the paper layouts
-(`sheets.json`, composited sheet images) landed too -- nothing of this
-section's 0.3.0 scope is open); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
+(`sheets.json`, composited sheet images) landed too -- no P7 feature of this
+section's 0.3.0 scope is open, but the package diverges from section 2 in two
+places: `manifest.json` is 17 KB to 90 KB rather than the 12 KB budgeted
+there, because it carries a `files[]` array the design never listed (one entry
+per written file, 89 of them for `example_2000.dwg` and 771 for
+`example_2018.dxf`), and `source` is `{codepage, name, version}` -- there is no
+`producer`, and no `input_fidelity: "dxf-partial"` for DXF input as section 1
+promises; `header.format` and the source file's extension are what say the
+input was a DXF); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
 (`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
 with five package questions, determinism test, `docs/EVAL.md`) are in --
 goldens (byte-exact reference packages) are not: with the bundled font the
@@ -521,6 +535,16 @@ command; the other render flags (`--space`, `--stroke`, `--fit`, `--lattice`,
 ...) are refused by name on an `export` line -- the package's patch size is
 the profile's, not a flag. The `info`, `render`, `dims` and `measure`
 subcommands do not exist. `uncad --help` is the current list.
+
+The same goes for what section 9 says about exit and failure handling, and for
+section 11's DWF paragraph. The CLI exits 0 or 1, never 2; `export` writes into
+the target directory itself (clearing what the previous `manifest.json` listed
+and writing the new manifest last) rather than into `<dir>.tmp-<pid>` and
+renaming; and there is no `.dwf`/`.dwfx` branch at all -- `Format::from_path`
+reads a `.dxf` extension as DXF and everything else as DWG, so a `.dwf` is
+handed to the DWG decoder and comes back as `ParseError::Critical`, not as an
+`UnsupportedFormat` with an explanation. `ParseError` has two variants,
+`Critical(i32)` and `Io`.
 
 | Release | Phase | Files |
 |---|---|---|
