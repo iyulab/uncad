@@ -298,6 +298,14 @@ undefined block in G10, an undeclared style in G5), and a test asserts the devia
 needed, so the day a name survives the read the suite says so. DWG files are unaffected: there
 a reference is a handle, and a handle that answers to nothing is already reported unresolved.
 
+The same importer causes a second deviation, on flags rather than names. A text drawing may
+omit a LEADER's arrowhead flag (group 71) and path type (group 72), and the model can say
+the file did not state them (`has_arrowhead` and `path_type` are `Option`s). From DXF this
+crate reports them as stated instead -- no arrowhead, straight -- because the importer leaves
+both fields at their zero value when the groups are absent, and nothing downstream can tell
+that from a file that wrote zero. A test in `tests/references.rs` asserts the deviation is
+still there. DWG files always store both values and are unaffected.
+
 Two cases carry no handle at all and are told apart by the drawing's version. Before R13 a
 drawing points at its tables by *index*, not by handle; those references are looked up by
 index in the table (LibreDWG's `dwg_handle_name` does the matching), and an index the table
@@ -652,7 +660,11 @@ the vendored C sources are not part of the Rust dependency graph). A `licenses` 
 links a GPL library, and the gate is there so a *second* copyleft component cannot arrive
 through a dependency bump unnoticed. `deny.toml` allows only the permissive licenses the
 graph actually uses and names the three crates of this workspace as the sole GPL
-exceptions; it reads `Cargo.lock` too, so the same submodule caveat applies -- what
+exceptions. Development dependencies are part of the graph it walks, but their licenses
+are not evaluated (observed with cargo-deny 0.20.2; see the `[graph]` note in
+`deny.toml`), so a test-only dependency's license is read and recorded in
+`docs/THIRD_PARTY_NOTICES.md` rather than gated. The gate reads `Cargo.lock` too, so the
+same submodule caveat applies -- what
 watches the vendored C side is the source-file drift detector in
 `crates/libredwg-sys/build.rs`. The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather

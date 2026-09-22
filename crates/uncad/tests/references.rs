@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use uncad::model::{
-    Confidence, EntityCommon, EntityId, LeaderAnnotation, LineEntity, Origin, Point3D, Ref,
+    Confidence, EntityCommon, EntityId, LeaderAnnotation, LeaderPath, LineEntity, Origin, Point3D,
+    Ref,
 };
 use uncad::{CadDatabase, Entity};
 
@@ -582,5 +583,82 @@ fn the_dxf_importer_still_drops_an_undeclared_mline_style_name() {
         mline.mlinestyle_name,
         Ref::Absent,
         "the name survived -- take the recorded deviations out"
+    );
+}
+
+/// Tripwire for the same importer, on a flag rather than a name: a text
+/// drawing may omit a leader's arrowhead flag (group 71) and path type
+/// (group 72), and the model can say "the file did not state it". This
+/// reader cannot: the importer leaves both fields at their zero value, so an
+/// omitted flag reads as a stated one. (A binary drawing always stores both
+/// values; nothing here applies to it.)
+///
+/// The control is a second leader that states both, as the opposite of the
+/// zero value, so a reader that dropped the flags wholesale cannot pass.
+/// The assertion states the defect, so the day the importer stops filling
+/// the fields this goes red and the recorded deviation should come out.
+#[test]
+fn the_dxf_importer_still_fills_a_leaders_omitted_flags() {
+    // The same shape as the dimension-style probe above: the importer
+    // refuses a leader that names no declared style, so both name one.
+    let pairs: &[(u16, &str)] = &[
+        (0, "SECTION"),
+        (2, "TABLES"),
+        (0, "TABLE"),
+        (2, "DIMSTYLE"),
+        (0, "DIMSTYLE"),
+        (2, "REAL"),
+        (70, "0"),
+        (0, "ENDTAB"),
+        (0, "ENDSEC"),
+        (0, "SECTION"),
+        (2, "ENTITIES"),
+        (0, "LEADER"),
+        (8, "0"),
+        (3, "REAL"),
+        (71, "1"),
+        (72, "1"),
+        (76, "2"),
+        (10, "0.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (10, "1.0"),
+        (20, "1.0"),
+        (30, "0.0"),
+        (0, "LEADER"),
+        (8, "0"),
+        (3, "REAL"),
+        (76, "2"),
+        (10, "5.0"),
+        (20, "0.0"),
+        (30, "0.0"),
+        (10, "6.0"),
+        (20, "1.0"),
+        (30, "0.0"),
+        (0, "ENDSEC"),
+        (0, "EOF"),
+    ];
+    let file = TempFile::new("leader-omitted-flags.dxf");
+    fs::write(file.path(), dxf_from(pairs)).expect("temp dir writable");
+    let db = uncad::parse(file.path()).expect("the DXF should parse");
+
+    let leaders: Vec<_> = db
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Leader(l) => Some(l),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(leaders.len(), 2, "{:?}", db.entities);
+    let (stated, omitted) = (leaders[0], leaders[1]);
+    // The control: the stated values come through as stated.
+    assert_eq!(stated.has_arrowhead, Some(true), "{stated:?}");
+    assert_eq!(stated.path_type, Some(LeaderPath::Spline), "{stated:?}");
+    // The defect: both should be `None`.
+    assert_eq!(
+        (omitted.has_arrowhead, omitted.path_type),
+        (Some(false), Some(LeaderPath::Straight)),
+        "an omitted flag no longer reads as stated -- take the recorded deviation out"
     );
 }
