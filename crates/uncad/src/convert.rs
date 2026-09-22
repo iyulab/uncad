@@ -1100,10 +1100,13 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
             let vertices: Vec<Point3D> =
                 get_point3d_array::<u32>(entity_ptr, "LEADER", "num_points", "points");
-            // arrowhead_type is BITCODE_BS (u16, not a bit flag): any nonzero
-            // value means an arrowhead is drawn.
+            // Whether an arrowhead is drawn is `arrowhead_on`, the bit the
+            // format writes as group 71. `arrowhead_type` is a different
+            // field -- *which* arrowhead, not whether -- and the format does
+            // not write it to DXF at all, so reading it here reported an
+            // arrowhead for a leader whose file says it has none.
             let has_arrowhead =
-                get_field::<u16>(entity_ptr, "LEADER", "arrowhead_type").unwrap_or(0) > 0;
+                get_field::<u8>(entity_ptr, "LEADER", "arrowhead_on").unwrap_or(0) != 0;
             // 0 straight, 1 spline (dwg.spec). The format does not state
             // what an absent group means, so an unreadable field is nothing.
             let path_type = match get_field::<u16>(entity_ptr, "LEADER", "path_type") {
