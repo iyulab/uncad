@@ -196,6 +196,14 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   anything but the automatic padding. The sheets keep their own zero padding -- a sheet
   is the paper exactly -- and `--lattice` stays a rendering option, since the package's
   patch size is the profile's.
+- `Entity::PolylineMesh` (`"POLYLINE_MESH"` in JSON), a polygon mesh's `m` by `n` grid
+  of vertices resolved into wireframe edges and rendered through the same isometric path
+  as `Entity::PolylinePFace`. The type used to be `Unknown`, read and counted but never
+  drawn -- which is what REVSURF, RULESURF, EDGESURF and most terrain tools write.
+- `uncad::color::resolve_color_in_block`, `uncad::color::effective_layer` and
+  `uncad::color::LAYER_ZERO`: AutoCAD's rule that geometry drawn on layer 0 inside a
+  block definition is placed on the layer of the block reference. `resolve_color` is
+  unchanged and now delegates with no reference layer.
 
 ### Changed
 
@@ -212,6 +220,13 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   together. The generated bitfield accessors raise one more harmless clippy lint
   (`manual_div_ceil`), allowed at crate level with the existing ones (see
   `docs/CAVEATS.md`, "Clippy").
+- `uncad::color::ACI_PALETTE` holds the real AutoCAD Color Index table, taken from
+  `rgb_palette[256]` in the vendored LibreDWG (`src/dwg.c`). The old table was a linear
+  ramp between the pure hues and differed from AutoCAD at 222 of the 255 real indices, so
+  the rendered colour of a BYLAYER entity -- the overwhelming majority -- changes wherever
+  its ACI is one of those: ACI 8 is `#414141` (was `#808080`), 9 `#808080` (was
+  `#c0c0c0`), 12 `#bd0000` (was `#cc0000`), 254 `#bebebe` (was `#d6d6d6`). The table is
+  public, so a caller reading it sees the new values too.
 
 ### Changed (breaking)
 
@@ -247,6 +262,64 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- Every POLYLINE_2D and POLYLINE_3D in an R13, R14 or R2000 file lost its last vertex.
+  LibreDWG's `dwg_object_polyline_{2,3}d_get_points` walk their `first_vertex ..
+  last_vertex` chain as `do { ... } while ((vobj = dwg_next_object (vobj)) && vobj !=
+  vlast);`, whose condition ends the loop before the body ever sees `vlast`, so they
+  return N-1 points. A closed 4-vertex boundary came back a triangle (area 5000 instead
+  of 10000, perimeter 341.42 instead of 400) and a 2-vertex arc segment collapsed to a
+  point and vanished: the bulges were already read from the subentity chain and so came
+  back N long, and the length mismatch cleared every one of them. `convert.rs` now walks
+  the owned-subentity chain for the points as well, which stops *at* `last_vertex`, with
+  a fall back to the object list for pre-R13 files (which fill neither `first_vertex` nor
+  `vertex[]`). Measured against the shipped reference DXF of
+  `test-data/2000/PolyLine3D.dwg`, which has 6 VERTEX records where uncad reported 5;
+  17 polylines across the corpus gained their last vertex.
+- A DXF containing a polygon mesh could not be read at all: every other entity in the
+  file was lost. `AcDbPolygonMeshVertex`, the subclass marker AutoCAD writes on a polygon
+  mesh's vertices, appeared nowhere in LibreDWG, so the object stayed a VERTEX_2D, failed
+  the "is this subclass allowed here" check and took the reader's `invalid_dxf` path --
+  `DWG_ERR_INVALIDDWG`, which `parse()` reports as `ParseError::Critical(2048)`. A DXF of
+  50 LINEs plus one `add_polymesh()` was refused whole, with a message suggesting the file
+  was corrupt (ezdxf audits it with 0 errors). Fixed in the vendored LibreDWG; see
+  `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG".
+- A DXF polyface mesh drew nothing. `in_dxf.c` picks a polyface vertex's type by resolving
+  the VERTEX's own group 330 and asking whether it names a POLYLINE_PFACE, and falls back
+  to VERTEX_MESH when it does not -- which is every file that points a vertex's owner at
+  the block record, as ezdxf and several exporters do. The wireframe walk looked for
+  VERTEX_PFACE only and found no positions. It now accepts both types inside a
+  POLYLINE_PFACE's own chain.
+- A polyline's VERTEX records were reported as top-level entities on the DXF path. They
+  are structural subentities of the POLYLINE that owns them, and LibreDWG documents
+  `get_next_owned_entity` as skipping them -- but its R2004+ branch just indexes
+  `BLOCK_HEADER.entities[]`, which the DXF reader fills with every object between the
+  BLOCK and the ENDBLK. One polyface mesh was reported as nine entities, with
+  `VERTEX_MESH` and `VERTEX_PFACE_FACE` named as unsupported types in the CLI warning and
+  in `report.json`, and the same eight records sitting in
+  `tables.block_records["*Model_Space"].entities`. `convert.rs` now skips the five
+  VERTEX_* types in the block-owned walk. (Pre-R13 DXFs leaked them too: `r9/entities.dxf`
+  reported 23 entities where it has 17.)
+- A DXF entity's true colour (group 420) was dropped and the entity rendered in its
+  layer's colour, while an entity carrying only a plain ACI index (group 62) was given a
+  `true_color` the file never wrote. `EntityCommon::true_color` was filled when
+  `Dwg_Color.method == DWG_COLOR_METHOD_TRUECOLOR`, which is neither necessary nor
+  sufficient: LibreDWG's DXF reader answers a group 62 with `method = 0xc3` and an `rgb`
+  *synthesised* from its own ACI palette, takes the method for a real group 420 from the
+  value's top byte (0 for a plain 24-bit RGB), and its R2004+ DWG reader
+  (`bit_read_ENC`) never sets `method` at all -- so no entity in any of the 105 corpus
+  DWGs or the 7 AutoCAD samples ever carried a true colour. `convert::split_entity_color`
+  now decides from the flag, the method and the palette together.
+- An R2004+ DWG entity that carried both a true colour and a transparency had the two
+  swapped: the colour landed in `alpha_raw` and the transparency in `rgb`. LibreDWG's
+  entity spec read them in the opposite order from its own `bit_read_ENC`; fixed in the
+  vendored copy, with the measurement in `docs/CAVEATS.md`.
+- Geometry drawn on layer 0 inside a block definition did not inherit the layer of the
+  block reference, so it rendered in layer 0's colour (black) instead of the discipline
+  colour of the layer the symbol was inserted on -- the standard CAD idiom, and 377 of the
+  813 INSERTs in one AutoCAD sample alone. `to_svg` now resolves a layer-0 BYLAYER child
+  against the INSERT's layer (`uncad::color::effective_layer`), and a text record inside a
+  block names that layer too. The model still stores the layer the file gives, because the
+  same block definition is placed by many references on many layers.
 - Not fixed, newly measured and documented: one changed byte in a class name makes
   LibreDWG's own DXF reader peak at 11.3 GB on a 143 KB file -- and succeed. It is below
   the FFI boundary, so nothing in this crate can refuse it; see `docs/CAVEATS.md`, "A

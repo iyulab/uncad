@@ -10,7 +10,9 @@ they land.
 Every file was written from scratch by `make_fixtures.py` in this directory
 on 2026-09-21 (the viewport fixture's LAYOUT, the plot-origin, the
 angular/ordinate, the hatched-viewport, the nested-attrib, the
-viewport-states, the radial and the infinite-lines fixtures on 2026-09-22)
+viewport-states, the radial and the infinite-lines fixtures on 2026-09-22; the
+polyline-vertices, entity-truecolor, polyface-mesh and block-layer0 fixtures on
+2026-09-23)
 -- no third-party drawing was copied, so they are redistributable under the
 repository's GPL-3. All are R2000 (`$ACADVER AC1015`) text DXF with CRLF
 line endings, between 470 and 4387 bytes, and above the 256-byte minimum
@@ -39,6 +41,10 @@ produced before the 0.3.0 work; the code-page conversion (P-1), the header
 | `hatched_viewport_r2000.dxf` | 3117 | 18 | The twisted-viewport fixture plus a pattern HATCH in model space (under the viewport) and one in paper space (outside its frame): the composited sheet must keep their `<defs>` apart |
 | `nested_attrib_r2000.dxf` | 2174 | 3 model-space entities, 2 blocks (6 entities) | A block with an ATTDEF inserted inside another block, its ATTRIB value owned by the block record: the attribute of a *nested* block reference, which the export used to drop |
 | `infinite_lines_r2000.dxf` | 673 | 4 | An XLINE and a RAY through the middle of a drawing 0.002 units across: the two entities with no end, at a scale where drawing them a fixed 1e6 units long panicked the rasterizer |
+| `polyline_vertices_r2000.dxf` | 2322 | 3 | A closed 4-vertex `POLYLINE_2D`, a 2-vertex one with bulge 1.0 and a 5-vertex `POLYLINE_3D`: the last vertex of each is what LibreDWG's own point accessors drop on any pre-R2004 file |
+| `entity_truecolor_r2000.dxf` | 795 | 4 | One LINE per way a DXF can state a colour (420 alone, 62 alone, 62 then 420, neither) on a layer whose own ACI is 3 |
+| `polyface_mesh_r2000.dxf` | 3921 | 3 | A `POLYLINE_PFACE` and a `POLYLINE_MESH` whose VERTEX records name the block record as their owner, next to a LINE: the shape that made LibreDWG refuse the whole file |
+| `block_layer0_r2000.dxf` | 1295 | 1 entity, 2 blocks (4 entities), 3 layers | A block drawn on layer 0 inserted on a coloured layer: AutoCAD's "layer 0 in a block means the layer of the reference" rule |
 
 ## cp949_r2000.dxf
 
@@ -591,3 +597,88 @@ shipped ones were: read it through `libredwg-sys` (`dxf_read_file`, then
 LAYOUT and its embedded `plotsettings`, see that section) and through
 `uncad <file> -o out.json --pretty`, and update the tables above and
 `tests/fixtures.rs`.
+
+## polyline_vertices_r2000.dxf
+
+HEADER: `$ACADVER AC1015`, `$INSUNITS 4`. TABLES: the `0` layer. ENTITIES: three
+old-style POLYLINEs, each with its own VERTEX chain and SEQEND, with the VERTEX
+records naming the POLYLINE in group 330 (the shape AutoCAD writes).
+
+| handle | entity | group 70 | vertices |
+|---|---|---|---|
+| `30` | `POLYLINE_2D` (`AcDb2dPolyline`) | 1, closed | (0,0) (100,0) (100,100) (0,100) |
+| `35` | `POLYLINE_2D` | 0 | (0,1000) with bulge (group 42) 1.0, (100,1000) |
+| `39` | `POLYLINE_3D` (`AcDb3dPolyline`) | 8 | (0,0,0) (10,0,0) (10,10,0) (0,10,5) (0,0,5) |
+
+Ground truth, all of it a property of the geometry above rather than of any reading of
+it: the square's perimeter is 400 and its area 10000; a bulge of 1.0 is a half turn, so
+handle `35` is a semicircle over a 100-unit chord, radius 50, length `pi * 50` =
+157.0796327; handle `39`'s last vertex is the only one with both y = 0 and z = 5.
+
+Before 0.3.0 all three came back one vertex short (3, 1 and 4), because LibreDWG's
+`dwg_object_polyline_{2,3}d_get_points` end their `first_vertex .. last_vertex` walk
+before the body reaches `last_vertex`. Handle `35` lost its arc entirely: the bulges came
+from the subentity chain and so were 2 long against 1 vertex, and the length mismatch
+cleared them.
+
+## entity_truecolor_r2000.dxf
+
+HEADER: `$ACADVER AC1015`, `$INSUNITS 4`. TABLES: layers `0` (ACI 7) and `GREEN`
+(ACI 3, `00ff00`). ENTITIES: four LINEs on `GREEN`, differing only in their colour
+groups, written in DXF order (62 before 420).
+
+| handle | groups | `color_index` | `true_color` | drawn |
+|---|---|---|---|---|
+| `30` | `420 65407` | 256 | `0x00ff7f` | `#00b259` (darkened for the white page) |
+| `31` | `62 1` | 1 | none | `#ff0000` |
+| `32` | `62 1`, `420 255` | 1 | `0x0000ff` | `#0000ff` |
+| `33` | neither | 256 | none | `#00c300`, the layer's green darkened |
+
+65407 is `0x00ff7f` and 255 is `0x0000ff`, both plain 24-bit values with no method byte,
+which is what a DXF carries.
+
+Before 0.3.0 handles `30` and `32` reported `true_color: null` and rendered in the
+layer's colour and in ACI 1 respectively, while handle `31` reported
+`true_color: 0xff0000` -- an RGB the file never wrote, synthesised by LibreDWG's DXF
+reader from its own ACI palette.
+
+## polyface_mesh_r2000.dxf
+
+HEADER: `$ACADVER AC1015`, `$INSUNITS 4`. TABLES: the `0` layer. ENTITIES: a LINE, a
+polyface mesh and a polygon mesh. Every VERTEX record names the `*Model_Space` block
+record (`330 1F`) rather than its POLYLINE -- what ezdxf and several exporters write, and
+what `ezdxf.audit()` passes with 0 errors.
+
+| handle | entity | contents |
+|---|---|---|
+| `30` | `LINE` | (0,0) to (1000,0) -- the control: it must survive whatever the meshes do |
+| `31` | `POLYLINE_PFACE` (`AcDbPolyFaceMesh`, 70 = 64, 71 = 8, 72 = 2) | 8 `AcDbPolyFaceMeshVertex` records (a 10 x 10 square at z 0 and the same at z 10) and 2 `AcDbFaceRecord` records, `1 2 3 4` and `5 6 7 8` |
+| `50` | `POLYLINE_MESH` (`AcDbPolygonMesh`, 70 = 16, 71 = 3, 72 = 4) | 12 `AcDbPolygonMeshVertex` records at `(i*10, j*5, 0)`, row-major over i in 0..3, j in 0..4 |
+
+Ground truth from the definitions: two quad faces are 2 * 4 = 8 wireframe edges; an open
+`m` by `n` grid is `n * (m - 1)` column edges plus `m * (n - 1)` row edges, so
+4 * 2 + 3 * 3 = 17.
+
+Before 0.3.0 this file did not parse at all -- `AcDbPolygonMeshVertex` matched no known
+subclass, which is `DWG_ERR_INVALIDDWG` and so a whole-file refusal, taking the LINE with
+it. With the polygon mesh removed, the polyface drew nothing (its vertices came back
+typed `VERTEX_MESH`, which the wireframe walk did not look for) and its ten VERTEX records
+were reported as top-level `Entity::Unknown` values.
+
+## block_layer0_r2000.dxf
+
+HEADER: `$ACADVER AC1015`, `$INSUNITS 4`. TABLES: layers `0` (ACI 7), `RED` (ACI 1) and
+`BLUE` (ACI 5), and BLOCK_RECORDs `*Model_Space` (`1F`) and `SYM` (`40`). BLOCKS: block
+`SYM`. ENTITIES: one INSERT of `SYM` at (0,0) on layer `RED`, colour BYLAYER.
+
+| handle | child of `SYM` | layer | group 62 | drawn |
+|---|---|---|---|---|
+| `42` | `LINE` (0,0)-(10,0) | 0 | 256 BYLAYER | `#ff0000`, the INSERT's layer |
+| `43` | `LINE` (0,2)-(10,2) | 0 | 0 BYBLOCK | `#ff0000`, the INSERT's own resolved colour |
+| `44` | `LINE` (0,4)-(10,4) | BLUE | 256 BYLAYER | `#0000ff` -- a named layer inside a block is used as stored |
+| `45` | `TEXT` "L0" at (0,6) | 0 | BYLAYER | `#ff0000`, and its text record's layer is `RED` |
+
+Layer 0's own ACI 7 is white, which this renderer draws black on a white page, so a child
+that resolved against layer 0 instead of the reference is unmistakable. Before 0.3.0
+handle `42` was `#000000`; handle `43` was already correct, since the BYBLOCK path
+inherits the INSERT's resolved colour and that path was never broken.

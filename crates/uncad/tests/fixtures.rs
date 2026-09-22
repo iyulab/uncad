@@ -79,10 +79,30 @@ const INFINITE_LINES: &str = concat!(
     "/tests/fixtures/infinite_lines_r2000.dxf"
 );
 
+const POLYLINE_VERTICES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/polyline_vertices_r2000.dxf"
+);
+
+const ENTITY_TRUECOLOR: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/entity_truecolor_r2000.dxf"
+);
+
+const POLYFACE_MESH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/polyface_mesh_r2000.dxf"
+);
+
+const BLOCK_LAYER0: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/block_layer0_r2000.dxf"
+);
+
 /// Every shipped fixture, so the checks that must hold for all of them
 /// (parsing, the JSON round trip) cover each new file from the day it
 /// lands.
-const ALL: [&str; 13] = [
+const ALL: [&str; 17] = [
     CP949,
     MIRRORED,
     DIMLFAC12,
@@ -96,6 +116,10 @@ const ALL: [&str; 13] = [
     VIEWPORT_STATES,
     RADIAL,
     INFINITE_LINES,
+    POLYLINE_VERTICES,
+    ENTITY_TRUECOLOR,
+    POLYFACE_MESH,
+    BLOCK_LAYER0,
 ];
 
 fn parse(path: &str) -> uncad::CadDatabase {
@@ -721,4 +745,209 @@ fn a_deep_tile_pyramid_keeps_the_construction_lines_and_does_not_panic() {
         "only {crossed_by_the_ray} of {deepest_tiles} deep tiles show the RAY down them"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --------------------------------------------------- polyline vertices
+
+/// Regression for the last vertex LibreDWG's own
+/// `dwg_object_polyline_{2,3}d_get_points` dropped on every R13/R14/R2000
+/// file. Every number below comes from the fixture's own generator (see
+/// `tests/fixtures/README.md`), not from this crate's output: the square is
+/// 100 by 100, so its perimeter is 400 and its area 10000; the arc
+/// polyline's single bulge of 1.0 is a half turn over a 100-unit chord,
+/// i.e. a semicircle of radius 50, whose length is `pi * 50`; and the 3D
+/// polyline's five points are listed in the generator.
+///
+/// Before the fix each of these came back one vertex short: the square was
+/// a right triangle (area 5000, perimeter 100 + 100 + 141.42), the arc
+/// polyline was a single point whose bulge list had been cleared for
+/// disagreeing with the vertex count, and the 3D polyline ended at
+/// (0, 10, 5).
+#[test]
+fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
+    let db = parse(POLYLINE_VERTICES);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("POLYLINE_2D", 2), ("POLYLINE_3D", 1)])
+    );
+
+    let square = match &db.entities[0] {
+        Entity::Polyline2D(p) => p,
+        other => panic!("expected the square first, got {other:?}"),
+    };
+    assert_eq!(square.common.handle, "30");
+    assert!(square.closed);
+    assert_eq!(
+        square
+            .vertices
+            .iter()
+            .map(|v| (v.x, v.y))
+            .collect::<Vec<_>>(),
+        [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
+    );
+    assert_eq!(square.length(), 400.0, "4 sides of 100");
+    assert_eq!(square.area(), Some(10000.0), "100 x 100");
+
+    let arc = match &db.entities[1] {
+        Entity::Polyline2D(p) => p,
+        other => panic!("expected the arc polyline second, got {other:?}"),
+    };
+    assert_eq!(arc.common.handle, "35");
+    assert_eq!(
+        arc.vertices.iter().map(|v| (v.x, v.y)).collect::<Vec<_>>(),
+        [(0.0, 1000.0), (100.0, 1000.0)]
+    );
+    assert_eq!(arc.bulges, [1.0, 0.0], "a bulge per vertex, or none at all");
+    let semicircle = std::f64::consts::PI * 50.0;
+    assert!(
+        (arc.length() - semicircle).abs() < 1e-6,
+        "{} vs {semicircle}",
+        arc.length()
+    );
+
+    let p3d = match &db.entities[2] {
+        Entity::Polyline3D(p) => p,
+        other => panic!("expected the 3D polyline third, got {other:?}"),
+    };
+    assert_eq!(p3d.common.handle, "39");
+    assert_eq!(
+        p3d.vertices
+            .iter()
+            .map(|v| (v.x, v.y, v.z))
+            .collect::<Vec<_>>(),
+        [
+            (0.0, 0.0, 0.0),
+            (10.0, 0.0, 0.0),
+            (10.0, 10.0, 0.0),
+            (0.0, 10.0, 5.0),
+            (0.0, 0.0, 5.0),
+        ]
+    );
+
+    // And the arc really is drawn: an `A` path command, from the one bulge.
+    let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
+    assert!(svg.contains(" A "), "no arc in the render: {svg}");
+}
+
+// ------------------------------------------------------ entity truecolor
+
+/// Regression for the two halves of the DXF colour read: a real group 420
+/// was dropped (the entity fell back to its layer's colour) and a plain
+/// group 62 was reported as a `true_color` the file never wrote.
+///
+/// The expected values are the fixture's own group codes: 65407 is
+/// `0x00ff7f` and 255 is `0x0000ff`. The layer is ACI 3 (`#00ff00`, which
+/// the renderer darkens to `#00c300` for the white page), so an entity that
+/// fell back to its layer is recognisable in the SVG.
+#[test]
+fn a_dxf_entity_carries_the_true_colour_it_states_and_no_other() {
+    let db = parse(ENTITY_TRUECOLOR);
+    let colors: Vec<(&str, i16, Option<u32>)> = db
+        .entities
+        .iter()
+        .map(|e| {
+            let c = e.common();
+            (c.handle.as_str(), c.color_index, c.true_color)
+        })
+        .collect();
+    assert_eq!(
+        colors,
+        [
+            ("30", 256, Some(0x00_ff7f)),
+            ("31", 1, None),
+            ("32", 1, Some(0x00_00ff)),
+            ("33", 256, None),
+        ]
+    );
+
+    let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
+    let strokes: Vec<&str> = svg
+        .match_indices("stroke=\"#")
+        .map(|(i, _)| &svg[i + 8..i + 15])
+        .collect();
+    // 420 wins over the layer; 420 wins over 62; 62 is the ACI palette's own
+    // red; no colour at all is the layer's green, darkened for white.
+    assert_eq!(
+        strokes,
+        ["#00b259", "#ff0000", "#0000ff", "#00c300"],
+        "{svg}"
+    );
+}
+
+// --------------------------------------------------------- mesh polylines
+
+/// Regression for a DXF that could not be read at all because of one
+/// polygon mesh, and for a polyface mesh that drew nothing while its
+/// vertices were reported as top-level entities.
+///
+/// The edge counts are the grids the generator writes, worked out from the
+/// mesh definitions rather than from the output: the polyface has two quad
+/// faces, so 2 * 4 = 8 edges; the polygon mesh is an open 3 by 4 grid, so
+/// 4 * (3 - 1) columns plus 3 * (4 - 1) rows = 17.
+#[test]
+fn a_dxf_with_mesh_polylines_reads_and_both_meshes_have_geometry() {
+    let db = parse(POLYFACE_MESH);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("LINE", 1), ("POLYLINE_PFACE", 1), ("POLYLINE_MESH", 1),]),
+        "no VERTEX record may be reported as an entity"
+    );
+    // The same three, and only those three, in the block record.
+    let model = &db.tables.block_records["*Model_Space"].entities;
+    assert_eq!(model.len(), 3, "{model:?}");
+
+    let edges = |e: &Entity| match e {
+        Entity::PolylinePFace(p) | Entity::PolylineMesh(p) => p.wireframe_edges.len(),
+        other => panic!("expected a mesh, got {other:?}"),
+    };
+    assert_eq!(edges(&db.entities[1]), 8, "2 quad faces");
+    assert_eq!(edges(&db.entities[2]), 17, "4 * 2 columns + 3 * 3 rows");
+
+    // Both meshes reach the image, and nothing is reported as unsupported.
+    let render = db.to_svg(uncad::ToSvgOptions::default());
+    assert!(
+        render.unsupported_types.is_empty(),
+        "{:?}",
+        render.unsupported_types
+    );
+    assert_eq!(
+        render.svg.matches("<line").count(),
+        1 + 8 + 17,
+        "{}",
+        render.svg
+    );
+}
+
+// ------------------------------------------------------- block on layer 0
+
+/// Regression for AutoCAD's layer-0-in-a-block rule: a BYLAYER child drawn
+/// on layer 0 inside a block definition resolves against the layer of the
+/// INSERT, not against layer 0.
+///
+/// The fixture inserts block `SYM` on layer `RED` (ACI 1 = `#ff0000`) and
+/// gives it one layer-0 BYLAYER child, one layer-0 BYBLOCK child and one
+/// child on layer `BLUE` (ACI 5 = `#0000ff`). Layer 0 is ACI 7, which this
+/// renderer draws black, so before the fix the first two children were
+/// `#000000`.
+#[test]
+fn block_geometry_on_layer_0_takes_the_inserts_layer() {
+    let db = parse(BLOCK_LAYER0);
+    // The model keeps what the file stores: the children are still on
+    // layer 0. The rule is a property of the reference, not of the block.
+    let children = &db.tables.block_records["SYM"].entities;
+    let layers: Vec<&str> = children.iter().map(|e| e.common().layer.as_str()).collect();
+    assert_eq!(layers, ["0", "0", "BLUE", "0"]);
+
+    let svg = db.to_svg(uncad::ToSvgOptions::default()).svg;
+    let strokes: Vec<&str> = svg
+        .match_indices("stroke=\"#")
+        .map(|(i, _)| &svg[i + 8..i + 15])
+        .collect();
+    assert_eq!(
+        strokes,
+        ["#ff0000", "#ff0000", "#0000ff"],
+        "BYLAYER and BYBLOCK on layer 0 both follow the INSERT: {svg}"
+    );
+    // The TEXT is drawn in the INSERT's colour too.
+    assert!(svg.contains("fill=\"#ff0000\""), "{svg}");
 }
