@@ -434,9 +434,12 @@ except the AutoCAD-written Korean DWG fixture (LibreDWG's own writer mangles
 CP949 text, so `tests/fixtures/` ships DXF fixtures only); **P0 done**
 (`CadDatabase::header`); **P1 mostly done** (`PngSize` fit-to-pixels with the
 8000 px cap, white RGB background, pixel strokes, contrast-normalized palette,
-fonts loaded once, `ViewBox` + `px_per_unit` in every result) -- still open in
-P1: the bundled Latin + Hangul font, `font-family` on text, RAY/XLINE clipping,
-and pixel-sized symbols (POINT, arrowheads, dashes); **P2 done** (`uncad::text`
+fonts loaded once, `ViewBox` + `px_per_unit` in every result, and the bundled
+`Uncad Sans` with `font-family` on every `<text>` -- shipped as a plain
+`include_bytes!`, not behind the `bundled-fonts` cargo feature the table in
+section 7 proposes) -- still open in P1: RAY/XLINE clipping (both are drawn as
+a 1e6-unit line) and pixel-sized symbols (POINT is a half-unit dot,
+arrowheads a fixed 2.5 units, dashes `4,2` user units); **P2 done** (`uncad::text`
 decoder with all three stack separators and the `%%` codes, `text_plain` on
 every text type, TEXT/ATTRIB justification fields and ATTRIB `tag`, MTEXT
 attachment/width/extents/`x_axis_dir` with the rotation derived, renderer
@@ -460,8 +463,11 @@ whose corner-connected clusters are too fragmented for a majority rule),
 header candidate,
 `CropMode::{Auto, Raw, Header, Fixed}`, automatic padding, lattice snap with
 exact pixel/unit proportion, `CropReport` in both results, CLI `--crop`,
-`--padding`, `--lattice`; the text metrics pre-pass and the frame split are
-still open); **P7** is in its 0.3.0 form (`export.rs`: the overview fitted
+`--padding`, `--lattice`; the frame split landed with P7, and the text metrics
+pre-pass exists but does not feed the crop -- `measure_texts` runs on the
+already-rendered drawing, so the crop is chosen from the 0.6-em estimate and
+only the frames and the tile culling see the measured boxes);
+**P7** is in its 0.3.0 form (`export.rs`: the overview fitted
 to the profile's edge and patch budget, the tile pyramid with 224 px overlap
 and inward-shifted edge tiles, sidecars with both affines and per-tile record
 lists, texts/dimensions/geometry/regions/blocks/strings/report/drawing JSON
@@ -472,8 +478,27 @@ the bundled `Uncad Sans`, usvg-measured text boxes and the paper layouts
 section's 0.3.0 scope is open); **P8** (README, ARCHITECTURE, CAVEATS, `--help`) and **P9**
 (`tests/corpus_sweep.rs` over the 208 corpus files, `tests/acceptance.rs`
 with five package questions, determinism test, `docs/EVAL.md`) are in --
-goldens (byte-exact reference packages) are not, since text rendering still
-depends on the host's fonts.
+goldens (byte-exact reference packages) are not: with the bundled font the
+tile PNGs should be identical across machines running the same resvg version,
+but no reference package is checked in, so the determinism test compares two
+runs on one machine.
+
+Four items the tables below place in 0.4.0 landed in 0.3.0 instead: the frame
+split (`frames/fN/`), viewport compositing with `sheets.json`, the bundled
+font, and per-viewport frozen layers (honoured by the sheet compositor only,
+`docs/CAVEATS.md`). The section 7 "Rendering changes" table and the section 9
+CLI sketch are the proposal as written, not a description of the binary.
+`uncad export` takes `-o`/`--output`, not `--out`; `--target` is spelled
+`--profile` and `--min-text-px` is `--text-px`; the tile and padding geometry
+comes from the profile and the crop rule, so `--tile`, `--overlap`,
+`--sparse-from`, `--dense`, `--pad`, `--pad-min-px` and `--trim-absorb` do
+not exist; and neither do `--layers`, `--exclude-layers`, `--layout`,
+`--units`, `--weights`, `--view`, `--mono`, `--jobs`, `--force`,
+`--dry-run`, `--json-report` or `-q`. Only `--crop`, `--no-trim`,
+`--include-hidden` and `--fonts` are shared with the plain command; the other
+render flags (`--space`, `--padding`, `--stroke`, `--fit`, ...) are refused
+by name on an `export` line. The `info`, `render`, `dims` and `measure`
+subcommands do not exist. `uncad --help` is the current list.
 
 | Release | Phase | Files |
 |---|---|---|

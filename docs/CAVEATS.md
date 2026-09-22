@@ -92,11 +92,13 @@ face) subentity chain is walked with `get_first_owned_subentity`, and each face'
 become wireframe edges -- rendered through the same isometric path as REGION, a polyface
 mesh being just as inherently 3D as an ACIS solid's wireframe.
 
-**TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
-`text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
-this project does not parse or strip (there is no dedicated stripper the way MTEXT has
-`strip_mtext_formatting`). Readable, but not real GD&T symbols. Its `text_height` is
-the entity's own only in R13/R14 files (LibreDWG decodes `height` for those alone);
+**TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text). It carries
+`text_plain` (`text::decode_text(text_value)`) next to the raw `text_value`, so the
+`%%c`/`%%d`/`%%p`/`%%%`/`%%nnn` codes are decoded like any other text; the GD&T
+feature-control-frame codes (`%%v` and similar) are left literally, because
+`uncad::text` has no GD&T-specific handling. Readable, but not real GD&T symbols. Its
+`text_height` is the entity's own only in R13/R14 files (LibreDWG decodes `height` for
+those alone);
 an R2000+ frame takes its DIMSTYLE's `DIMTXT`, else the header's, else 1.0 -- it used
 to come out as 0 and draw nothing.
 
@@ -151,7 +153,8 @@ so both input paths use 512 (`LWPOLYLINE_CLOSED_FLAG` in `crates/uncad/src/conve
 tested in `crates/uncad/tests/polyline_closed.rs`). The old reading exported every closed
 LWPOLYLINE as open -- 741 of them across the sample drawings -- and the mirrored open ones
 as closed. `POLYLINE_2D`/`POLYLINE_3D` keep bit 1, which is their real convention. The
-extrusion itself is still ignored (see `docs/VLM_INVESTIGATION.md`, section 1).
+extrusion itself is applied since 0.3.0 -- see "Coordinates are world" below; the
+pre-0.3.0 state is what `docs/VLM_INVESTIGATION.md`, section 1, probed.
 
 ## The package: what `uncad export` does not do yet (since 0.3.0)
 
@@ -190,9 +193,11 @@ its 0.3.0 form. Known gaps:
   content -- has no rectangle to draw on and is skipped with an
   `UnusableSheet` warning rather than failing the export. The model is drawn
   through every viewport that is on, looks down the z axis and is not the
-  sheet's overall frame -- detected as a DXF `id` of 1 or a view at scale 1
-  centred exactly on its frame (a DWG stores no id; the rule held on every
-  corpus file). A viewport whose own layer is off, frozen or non-plotting
+  sheet's overall frame, without the layers frozen in that viewport
+  (`frozen_layers`, listed per viewport in `sheets.json`). An overall frame
+  is detected as a DXF `id` of 1, or a view at scale 1 centred exactly on
+  its frame (a DWG stores no id; the rule held on every corpus file). A
+  viewport whose own layer is off, frozen or non-plotting
   still shows its window and loses only its border (AutoCAD hides the whole
   viewport for a frozen layer; the content is worth more to a reader than
   that fidelity). The twist sign follows ezdxf (a positive twist turns the
@@ -233,11 +238,16 @@ silently drop a detail drawn beside the plan; it is gone.
 
 Two things to know:
 
-- **Text extents are estimates.** The renderer measures TEXT/MTEXT/ATTRIB
-  from their anchor and a 0.6-em-per-character guess, not from glyph
-  metrics, so a label at the edge of a drawing can be clipped by a few
-  characters. The design's metrics pre-pass (a usvg parse of the text at
-  world scale) is still to come.
+- **Text extents are estimates while the crop is chosen.** The renderer
+  measures TEXT/MTEXT/ATTRIB from their anchor and a 0.6-em-per-character
+  guess, not from glyph metrics, so a label at the edge of a drawing can be
+  clipped by a few characters. The design's metrics pre-pass exists
+  (`measure_texts` in `export.rs`, a usvg parse of the drawing's texts at
+  world scale, which is where `texts.json`'s `bbox_confidence: "measured"`
+  comes from), but it runs on the rendered drawing, so the crop is already
+  decided by the time its boxes exist; the frames and the tile culling do
+  use them (see "Text boxes are measured, the crop is not" above). Feeding
+  them back into the crop is the open item.
 - **The header extents are a candidate, not the truth.** `$EXTMIN/$EXTMAX`
   are used (in `Auto`) only when sane, no more than 4x the content area,
   containing 90 % of the entities and covering more of them than the
@@ -270,9 +280,14 @@ Two limits of the layer state, both inherited from how LibreDWG reads:
   a DXF layer without group 370 (which LibreDWG leaves at code 0, i.e.
   0.00 mm -- reported as unknown rather than as the thinnest weight).
 
-Not modelled: per-viewport frozen layers (VIEWPORT's `frozen_layers`), layer
-overrides in layouts, and xref layer state. Locked layers are drawn, as in
-AutoCAD. Linetypes and lineweights are read but not rendered (0.4.0).
+Per-viewport frozen layers are read into `ViewportEntity.frozen_layers` and
+listed in `sheets.json`, but only the sheet compositor acts on them: a layer
+frozen in a viewport is left out of that viewport's part of
+`sheets/<layout>/overview.png`. The model-space picture and
+`visibility::hidden_reason` ignore them by design -- they are a property of a
+viewport, not of the drawing. Not modelled at all: layer overrides in layouts,
+and xref layer state. Locked layers are drawn, as in AutoCAD. Linetypes and
+lineweights are read but not rendered (0.4.0).
 
 ## Coordinates are world; the OCS is applied on read (since 0.3.0)
 
@@ -532,53 +547,74 @@ C build still includes `USE_WRITE` and the encoder sources -- see `docs/ARCHITEC
 See `docs/ARCHITECTURE.md`. The `uncad` crate is safe to call from multiple threads; using
 `libredwg-sys` directly means serializing the calls yourself.
 
-## File-based regression tests are few (broad real-file coverage is still missing)
+## What the tests actually verify
 
 This section is the single list of what is actually verified. `samples/README.md` only
 explains why that directory is gitignored and links here. `docs/ARCHITECTURE.md`'s "Test
-layout" covers where a new test belongs.
+layout" covers where a new test belongs. The counts below are what
+`cargo test --workspace -- --list` reports at 0.3.0; regenerate them from that command
+rather than editing them by hand.
 
-`cargo test --workspace` runs 86 tests. 64 of them are `uncad` unit tests: `color.rs` 11
-(ACI/BYLAYER resolution and the gradient helper `tint_toward_white`), `acis.rs` 6 (SAT
-record parsing, pointer resolution, wireframe extraction), `convert.rs` 6 (HATCH gradient
-color resolution, stop ordering, `gradient_name` classification), `json.rs` 6, `svg*.rs`
-28 (outlier-trim clustering, HATCH edge approximation, MTEXT formatting stripping,
-stroke-width substitution, transform composition, HATCH pattern fill, MLINE offsets,
-TEXT/ATTRIB rotation transforms, non-finite coordinate defense, block-reference recursion
-blowup), `tables.rs` 3 (the LAYER TRUECOLOR 256-sentinel fallback), and `png.rs` 4 (SVG ->
-PNG size, scaling, errors, plus the `circle.dwg` pipeline). Most are pure-function tests
-verifiable with synthetic data, which makes them genuinely useful regression guards:
-whether `dominant_cluster_box` picks the right cluster out of a synthetic set of boxes, or
-whether `parse_sat_records` really stops at the `End-of-ACIS-data` marker, is decidable
-without a DWG file at all.
+`cargo test --workspace` runs 275 tests. 114 of them are `uncad` unit tests, by module:
+`svg*.rs` 30 (HATCH edge approximation and pattern fill, stroke-width substitution,
+block-transform composition, MLINE offsets, TEXT/ATTRIB anchoring and rotation, number
+formatting, non-finite coordinate defense, block-reference recursion blowup),
+`color.rs` 13 (ACI/BYLAYER resolution, the white-background normalization and the
+gradient helper `tint_toward_white`), `crop.rs` 9 (the outlier rules, the header
+candidate, padding, lattice snap, `detached_groups`), `text.rs` 8 (the `%%` and `\S`
+decoders, the 0.6-em box estimate), `geom.rs` 8 (OCS to world, bulge arcs, polyline
+length/area/bounds), `dimension.rs` 7, `convert.rs` 7 (HATCH gradient color resolution,
+stop ordering, `gradient_name` classification), `json.rs` 6, `acis.rs` 6 (SAT record
+parsing, pointer resolution, wireframe extraction), `png.rs` 5 (SVG -> PNG size, scaling,
+errors, the bundled face's cap height, plus the `circle.dwg` pipeline), `export.rs` 5,
+`tables.rs` 4 (the LAYER TRUECOLOR 256-sentinel fallback), `visibility.rs` 3 and
+`header.rs` 3. Most are pure-function tests verifiable with synthetic data, which makes
+them genuinely useful regression guards: whether `crop::outliers` sets aside the 3256x
+INSERT and nothing else, or whether `parse_sat_records` really stops at the
+`End-of-ACIS-data` marker, is decidable without a DWG file at all.
 
-**Real-file tests**: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
+**Real-file tests**: 118 across the 20 integration files in `crates/uncad/tests/`, plus
+43 in `uncad-cli`. `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
 `parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
 (`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
 unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
-precondition) and checks that a valid PNG comes out. That is a smoke test on one file, not
-broad per-entity-type rendering accuracy. From the same corpus:
-`tests/dxf_pipeline.rs` (5: DXF parse/render, a JSON round trip through
+precondition). 16 of the 20 integration files read that same corpus:
+`export.rs` (20: every file the design lists, the overview budget, the tile grid per
+level, sidecar affines that round-trip, the 32 KB sidecar cap, records pointing only at
+written tiles, byte-identical output on a second run, a re-export clearing the previous
+package), `dimensions.rs` (8), `sheets.rs` (8), `codepage.rs` (8), `polyline_geometry.rs`
+(8), `header.rs` (7), `read_paths.rs` (6, Korean directory names), `png_output.rs` (9),
+`crop.rs` (5), `dxf_pipeline.rs` (5: DXF parse/render, a JSON round trip through
 `serde_json::from_str` and `PartialEq`, two parses agreeing and producing identical JSON
 with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic on
-garbage input), `tests/acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
-`entities` and in `tables.block_records`), and `uncad-cli`'s
-`tests/documented_invocations.rs` (16: every call the README documents, run against the
-real binary; `--scale`/`--space`/`--no-trim`/`--pretty` are each checked for actually
-changing the result, with `--no-trim` using a five-line DXF the test writes from group
-codes itself). All of them assert properties rather than pinned expected values. The 6
-`json.rs` unit tests build one instance of every `Entity` variant and check that the JSON
-`type` tag matches `type_name()`, that HATCH path and edge tags are right, that a round
-trip holds, that non-finite floats become `null` and do not come back, and that a wrong or
-missing `type` tag is an error rather than a panic.
+garbage input), `visibility.rs` (5), `text_fields.rs` (5), `polyline_closed.rs` (3),
+`acceptance.rs` (1: five agent questions answered from an exported package alone, see
+`docs/EVAL.md`), `acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
+`entities` and in `tables.block_records`) and `corpus_sweep.rs` (1, `#[ignore]`d: parses
+and renders all 208 corpus files and fails on any panic -- `docs/EVAL.md` records what it
+found). The other four run against this project's own committed DXF fixtures
+(`crates/uncad/tests/fixtures/`, 12 files written by `make_fixtures.py`): `fixtures.rs`
+(10), `block_transforms.rs` (3), `sheets_compositing.rs` (3) and `control_chars.rs` (2).
+`uncad-cli`'s `tests/documented_invocations.rs` (43) runs every call the README and
+`--help` document against the real binary -- the `export` subcommand and each of its
+options included -- and the parser's refusals (an unknown option, a second positional, a
+missing value, a flag of the other command); `--scale`, `--fit`, `--ppu`, `--stroke`,
+`--bg`, `--space`, `--crop`, `--no-trim`, `--include-hidden`, `--fonts` and `--pretty`
+are each checked for actually changing the result. All of them assert properties rather
+than pinned expected values. The 6 `json.rs` unit tests build one instance of every
+`Entity` variant and check that the JSON `type` tag matches `type_name()`, that HATCH
+path and edge tags are right, that a round trip holds, that non-finite floats become
+`null` and do not come back, and that a wrong or missing `type` tag is an error rather
+than a panic.
 
-**Still missing**: broad end-to-end verification of `parse()`/`to_svg()`/`to_json()`
-against real DWG/DXF files -- entity-count parity across many files, byte-level rendering
-comparison and so on -- is not automated. `samples/` is entirely gitignored (a deliberate
-choice, so anyone can drop any file in without license clearance), so CI has nothing
-committed to read. See `samples/README.md`. Restoring that coverage means committing files
-with a clear license and verifying expected values against an independent reference rather
-than against this project's own output.
+**Still missing**: the corpus sweep proves nothing panics and nothing regresses in entity
+counts run to run, but not that the numbers are *right* -- there is no comparison against
+an independent reference, and no byte-exact golden package is checked in (`docs/EVAL.md`,
+section 4). `samples/` is entirely gitignored (a deliberate choice, so anyone can drop any
+file in without license clearance), so CI has nothing committed to read beyond the
+LibreDWG corpus and this project's own fixtures. See `samples/README.md`. Closing that gap
+means committing files with a clear license and verifying expected values against an
+independent reference rather than against this project's own output.
 
 ## Clippy
 

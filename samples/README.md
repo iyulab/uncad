@@ -16,13 +16,14 @@ project's docs describe the current state, not a running history.
 In practice that means there is no automated regression coverage for `parse()`/`to_svg()`/
 `to_json()` against *this* directory. It does not mean those calls are untested:
 `cargo test` covers them through self-contained unit tests on the pure-Rust side, plus
-fixture-based tests that read the LibreDWG submodule's own corpus (run
+integration tests that read the LibreDWG submodule's own corpus (run
 `git submodule update --init` first -- the build compiles a vendored copy and does not need
-the submodule, but those tests do).
+the submodule, but those tests do) and this project's own committed DXF fixtures in
+`crates/uncad/tests/fixtures/`.
 
 That inventory is not restated here, so it cannot drift: it lives in `docs/CAVEATS.md`,
-"File-based regression tests", which lists what each test file covers and what breadth is
-still missing. For how unit, integration and example targets divide up, see
+"What the tests actually verify", which lists what each test file covers and what breadth
+is still missing. For how unit, integration and example targets divide up, see
 `docs/ARCHITECTURE.md`, "Test layout".
 
 Use files dropped here for manual spot checks:

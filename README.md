@@ -72,9 +72,11 @@ intended consumers are libraries and binaries (CLI, server, desktop app).
 `winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). The LibreDWG C
 sources are vendored into `crates/libredwg-sys/vendor/libredwg/`, so **building
 does not need the `lib/libredwg` submodule**. Running `cargo test --workspace`
-does: the real-file tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs`
-in `uncad`, and `tests/documented_invocations.rs` in `uncad-cli`) read fixtures
-from that submodule's `test/test-data/`. Clone with
+does: 16 of the 20 integration test files in `uncad` (plus `png.rs`'s own
+end-to-end test and `tests/documented_invocations.rs` in `uncad-cli`) read
+fixtures from that submodule's `test/test-data/`; the four that do not
+(`fixtures.rs`, `block_transforms.rs`, `control_chars.rs`,
+`sheets_compositing.rs`) use this project's own DXF fixtures. Clone with
 `git clone --recurse-submodules`, or run `git submodule update --init` in an
 existing clone. Builds and tests pass on Linux (`x86_64-unknown-linux-gnu`) as
 well as Windows.
@@ -122,6 +124,7 @@ Further reading:
 - [`docs/VLM_INVESTIGATION.md`](./docs/VLM_INVESTIGATION.md) — what it would
   take to hand a drawing to a VLM/LLM: extraction and rendering audit, measured
   numbers, facts settled against real files (2026-09-21)
-- [`docs/VLM_EXPORT_DESIGN.md`](./docs/VLM_EXPORT_DESIGN.md) — the resulting
-  proposal (not implemented): export package, crop and tiling rules, JSON
-  schema, API, roadmap
+- [`docs/VLM_EXPORT_DESIGN.md`](./docs/VLM_EXPORT_DESIGN.md) — the design the
+  0.3.0 package follows (`export::export_package`, `uncad export`; section 10
+  records what has landed): export package, crop and tiling rules, JSON schema,
+  API, roadmap

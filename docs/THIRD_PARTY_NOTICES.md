@@ -13,7 +13,7 @@ This project bundles or builds against the following third-party components.
 
 ---
 
-This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party component bundled). See [`LICENSE`](../LICENSE).
+This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party *code* bundled; the second bundled component, the Noto Sans KR subset below, is data under the SIL Open Font License 1.1, which permits bundling in GPL software). See [`LICENSE`](../LICENSE).
 
 DWF/DWFx support (previously provided by a vendored subset of
 [dwf-viewer](https://github.com/flyfish-dev/dwf-viewer), AGPL-3.0-only) was

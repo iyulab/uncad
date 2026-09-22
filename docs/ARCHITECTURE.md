@@ -27,14 +27,17 @@ crates/
                          color.rs (ACI/BYLAYER resolution) -> svg.rs (to_svg, measures
                          every entity's extent) + crop.rs (the viewBox rule) -> png.rs
                          (to_png: fit, padding, lattice) -> export.rs (the package:
-                         overview, tiles, sidecars, records); json.rs (to_json) and
+                         overview, per-frame tile pyramids, sidecars, records, and the
+                         composited paper sheets); json.rs (to_json) and
                          acis.rs (3DSOLID wireframes) beside them. Read-only: there is
                          no DWG/DXF write path.
-    tests/               integration tests against the public API, one file per
-                         concern (fixtures.rs, header.rs, codepage.rs, text_fields.rs,
-                         dimensions.rs, polyline_geometry.rs, visibility.rs, crop.rs,
-                         export.rs, acceptance.rs, ...); corpus_sweep.rs is ignored by
-                         default (minutes) -- see docs/EVAL.md
+    tests/               integration tests against the public API, one file per concern
+                         (20 files: acceptance, acis_sab, block_transforms, codepage,
+                         control_chars, corpus_sweep, crop, dimensions, dxf_pipeline,
+                         export, fixtures, header, png_output, polyline_closed,
+                         polyline_geometry, read_paths, sheets, sheets_compositing,
+                         text_fields, visibility); corpus_sweep.rs is ignored by
+                         default -- see docs/EVAL.md
     tests/fixtures/      this project's own R2000 DXF fixtures (make_fixtures.py)
     examples/            dump.rs / blocks.rs -- manual checks
   uncad-cli/             the CLI binary (uncad)
@@ -59,10 +62,11 @@ header, `.spec`, `.inc` and codepage table they `#include`, 112 files in total
 (`git ls-files crates/libredwg-sys/vendor | wc -l`), unmodified (see
 `docs/THIRD_PARTY_NOTICES.md`) but a subset rather than the whole submodule. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
-tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
-`tests/documented_invocations.rs` in `uncad-cli`) read fixtures from
-`lib/libredwg/test/test-data/`. In short, the submodule is a precondition of
-`cargo test`, not of `cargo build`.
+tests read fixtures from `lib/libredwg/test/test-data/` -- `png.rs`'s own end-to-end
+test, 16 of the 20 integration files in `uncad` (all but `fixtures.rs`,
+`block_transforms.rs`, `control_chars.rs` and `sheets_compositing.rs`, which use this
+project's own DXF fixtures) and `tests/documented_invocations.rs` in `uncad-cli`. In
+short, the submodule is a precondition of `cargo test`, not of `cargo build`.
 
 **Updating the submodule**: after moving the `lib/libredwg` pointer (e.g. with
 `git submodule update --remote`), run `scripts/sync-libredwg-vendor.sh` to regenerate the
@@ -94,15 +98,16 @@ it needs access to**.
 
 **Unit tests** exist where they are precisely because they can call private helpers.
 Everything that needs no external file -- color resolution, SVG generation, SAT parsing,
-outlier-trim clustering -- lives here, and this is the bulk of what `cargo test` runs. One
+the crop rules, polyline geometry -- lives here: 114 of the 275 tests. One
 exception: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` reads a real DWG
 end-to-end but sits here because it needs the private `png_dimensions` helper.
 
 **Integration tests** compile as separate crates and therefore see only the public API, so
 what they cover matches exactly what someone who installed the crate can do. Fixtures come
 from `lib/libredwg/test/test-data/` (see "Build" -- the submodule is a precondition of
-`cargo test`, not `cargo build`). `uncad-cli`'s tests run the built binary itself rather
-than the library.
+`cargo test`, not `cargo build`) and from `crates/uncad/tests/fixtures/`, the DXF files
+this project writes itself (`make_fixtures.py`, with a row per file in that directory's
+README). `uncad-cli`'s tests run the built binary itself rather than the library.
 
 **Examples** assert nothing. Instead, `cargo test` and
 `cargo clippy --workspace --all-targets` compile them, so a broken public API signature
@@ -124,7 +129,7 @@ with no way to regenerate correct expectations for a different file, it was dele
 with its fixtures. See `samples/README.md`.
 
 What is actually covered today -- test counts, per-file breakdown, and what is still not
-automated -- is in `docs/CAVEATS.md`, "File-based regression tests". This section only
+automated -- is in `docs/CAVEATS.md`, "What the tests actually verify". This section only
 covers where things go.
 
 ## FFI boundary: opaque types plus dynapi reflection
@@ -175,7 +180,8 @@ calls have reproducibly caused `STATUS_HEAP_CORRUPTION`.
 ## Model: one `Entity`/`Tables`, with `Dwg_Data` living only inside `parse()`
 
 `CadDatabase` is a plain Rust value holding `entities` (what the model and paper spaces
-own) and `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE). It derives `Debug`, `Clone`,
+own), `tables` (LAYER with its state, every BLOCK_RECORD, MLINESTYLE, DIMSTYLE and
+LAYOUT) and `header` (the header variables the exports need). It derives `Debug`, `Clone`,
 `PartialEq`, `serde::Serialize` and `Deserialize`, and can be constructed directly.
 `parse()` reads the file with `std::fs::read` and hands the bytes to `parse_bytes()`,
 which decodes them through the `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` shims
@@ -187,10 +193,16 @@ and never reaches the return value. The hub of "DWG/DXF -> one model -> several 
 is therefore this Rust model, and the outputs are `to_json()` (serde, `json.rs`),
 `to_svg()` and `to_png()` (rasterized from the SVG).
 
-The model is deliberately lossy: it keeps the fields rendering needs and nothing else --
-no linetypes, lineweights, layer on/off state, text styles, object dictionaries or header
-variables. It cannot be used to write a DWG/DXF back out, and this project offers no
-writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see `CHANGELOG.md`).
+The model is deliberately lossy: it keeps the fields rendering and the exports need and
+nothing else. Since 0.3.0 that includes layer on/frozen/locked/plot state, lineweights,
+linetypes and text styles *by name* on layers and text entities, and the header variables
+the numbers need a meaning from. What is dropped: the LTYPE table (so dash patterns are
+unknown -- the name is all that survives), the STYLE table (so a text's font is unknown),
+DICTIONARY objects and everything reached only through them, xref state, and every field
+the exports do not read. LAYOUT objects are collected by a fixedtype scan, not by walking
+the named object dictionary. The model cannot be used to write a DWG/DXF back out, and
+this project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed;
+see `CHANGELOG.md`).
 
 The C build still includes the encoder sources and defines `USE_WRITE`, because reading
 depends on them: `dwg.c` gates `dxf_read_file()` on `USE_WRITE`, `in_dxf.c` uses
