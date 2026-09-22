@@ -1454,7 +1454,7 @@ pub fn export_package(
                     json!(rounder.derived(length)),
                 );
                 if let Some(area) = p.area() {
-                    let signed = crate::geom::polyline_signed_area(&p.vertices, &p.bulges);
+                    let signed = p.signed_area();
                     let simple = crate::geom::is_simple(&p.vertices);
                     v.insert("area".into(), json!(rounder.derived(area)));
                     v.insert(

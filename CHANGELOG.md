@@ -95,8 +95,9 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
   `bulge_arc`, `polyline_segments`, `polyline_length`, `polyline_signed_area` /
   `polyline_area` (shoelace plus each arc's circular segment, signed by orientation),
   `polyline_bounds` (arc extremes included) and `is_simple`. `LwPolylineEntity` gains
-  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()` and
-  `area()`; POLYLINE_2D bulges are collected from its VERTEX_2D subentities. The renderer
+  `bulges`, `widths`, `const_width`, `elevation` and `extrusion`, with `length()`,
+  `area()` and `signed_area()`; POLYLINE_2D bulges are collected from its VERTEX_2D
+  subentities. The renderer
   draws bulges as SVG arcs instead of chords (the 25-arc revision cloud in
   `example_2000.dwg` was a 25-gon). The design document's worked example -- a 100 x 50
   outline with one 90-degree arc -- measures 305.536 around and 5356.748 in area.
@@ -172,6 +173,11 @@ Work towards 0.3.0 "Readable" (see `docs/VLM_EXPORT_DESIGN.md`).
 
 ### Fixed
 
+- `polyline_signed_area` / `polyline_area` (and so `LwPolylineEntity::area()` and the
+  package's `area` / `orientation`) applied the bulge stored on the last vertex of an
+  *open* polyline to the straight segment that closes it for the area, which AutoCAD
+  leaves behind after BREAK/TRIM: a 0.77 x 0.45 in sketch reported 63646 in^2. The
+  helpers take the `closed` flag now, like `polyline_length` and `polyline_bounds`.
 - Justified text is drawn at its alignment point (`text-anchor` middle/end, baseline
   offset for middle/top/bottom): a center- or right-justified TEXT/ATTRIB used to be
   anchored at its left-baseline point, i.e. displaced by up to its own width (541 of

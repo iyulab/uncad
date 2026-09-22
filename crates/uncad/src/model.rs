@@ -185,9 +185,16 @@ impl LwPolylineEntity {
     }
 
     /// The area the polyline encloses (an open one is closed by a straight
-    /// segment), arcs included; `None` unless it has three or more vertices.
+    /// segment, its last vertex's bulge ignored), arcs included; `None`
+    /// unless it has three or more vertices.
     pub fn area(&self) -> Option<f64> {
-        (self.vertices.len() >= 3).then(|| crate::geom::polyline_area(&self.vertices, &self.bulges))
+        (self.vertices.len() >= 3).then(|| self.signed_area().abs())
+    }
+
+    /// [`area`](Self::area) with its sign: positive for a counter-clockwise
+    /// outline (see [`crate::geom::polyline_signed_area`]).
+    pub fn signed_area(&self) -> f64 {
+        crate::geom::polyline_signed_area(&self.vertices, &self.bulges, self.closed)
     }
 }
 

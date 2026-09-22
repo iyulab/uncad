@@ -119,8 +119,42 @@ fn the_revision_clouds_length_is_the_sum_of_its_arcs() {
     );
     // A cloud bulging outward encloses more than its vertex polygon.
     let area = cloud.area().expect("closed outline");
-    let polygon = uncad::geom::polyline_area(&cloud.vertices, &[]);
+    let polygon = uncad::geom::polyline_area(&cloud.vertices, &[], true);
     assert!(area > polygon, "{area} vs polygon {polygon}");
+}
+
+#[test]
+fn an_open_polylines_area_ignores_the_bulge_on_its_last_vertex() {
+    // AutoCAD keeps a bulge on the last vertex of an open polyline (after
+    // BREAK or TRIM, say); it belongs to no segment. The right triangle
+    // (0,0) -> (10,0) -> (10,10) closed by a straight segment for the area
+    // is 10 * 10 / 2 = 50 whatever that bulge says; a semicircle (bulge 1)
+    // on the closing chord would have added pi * (5 sqrt 2)^2 / 2 =
+    // 78.54. Open, the length is the two drawn sides: 20.
+    let mut p: LwPolylineEntity = {
+        let db = uncad::parse(MIRRORED).expect("fixture must parse");
+        lwpolyline(&db, "21").clone()
+    };
+    p.vertices = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]
+        .into_iter()
+        .map(|(x, y)| uncad::model::Point2D { x, y })
+        .collect();
+    p.closed = false;
+    for bulge in [1.0, -1.0, 669.19] {
+        p.bulges = vec![0.0, 0.0, bulge];
+        let area = p.area().expect("three vertices");
+        assert!((area - 50.0).abs() < 1e-9, "bulge {bulge}: {area}");
+        assert!(p.signed_area() > 0.0, "counter-clockwise");
+        assert!((p.length() - 20.0).abs() < 1e-9);
+    }
+    // Flagged closed, the same bulge is the third, real segment.
+    p.closed = true;
+    p.bulges = vec![0.0, 0.0, 1.0];
+    let area = p.area().unwrap();
+    assert!(
+        (area - (50.0 + std::f64::consts::PI * 50.0 / 2.0)).abs() < 1e-9,
+        "{area}"
+    );
 }
 
 #[test]
