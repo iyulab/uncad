@@ -2000,15 +2000,82 @@ fn dimension_dxfname(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> &'static str {
     }
 }
 
+/// `Dwg_Color.flag` bit: an inline 24-bit RGB follows in `rgb`. The *only*
+/// statement an R2004+ DWG entity makes about a true colour -- `bit_read_ENC`
+/// (bits.c), which `common_entity_data.spec` uses from R2004 on, reads `rgb`
+/// under this bit and never assigns `method` at all.
+const COLOR_FLAG_INLINE_RGB: u16 = 0x80;
+
+/// `Dwg_Color.flag` bit: a DBCOLOR object handle follows *instead of* an
+/// inline RGB. That object is not converted, so there is no colour to report
+/// and whatever `rgb` holds is not it.
+const COLOR_FLAG_COLOR_HANDLE: u16 = 0x40;
+
 /// Reads the common `color` (`Dwg_Color`) field and splits it into
 /// `(color_index, true_color)` per [`EntityCommon`].
 fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
     let Some(color) = get_common_field::<libredwg_sys::Dwg_Color>(entity_ptr, "color") else {
         return (256, None); // no color field at all -- BYLAYER default
     };
-    let true_color = (color.method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR)
-        .then_some(color.rgb & 0xff_ffff);
-    (color.index, true_color)
+    split_entity_color(color.index, color.flag, color.method, color.rgb, |index| {
+        // SAFETY: a pure lookup in the library's static palette; any index
+        // is accepted (256 and above answer 0).
+        unsafe { libredwg_sys::dwg_rgb_palette_index(index) }
+    })
+}
+
+/// Decides whether a `Dwg_Color` read off an *entity* really states a direct
+/// RGB, from the three fields the two readers fill differently. Testing
+/// `method == TRUECOLOR` alone is wrong in both directions:
+///
+/// * **DWG, R2004+** -- `bit_read_ENC` puts the 420 value in `rgb` under
+///   `flag & 0x80` and leaves `method` at 0, so a real true colour was
+///   dropped: no entity of any corpus DWG reported one.
+/// * **DXF** -- `dxf_set_CMC_index` (in_dxf.c) answers a plain group 62 with
+///   `method = 0xc3` and an `rgb` *synthesised* from LibreDWG's own ACI
+///   palette, so an entity that states only an index was reported as
+///   carrying an RGB the file never wrote. A real group 420 instead takes the
+///   `color.method = value >> 24` path, which is 0 for a plain 24-bit value.
+///
+/// `palette` is the RGB the library synthesises for an ACI index -- its own
+/// table (`dwg_rgb_palette_index`), which is not the display palette the
+/// model publishes; the two disagree on most indices, and only the
+/// library's tells a synthesised RGB from a stated one.
+///
+/// Two cases stay indistinguishable from the fields available and are
+/// reported as "no true colour", which renders identically either way: a
+/// group 420 of pure black (`rgb` 0 is also what an untouched field holds),
+/// and a group 420 that repeats the library's RGB for the entity's own ACI
+/// index exactly.
+fn split_entity_color(
+    index: i16,
+    flag: u16,
+    method: libredwg_sys::Dwg_Color_Method,
+    rgb: u32,
+    palette: impl Fn(u16) -> u32,
+) -> (i16, Option<u32>) {
+    let rgb24 = rgb & 0xff_ffff;
+    if flag & COLOR_FLAG_COLOR_HANDLE != 0 {
+        return (index, None);
+    }
+    if flag & COLOR_FLAG_INLINE_RGB != 0 {
+        return (index, Some(rgb24));
+    }
+    // The DXF reader's method byte. VOID (0) is a plain 24-bit group 420;
+    // ACI (0xc2) and TRUECOLOR (0xc3) are a pre-tagged one -- except that
+    // 0xc2 with no RGB is how it spells BYLAYER and 0xc3 with the palette's
+    // own entry is how it spells a plain group 62.
+    let tagged_rgb = matches!(
+        method,
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID
+            | libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI
+            | libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR
+    );
+    let from_palette = u16::try_from(index).is_ok_and(|i| palette(i) & 0xff_ffff == rgb24);
+    (
+        index,
+        (tagged_rgb && rgb24 != 0 && !from_palette).then_some(rgb24),
+    )
 }
 
 /// # Safety
@@ -2252,6 +2319,98 @@ fn dimension_text_override(user_text: Option<&str>) -> TextOverride {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const VOID: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID;
+    const BYLAYER: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_BYLAYER;
+    const BYBLOCK: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_BYBLOCK;
+    const ACI: libredwg_sys::Dwg_Color_Method = libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI;
+    const TRUECOLOR: libredwg_sys::Dwg_Color_Method =
+        libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR;
+
+    /// The library's own palette, through the same lookup the conversion
+    /// uses.
+    fn split(
+        index: i16,
+        flag: u16,
+        method: libredwg_sys::Dwg_Color_Method,
+        rgb: u32,
+    ) -> (i16, Option<u32>) {
+        split_entity_color(index, flag, method, rgb, |i| unsafe {
+            libredwg_sys::dwg_rgb_palette_index(i)
+        })
+    }
+
+    /// Each case below is the `(index, flag, method, rgb)` LibreDWG leaves in
+    /// `Dwg_Color` for one way of writing a colour, read off the reader that
+    /// writes it: `bit_read_ENC` / `common_entity_data.spec` for the DWG
+    /// rows and `dxf_set_CMC_index` / the group-420 arm of the common-entity
+    /// loop in `in_dxf.c` for the DXF ones.
+    #[test]
+    fn split_entity_color_follows_what_each_reader_actually_stores() {
+        // --- R2004+ DWG (bit_read_ENC): flag 0x80 says an RGB follows, and
+        // nothing ever sets `method` on this path.
+        assert_eq!(split(256, 0x80, VOID, 0x00_ff7f), (256, Some(0x00_ff7f)));
+        // The stored BL may carry a method byte of its own; only the low 24
+        // bits are the colour (which is what the DXF writer emits for 420).
+        assert_eq!(split(256, 0x80, VOID, 0xc200_ff7f), (256, Some(0x00_ff7f)));
+        // flag 0x40 is a DBCOLOR handle *instead of* an inline RGB (the spec
+        // reads one or the other), and that object is not converted.
+        assert_eq!(split(256, 0xc0, VOID, 0x00_ff7f), (256, None));
+        // Plain BYLAYER: no flag bits, rgb zeroed by the decoder.
+        assert_eq!(split(256, 0, VOID, 0), (256, None));
+
+        // --- DXF group 62 only (dxf_set_CMC_index): method 0xc3 with `rgb`
+        // synthesised from LibreDWG's ACI palette. ACI 1 is 0xff0000 there,
+        // and ACI 8 -- where the library's table and the model's display
+        // palette disagree -- is 0x414141.
+        assert_eq!(
+            split(1, 0, TRUECOLOR, 0xc300_0000 | 0xff_0000),
+            (1, None),
+            "an index-only entity states no RGB"
+        );
+        assert_eq!(split(8, 0, TRUECOLOR, 0xc341_4141), (8, None));
+        // ... and the same for BYLAYER / BYBLOCK / none, which that function
+        // spells with an empty rgb.
+        assert_eq!(
+            split(256, 0, ACI, 0xc200_0000),
+            (256, None),
+            "0xc2 with no RGB is how the DXF reader spells BYLAYER"
+        );
+        assert_eq!(split(0, 0, BYBLOCK, 0xc100_0000), (0, None));
+        assert_eq!(split(256, 0, BYLAYER, 0xc000_0000), (256, None));
+
+        // --- DXF group 420. The common-entity arm stores the value verbatim
+        // and takes the method from its top byte, so a plain 24-bit RGB
+        // arrives with method 0 and a pre-tagged one with 0xc2 or 0xc3.
+        assert_eq!(split(256, 0, VOID, 65407), (256, Some(0x00_ff7f)));
+        assert_eq!(
+            split(3, 0, ACI, 0xc200_ff7f),
+            (3, Some(0x00_ff7f)),
+            "a 420 override wins over the entity's own group 62"
+        );
+        assert_eq!(split(3, 0, TRUECOLOR, 0xc300_ff7f), (3, Some(0x00_ff7f)));
+        // Group 420 of 257 is the reader's "none": method 0xc8, rgb 0.
+        assert_eq!(
+            split(
+                256,
+                0,
+                libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_NONE,
+                0xc800_0000
+            ),
+            (256, None)
+        );
+    }
+
+    #[test]
+    fn the_librarys_palette_is_its_own_not_the_models() {
+        // The reason the lookup goes through the library: its ACI 8 is
+        // 0x414141, the model's display palette says 0x808080.
+        assert_eq!(unsafe { libredwg_sys::dwg_rgb_palette_index(8) }, 0x41_4141);
+        assert_eq!(uncad_model::color::aci_to_rgb(8), Some(0x80_8080));
+    }
 
     fn aci_stop(shift_value: f64, index: i16) -> libredwg_sys::Dwg_HATCH_Color {
         libredwg_sys::Dwg_HATCH_Color {

@@ -113,16 +113,16 @@ Notable changes to this project are recorded here. The format follows
   "Local patches to the vendored LibreDWG". A DXF holding a polygon mesh is read instead
   of refused as a whole (critical error 2048: the importer did not know the mesh
   vertices' `AcDbPolygonMeshVertex` marker). A corrupt header date no longer ends the
-  process from inside the C library (0xC0000409 on Windows, from `strftime`). Two more
-  are not visible in this crate's output yet: an R2004+ entity carrying both a true
-  colour and a transparency no longer has the two swapped in the library's fields (this
-  crate reads a true colour only under the TRUECOLOR method, which the entities measured
-  do not have), and the importer compares an R2007+ DXF's table-record names decoded, so
-  its layer and block lookups no longer stop at the first character (such a DXF is still
-  refused). On the 208 corpus drawings the JSON output is byte-identical with and without
-  the patches. `build.rs` refuses to build when a patch's marker has gone missing,
-  which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
-  silence.
+  process from inside the C library (0xC0000409 on Windows, from `strftime`). An R2004+
+  entity carrying both a true colour and a transparency no longer has the two swapped in
+  the library's fields (`2004/HatchG.dwg`'s HATCH 29F: `0x1ae464`, not `0x0000e5`). One
+  more is not visible in this crate's output yet: the importer compares an R2007+ DXF's
+  table-record names decoded, so its layer and block lookups no longer stop at the first
+  character (such a DXF is still refused). When the patches landed, the JSON output of
+  the 208 corpus drawings was byte-identical with and without them; the colour-order one
+  shows since true colours are read as the file states them (below). `build.rs` refuses
+  to build when a patch's marker has gone missing, which a re-vendor through
+  `scripts/sync-libredwg-vendor.sh` would otherwise do in silence.
 - **Every vertex of a POLYLINE_2D/3D is read.** LibreDWG's point accessors end their walk
   one vertex early on every file older than R2004, so the last vertex was dropped: a closed
   square came back a triangle, a two-vertex arc a single point. The vertices now come from
@@ -131,6 +131,14 @@ Notable changes to this project are recorded here. The format follows
   20 of them one short). A polyline's VERTEX records are no longer reported as entities of
   their own either -- 62 `Unknown` VERTEX entities in seven pre-R13 DXFs. See
   `docs/CAVEATS.md`, "Polyline vertices come from the polyline's own chain".
+- **An entity's true colour is the one the file states.** It was read only when the
+  colour's method said TRUECOLOR: an R2004+ DWG never sets the method (the RGB comes under
+  the colour's `0x80` flag), so no DWG entity reported its true colour, while the DXF
+  importer sets it for a plain group 62 with an RGB taken from its own palette, so a DXF
+  entity with only an ACI index reported an RGB the file never wrote. The flag is read
+  first, and a DXF RGB that is the one the library synthesises for the entity's index is
+  not a true colour. See `docs/CAVEATS.md`, "An entity's true colour is what the file
+  states".
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as

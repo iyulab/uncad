@@ -276,6 +276,10 @@ fn main() {
         .allowlist_function("dwg_codepage_uc")
         .allowlist_function("dwg_codepage_uwc")
         .allowlist_function("dwg_codepage_dxfstr")
+        // The RGB the library's DXF importer synthesises for a plain ACI
+        // index (dxf_set_CMC_index): how an entity's stated true colour is
+        // told from one the importer made up.
+        .allowlist_function("dwg_rgb_palette_index")
         // The handle of the object a type-specific struct pointer belongs
         // to, for naming a string in a diagnostic.
         .allowlist_function("dwg_obj_generic_handlevalue")

@@ -650,3 +650,28 @@ fn a_nested_block_reference_carries_its_attribute_once() {
     assert_eq!(attribs(&db.entities[0]), []);
     assert_eq!(attribs(&db.entities[1]), [entry("62", "NUM", "D-TOP")]);
 }
+
+// ------------------------------------------------------ entity truecolor
+
+/// The four ways a DXF entity can state its colour, on a layer whose own ACI
+/// is 3. 65407 is `0x00ff7f` and 255 is `0x0000ff`, the file's own group 420
+/// values; a plain group 62 states no RGB, although LibreDWG's importer
+/// synthesises one for it from its own palette.
+#[test]
+fn a_dxf_entity_carries_the_true_colour_it_states_and_no_other() {
+    let db = parse(ENTITY_TRUECOLOR);
+    let colors: Vec<(&str, i16, Option<u32>)> = db
+        .entities
+        .iter()
+        .map(|e| (handle(e), e.common().color_index, e.common().true_color))
+        .collect();
+    assert_eq!(
+        colors,
+        [
+            ("30", 256, Some(0x00_ff7f)),
+            ("31", 1, None),
+            ("32", 1, Some(0x00_00ff)),
+            ("33", 256, None),
+        ]
+    );
+}

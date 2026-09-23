@@ -527,7 +527,7 @@ confirmation, which put rotated text on its side without saying so.)
 
 ## There is no single ACI colour table
 
-`ACI_PALETTE` in `crates/uncad/src/color.rs` maps colour index 1-255 to RGB, and which RGB
+`ACI_PALETTE` in `uncad-model`'s `color.rs` maps colour index 1-255 to RGB, and which RGB
 values are "right" has no one answer. AutoCAD's *displayed* colours depend on the
 drawing-area background, so a table captured from a dark model space and one captured from
 a white sheet disagree with each other; a third-party reader may carry a table that matches
@@ -546,6 +546,27 @@ table cannot land silently.
 Two entries are not colours: index 0 is a placeholder and index 256 is the BYLAYER slot.
 Both are `0`, which is what lets `aci_to_hex` stay total over `0..=256` without a branch --
 and what makes the unresolved-layer case below come out black rather than panicking.
+
+## An entity's true colour is what the file states
+
+`common.true_color` is the 24-bit RGB an entity states (DXF 420), beside its ACI index.
+The two readers leave it in different shapes, and the colour's method byte alone tells
+neither apart. An R2004+ DWG entity states it under its colour's ENC flag `0x80` and
+never sets the method, so a test on the method dropped every true colour of every DWG.
+The DXF importer, for its part, answers a plain group 62 with the TRUECOLOR method and an
+RGB it *synthesises* from its own copy of the ACI palette, so an entity that states only
+an index looked as if it carried an RGB. `split_entity_color` in `convert.rs` reads the
+flag first (`0x80` an inline RGB, `0x40` a colour-book reference, which is not converted),
+and for a DXF compares the RGB with the one the library synthesises for the entity's
+index -- through the library itself (`dwg_rgb_palette_index`), because its table is not
+the display palette the model publishes (the two differ on 222 of 256 indices, see "There
+is no single ACI colour table"): an RGB that is the synthesised one is not a stated true
+colour. Two cases stay indistinguishable and read as no true colour, which draws the same
+either way: a stated 420 of pure black, and a stated 420 that repeats the library's RGB
+for the entity's own index. `tests/fixtures.rs` pins the four DXF spellings
+(`entity_truecolor_r2000.dxf`). Over the corpus, the DXF readings of `example_*` and
+`sample_*` no longer report a true colour for their entities of plain ACI 8 or 3, and the
+R2004+ DWGs `2004/HatchG` and `2013/gh44-error` now report the ones they state.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
@@ -774,11 +795,10 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
   `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
   flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
-  the two bits set there is a single BL and the order cannot matter. This crate does not
-  show the difference yet: it reports an entity's true colour only when the colour's
-  method says TRUECOLOR, and on that drawing neither entity's does, so both come out
-  without a true colour with the patch as without it. There is no regression test for it
-  here for that reason.
+  the two bits set there is a single BL and the order cannot matter.
+  `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
+  colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
+  true colour is what the file states" for how the colour is read).
 
 ## No DWG/DXF writing
 

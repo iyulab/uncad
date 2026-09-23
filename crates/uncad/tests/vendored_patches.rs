@@ -10,14 +10,9 @@
 //! header date ends that build's process with 0xC0000409, and the polygon
 //! mesh makes it refuse the whole file with critical error 2048.
 //!
-//! Two of the five are not observable through `parse()` yet, so they have no
-//! test here. The `dwg.c` one decodes an R2007+ DXF's table names, and this
-//! crate still refuses such a DXF before LibreDWG reads it. The
-//! `common_entity_data.spec` one puts an entity's true colour and its
-//! transparency back in their own fields, and the entity it was measured on
-//! (HATCH 29F in `test-data/2004/HatchG.dwg`) comes out of this crate without
-//! a true colour with the patch as without it: the colour is reported only
-//! when its method says TRUECOLOR, and that entity's does not.
+//! One of the five is not observable through `parse()` yet, so it has no
+//! test here: the `dwg.c` one decodes an R2007+ DXF's table names, and this
+//! crate still refuses such a DXF before LibreDWG reads it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +20,12 @@ use std::path::{Path, PathBuf};
 const HELIX: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../lib/libredwg/test/test-data/2000/Helix.dwg"
+);
+
+/// The R2004 drawing the colour-order patch was measured on.
+const HATCH_G: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/2004/HatchG.dwg"
 );
 
 /// The same corpus R2000 DXF the other DXF tests read.
@@ -203,5 +204,33 @@ fn a_polygon_mesh_does_not_cost_the_whole_dxf() {
         db.entities.len(),
         reference.entities.len() + 1,
         "the polygon mesh should add exactly one entity: {after:?}"
+    );
+}
+
+// --- src/common_entity_data.spec: an entity's RGB before its transparency --
+
+/// HATCH `29F` of `2004/HatchG.dwg` carries both an inline RGB and a
+/// transparency (its colour's ENC flag is `0xa0`); it lies inside LWPOLYLINE
+/// `28D`, whose flag is `0x80` alone -- one BL, which no reading order can
+/// get wrong -- and the file draws the two in the same colour. Without the
+/// patch the spec read the HATCH's two BLs the other way round, so its
+/// colour was the transparency word `0x020000e5` (a true colour of
+/// `0x0000e5`) and the RGB went to the transparency field.
+#[test]
+fn an_entity_with_a_transparency_keeps_its_true_colour() {
+    let db = uncad::parse(HATCH_G).expect("the corpus DWG parses");
+    let colour = |handle: &str| {
+        db.entities
+            .iter()
+            .find(|e| e.common().source_handle == uncad::model::Ref::Resolved(handle.to_string()))
+            .unwrap_or_else(|| panic!("HatchG.dwg has an entity {handle}"))
+            .common()
+            .true_color
+    };
+    assert_eq!(colour("28D"), Some(0x1a_e464), "the LWPOLYLINE, one BL");
+    assert_eq!(
+        colour("29F"),
+        Some(0x1a_e464),
+        "the HATCH, RGB and transparency"
     );
 }
