@@ -1,0 +1,1128 @@
+{
+  "entities": [
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 264,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "108"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "text_height": 2.5,
+      "text": "LEFT",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 265,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "109"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 43.0,
+        "y": 0.0
+      },
+      "text_height": 2.5,
+      "text": "CENTER",
+      "rotation": 0.0,
+      "horizontal_justification": "CENTER",
+      "vertical_justification": "BASELINE",
+      "alignment_point": {
+        "x": 50.0,
+        "y": 0.0
+      },
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ROMANS"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 266,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10A"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 88.0,
+        "y": -2.5
+      },
+      "text_height": 2.5,
+      "text": "RIGHT TOP",
+      "rotation": 0.0,
+      "horizontal_justification": "RIGHT",
+      "vertical_justification": "TOP",
+      "alignment_point": {
+        "x": 100.0,
+        "y": 0.0
+      },
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 267,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10B"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 44.0,
+        "y": 18.75
+      },
+      "text_height": 2.5,
+      "text": "MIDDLE",
+      "rotation": 0.0,
+      "horizontal_justification": "MIDDLE",
+      "vertical_justification": "BASELINE",
+      "alignment_point": {
+        "x": 50.0,
+        "y": 20.0
+      },
+      "width_factor": 0.8,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "ROMANS"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 268,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10C"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 0.0,
+        "y": 40.0
+      },
+      "text_height": 2.5,
+      "text": "ALIGNED",
+      "rotation": 0.0,
+      "horizontal_justification": "ALIGNED",
+      "vertical_justification": "BASELINE",
+      "alignment_point": {
+        "x": 60.0,
+        "y": 40.0
+      },
+      "width_factor": 1.0,
+      "oblique_angle": 0.2617993877991494,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 269,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10D"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 0.0,
+        "y": 60.0
+      },
+      "text_height": 2.5,
+      "text": "FIT",
+      "rotation": 0.0,
+      "horizontal_justification": "FIT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": {
+        "x": 60.0,
+        "y": 60.0
+      },
+      "width_factor": 2.5,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 270,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10E"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 0.0,
+        "y": 79.0
+      },
+      "text_height": 2.5,
+      "text": "LEFT BOTTOM",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BOTTOM",
+      "alignment_point": {
+        "x": 0.0,
+        "y": 80.0
+      },
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "UNRESOLVED",
+        "data": "GOST"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "INSERT",
+      "common": {
+        "id": 271,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10F"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "block_name": {
+        "type": "RESOLVED",
+        "data": "TAG"
+      },
+      "insertion_point": {
+        "x": 120.0,
+        "y": 0.0,
+        "z": 0.0
+      },
+      "scale": {
+        "x": 1.0,
+        "y": 1.0,
+        "z": 1.0
+      },
+      "rotation": 0.0,
+      "attribs": [
+        {
+          "common": {
+            "id": 272,
+            "origin": "VECTOR",
+            "confidence": "HIGH",
+            "source_handle": {
+              "type": "RESOLVED",
+              "data": "110"
+            },
+            "layer": {
+              "type": "RESOLVED",
+              "data": "TEXT"
+            },
+            "color_index": 256,
+            "true_color": null,
+            "invisible": false
+          },
+          "start_point": {
+            "x": 120.0,
+            "y": 0.0
+          },
+          "text_height": 2.5,
+          "tag": "NUMBER",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
+          "text": "D-101",
+          "rotation": 0.0,
+          "horizontal_justification": "LEFT",
+          "vertical_justification": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "RESOLVED",
+            "data": "STANDARD"
+          },
+          "elevation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
+        },
+        {
+          "common": {
+            "id": 273,
+            "origin": "VECTOR",
+            "confidence": "HIGH",
+            "source_handle": {
+              "type": "RESOLVED",
+              "data": "111"
+            },
+            "layer": {
+              "type": "RESOLVED",
+              "data": "TEXT"
+            },
+            "color_index": 256,
+            "true_color": null,
+            "invisible": false
+          },
+          "start_point": {
+            "x": 120.0,
+            "y": -4.0
+          },
+          "text_height": 2.5,
+          "tag": "NOTE",
+          "flags": {
+            "invisible": true,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
+          "text": "FIRE RATED",
+          "rotation": 0.0,
+          "horizontal_justification": "LEFT",
+          "vertical_justification": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "RESOLVED",
+            "data": "STANDARD"
+          },
+          "elevation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
+        }
+      ],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "ATTRIB",
+      "common": {
+        "id": 272,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "110"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 120.0,
+        "y": 0.0
+      },
+      "text_height": 2.5,
+      "tag": "NUMBER",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
+      "text": "D-101",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "ATTRIB",
+      "common": {
+        "id": 273,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "111"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TEXT"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 120.0,
+        "y": -4.0
+      },
+      "text_height": 2.5,
+      "tag": "NOTE",
+      "flags": {
+        "invisible": true,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
+      "text": "FIRE RATED",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "RESOLVED",
+        "data": "STANDARD"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      },
+      "TEXT": {
+        "name": "TEXT",
+        "color_index": 2,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      }
+    },
+    "block_records": {
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "text_height": 2.5,
+            "text": "LEFT",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 265,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "109"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 43.0,
+              "y": 0.0
+            },
+            "text_height": 2.5,
+            "text": "CENTER",
+            "rotation": 0.0,
+            "horizontal_justification": "CENTER",
+            "vertical_justification": "BASELINE",
+            "alignment_point": {
+              "x": 50.0,
+              "y": 0.0
+            },
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ROMANS"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 266,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10A"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 88.0,
+              "y": -2.5
+            },
+            "text_height": 2.5,
+            "text": "RIGHT TOP",
+            "rotation": 0.0,
+            "horizontal_justification": "RIGHT",
+            "vertical_justification": "TOP",
+            "alignment_point": {
+              "x": 100.0,
+              "y": 0.0
+            },
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 44.0,
+              "y": 18.75
+            },
+            "text_height": 2.5,
+            "text": "MIDDLE",
+            "rotation": 0.0,
+            "horizontal_justification": "MIDDLE",
+            "vertical_justification": "BASELINE",
+            "alignment_point": {
+              "x": 50.0,
+              "y": 20.0
+            },
+            "width_factor": 0.8,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "ROMANS"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 268,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10C"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 40.0
+            },
+            "text_height": 2.5,
+            "text": "ALIGNED",
+            "rotation": 0.0,
+            "horizontal_justification": "ALIGNED",
+            "vertical_justification": "BASELINE",
+            "alignment_point": {
+              "x": 60.0,
+              "y": 40.0
+            },
+            "width_factor": 1.0,
+            "oblique_angle": 0.2617993877991494,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 269,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 60.0
+            },
+            "text_height": 2.5,
+            "text": "FIT",
+            "rotation": 0.0,
+            "horizontal_justification": "FIT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": {
+              "x": 60.0,
+              "y": 60.0
+            },
+            "width_factor": 2.5,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 270,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 79.0
+            },
+            "text_height": 2.5,
+            "text": "LEFT BOTTOM",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BOTTOM",
+            "alignment_point": {
+              "x": 0.0,
+              "y": 80.0
+            },
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "UNRESOLVED",
+              "data": "GOST"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "INSERT",
+            "common": {
+              "id": 271,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10F"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TEXT"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "block_name": {
+              "type": "RESOLVED",
+              "data": "TAG"
+            },
+            "insertion_point": {
+              "x": 120.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "rotation": 0.0,
+            "attribs": [
+              {
+                "common": {
+                  "id": 272,
+                  "origin": "VECTOR",
+                  "confidence": "HIGH",
+                  "source_handle": {
+                    "type": "RESOLVED",
+                    "data": "110"
+                  },
+                  "layer": {
+                    "type": "RESOLVED",
+                    "data": "TEXT"
+                  },
+                  "color_index": 256,
+                  "true_color": null,
+                  "invisible": false
+                },
+                "start_point": {
+                  "x": 120.0,
+                  "y": 0.0
+                },
+                "text_height": 2.5,
+                "tag": "NUMBER",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
+                "text": "D-101",
+                "rotation": 0.0,
+                "horizontal_justification": "LEFT",
+                "vertical_justification": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "RESOLVED",
+                  "data": "STANDARD"
+                },
+                "elevation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
+              },
+              {
+                "common": {
+                  "id": 273,
+                  "origin": "VECTOR",
+                  "confidence": "HIGH",
+                  "source_handle": {
+                    "type": "RESOLVED",
+                    "data": "111"
+                  },
+                  "layer": {
+                    "type": "RESOLVED",
+                    "data": "TEXT"
+                  },
+                  "color_index": 256,
+                  "true_color": null,
+                  "invisible": false
+                },
+                "start_point": {
+                  "x": 120.0,
+                  "y": -4.0
+                },
+                "text_height": 2.5,
+                "tag": "NOTE",
+                "flags": {
+                  "invisible": true,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
+                "text": "FIRE RATED",
+                "rotation": 0.0,
+                "horizontal_justification": "LEFT",
+                "vertical_justification": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "RESOLVED",
+                  "data": "STANDARD"
+                },
+                "elevation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
+              }
+            ],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ]
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": []
+      },
+      "TAG": {
+        "name": "TAG",
+        "entities": [
+          {
+            "type": "ATTDEF",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 0.0
+            },
+            "text_height": 2.5,
+            "tag": "NUMBER",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
+            "default_value": "-",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "ATTDEF",
+            "common": {
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": -4.0
+            },
+            "text_height": 2.5,
+            "tag": "NOTE",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
+            "default_value": "-",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "RESOLVED",
+              "data": "STANDARD"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ]
+      }
+    },
+    "dim_styles": {},
+    "mlinestyles": {},
+    "layouts": {}
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}

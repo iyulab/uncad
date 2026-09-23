@@ -61,6 +61,9 @@ Notable changes to this project are recorded here. The format follows
   radians) and the text style they name (DXF 7). An MTEXT carries its reference width
   (DXF 41), the extents its writer measured (DXF 42/43, `None` when not stated) and its
   text style.
+- ATTRIB and ATTDEF carry their `flags` (DXF 70): invisible, constant, verify, preset. An
+  invisible attribute (a title block's hidden field, say) is no longer indistinguishable
+  from a shown one.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

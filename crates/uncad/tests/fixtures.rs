@@ -588,3 +588,65 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
     assert!((arc.start_angle - 315f64.to_radians()).abs() < 1e-9);
     assert!((arc.end_angle - 45f64.to_radians()).abs() < 1e-9);
 }
+
+// -------------------------------------------------------- nested attrib
+
+/// The attribute of a block reference nested in another block. The inner
+/// INSERT (`55`, inside `DOOR`) carries its value as its own attribute, and
+/// the block's entity list does not carry that ATTRIB a second time; the
+/// model-space INSERT (`61`) carries its value and the top level lists it
+/// once more after it, as every drawn INSERT's attributes are.
+#[test]
+fn a_nested_block_reference_carries_its_attribute_once() {
+    let db = parse(NESTED_ATTRIB);
+    let attribs = |e: &Entity| -> Vec<(String, String, String)> {
+        match e {
+            Entity::Insert(i) => i
+                .attribs
+                .iter()
+                .map(|a| {
+                    let Ref::Resolved(h) = &a.common.source_handle else {
+                        panic!("{a:?}");
+                    };
+                    (h.clone(), a.tag.clone(), a.text.clone())
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    let entry = |h: &str, tag: &str, text: &str| (h.to_string(), tag.to_string(), text.to_string());
+
+    let door: Vec<(&str, &str)> = db.tables.block_records["DOOR"]
+        .entities
+        .iter()
+        .map(|e| (e.type_name(), handle(e)))
+        .collect();
+    assert_eq!(door, [("LINE", "52"), ("LINE", "53"), ("INSERT", "55")]);
+    assert_eq!(
+        attribs(&db.tables.block_records["DOOR"].entities[2]),
+        [entry("56", "NUM", "D-101")]
+    );
+    // The definition keeps its ATTDEF, with no flag set.
+    let tag = db.tables.block_records["TAG"]
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Attdef(a) => Some(a),
+            _ => None,
+        })
+        .expect("TAG's ATTDEF");
+    assert_eq!(
+        (tag.tag.as_str(), tag.default_value.as_str()),
+        ("NUM", "D-000")
+    );
+    assert_eq!(tag.flags, uncad::model::AttributeFlags::default());
+
+    let top: Vec<(&str, &str)> = db
+        .entities
+        .iter()
+        .map(|e| (e.type_name(), handle(e)))
+        .collect();
+    assert_eq!(top, [("INSERT", "60"), ("INSERT", "61"), ("ATTRIB", "62")]);
+    assert_eq!(attribs(&db.entities[0]), []);
+    assert_eq!(attribs(&db.entities[1]), [entry("62", "NUM", "D-TOP")]);
+}

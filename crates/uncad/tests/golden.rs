@@ -20,7 +20,7 @@ use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 11] = [
+const CASES: [(&str, &[u8], &str); 12] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -72,6 +72,11 @@ const CASES: [(&str, &[u8], &str); 11] = [
         include_str!("golden/g12.expected.json"),
     ),
     (
+        "g13",
+        include_bytes!("golden/g13.dxf"),
+        include_str!("golden/g13.expected.json"),
+    ),
+    (
         "g15",
         include_bytes!("golden/g15.dxf"),
         include_str!("golden/g15.expected.json"),
@@ -110,6 +115,12 @@ impl Drop for Fixture {
 /// in two places, which is why the deviation is written once over both.
 /// It is applied to the expectation rather than by weakening the
 /// comparison, so every other value in those cases stays pinned exactly.
+///
+/// A text style takes a different turn through the same importer: a TEXT
+/// naming a style the file never declares (G13's `GOST`) is pointed at the
+/// STANDARD entry instead, the entry an absent group 7 means. The name the
+/// file wrote is lost the same way; what arrives is a resolved reference
+/// to a style the entity did not name.
 ///
 /// The style table carries a second, smaller one. A DIMSTYLE writes a
 /// variable only when it differs from the value the application starts from,
@@ -163,6 +174,19 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
     }
 
     fn lower(entity: &mut Entity) {
+        let text_style = match entity {
+            Entity::Text(text) => Some(&mut text.style_name),
+            Entity::Attrib(attrib) => Some(&mut attrib.style_name),
+            Entity::Attdef(attdef) => Some(&mut attdef.style_name),
+            Entity::MText(mtext) => Some(&mut mtext.style_name),
+            _ => None,
+        };
+        if let Some(style) = text_style {
+            if matches!(style, Ref::Unresolved(_)) {
+                *style = Ref::Resolved("STANDARD".to_string());
+            }
+            return;
+        }
         let reference = match entity {
             Entity::Insert(insert) => &mut insert.block_name,
             Entity::Dimension(dimension) => &mut dimension.style_name,
@@ -220,7 +244,7 @@ fn assert_reads_back_exactly(name: &str, dxf: &[u8], expected_json: &str) {
 }
 
 /// The tripwire for the deviation above: it asserts the defect is still
-/// there, in both the places the golden cases put it. The day this reader
+/// there, in all the places the golden cases put it. The day this reader
 /// returns the name the file wrote, this test fails -- which is the signal
 /// to delete both it and `apply_known_deviations`.
 #[test]
@@ -256,6 +280,31 @@ fn the_dxf_importer_still_drops_an_undeclared_name() {
         undeclared,
         &Ref::Absent,
         "the importer kept the name of an undeclared style -- remove the known deviation"
+    );
+
+    let fixture = Fixture::write("golden-g13-deviation.dxf", include_bytes!("golden/g13.dxf"));
+    let db = uncad::parse(&fixture.0).expect("g13 should parse");
+    let expected: CadDatabase =
+        serde_json::from_str(include_str!("golden/g13.expected.json")).unwrap();
+    let styles = |db: &CadDatabase| -> Vec<Ref<String>> {
+        db.entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Text(t) => Some(t.style_name.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let (read, stated) = (styles(&db), styles(&expected));
+    let undeclared = stated
+        .iter()
+        .position(|s| matches!(s, Ref::Unresolved(_)))
+        .expect("g13 has a text naming a style the file never declares");
+    assert_eq!(stated[undeclared], Ref::Unresolved("GOST".to_string()));
+    assert_eq!(
+        read[undeclared],
+        Ref::Resolved("STANDARD".to_string()),
+        "the importer kept the name of an undeclared text style -- remove the known deviation"
     );
 }
 

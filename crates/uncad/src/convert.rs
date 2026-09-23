@@ -26,7 +26,9 @@ use uncad_model::model::{
     Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity, SolidEntity,
     SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
-use uncad_model::model::{HorizontalJustification, Point2D, Point3D, VerticalJustification};
+use uncad_model::model::{
+    AttributeFlags, HorizontalJustification, Point2D, Point3D, VerticalJustification,
+};
 
 /// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
 /// as in DXF group 70 and as `dwg.h` documents for `Dwg_Entity_POLYLINE_2D`.
@@ -721,6 +723,19 @@ fn text_placement(
     }
 }
 
+/// An ATTRIB's or ATTDEF's flags (DXF 70), one per bit as the reference
+/// names them: 1 invisible, 2 constant, 4 verify, 8 preset. An absent group
+/// is no flag set.
+fn attribute_flags(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> AttributeFlags {
+    let flags = get_field::<u8>(entity_ptr, dxfname, "flags").unwrap_or(0);
+    AttributeFlags {
+        invisible: flags & 1 != 0,
+        constant: flags & 2 != 0,
+        verify: flags & 4 != 0,
+        preset: flags & 8 != 0,
+    }
+}
+
 /// The text style (DXF 7) a TEXT, ATTRIB, ATTDEF or MTEXT names, as a
 /// reference like a layer. The DXF reference's default for an absent group
 /// is the style named STANDARD, and LibreDWG's DXF importer already points
@@ -1066,6 +1081,7 @@ unsafe fn convert_entity(
             // Read before `text` is shadowed by the value below.
             let tag = text.field(entity_ptr, "ATTRIB", "tag").unwrap_or_default();
             let placement = text_placement(dwg, text, entity_ptr, "ATTRIB");
+            let flags = attribute_flags(entity_ptr, "ATTRIB");
             let text = text
                 .field(entity_ptr, "ATTRIB", "text_value")
                 .unwrap_or_default();
@@ -1077,7 +1093,7 @@ unsafe fn convert_entity(
                 tag,
                 text,
                 rotation,
-                flags: Default::default(),
+                flags,
                 horizontal_justification: placement.horizontal,
                 vertical_justification: placement.vertical,
                 alignment_point: placement.alignment_point,
@@ -1140,6 +1156,7 @@ unsafe fn convert_entity(
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
             let tag = text.field(entity_ptr, "ATTDEF", "tag").unwrap_or_default();
             let placement = text_placement(dwg, text, entity_ptr, "ATTDEF");
+            let flags = attribute_flags(entity_ptr, "ATTDEF");
             Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
@@ -1147,7 +1164,7 @@ unsafe fn convert_entity(
                 tag,
                 default_value,
                 rotation,
-                flags: Default::default(),
+                flags,
                 horizontal_justification: placement.horizontal,
                 vertical_justification: placement.vertical,
                 alignment_point: placement.alignment_point,
