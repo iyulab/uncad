@@ -16,8 +16,8 @@
 //! dir/
 //!   README.txt        reading order
 //!   manifest.json     source, units, profile, crop, overview, frames, frames_dropped,
-//!                     legibility, capabilities, counts, warnings, files, shard_index,
-//!                     legend, guidance
+//!                     sheets, legibility, capabilities, counts, warnings, files,
+//!                     shard_index, legend, guidance
 //!   drawing.json      header, units, layers with their state, the block definitions, counts
 //!   overview.png      the whole crop, fitted to the profile (Claude: <= 1568 px edge,
 //!                     <= 1568 patches)
@@ -26,8 +26,14 @@
 //!   frames/fN/overview.png   one per frame when the drawing splits into several
 //!   tiles.json        every tile of every level and frame: written (with its bytes and
 //!                     sha256) or empty (with a reason)
+//!   sheets.json       the paper layouts: sheet rectangle and its source, plot settings,
+//!                     viewports, the model-to-paper map of each composited one
+//!   sheets/<layout>/overview.png   each layout, the model composited through its
+//!                     viewports
 //!   texts.json        TEXT/MTEXT/ATTRIB/TOLERANCE, block contents included, with the
-//!                     world box of their glyph outlines and the tiles they are on
+//!                     world box of their glyph outlines and the tiles they are on; the
+//!                     paper layouts' own texts with `space: "paper"`, their sheet and
+//!                     that sheet's pixel box
 //!   dimensions.json   measured value and where it came from, display string, points
 //!   geometry.json     every other visible entity: key points, length, area, bbox
 //!   regions.json      closed polylines: area, perimeter, centroid, the texts inside
@@ -51,6 +57,8 @@
 //! tiles per frame, 2x per level, as deep as the frame's dominant text needs
 //! to reach the target pixel height and the tile budget allows. A tile is
 //! drawn from the parts that reach it, on as many threads as there are.
+//! Each paper layout is walked once more, as its sheet (the renderer's
+//! `Scene::layout`), and drawn whole.
 //!
 //! A text record's box is measured from the glyph outlines of the bundled
 //! font ([`fonts`]) as the renderer laid them out, and those boxes widen the
@@ -79,5 +87,5 @@ pub use frame::{CropMode, CropSource, Rect};
 pub use package::{
     compact_string, export_file, export_package, normalize_string, Counts, CropReport,
     ExcludeReason, Excluded, ExportError, ExportOptions, ExportReport, FrameReport, HeightClass,
-    ImageInfo, LevelInfo, Profile, WrittenFile, SCHEMA,
+    ImageInfo, LevelInfo, Profile, SheetReport, SheetViewport, WrittenFile, SCHEMA,
 };

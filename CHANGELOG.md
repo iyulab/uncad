@@ -156,7 +156,11 @@ Notable changes to this project are recorded here. The format follows
   beside the plan is its own), each with a pyramid of overlapping tiles as deep as its
   text needs, culled to the tiles something visible reaches -- by the measured text boxes,
   not the estimate -- and hashed in `tiles.json`; every tile has a sidecar under 32 KB
-  saying what is on it. The same input gives the same bytes, `report.json` included.
+  saying what is on it. Each paper layout is a sheet image, drawn by the renderer's layout
+  rendering with the model composited through its viewports, and `sheets.json` states each
+  composited viewport's model-to-paper map in its own fields; the sheets' own texts (the
+  title, the title block) are text records on their sheet. The same input gives the same
+  bytes, `report.json` included.
 
 ### Changed
 

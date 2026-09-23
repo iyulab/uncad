@@ -3,6 +3,7 @@
 
 mod output;
 mod records;
+mod sheets;
 mod tiles;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,6 +36,7 @@ use records::{
     capped_confidence, coord_decimals, handle_of, id_key, layer_name, placed_texts, text_record,
     PlacedText, Record, Rounder,
 };
+pub use sheets::{SheetReport, SheetViewport};
 
 /// The `$schema` value every JSON file in the package carries.
 pub const SCHEMA: &str = "uncad-package/1";
@@ -444,6 +446,8 @@ pub struct ExportReport {
     pub overview: ImageInfo,
     /// The frames, `f0` first.
     pub frames: Vec<FrameReport>,
+    /// The paper layouts, in tab order.
+    pub sheets: Vec<SheetReport>,
     pub crop: CropReport,
     pub counts: Counts,
     pub warnings: Vec<String>,
@@ -831,6 +835,13 @@ pub fn export_package(
         .collect();
     let drawn = tiles::render_images(&scene, fonts, &extent_of, &to_draw)?;
 
+    // --- sheets: one image per paper layout ------------------------------------
+    let sheets = if options.sheets {
+        sheets::export_sheets(db, &unit, options, cap_height, &rounder, &mut warnings)?
+    } else {
+        sheets::Sheets::default()
+    };
+
     // --- records with their images -------------------------------------------
     let images_for = |bbox: &Rect| -> Vec<&ImageInfo> {
         tile_images
@@ -862,6 +873,35 @@ pub fn export_package(
         .map(|t| with_images(text_record(t, &rounder, "model", None, measured_why)))
         .collect();
     text_records.sort_by_cached_key(|r| id_key(&r.id));
+    // The paper-space texts, each with its sheet and that sheet image's
+    // pixel box -- the only route in the package from a record to a sheet
+    // pixel. They are kept out of `text_records` proper because that list
+    // is what the tile sidecars are built from, and a paper box in paper
+    // units would otherwise be matched against model tiles.
+    let paper_text_records: Vec<Record> = sheets
+        .texts
+        .iter()
+        .map(|(t, sheet)| {
+            let report = &sheets.reports[*sheet];
+            let mut r = text_record(t, &rounder, "paper", Some(&report.name), measured_why);
+            let mut px = Map::new();
+            px.insert(
+                report.overview.id.clone(),
+                json!(report.overview.px_box(&t.bbox)),
+            );
+            r.value.insert("tiles".into(), json!([]));
+            r.value.insert("px".into(), Value::Object(px));
+            r
+        })
+        .collect();
+    // Model and paper texts in one record file, ordered by id like every
+    // other kind, so `shard_index` resolves either of them.
+    let mut written_texts: Vec<Record> = text_records
+        .iter()
+        .chain(paper_text_records.iter())
+        .cloned()
+        .collect();
+    written_texts.sort_by_cached_key(|r| id_key(&r.id));
 
     let defaults = header.map(DimDefaults::from_header).unwrap_or_default();
     let dim_records = dimension_records(db, &shown, &extent_of, &defaults, &unit, &rounder)?
@@ -888,7 +928,7 @@ pub fn export_package(
         }
         strings.entry(key).or_default().insert(id.to_string());
     };
-    for t in &texts {
+    for t in texts.iter().chain(sheets.texts.iter().map(|(t, _)| t)) {
         index(&t.text, &t.id);
     }
     for r in &dim_records {
@@ -935,7 +975,10 @@ pub fn export_package(
         }
         writer.write_bytes(&image.png, bytes, if is_tile { "tile" } else { "image" })?;
     }
-    writer.write_records("texts", "text", &text_records)?;
+    for (path, bytes) in &sheets.images {
+        writer.write_bytes(path, bytes, "sheet")?;
+    }
+    writer.write_records("texts", "text", &written_texts)?;
     writer.write_records("dimensions", "dimension", &dim_records)?;
     writer.write_records("geometry", "geometry", &geo_records)?;
     writer.write_records("regions", "region", &region_records)?;
@@ -953,6 +996,20 @@ pub fn export_package(
         }),
         "strings",
     )?;
+
+    if options.sheets {
+        writer.write_json(
+            "sheets.json",
+            &json!({
+                "$schema": SCHEMA,
+                // Stated in the fields this file publishes.
+                "model_to_paper": "Per composited viewport, `model_to_paper` is the map the model was drawn through: row-major [a, b, c, d, e, f] with paper_x = a x + b y + c and paper_y = d x + e y + f for a model point (x, y) -- a rotation by `twist_deg` and a scale of `scale` paper units per model unit, which sends the four `model_window` corners (lower-left, lower-right, upper-right, upper-left as they sit on the sheet) onto the four corners of its `frame`. With twist_deg 0 that is paper = [frame[0] + (x - model_window[0][0]) * scale, frame[1] + (y - model_window[0][1]) * scale]. Then apply this sheet's overview `world_to_px` to get pixels in sheets/<layout>/overview.png.",
+                "twist_convention": "`twist_deg` is the viewport's VIEWTWIST in degrees, positive turning the model counter-clockwise on the sheet (ezdxf's rule; not checked against a plotted sheet).",
+                "sheets": sheets.reports,
+            }),
+            "sheets",
+        )?;
+    }
 
     // --- sidecars and tiles.json -------------------------------------------------
     let on_tiles = tiles::OnTiles {
@@ -1039,7 +1096,24 @@ pub fn export_package(
             }
         }
     }
-    let limits = &scene.limits;
+    // Every bound the model render and each sheet render engaged, summed
+    // field by field: what a malformed file cost the package.
+    let mut limits = scene.limits.clone();
+    for l in &sheets.limits {
+        limits.oversized_entities += l.oversized_entities;
+        limits.block_refs_dropped += l.block_refs_dropped;
+        limits.hatch_patterns_dropped += l.hatch_patterns_dropped;
+        limits.entities_dropped += l.entities_dropped;
+        limits.truncated_parts += l.truncated_parts;
+        limits.unreadable_entities += l.unreadable_entities;
+        limits.out_of_range_entities += l.out_of_range_entities;
+        for d in &l.dropped {
+            if limits.dropped.len() < MAX_HIDDEN_NAMED && !limits.dropped.contains(d) {
+                limits.dropped.push(d.clone());
+            }
+        }
+    }
+    let limits = &limits;
     if limits.engaged() {
         warnings.push(format!(
             "the drawing hit the renderer's robustness limits: {}",
@@ -1088,11 +1162,10 @@ pub fn export_package(
             })
         }))
         .collect();
-    let written_texts = &text_records;
     let counts = Counts {
         entities: parts.len(),
         texts: written_texts.len(),
-        texts_paper: 0,
+        texts_paper: paper_text_records.len(),
         dimensions: dim_records.len(),
         geometry: geo_records.len(),
         regions: region_records.len(),
@@ -1101,7 +1174,7 @@ pub fn export_package(
         excluded: excluded_json.len(),
         tiles: written_total,
         frames: frame_reports.len(),
-        sheets: 0,
+        sheets: sheets.reports.len(),
     };
     let hidden_top_level: usize = hidden_by_reason.values().sum();
     // `count` is the number `manifest.counts.hidden` prints, every hidden
@@ -1144,8 +1217,11 @@ pub fn export_package(
         frames: &frame_reports,
         frames_dropped: &plan.dropped,
         frames_dropped_total: plan.dropped_total,
+        rounder: &rounder,
         counts: &counts,
-        texts: written_texts,
+        texts: &written_texts,
+        paper_texts: &paper_text_records,
+        sheets: &sheets.reports,
         dims: &dim_records,
         regions: &region_records,
         warnings: &warnings,
@@ -1179,6 +1255,7 @@ pub fn export_package(
         files: writer.files,
         overview,
         frames: frame_reports,
+        sheets: sheets.reports,
         crop: crop_report,
         counts,
         warnings,
@@ -1840,8 +1917,11 @@ struct ManifestInput<'a, 'w> {
     frames: &'a [FrameReport],
     frames_dropped: &'a [Value],
     frames_dropped_total: usize,
+    rounder: &'a Rounder,
     counts: &'a Counts,
     texts: &'a [Record],
+    paper_texts: &'a [Record],
+    sheets: &'a [SheetReport],
     dims: &'a [Record],
     regions: &'a [Record],
     warnings: &'a [String],
@@ -1892,6 +1972,8 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
         "areas_by_confidence": { "exact": areas_exact, "estimated": areas_estimated, "unavailable": areas_unavailable },
         "text_boxes": if m.texts.is_empty() { "none" } else if measured_total == m.texts.len() { "measured" } else if measured_total == 0 { "estimated" } else { "mixed" },
         "fonts": fonts_name,
+        "paper_layouts": if m.sheets.is_empty() { "none" } else { "composited" },
+        "paper_text": if m.sheets.is_empty() { "none" } else if m.paper_texts.is_empty() { "empty" } else { "indexed" },
         "frames": m.frames.len(),
     });
     let legend = json!({
@@ -1903,7 +1985,7 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
             "unavailable": "no meaningful value; `why` says why, and any number beside it is not to be used",
             "none": "there was nothing to compute (used by capabilities, not by records)",
         },
-        "text_records": "texts carry `bbox_confidence` (`measured` from the glyph outlines as the renderer laid them out, or `estimated` at 0.6 em per character) and no `confidence`; block instances carry neither.",
+        "text_records": "texts carry `bbox_confidence` (`measured` from the glyph outlines as the renderer laid them out, or `estimated` at 0.6 em per character) and no `confidence`; block instances carry neither. `space` is `model` or `paper`; a paper text names its `sheet` and is measured in that layout's paper units.",
         "ids": "a record's `id` is the drawing's entity reference ID in decimal (a path of them for a text inside a block); its `handle` is the file's own handle for the entity, in hexadecimal, when it came from a file",
         "measurement_source": ["act_measurement", "from_points", "none"],
         "display_source": ["user_text", "cached_block", "formatted", "suppressed", "none"],
@@ -1916,7 +1998,7 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
     // The tile and overlap numbers come from the profile in use, not from
     // the prose: claude-hires writes 1932 px tiles with 392 px of overlap.
     let guidance = format!(
-        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; `legend` says what `confidence` and the package's other vocabularies mean and which records carry them. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), resolve the id through shard_index -- the entry whose [first_key, last_key] contains int(id.split('/')[0]), since the id does not say its kind and one id can be in two -- then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes, its own `columns` legend and a `counts` object that stays exact when rows are cut. Pixel boxes are clipped to the image they are quoted in; the record's world `bbox` is its full extent. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; a group too small to be framed is in `frames_dropped` and its records carry `tiles: []`. report.json lists what was left out and why.",
+        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; `legend` says what `confidence` and the package's other vocabularies mean and which records carry them. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), resolve the id through shard_index -- the entry whose [first_key, last_key] contains int(id.split('/')[0]), since the id does not say its kind and one id can be in two -- then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes, its own `columns` legend and a `counts` object that stays exact when rows are cut. Pixel boxes are clipped to the image they are quoted in; the record's world `bbox` is its full extent. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; a group too small to be framed is in `frames_dropped` and its records carry `tiles: []`. The drawing's title and title block are paper-space text: those records carry `space: \"paper\"` and a `sheet`, and their pixel box is on that sheet's image, not on a tile. report.json lists what was left out and why.",
         profile.tile, profile.overlap
     );
     m.writer.files.push(WrittenFile {
@@ -1948,6 +2030,7 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
         "frames": m.frames,
         "frames_dropped": m.frames_dropped,
         "frames_dropped_total": m.frames_dropped_total,
+        "sheets": m.sheets.iter().map(|s| json!({"name": s.name, "tab_order": s.tab_order, "png": s.overview.png, "px": s.overview.px, "rect": m.rounder.rect(&s.rect), "units": s.units, "viewports": s.viewports.len(), "texts": m.paper_texts.iter().filter(|r| r.value.get("sheet").is_some_and(|n| n == s.name.as_str())).count()})).collect::<Vec<_>>(),
         "legibility": { "target_px": m.options.target_text_px, "per_frame": m.frames.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "target_met": f.height_classes.iter().all(|c| c.legible), "pyramid_complete": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
         "counts": m.counts,
         "capabilities": capabilities,
@@ -1961,7 +2044,7 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
 
 fn readme(options: &ExportOptions) -> String {
     format!(
-        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines; `legend` explains the record vocabularies, `guidance` how to look something up\n  2. strings.json    find a text or a number, get record ids; shard_index turns an id into a file (compare int(id.split('/')[0]) against first_key/last_key, not the strings)\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index); blocks.json holds the INSERT instances, drawing.json the block definitions\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars; tiles.json lists every tile, written or empty with a reason, with its size and sha256\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units, layer states and block definitions; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines; `legend` explains the record vocabularies, `guidance` how to look something up\n  2. strings.json    find a text or a number, get record ids; shard_index turns an id into a file (compare int(id.split('/')[0]) against first_key/last_key, not the strings)\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index); blocks.json holds the INSERT instances, drawing.json the block definitions\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars; tiles.json lists every tile, written or empty with a reason, with its size and sha256\n  5. sheets.json     paper layouts: sheet size, viewports with their scale and model window, and how a model point maps onto the sheet; sheets/<layout>/overview.png. The title and title block are paper-space texts in texts.json (`space: \"paper\"`, with a `sheet` and that sheet's pixel box)\n  6. report.json     what was left out and why\n\nAll other records are model space. drawing.json holds the header, units, layer states and block definitions; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
     )
 }
