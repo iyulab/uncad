@@ -334,7 +334,7 @@ fn r2007_and_later_dxf_mtext_is_read_as_the_utf8_it_is_stored_as() {
 
 #[test]
 fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_as_written() {
-    // An AC1021+ DXF is UTF-8 by definition. "가나" is U+AC00 U+B098, the
+    // An AC1021+ DXF is UTF-8 by definition. U+AC00 U+B098, two Hangul syllables, the
     // bytes EA B0 80 EB 82 98. TEXT goes through the importer's UTF-16
     // storage, MTEXT stays 8-bit: both must come back the same. The escaped
     // spelling older writers use is text too, kept as written in both.
@@ -344,7 +344,10 @@ fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_as_written() 
     let (db, header) =
         uncad::parse_bytes_with_header(&bytes, Format::Dxf).expect("the DXF must parse");
     assert_eq!(header.version.as_deref(), Some("r2018"));
-    let expected = vec!["가나 AB".to_string(), "\\U+AC00\\U+B098 AB".to_string()];
+    let expected = vec![
+        "\u{AC00}\u{B098} AB".to_string(),
+        "\\U+AC00\\U+B098 AB".to_string(),
+    ];
     assert_eq!(mtext_values(&db), expected);
     assert_eq!(text_values(&db), expected);
     assert!(text_encoding_warnings(&db).is_empty());

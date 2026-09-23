@@ -692,7 +692,7 @@ mod tests {
 
     #[test]
     fn a_stored_utf16_string_is_read_to_its_16_bit_nul() {
-        // "가A" then a 16-bit NUL: the first byte of U+AC00 in memory is 0x00,
+        // U+AC00 then "A" and a 16-bit NUL: the first byte of U+AC00 in memory is 0x00,
         // where an 8-bit read would have stopped with nothing.
         let units: [u16; 3] = [0xAC00, 0x0041, 0];
         let d = decoder(CP_UTF16, Storage::WideDxf);

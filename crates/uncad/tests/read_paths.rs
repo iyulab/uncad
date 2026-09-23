@@ -38,8 +38,8 @@ impl Drop for TempDir {
 
 #[test]
 fn parse_opens_a_dwg_under_a_korean_path() {
-    let dir = TempDir::new("한글경로");
-    let target = dir.0.join("도면.dwg");
+    let dir = TempDir::new("\u{D55C}\u{AE00}\u{ACBD}\u{B85C}");
+    let target = dir.0.join("\u{B3C4}\u{BA74}.dwg");
     std::fs::copy(CIRCLE_DWG, &target).expect("copying the fixture should succeed");
 
     let db = uncad::parse(&target).expect("a path with Hangul in it must parse");
@@ -48,8 +48,8 @@ fn parse_opens_a_dwg_under_a_korean_path() {
 
 #[test]
 fn parse_opens_a_dxf_under_a_korean_path() {
-    let dir = TempDir::new("한글경로-dxf");
-    let target = dir.0.join("도면.dxf");
+    let dir = TempDir::new("\u{D55C}\u{AE00}\u{ACBD}\u{B85C}-dxf");
+    let target = dir.0.join("\u{B3C4}\u{BA74}.dxf");
     std::fs::copy(ENTITIES_DXF, &target).expect("copying the fixture should succeed");
 
     let from_korean_path = uncad::parse(&target).expect("a path with Hangul in it must parse");

@@ -48,7 +48,7 @@ linked against `libredwg-sys` that read `Dwg_Data.header` and every field throug
 
 HEADER: `$DWGCODEPAGE ANSI_949`, `$INSUNITS 4`, `$MEASUREMENT 1`, `$LUNITS 2`,
 `$DIMLFAC 1.0`. TABLES: a LAYER table with `0` and a layer whose name is the CP949 bytes
-of "벽체". ENTITIES: four TEXT and one MTEXT, all at height 2.5.
+of "U+BCBD U+CCB4". ENTITIES: four TEXT and one MTEXT, all at height 2.5.
 
 Probe: `dxf_read_file` rc 0, `Dwg_Data.header.version` 25 (`R_2000`),
 `Dwg_Data.header.codepage` **40** (`CP_ANSI_949`, `src/codepages.h`). LibreDWG does no
@@ -57,12 +57,12 @@ bytes unchanged.
 
 | Handle | Entity | Layer | Raw bytes (CP949) | Meaning (UTF-8) |
 |---|---|---|---|---|
-| 23 | TEXT at (0,0) | 벽체 | `B5 B5 B8 E9` | `도면` |
+| 23 | TEXT at (0,0) | U+BCBD U+CCB4 | `B5 B5 B8 E9` | `U+B3C4 U+BA74` |
 | 24 | TEXT at (0,5) | 0 | `A1 BE 33` | `±3` |
-| 25 | TEXT at (0,10) | 0 | `33 32 2E 35 A7 B3` | `32.5㎡` |
-| 26 | MTEXT at (0,20), width 50 | 0 | `B9 E6 20 31 30 31 5C 50 B8 E9 C0 FB 20 33 32 2E 35 A7 B3` | `방 101\P면적 32.5㎡` (`\P` literal) |
+| 25 | TEXT at (0,10) | 0 | `33 32 2E 35 A7 B3` | `32.5U+33A1` |
+| 26 | MTEXT at (0,20), width 50 | 0 | `B9 E6 20 31 30 31 5C 50 B8 E9 C0 FB 20 33 32 2E 35 A7 B3` | `U+BC29 101\PU+BA74 U+C801 32.5U+33A1` (`\P` literal) |
 | 27 | TEXT at (0,15) | 0 | `50 4C 41 49 4E` | `PLAIN` |
-| 22 | LAYER (color 1) | | `BA AE C3 BC` | `벽체` |
+| 22 | LAYER (color 1) | | `BA AE C3 BC` | `U+BCBD U+CCB4` |
 
 Notes:
 
@@ -538,7 +538,7 @@ reference: the file, and the model, keep the children on layer 0.
    the same strings as the DXF fixture and calls `dwg_write_file` does produce an R2000
    DWG that reads back with `codepage = 40` -- but LibreDWG's UTF-8 -> code-page encoder
    mangles every non-ASCII string on the way in (the layer came back as `;`, "±3" as
-   `1B 33`, "32.5㎡" as `32.5{`, with `Warning: utf-8: BAD_CONTINUATION_BYTE` at write
+   `1B 33`, "32.5U+33A1" as `32.5{`, with `Warning: utf-8: BAD_CONTINUATION_BYTE` at write
    time), and setting `$DWGCODEPAGE` through `dwg_dynapi_header_set_value` crashed. So no
    DWG is shipped: the code-page fixture is DXF-only. An AutoCAD-written Korean R2000 DWG
    is still wanted as a fixture.

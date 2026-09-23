@@ -387,17 +387,17 @@ def cp949():
         LUNITS=(70, 2),
         DIMLFAC=(40, 1.0),
     )
-    tbl = tables(layers=((b"0", 7), (k("벽체"), 1)))
+    tbl = tables(layers=((b"0", 7), (k("\uBCBD\uCCB4"), 1)))
     ents = b"".join([
-        text(k("도면"), 0, 0, layer=k("벽체")),
+        text(k("\uB3C4\uBA74"), 0, 0, layer=k("\uBCBD\uCCB4")),
         text(k("±3"), 0, 5),
-        text(k("32.5㎡"), 0, 10),
+        text(k("32.5\u33A1"), 0, 10),
         entity(
             "MTEXT", b"0",
             (100, "AcDbMText"),
             (10, 0.0), (20, 20.0), (30, 0.0),
             (40, 2.5), (41, 50.0), (71, 1),
-            (1, k("방 101\\P면적 32.5㎡")),
+            (1, k("\uBC29 101\\P\uBA74\uC801 32.5\u33A1")),
         ),
         text(b"PLAIN", 0, 15),
     ])
