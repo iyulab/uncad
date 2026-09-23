@@ -20,25 +20,43 @@
       },
       "vertices": [
         {
-          "x": 0.0,
-          "y": 0.0
+          "point": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
-          "x": 120.0,
-          "y": 0.0
+          "point": {
+            "x": 120.0,
+            "y": 0.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
-          "x": 120.0,
-          "y": 60.0
+          "point": {
+            "x": 120.0,
+            "y": 60.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
-          "x": 0.0,
-          "y": 60.0
+          "point": {
+            "x": 0.0,
+            "y": 60.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         }
       ],
       "closed": true,
-      "bulges": [],
-      "widths": [],
       "const_width": 0.0,
       "elevation": 0.0,
       "extrusion": {
@@ -762,25 +780,43 @@
             },
             "vertices": [
               {
-                "x": 0.0,
-                "y": 0.0
+                "point": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
-                "x": 120.0,
-                "y": 0.0
+                "point": {
+                  "x": 120.0,
+                  "y": 0.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
-                "x": 120.0,
-                "y": 60.0
+                "point": {
+                  "x": 120.0,
+                  "y": 60.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
-                "x": 0.0,
-                "y": 60.0
+                "point": {
+                  "x": 0.0,
+                  "y": 60.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               }
             ],
             "closed": true,
-            "bulges": [],
-            "widths": [],
             "const_width": 0.0,
             "elevation": 0.0,
             "extrusion": {

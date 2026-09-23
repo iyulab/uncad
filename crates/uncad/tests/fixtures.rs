@@ -345,7 +345,7 @@ fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
         square
             .vertices
             .iter()
-            .map(|v| (v.x, v.y))
+            .map(|v| (v.point.x, v.point.y))
             .collect::<Vec<_>>(),
         [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
     );
@@ -357,7 +357,10 @@ fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
     assert_eq!(arc.common.source_handle, resolved("35"));
     assert!(!arc.closed);
     assert_eq!(
-        arc.vertices.iter().map(|v| (v.x, v.y)).collect::<Vec<_>>(),
+        arc.vertices
+            .iter()
+            .map(|v| (v.point.x, v.point.y))
+            .collect::<Vec<_>>(),
         [(0.0, 1000.0), (100.0, 1000.0)]
     );
 
@@ -481,7 +484,7 @@ fn mirrored_ocs_entities_keep_their_stated_coordinates_and_carry_their_normal() 
         .collect();
     assert_eq!(polylines.len(), 2);
     let xy = |p: &uncad::model::LwPolylineEntity| -> Vec<(f64, f64)> {
-        p.vertices.iter().map(|v| (v.x, v.y)).collect()
+        p.vertices.iter().map(|v| (v.point.x, v.point.y)).collect()
     };
     let outline = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
 
@@ -540,7 +543,7 @@ fn mirrored_ocs_entities_keep_their_stated_coordinates_and_carry_their_normal() 
 // ------------------------------------------------------------- bulges
 
 /// A bulge is carried as stated -- one per vertex, the sign the file wrote
-/// -- and a polyline whose segments are all straight carries none.
+/// -- and a segment the file states no bulge for is straight, `0`.
 #[test]
 fn polyline_bulges_are_carried_as_the_file_states_them() {
     let bulged_polyline = |path: &str| -> Vec<(String, Vec<f64>, uncad::model::Point3D)> {
@@ -548,9 +551,11 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
             .entities
             .iter()
             .filter_map(|e| match e {
-                Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
-                    Some((handle(e).to_string(), p.bulges.clone(), p.extrusion))
-                }
+                Entity::LwPolyline(p) | Entity::Polyline2D(p) => Some((
+                    handle(e).to_string(),
+                    p.vertices.iter().map(|v| v.bulge).collect(),
+                    p.extrusion,
+                )),
                 _ => None,
             })
             .collect()
@@ -560,7 +565,7 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
     assert_eq!(
         bulged_polyline(MIRRORED),
         [
-            ("20".to_string(), vec![], DOWN),
+            ("20".to_string(), vec![0.0; 4], DOWN),
             ("21".to_string(), vec![0.0, 0.41421356, 0.0, 0.0], UP),
         ]
     );
@@ -576,7 +581,7 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
     assert_eq!(
         bulged_polyline(POLYLINE_VERTICES),
         [
-            ("30".to_string(), vec![], UP),
+            ("30".to_string(), vec![0.0; 4], UP),
             ("35".to_string(), vec![1.0, 0.0], UP),
         ]
     );

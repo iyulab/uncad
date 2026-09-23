@@ -23,12 +23,13 @@ use uncad_model::model::{
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
     InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
-    OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity,
-    SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity,
-    ViewportView, WipeoutEntity,
+    OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity,
+    SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, ViewportView,
+    WipeoutEntity,
 };
 use uncad_model::model::{
-    AttributeFlags, HorizontalJustification, Point2D, Point3D, VerticalJustification,
+    AttributeFlags, HorizontalJustification, Point2D, Point3D, PolylineVertex,
+    VerticalJustification,
 };
 
 /// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
@@ -50,11 +51,6 @@ const POLYLINE_MESH_CLOSED_M_FLAG: u16 = 1;
 
 /// POLYLINE_MESH's `flag` bit 32: the grid wraps in N.
 const POLYLINE_MESH_CLOSED_N_FLAG: u16 = 32;
-
-/// LWPOLYLINE's `flag` bit 1 in the library's layout: an extrusion is
-/// stored. The decoder reads the field only then; otherwise it is the
-/// default normal.
-const LWPOLYLINE_EXTRUSION_FLAG: u16 = 1;
 
 /// The default normal of an object coordinate system (DXF 210): the world's
 /// z axis, which makes the OCS the world's own axes.
@@ -172,7 +168,7 @@ pub unsafe fn convert_entities(
 /// so the two stay in sync as entity types are added.
 ///
 /// A polyline's VERTEX records are skipped: they belong to the POLYLINE that
-/// owns them and are read from *its* chain (see [`polyline_subentities`]),
+/// owns them and are read from *its* chain (see [`polyline_vertex_records`]),
 /// not drawing content of the block. That is the contract LibreDWG
 /// documents for `get_next_owned_entity` ("Not subentities: ATTRIB,
 /// VERTEX") and what the R13..R2000 walk here implements -- but the
@@ -427,79 +423,195 @@ unsafe fn is_attrib(obj: *mut libredwg_sys::Dwg_Object) -> bool {
         == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
 }
 
-/// Every subentity an old-style POLYLINE owns, in order.
+/// A POLYLINE's VERTEX records, in order -- a 2D or 3D polyline's vertices,
+/// and a polyface's or a polygon mesh's records alike (a polyface keeps its
+/// face records in the same run).
 ///
-/// Walks the owned-subentity chain (`get_first`/`get_next_owned_subentity`,
-/// dwg.c) rather than calling LibreDWG's own
-/// `dwg_object_polyline_{2,3}d_get_points`, because those are short by one on
-/// every R13/R14/R2000 file: for `version < R_2004` both the point and the
-/// count accessor walk `first_vertex .. last_vertex` as
-/// `do { ... } while ((vobj = dwg_next_object (vobj)) && vobj != vlast);`
-/// (dwg_api.c), whose condition ends the loop *before* the body sees
-/// `vlast`. They returned N-1 points, and the last vertex of every such
-/// polyline was dropped -- a closed square came back a triangle, a
-/// two-vertex arc a single point. `get_next_owned_subentity` stops *at*
-/// `last_vertex` and yields all N; from R2004 on it indexes the `vertex[]`
-/// array by `num_owned`, the same source the accessors use there.
+/// Before R13 a polyline's vertices simply follow it in the object stream,
+/// up to its SEQEND. From R13 on the polyline owns them, and LibreDWG's own
+/// owned-subentity walk returns them -- through `first_vertex..last_vertex`,
+/// last included, up to R2000, and through the `vertex` handle array after.
 ///
-/// Files older than R13 fill neither `first_vertex` nor `vertex[]`, so that
-/// chain is empty for them, and the fallback is the scan LibreDWG's own
-/// pre-R13 branch uses: forward through the object list, which is where such
-/// a polyline's vertices physically are, stopping at the first object that
-/// is not a VERTEX (the SEQEND, in a well-formed file).
+/// LibreDWG's dedicated point accessors (`dwg_object_polyline_{2,3}d_get_points`)
+/// are not used: from R13 to R2000 their loop stops *before* `last_vertex`,
+/// so a polyline arrived one vertex short -- a file's DXF twin writes the
+/// vertex they drop.
 ///
-/// Both walks are bounded against a chain damaged handles turned into a ring
-/// ([`MAX_OWNED_SUBENTITIES`]).
+/// A polyline from R13 on can also own none of the records that follow it:
+/// the DXF importer attaches a VERTEX to its polyline by the owner the
+/// VERTEX names (group 330), and a file whose vertices name the block record
+/// instead -- the shape ezdxf writes for a polyface and a polygon mesh --
+/// leaves the polyline's own list empty. Its records are then the ones that
+/// follow it in the object stream, as before R13.
+///
+/// The records are data from the file, so both walks are bounded: the one
+/// through the object stream by the number of objects, the owned one by
+/// [`MAX_OWNED_SUBENTITIES`].
+///
+/// When the records in the object stream end before the polyline's SEQEND
+/// the read reports `POLYLINE_VERTICES`, naming the polyline. Before R13 they
+/// may: when the entity section continues elsewhere (a JUMP entity), the
+/// library's object stream can end at the JUMP, before the vertices that
+/// follow it in the file -- the polyline then has fewer vertices than the
+/// file gives it.
 ///
 /// # Safety
-/// `obj` must be a valid, non-null `POLYLINE_2D`/`POLYLINE_3D`/
-/// `POLYLINE_PFACE`/`POLYLINE_MESH` `Dwg_Object`.
-unsafe fn polyline_subentities(
+/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D`/`POLYLINE_PFACE`/
+/// `POLYLINE_MESH` object of `dwg`.
+unsafe fn polyline_vertex_records(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
 ) -> Vec<*mut libredwg_sys::Dwg_Object> {
-    let mut subs = Vec::new();
-    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    while !sub.is_null() && subs.len() < MAX_OWNED_SUBENTITIES {
-        subs.push(sub);
-        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
+    let mut records = Vec::new();
+    if !is_pre_r13(dwg) {
+        let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+        while !sub.is_null() && records.len() < MAX_OWNED_SUBENTITIES {
+            records.push(sub);
+            sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
+        }
+        if !records.is_empty() {
+            return records;
+        }
     }
-    if !subs.is_empty() {
-        return subs;
-    }
-    let mut next = unsafe { libredwg_sys::dwg_next_object(obj) };
-    while !next.is_null() && subs.len() < MAX_OWNED_SUBENTITIES {
-        let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(next) }
-            as libredwg_sys::DWG_OBJECT_TYPE;
+    let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    let mut sub = unsafe { libredwg_sys::dwg_next_object(obj) };
+    let mut steps = 0;
+    while !sub.is_null() && steps <= max_steps {
+        steps += 1;
+        let fixedtype =
+            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
+        if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND {
+            return records;
+        }
+        // Anything else is not this polyline's: its vertex run ended
+        // without its SEQEND.
         if !is_polyline_vertex(fixedtype) {
             break;
         }
-        subs.push(next);
-        next = unsafe { libredwg_sys::dwg_next_object(next) };
+        records.push(sub);
+        sub = unsafe { libredwg_sys::dwg_next_object(sub) };
     }
-    subs
+    let (id, _) = unsafe { entity_identity(obj) };
+    text.warn(format!(
+        "POLYLINE_VERTICES: the vertex records of the POLYLINE {:X} end before its SEQEND; it is read with the {} vertices that were found",
+        id.value(),
+        records.len()
+    ));
+    records
 }
 
-/// The type-specific struct pointers of the vertices of `vertex_type` an
-/// old-style POLYLINE owns, in order -- what each vertex's fields are read
-/// through.
+/// The positions (and whatever else `read` takes) of a polyline's vertex
+/// records of type `vertex_type`, in order. A record of another type -- a
+/// polyface's face record, say -- is not a vertex and is skipped.
 ///
 /// # Safety
-/// `obj` must be a valid, non-null POLYLINE `Dwg_Object` per
-/// [`polyline_subentities`].
-unsafe fn polyline_vertices(
+/// As [`polyline_vertex_records`].
+unsafe fn polyline_vertices<T>(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
     vertex_type: libredwg_sys::DWG_OBJECT_TYPE,
-) -> Vec<*mut std::ffi::c_void> {
-    unsafe { polyline_subentities(obj) }
+    mut read: impl FnMut(*mut std::ffi::c_void) -> Option<T>,
+) -> Vec<T> {
+    unsafe { polyline_vertex_records(dwg, text, obj) }
         .into_iter()
-        .filter(|&sub| {
-            (unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
-                as libredwg_sys::DWG_OBJECT_TYPE)
-                == vertex_type
+        .filter_map(|sub| {
+            let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
+                as libredwg_sys::DWG_OBJECT_TYPE;
+            let entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
+            (fixedtype == vertex_type && !entity_ptr.is_null())
+                .then(|| read(entity_ptr))
+                .flatten()
         })
-        .map(|sub| unsafe { libredwg_sys::uncad_object_entity_ptr(sub) })
-        .filter(|ptr| !ptr.is_null())
         .collect()
+}
+
+/// Pairs a polyline's vertex positions with the bulges its record stores as a
+/// separate array. The array is empty when every segment is straight, and
+/// otherwise has one entry per vertex; any other length does not say which
+/// bulge belongs to which vertex, so none is used and the read says so.
+fn with_bulges(
+    text: &TextDecoder,
+    dxfname: &str,
+    points: Vec<Point2D>,
+    bulges: Vec<f64>,
+) -> Vec<PolylineVertex> {
+    if !bulges.is_empty() && bulges.len() != points.len() {
+        text.warn(format!(
+            "POLYLINE_BULGE: a {dxfname} stores {} bulges for {} vertices; its segments are read as straight",
+            bulges.len(),
+            points.len()
+        ));
+    }
+    let matched = bulges.len() == points.len();
+    points
+        .into_iter()
+        .enumerate()
+        .map(|(i, point)| PolylineVertex {
+            point,
+            bulge: if matched { bulges[i] } else { 0.0 },
+            ..PolylineVertex::default()
+        })
+        .collect()
+}
+
+/// Gives an LWPOLYLINE's vertices the widths its record stores as a separate
+/// array, as [`with_bulges`] does the bulges: the array is empty when no
+/// vertex has a width of its own, and otherwise has one entry per vertex;
+/// any other length does not say which width belongs to which vertex, so
+/// none is used and the read says so.
+///
+/// A file that states the polyline's constant width again on every vertex,
+/// at both ends, draws the same polyline as one that states it only once
+/// (see `LwPolylineEntity::const_width`), so such vertices are given no
+/// width of their own either.
+fn with_widths(
+    text: &TextDecoder,
+    dxfname: &str,
+    mut vertices: Vec<PolylineVertex>,
+    widths: Vec<RawSegmentWidth>,
+    const_width: f64,
+) -> Vec<PolylineVertex> {
+    if widths.is_empty() {
+        return vertices;
+    }
+    if widths.len() != vertices.len() {
+        text.warn(format!(
+            "POLYLINE_WIDTH: a {dxfname} stores {} widths for {} vertices; its vertices are read with no width of their own",
+            widths.len(),
+            vertices.len()
+        ));
+        return vertices;
+    }
+    if widths
+        .iter()
+        .all(|w| w.start == const_width && w.end == const_width)
+    {
+        return vertices;
+    }
+    for (vertex, width) in vertices.iter_mut().zip(widths) {
+        vertex.start_width = width.start;
+        vertex.end_width = width.end;
+    }
+    vertices
+}
+
+/// An entity's extrusion direction (DXF 210): the normal of its plane, and
+/// for an entity stored in its own coordinate system the Z axis of that
+/// system. The default is the world Z axis.
+///
+/// That default is also what a zero vector reads as. A zero vector is not a
+/// direction, and it is what the library leaves in the field when the
+/// record does not store one: an LWPOLYLINE stores its extrusion only when
+/// its flag says so, and a pre-R13 entity only when its options say so --
+/// both are the absent group. Not normalised: the model carries what the
+/// file states, and taking the entity's coordinates to the world through it
+/// is the consumer's step.
+fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
+    get_point3d(entity_ptr, dxfname, "extrusion")
+        .filter(|e| e.x != 0.0 || e.y != 0.0 || e.z != 0.0)
+        .unwrap_or(Z_AXIS)
 }
 
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
@@ -522,12 +634,16 @@ unsafe fn polyline_vertices(
 /// out-of-range or all-zero index list are skipped.
 ///
 /// # Safety
-/// `obj` must be a valid, non-null `POLYLINE_PFACE` `Dwg_Object`.
-unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[Point3D; 2]> {
+/// `obj` must be a valid, non-null `POLYLINE_PFACE` object of `dwg`.
+unsafe fn polyline_pface_wireframe(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    obj: *mut libredwg_sys::Dwg_Object,
+) -> Vec<[Point3D; 2]> {
     let mut positions = Vec::new();
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
-    for sub in unsafe { polyline_subentities(obj) } {
+    for sub in unsafe { polyline_vertex_records(dwg, text, obj) } {
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
@@ -589,8 +705,10 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
 /// empty one.
 ///
 /// # Safety
-/// `obj` must be a valid, non-null `POLYLINE_MESH` `Dwg_Object`.
+/// `obj` must be a valid, non-null `POLYLINE_MESH` object of `dwg`.
 unsafe fn polyline_mesh_wireframe(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
     m: usize,
     n: usize,
@@ -603,11 +721,15 @@ unsafe fn polyline_mesh_wireframe(
     let edge_count = rows_joined
         .saturating_mul(n)
         .saturating_add(m.saturating_mul(columns_joined));
-    let positions: Vec<Point3D> =
-        unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH) }
-            .into_iter()
-            .filter_map(|vertex| get_point3d(vertex, "VERTEX_MESH", "point"))
-            .collect();
+    let positions: Vec<Point3D> = unsafe {
+        polyline_vertices(
+            dwg,
+            text,
+            obj,
+            libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH,
+            |v| get_point3d(v, "VERTEX_MESH", "point"),
+        )
+    };
     if positions.is_empty() || positions.len() != m.saturating_mul(n) {
         return (Vec::new(), edge_count);
     }
@@ -624,45 +746,6 @@ unsafe fn polyline_mesh_wireframe(
         }
     }
     (edges, 0)
-}
-
-/// An OCS entity's normal (`extrusion`, DXF 210), as the file states it.
-/// A zero vector is not a direction, and the format's default is the z
-/// axis, so an unreadable or zero normal is the z axis. Not normalised:
-/// the model carries what the file states, and taking the entity's
-/// coordinates to the world through it is the consumer's step.
-fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
-    get_point3d(entity_ptr, dxfname, "extrusion")
-        .filter(|e| e.x != 0.0 || e.y != 0.0 || e.z != 0.0)
-        .unwrap_or(Z_AXIS)
-}
-
-/// A polyline's bulges as the model carries them: as stated, one per vertex
-/// -- a negative bulge is an arc that turns clockwise in the OCS, and a
-/// mirrored OCS does not change that sign -- or none at all when every
-/// segment is straight, so that a file stating only zeros and one stating
-/// nothing are the same polyline.
-fn stated_bulges(bulges: Vec<f64>) -> Vec<f64> {
-    if bulges.iter().all(|b| *b == 0.0) {
-        Vec::new()
-    } else {
-        bulges
-    }
-}
-
-/// A polyline's per-vertex widths as the model carries them: as stated, or
-/// none at all when every segment is `const_width` wide at both ends -- the
-/// same polyline whether the file states that width for every vertex or
-/// states none.
-fn stated_widths(widths: Vec<SegmentWidth>, const_width: f64) -> Vec<SegmentWidth> {
-    if widths
-        .iter()
-        .all(|w| w.start == const_width && w.end == const_width)
-    {
-        Vec::new()
-    } else {
-        widths
-    }
 }
 
 /// How a TEXT, ATTRIB or ATTDEF is placed beyond its start point: the
@@ -981,45 +1064,31 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
-            let vertices: Vec<Point2D> =
+            let points: Vec<Point2D> =
                 get_point2d_array::<u32>(entity_ptr, "LWPOLYLINE", "num_points", "points");
+            // The record stores the bulges as a separate array that is either
+            // empty (every segment straight) or one per vertex.
+            let bulges: Vec<f64> =
+                get_array_field::<u32, f64>(entity_ptr, "LWPOLYLINE", "num_bulges", "bulges");
+            let vertices = with_bulges(text, "LWPOLYLINE", points, bulges);
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
             let const_width =
                 get_field::<f64>(entity_ptr, "LWPOLYLINE", "const_width").unwrap_or(0.0);
-            let bulges = stated_bulges(get_array_field::<u32, f64>(
+            // The widths are a separate array too, on the same terms.
+            let widths = get_array_field::<u32, RawSegmentWidth>(
                 entity_ptr,
                 "LWPOLYLINE",
-                "num_bulges",
-                "bulges",
-            ));
-            let widths = stated_widths(
-                get_array_field::<u32, RawSegmentWidth>(
-                    entity_ptr,
-                    "LWPOLYLINE",
-                    "num_widths",
-                    "widths",
-                )
-                .into_iter()
-                .map(|w| SegmentWidth {
-                    start: w.start,
-                    end: w.end,
-                })
-                .collect(),
-                const_width,
+                "num_widths",
+                "widths",
             );
+            let vertices = with_widths(text, "LWPOLYLINE", vertices, widths, const_width);
             Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
-                bulges,
-                widths,
                 const_width,
                 elevation: get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0),
-                extrusion: if flag & LWPOLYLINE_EXTRUSION_FLAG != 0 {
-                    extrusion(entity_ptr, "LWPOLYLINE")
-                } else {
-                    Z_AXIS
-                },
+                extrusion: extrusion(entity_ptr, "LWPOLYLINE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -1042,11 +1111,7 @@ unsafe fn convert_entity(
             let axis_ratio = get_field::<f64>(entity_ptr, "ELLIPSE", "axis_ratio")?;
             let start_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "end_angle")?;
-            let extrusion = get_point3d(entity_ptr, "ELLIPSE", "extrusion").unwrap_or(Point3D {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            });
+            let extrusion = extrusion(entity_ptr, "ELLIPSE");
             Entity::Ellipse(EllipseEntity {
                 common,
                 center,
@@ -1260,12 +1325,14 @@ unsafe fn convert_entity(
             let corner2 = get_point3d(entity_ptr, "3DFACE", "corner2")?;
             let corner3 = get_point3d(entity_ptr, "3DFACE", "corner3")?;
             let corner4 = get_point3d(entity_ptr, "3DFACE", "corner4")?;
+            let invis_flags = get_field::<u16>(entity_ptr, "3DFACE", "invis_flags").unwrap_or(0);
             Entity::Face3D(Face3DEntity {
                 common,
                 corner1,
                 corner2,
                 corner3,
                 corner4,
+                invisible_edges: Face3DEntity::invisible_edges_from_bits(u32::from(invis_flags)),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SPLINE => {
@@ -1379,13 +1446,16 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
-            // SAFETY: obj is a POLYLINE_3D per fixedtype; the vertices it
-            // owns are VERTEX_3D.
-            let vertices: Vec<Point3D> =
-                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D) }
-                    .into_iter()
-                    .filter_map(|vertex| get_point3d(vertex, "VERTEX_3D", "point"))
-                    .collect();
+            // SAFETY: obj is a POLYLINE_3D of dwg per fixedtype.
+            let vertices: Vec<Point3D> = unsafe {
+                polyline_vertices(
+                    dwg,
+                    text,
+                    obj,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D,
+                    |v| get_point3d(v, "VERTEX_3D", "point"),
+                )
+            };
             // POLYLINE_3D.flag is BITCODE_RC (1 byte), unlike LWPOLYLINE's
             // BITCODE_BS (2 bytes) -- same closed-bit convention, different
             // underlying C width.
@@ -1397,12 +1467,6 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // SAFETY: obj is a POLYLINE_2D per fixedtype; the vertices it
-            // owns are VERTEX_2D, each with its own bulge and widths. A
-            // VERTEX_2D's stored point is 3D, but its z is the polyline's
-            // own elevation repeated.
-            let owned =
-                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D) };
             // A DXF states the polyline's default widths once (its own
             // groups 40/41) and leaves them out of every VERTEX that has
             // them, and the importer reads an absent vertex width as 0: so
@@ -1418,41 +1482,44 @@ unsafe fn convert_entity(
             } else {
                 (0.0, 0.0)
             };
-            let mut vertices = Vec::with_capacity(owned.len());
-            let mut bulges = Vec::with_capacity(owned.len());
-            let mut widths = Vec::with_capacity(owned.len());
-            for vertex in owned {
-                let Some(point) = get_point3d(vertex, "VERTEX_2D", "point") else {
-                    continue;
-                };
-                let value = |field: &str| get_field::<f64>(vertex, "VERTEX_2D", field);
-                vertices.push(Point2D {
-                    x: point.x,
-                    y: point.y,
-                });
-                bulges.push(value("bulge").unwrap_or(0.0));
-                let stated = (
-                    value("start_width").unwrap_or(0.0),
-                    value("end_width").unwrap_or(0.0),
-                );
-                let (start, end) = if stated == (0.0, 0.0) {
-                    default_width
-                } else {
-                    stated
-                };
-                widths.push(SegmentWidth { start, end });
-            }
+            // Each VERTEX_2D carries its own bulge (the segment to the next
+            // vertex) and widths; an unreadable bulge is a straight segment.
+            // A VERTEX_2D's stored point is 3D, but its z is the polyline's
+            // own elevation repeated.
+            // SAFETY: obj is a POLYLINE_2D of dwg per fixedtype.
+            let vertices: Vec<PolylineVertex> = unsafe {
+                polyline_vertices(
+                    dwg,
+                    text,
+                    obj,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D,
+                    |v| {
+                        let p = get_point3d(v, "VERTEX_2D", "point")?;
+                        let width =
+                            |field: &str| get_field::<f64>(v, "VERTEX_2D", field).unwrap_or(0.0);
+                        let stated = (width("start_width"), width("end_width"));
+                        let (start_width, end_width) = if stated == (0.0, 0.0) {
+                            default_width
+                        } else {
+                            stated
+                        };
+                        Some(PolylineVertex {
+                            point: Point2D { x: p.x, y: p.y },
+                            bulge: get_field::<f64>(v, "VERTEX_2D", "bulge").unwrap_or(0.0),
+                            start_width,
+                            end_width,
+                        })
+                    },
+                )
+            };
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
-            // A POLYLINE_2D states no constant width: its widths are its
-            // vertices' own (see LwPolylineEntity::const_width).
-            let const_width = 0.0;
             Entity::Polyline2D(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & POLYLINE_CLOSED_FLAG != 0,
-                bulges: stated_bulges(bulges),
-                widths: stated_widths(widths, const_width),
-                const_width,
+                // A POLYLINE_2D states no constant width: its widths are its
+                // vertices' own (see LwPolylineEntity::const_width).
+                const_width: 0.0,
                 elevation: get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "POLYLINE_2D"),
             })
@@ -1653,10 +1720,9 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_PFACE => {
-            // SAFETY: obj is a valid, non-null POLYLINE_PFACE Dwg_Object*
-            // (matching fixedtype); the helper only walks its owned-subentity
-            // chain.
-            let wireframe_edges = unsafe { polyline_pface_wireframe(obj) };
+            // SAFETY: obj is a valid, non-null POLYLINE_PFACE object of dwg
+            // (matching fixedtype); the helper only walks its vertex records.
+            let wireframe_edges = unsafe { polyline_pface_wireframe(dwg, text, obj) };
             Entity::PolylinePFace(Solid3DEntity {
                 common,
                 wireframe_edges,
@@ -1668,11 +1734,11 @@ unsafe fn convert_entity(
             let m = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_m_verts").unwrap_or(0);
             let n = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_n_verts").unwrap_or(0);
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "flag").unwrap_or(0);
-            // SAFETY: obj is a valid, non-null POLYLINE_MESH Dwg_Object*
-            // (matching fixedtype); the helper only walks its owned-subentity
-            // chain.
-            let (wireframe_edges, skipped_edges) =
-                unsafe { polyline_mesh_wireframe(obj, usize::from(m), usize::from(n), flag) };
+            // SAFETY: obj is a valid, non-null POLYLINE_MESH object of dwg
+            // (matching fixedtype); the helper only walks its vertex records.
+            let (wireframe_edges, skipped_edges) = unsafe {
+                polyline_mesh_wireframe(dwg, text, obj, usize::from(m), usize::from(n), flag)
+            };
             Entity::PolylineMesh(Solid3DEntity {
                 common,
                 wireframe_edges,
@@ -1881,12 +1947,17 @@ fn convert_hatch_path(path: &libredwg_sys::Dwg_HATCH_Path) -> HatchBoundaryPath 
         // SAFETY: polyline_paths/num_segs_or_paths are LibreDWG's own matched
         // array-length convention (see Dwg_HATCH_Path in dwg.h); valid until
         // dwg_free, which outlives this whole conversion pass.
-        let vertices: Vec<Point2D> =
+        let vertices: Vec<PolylineVertex> =
             unsafe { read_raw_array(path.polyline_paths, path.num_segs_or_paths) }
                 .into_iter()
-                .map(|v| Point2D {
-                    x: v.point.x,
-                    y: v.point.y,
+                .map(|v| PolylineVertex {
+                    point: Point2D {
+                        x: v.point.x,
+                        y: v.point.y,
+                    },
+                    bulge: v.bulge,
+                    // A HATCH boundary has no widths.
+                    ..PolylineVertex::default()
                 })
                 .collect();
         HatchBoundaryPath::Polyline(vertices)

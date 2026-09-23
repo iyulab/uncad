@@ -486,10 +486,16 @@ and a mirrored arc keeps its stated angles although it runs clockwise in the wor
 the coordinates to the world (the DXF reference's arbitrary axis algorithm) is a
 consumer's step; `Affine2::from_insert` in the model does it for a block reference. The
 normal is not normalised either; only a zero vector, which is no direction, reads as the
-default (0, 0, 1). An LWPOLYLINE's normal is read only when its flag says one is stored
-(bit 1 in LibreDWG's layout), as the decoder itself does. Of the corpus and the nine local
-sample drawings, three samples carry such entities -- 240 SOLIDs, 95 LWPOLYLINEs and 66
-INSERTs, every one with the normal (0, 0, -1) that AutoCAD's MIRROR leaves behind.
+default (0, 0, 1). Of the corpus and the nine local sample drawings, three samples carry
+such entities -- 240 SOLIDs, 95 LWPOLYLINEs and 66 INSERTs, every one with the normal
+(0, 0, -1) that AutoCAD's MIRROR leaves behind.
+
+A zero vector is also what LibreDWG leaves in the field when the record stores no normal,
+which is the absent group: an LWPOLYLINE stores one only when its flag says so (bit 1 in
+the library's layout), and a pre-R13 entity only when its options say so. Taken as it
+stands, the field is (0, 0, 0) for every LWPOLYLINE of the corpus's DWGs (946, block
+contents counted apiece) and for every circle, arc, solid, trace and 2D polyline of its
+pre-R13 DWGs; the DXF importer fills in (0, 0, 1) itself.
 
 ## The polyline "closed" flag
 
@@ -502,52 +508,70 @@ corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported close
 constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
 carry the distinction.
 
-## Polyline vertices come from the polyline's own chain
+## Where a polyline's bulges come from
 
-An old-style POLYLINE (2D, 3D, polyface, polygon mesh) owns its vertices as VERTEX
-records, closed by a SEQEND. They are read here by walking the polyline's own
-owned-subentity chain (`get_first_owned_subentity` / `get_next_owned_subentity`), not
-through LibreDWG's `dwg_object_polyline_{2,3}d_get_points`: for every file older than
-R2004 those walk `first_vertex .. last_vertex` with a loop whose condition ends *before*
-its body sees `last_vertex`, and returned one vertex short -- a closed square came back a
-triangle, a two-vertex arc a single point. Measured on the DXFs of the corpus
-(`example_2000`, `example_2004`, `example_r13`, `example_r14`, `2000/PolyLine2D`,
-`2000/PolyLine3D`, `r12/Leader`) and the `polyline_vertices_r2000.dxf` fixture: every one
-of the 22 POLYLINEs whose VERTEX records can be counted in the file now has exactly that
-many vertices, where the accessors had given 20 of them one too few; the DWG twins give
-the same vertices as their DXFs. Files older than R13 do not fill that chain, so there
-the vertices are the VERTEX records that follow the polyline in the object list, as in
-LibreDWG's own pre-R13 branch.
+Each polyline vertex carries the bulge of the segment that leaves it (an arc segment's; `0`
+is straight). They are read from three places:
+
+- **LWPOLYLINE** stores its bulges as an array separate from its points, empty when every
+  segment is straight. An array of any other length than the points' does not say which bulge
+  belongs to which vertex: every segment is then read as straight, and the read reports
+  `POLYLINE_BULGE`.
+- **2D POLYLINE** stores each bulge on its own `VERTEX_2D` record, beside the position; both
+  come from the same record (see the next section for how the records are found).
+- **A HATCH polyline boundary** stores the bulge beside each point.
+
+A bulge keeps the sign the file wrote: a mirrored object coordinate system does not change
+it. In the test corpus, 231 LWPOLYLINEs and 10 POLYLINE_2Ds (entities and block contents
+counted apiece) have a bulge.
+
+## Where a polyline's widths come from
+
+Each polyline vertex also carries the widths of the segment that leaves it, where it starts
+and where it ends (`start_width`, `end_width`; DXF 40 and 41), and an LWPOLYLINE the
+constant width of every segment (`const_width`, DXF 43) that applies when no vertex has a
+width of its own. They are read from the same places as the bulges:
+
+- **LWPOLYLINE** stores its widths as another separate array, on the same terms as its
+  bulges: empty when no vertex has a width, otherwise one pair per vertex. An array of any
+  other length is read as no widths, and the read reports `POLYLINE_WIDTH`. A file that
+  states the constant width again on every vertex, at both ends, draws the same polyline as
+  one that states it only once, and the two read the same: vertices with no width of their
+  own.
+- **2D POLYLINE** stores each vertex's widths on its `VERTEX_2D` record and states no
+  constant width (it carries `0`). A DXF, though, writes the polyline's default widths once,
+  as the POLYLINE's groups 40/41, and leaves them out of every VERTEX that has them -- the
+  DWG of `2000/PolyLine2D` stores 0.15 on each vertex of its `_ARCHTICK` tick where the DXF
+  twin states it once -- and LibreDWG's importer reads an absent vertex width as 0. So a DXF
+  vertex whose widths read as 0 takes the polyline's default widths. A DXF vertex that
+  states 0 explicitly under a non-zero default cannot be told apart and reads as the default
+  too.
+- **A HATCH polyline boundary** has no widths; its vertices carry `0`.
+
+## How a 2D or 3D POLYLINE's vertices are found
+
+A heavy POLYLINE keeps its vertices as separate records. Before R13 they follow it in the
+object stream up to its SEQEND; from R13 to R2000 the polyline chains them from
+`first_vertex` to `last_vertex`; from R2004 on it lists them by handle. This crate walks the
+records itself, by version, rather than through the library's dedicated point accessors:
+from R13 to R2000 those stop one record short of `last_vertex`, so a polyline arrived without
+its last vertex. On the test corpus the walk's vertex count matches each drawing's DXF twin
+for every polyline but one in each of two pre-R11 drawings (`r9`, `r10`). There the entity
+section continues elsewhere (a JUMP entity) right after the polyline, and the library's
+object stream ends at the JUMP, so none of the polyline's vertex records is reached. A
+pre-R13 polyline whose vertex records end before its SEQEND is read with the vertices that
+were found and reported as `POLYLINE_VERTICES`, naming the polyline.
+
+A polyface and a polygon mesh keep their records the same way and are read through the
+same walk. The records are data from the file, so the walk is bounded: through the object
+stream by the number of objects, and through the polyline's own records by the same cap as
+every other owned-subentity walk here.
 
 The VERTEX records themselves are not entities of the block that holds the polyline. The
 R13..R2000 block walk here skips them, and so does the walk for every other version, whose
 list the DXF importer fills with every object between a BLOCK and its ENDBLK: seven
 pre-R13 DXFs in the corpus reported each polyline's vertices a second time, as 62
 `Unknown` entities.
-
-## Polyline bulges and widths are carried as stated -- except a HATCH boundary's
-
-A polyline vertex can carry a bulge: the segment to the next vertex is then an arc, not a
-straight line. LWPOLYLINE and POLYLINE_2D carry their `bulges` (one per vertex, with the
-sign the file wrote -- a mirrored object coordinate system does not change it), their
-per-vertex `widths`, their `const_width` and their `elevation`. A polyline whose file
-states only zero bulges, or widths all equal to its constant width, carries the empty list,
-the same as one that states none. In the test corpus, 231 LWPOLYLINEs and 10 POLYLINE_2Ds
-(entities and block contents counted apiece) have a bulge.
-
-A POLYLINE_2D states no constant width of its own: its widths are its vertices'. A DXF,
-though, writes the polyline's default widths once, as the POLYLINE's groups 40/41, and
-leaves them out of every VERTEX that has them -- the DWG of `2000/PolyLine2D` stores 0.15 on
-each vertex of its `_ARCHTICK` tick where the DXF twin states it once -- and LibreDWG's
-importer reads an absent vertex width as 0. So a DXF vertex whose widths read as 0 takes
-the polyline's default widths. A DXF vertex that states 0 explicitly under a non-zero
-default cannot be told apart and reads as the default too.
-
-A HATCH's polyline boundary paths still arrive as their vertices alone: the model's
-`HatchBoundaryPath::Polyline` has no bulges, so an arc segment of a boundary arrives as its
-chord, with no error and no diagnostic. In the test corpus, 67 of the 122 HATCH
-polyline-boundary vertices another reader finds carry a non-zero bulge. The library reads
-them; carrying them is a change to the model, not to this reader.
 
 ## A fit-point spline's closed and periodic bits
 

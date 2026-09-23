@@ -212,9 +212,18 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (58, 0, 9));
 
     // --- LibreDWG's non-fatal error bits, which used to be discarded ---
-    assert_eq!(s.clean_dwg, 100);
+    assert_eq!(s.clean_dwg, 98);
     assert_eq!(s.diagnostics.get("UNHANDLEDCLASS"), Some(&17));
     assert_eq!(s.diagnostics.get("VALUEOUTOFBOUNDS"), Some(&31));
+    // The two pre-R11 drawings (r9, r10) whose object stream ends at a JUMP
+    // right after a closed polyline, before that polyline's vertices.
+    let short_polylines: usize = s
+        .diagnostics
+        .iter()
+        .filter(|(name, _)| name.starts_with("POLYLINE_VERTICES:"))
+        .map(|(_, n)| n)
+        .sum();
+    assert_eq!(short_polylines, 2);
 
     // --- references: no bare zero handle; the only unresolved ones are the
     // 22 layers of the R1.4 drawing, whose LAYER table LibreDWG does not read;

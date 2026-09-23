@@ -938,11 +938,12 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
 
 /// The same lightweight polylines and ellipses, field by field.
 ///
-/// Matched by handle and compared exactly, like the other field comparisons.
-/// The second reader also carries each polyline vertex's bulge and widths,
-/// which the model does not; how many vertices carry a non-zero one is
-/// printed alongside, because a bulge is an arc segment and dropping it
-/// changes the drawing's geometry.
+/// Matched by handle and compared exactly, like the other field comparisons,
+/// each polyline vertex with its bulge (an arc segment's). The second reader
+/// also carries vertex widths, which the model does not; how many vertices
+/// carry a non-zero one is printed alongside. The comparison is required to
+/// have met bulged vertices, so that it cannot pass by comparing only
+/// straight segments.
 #[test]
 fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
     use std::collections::{BTreeMap, BTreeSet};
@@ -995,12 +996,14 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
                         let ov: Vec<String> = o
                             .vertices
                             .iter()
-                            .map(|v| format!("({:?}, {:?})", v.x, v.y))
+                            .map(|v| format!("({:?}, {:?}) b{:?}", v.point.x, v.point.y, v.bulge))
                             .collect();
                         let tv: Vec<String> = t
                             .vertices
                             .iter()
-                            .map(|v| format!("({:?}, {:?})", v.location.x, v.location.y))
+                            .map(|v| {
+                                format!("({:?}, {:?}) b{:?}", v.location.x, v.location.y, v.bulge)
+                            })
                             .collect();
                         fields.push(("vertex count", ov.len().to_string(), tv.len().to_string()));
                         for (i, (a, b)) in ov.iter().zip(&tv).enumerate() {
@@ -1078,6 +1081,7 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
          (in {bulged_polylines} polylines), width != 0 on {widened}"
     );
     assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(bulged > 0, "no bulged vertex was compared");
     assert!(
         unmatched.is_empty() && disagreements.is_empty(),
         "compared {compared:?}, unmatched {unmatched:?}, {} disagreements:\n{}",
@@ -1253,4 +1257,315 @@ fn the_two_readers_agree_on_which_entities_are_invisible() {
         disagreements.join("\n")
     );
     println!("compared {compared}, invisible {invisible}");
+}
+
+/// The same 2D and 3D POLYLINEs, vertex by vertex: every position, each 2D
+/// vertex with its bulge, and the closed bit.
+///
+/// The vertex list is the field most at risk here: a POLYLINE stores its
+/// vertices as separate records chained to it, and walking that chain is
+/// version-dependent -- a walk that stops one record early drops the last
+/// vertex without an error. So the count is compared too, and the
+/// comparison is required to have met polylines from before R2004 (where the
+/// chain runs `first_vertex..last_vertex`) as well as after.
+#[test]
+fn the_two_readers_agree_on_every_2d_and_3d_polyline_vertex() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut unmatched = 0usize;
+    let mut chained = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let id = entity.common().id;
+                let (kind, ov, oc): (&str, Vec<String>, bool) = match entity {
+                    uncad::Entity::Polyline2D(o) => (
+                        "polyline 2d",
+                        o.vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?}) b{:?}", v.point.x, v.point.y, v.bulge))
+                            .collect(),
+                        o.closed,
+                    ),
+                    uncad::Entity::Polyline3D(o) => (
+                        "polyline 3d",
+                        o.vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?}, {:?})", v.x, v.y, v.z))
+                            .collect(),
+                        o.closed,
+                    ),
+                    _ => continue,
+                };
+                if !seen.insert(id) {
+                    continue;
+                }
+                use acadrust::EntityType as E;
+                let (tv, tc): (Vec<String>, bool) = match (kind, theirs.get(&id.value())) {
+                    ("polyline 2d", Some(E::Polyline2D(t))) => (
+                        t.vertices
+                            .iter()
+                            .map(|v| {
+                                format!("({:?}, {:?}) b{:?}", v.location.x, v.location.y, v.bulge)
+                            })
+                            .collect(),
+                        t.flags.is_closed(),
+                    ),
+                    ("polyline 3d", Some(E::Polyline3D(t))) => (
+                        t.vertices
+                            .iter()
+                            .map(|v| {
+                                format!(
+                                    "({:?}, {:?}, {:?})",
+                                    v.position.x, v.position.y, v.position.z
+                                )
+                            })
+                            .collect(),
+                        t.flags.closed,
+                    ),
+                    _ => {
+                        unmatched += 1;
+                        continue;
+                    }
+                };
+                *compared.entry(kind).or_default() += 1;
+                if matches!(*version, "2000" | "r14") {
+                    chained += 1;
+                }
+                let mut fields = vec![
+                    ("vertex count", ov.len().to_string(), tv.len().to_string()),
+                    ("closed", oc.to_string(), tc.to_string()),
+                ];
+                for (i, (a, b)) in ov.iter().zip(&tv).enumerate() {
+                    if a != b {
+                        fields.push(("vertex", format!("[{i}] {a}"), format!("[{i}] {b}")));
+                    }
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared:?}, from before R2004 {chained}, unmatched {unmatched}");
+    assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(chained > 0, "no polyline from before R2004 was compared");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared:?}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}
+
+/// The same 3DFACEs, field by field: the four corners and which edges are
+/// invisible. A mesh of faces hides the edges its faces share, so the flags
+/// decide what outline is drawn; the comparison is required to have met
+/// faces with hidden edges.
+#[test]
+fn the_two_readers_agree_on_every_3dface_corner_and_hidden_edge() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let (mut compared, mut unmatched, mut with_hidden) = (0usize, 0usize, 0usize);
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let uncad::Entity::Face3D(o) = entity else {
+                    continue;
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(acadrust::EntityType::Face3D(t)) = theirs.get(&id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                with_hidden += usize::from(o.invisible_edges.iter().any(|h| *h));
+                let p = |x: f64, y: f64, z: f64| format!("({x:?}, {y:?}, {z:?})");
+                let ours_corners = [o.corner1, o.corner2, o.corner3, o.corner4]
+                    .iter()
+                    .map(|c| p(c.x, c.y, c.z))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let their_corners = [
+                    t.first_corner,
+                    t.second_corner,
+                    t.third_corner,
+                    t.fourth_corner,
+                ]
+                .iter()
+                .map(|c| p(c.x, c.y, c.z))
+                .collect::<Vec<_>>()
+                .join(" ");
+                let flags = &t.invisible_edges;
+                let their_hidden = [
+                    flags.is_first_invisible(),
+                    flags.is_second_invisible(),
+                    flags.is_third_invisible(),
+                    flags.is_fourth_invisible(),
+                ];
+                for (field, a, b) in [
+                    ("corners", ours_corners, their_corners),
+                    (
+                        "invisible edges",
+                        format!("{:?}", o.invisible_edges),
+                        format!("{their_hidden:?}"),
+                    ),
+                ] {
+                    if a != b {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} 3dface {field}: ours {a}, theirs {b}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared}, with hidden edges {with_hidden}, unmatched {unmatched}");
+    assert!(compared > 0, "nothing was read by both");
+    assert!(with_hidden > 0, "no face with a hidden edge was compared");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}
+
+/// The same SOLIDs and TRACEs, field by field: the four corners, the
+/// elevation they share and the extrusion. The other reader keeps the
+/// elevation as each corner's z and the extrusion as the normal.
+#[test]
+fn the_two_readers_agree_on_every_solid_and_trace_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let (mut compared, mut unmatched, mut raised) = (0usize, 0usize, 0usize);
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let (kind, o) = match entity {
+                    uncad::Entity::Solid(o) => ("solid", o),
+                    uncad::Entity::Trace(o) => ("trace", o),
+                    _ => continue,
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(acadrust::EntityType::Solid(t)) = theirs.get(&id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                raised += usize::from(o.elevation != 0.0);
+                let xy = |x: f64, y: f64| format!("({x:?}, {y:?})");
+                let fields = [
+                    (
+                        "corners",
+                        [o.corner1, o.corner2, o.corner3, o.corner4]
+                            .iter()
+                            .map(|c| xy(c.x, c.y))
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        [
+                            t.first_corner,
+                            t.second_corner,
+                            t.third_corner,
+                            t.fourth_corner,
+                        ]
+                        .iter()
+                        .map(|c| xy(c.x, c.y))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    ),
+                    (
+                        "elevation",
+                        format!("{:?}", o.elevation),
+                        format!("{:?}", t.first_corner.z),
+                    ),
+                    (
+                        "extrusion",
+                        format!(
+                            "({:?}, {:?}, {:?})",
+                            o.extrusion.x, o.extrusion.y, o.extrusion.z
+                        ),
+                        format!("({:?}, {:?}, {:?})", t.normal.x, t.normal.y, t.normal.z),
+                    ),
+                ];
+                for (field, a, b) in fields {
+                    if a != b {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {a}, theirs {b}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared}, with an elevation {raised}, unmatched {unmatched}");
+    assert!(compared > 0, "nothing was read by both");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
 }

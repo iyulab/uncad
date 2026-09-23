@@ -14,8 +14,8 @@ Notable changes to this project are recorded here. The format follows
   exposes the file-header facts decoding a drawing's text and header needs:
   `uncad_dwg_version`, `uncad_dwg_from_version`, `uncad_dwg_from_dxf`,
   `uncad_dwg_numheader_vars` (how long a pre-R13 header is) and `uncad_dwg_template_read`
-  (whether the section holding `$MEASUREMENT` was read), with bindings for
-  `dwg_version_type` and `dwg_next_object`. Strings are not converted in C: `uncad`'s
+  (whether the section holding `$MEASUREMENT` was read), with a binding for
+  `dwg_version_type`. Strings are not converted in C: `uncad`'s
   `TextDecoder` does that, and reports what it cannot.
 - `uncad::parse_bytes(bytes, Format)` parses a drawing already in memory, and
   `uncad::Format` (`Dwg`, `Dxf`, with `Format::from_path`) says which it is. `parse()`
@@ -52,6 +52,18 @@ Notable changes to this project are recorded here. The format follows
   hidden visibility states are the common case (5,499 of the test corpus's entities).
 - An ELLIPSE carries its `extrusion` (DXF 210), the normal of its plane: a mirrored
   ellipse's parameters run the other way.
+- A CIRCLE and an ARC carry their `extrusion` (DXF 210). Their center is written in
+  their own coordinate system, whose Z axis that is: a mirror copy's (0, 0, -1) puts
+  it at the world x reversed, and its angles run clockwise in the world.
+- An LWPOLYLINE and a 2D POLYLINE carry their `elevation` (the z of every vertex in
+  their own coordinate system) and `extrusion` (DXF 210), for the same reason.
+- A 3DFACE carries which of its edges are `invisible_edges` (DXF 70) -- a mesh of faces
+  hides the edges its faces share.
+- A SOLID and a TRACE carry their `elevation` and `extrusion`: their corners are points
+  of their own coordinate system too.
+- `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
+  before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
+  found, and named. It used to arrive with no vertices and no signal.
 - A layer's state is read: `off`, `frozen`, `locked`, `plot` (DXF 290), `lineweight`
   (DXF 370, hundredths of a millimetre or -3 for the default) and the `linetype` it names.
   A DXF's plot flag and lineweight are `None` where its importer cannot tell a stated 0
@@ -63,16 +75,20 @@ Notable changes to this project are recorded here. The format follows
   (they name the block record as their owner, the shape ezdxf writes) finds its vertex
   positions: `example_2000.dxf`'s and `example_r13.dxf`'s polyface had no edges where
   their DWG twins have six.
-- The object coordinate system of CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB,
-  ATTDEF, INSERT, SOLID and TRACE is read: each carries its `extrusion` (DXF 210) and the
-  planar ones their `elevation`, with the coordinates as the file states them. A
-  mirrored entity used to be indistinguishable from an upright one. See
+- TEXT, ATTRIB and ATTDEF carry their `elevation` and `extrusion` too, and an INSERT its
+  `extrusion`, with the coordinates as the file states them: a mirrored block reference
+  used to be indistinguishable from an upright one. A normal the record does not store --
+  an LWPOLYLINE's unless its flag says so, a pre-R13 entity's unless its options do -- is
+  the default (0, 0, 1), not the zero vector the library leaves in the field. See
   `docs/CAVEATS.md`, "Object coordinate systems".
-- LWPOLYLINE and POLYLINE_2D carry what runs between their vertices: `bulges` (with the
-  sign the file wrote), per-vertex `widths` and `const_width`, empty lists when every
-  segment is straight and every width the constant one. A DXF POLYLINE's default widths
+- A polyline vertex carries the widths of the segment that leaves it, `start_width` and
+  `end_width` (DXF 40/41), and an LWPOLYLINE its `const_width` (DXF 43), the width of
+  every segment when no vertex has one of its own. A file that states the constant width
+  again on every vertex reads as one that states it once. A DXF POLYLINE's default widths
   (its groups 40/41) are the widths of the vertices that state none, so a DXF and its DWG
-  twin agree. See `docs/CAVEATS.md`, "Polyline bulges and widths are carried as stated".
+  twin agree. An LWPOLYLINE width array that cannot be matched to the vertices is reported
+  as `POLYLINE_WIDTH` and read as no widths. See `docs/CAVEATS.md`, "Where a polyline's
+  widths come from".
 - TEXT, ATTRIB and ATTDEF carry how they are placed beyond their start point: the
   horizontal and vertical justification (DXF 72, 73/74), the alignment point (DXF 11,
   only for a justified text), the width factor (DXF 41), the oblique angle (DXF 51,
@@ -99,28 +115,6 @@ Notable changes to this project are recorded here. The format follows
   DXF's; the binary format stores none) and the layers frozen in it alone.
 - An ordinate DIMENSION carries its `ordinate_axis` (DXF 70, bit 64): whether it measures
   its feature's x or y distance from the datum.
-### Changed
-
-- A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
-  measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
-- A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
-  entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
-  entity answers to it, `Absent` is a leader that names nothing. The `Option` it
-  replaces carried the first two as the same `Some`.
-- A LEADER's `has_arrowhead` is `Option<bool>`; `None` where the flag cannot be read.
-- `LightEntity::has_target` is gone and `LightEntity::light_type`
-  (`Option<LightType>`: distant, point, spot) takes its place. `has_target` was not
-  something the file states but a conclusion drawn from the type and two points; the
-  type is what the file states, and whether a light aims at its target follows from
-  it. Breaking for consumers reading any of the three fields.
-- `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
-  `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
-  instead of two rendered hex strings. The parser no longer decides how a
-  single-color gradient fades or whether white is flipped for a white background;
-  those are a renderer's derivations. Breaking for consumers reading the two fields.
-
-### Added
-
 - `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value
   answers to. A title block's values were readable but not which field each one filled.
 - `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while
@@ -142,6 +136,37 @@ Notable changes to this project are recorded here. The format follows
 - All three crates declare `rust-version = "1.88"`. Until now the minimum was whatever
   happened to build. The value is measured (1.87 fails, 1.88 passes) and CI has an `msrv`
   job that checks the workspace with exactly the declared toolchain.
+
+### Changed
+
+- A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
+  measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
+- A polyline's vertices are `PolylineVertex { point, bulge, start_width, end_width }` --
+  LWPOLYLINE, 2D POLYLINE and a HATCH's polyline boundaries. The bulge (DXF 42) is an arc
+  segment's; it was read and dropped, so an arc segment arrived as its chord. A bulge array
+  that cannot be matched to the vertices is reported as `POLYLINE_BULGE` and read as
+  straight. (The widths are under "Added".)
+- `libredwg-sys` no longer binds `dwg_object_polyline_2d_get_points`,
+  `dwg_object_polyline_2d_get_numpoints`, `dwg_object_polyline_3d_get_points` or
+  `dwg_object_polyline_3d_get_numpoints` (see Fixed), and binds `dwg_next_object` and
+  `dwg_rgb_palette_index` (the RGB the DXF importer makes up for a colour index; see
+  Fixed, true colour).
+
+- A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
+  entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
+  entity answers to it, `Absent` is a leader that names nothing. The `Option` it
+  replaces carried the first two as the same `Some`.
+- A LEADER's `has_arrowhead` is `Option<bool>`; `None` where the flag cannot be read.
+- `LightEntity::has_target` is gone and `LightEntity::light_type`
+  (`Option<LightType>`: distant, point, spot) takes its place. `has_target` was not
+  something the file states but a conclusion drawn from the type and two points; the
+  type is what the file states, and whether a light aims at its target follows from
+  it. Breaking for consumers reading any of the three fields.
+- `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
+  `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
+  instead of two rendered hex strings. The parser no longer decides how a
+  single-color gradient fades or whether white is flipped for a white background;
+  those are a renderer's derivations. Breaking for consumers reading the two fields.
 
 ### Fixed
 
@@ -171,14 +196,13 @@ Notable changes to this project are recorded here. The format follows
   shows since true colours are read as the file states them (below). `build.rs` refuses
   to build when a patch's marker has gone missing, which a re-vendor through
   `scripts/sync-libredwg-vendor.sh` would otherwise do in silence.
-- **Every vertex of a POLYLINE_2D/3D is read.** LibreDWG's point accessors end their walk
-  one vertex early on every file older than R2004, so the last vertex was dropped: a closed
-  square came back a triangle, a two-vertex arc a single point. The vertices now come from
-  the polyline's own subentity chain; all 22 POLYLINEs of the corpus DXFs and the
-  fixtures whose vertices can be counted in the file match that count (the accessors had
-  20 of them one short). A polyline's VERTEX records are no longer reported as entities of
-  their own either -- 62 `Unknown` VERTEX entities in seven pre-R13 DXFs. See
-  `docs/CAVEATS.md`, "Polyline vertices come from the polyline's own chain".
+- A 2D or 3D POLYLINE from an R13 to R2000 drawing no longer loses its last vertex. The
+  library's point accessors stop one record early in that range; the vertex records are
+  now walked directly. A closed square came back a triangle, a two-vertex arc a single
+  point; all 22 POLYLINEs of the corpus DXFs and the fixtures whose vertices can be
+  counted in the file now have that count. A polyline's VERTEX records are no longer
+  reported as entities of their own either -- 62 `Unknown` VERTEX entities in seven
+  pre-R13 DXFs. See `docs/CAVEATS.md`, "How a 2D or 3D POLYLINE's vertices are found".
 - **An entity's true colour is the one the file states.** It was read only when the
   colour's method said TRUECOLOR: an R2004+ DWG never sets the method (the RGB comes under
   the colour's `0x80` flag), so no DWG entity reported its true colour, while the DXF

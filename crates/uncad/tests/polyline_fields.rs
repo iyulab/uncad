@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use uncad::model::{LwPolylineEntity, SegmentWidth};
+use uncad::model::LwPolylineEntity;
 use uncad::Entity;
 
 const CORPUS: &str = concat!(
@@ -66,10 +66,18 @@ fn the_dwg_and_its_dxf_twin_agree_on_what_runs_between_the_vertices() {
                         .all(|(p, q)| (p - q).abs() <= 1e-12 * p.abs().max(q.abs()).max(1.0))
             };
             let xy = |p: &LwPolylineEntity| -> Vec<f64> {
-                p.vertices.iter().flat_map(|v| [v.x, v.y]).collect()
+                p.vertices
+                    .iter()
+                    .flat_map(|v| [v.point.x, v.point.y])
+                    .collect()
             };
+            let bulges =
+                |p: &LwPolylineEntity| -> Vec<f64> { p.vertices.iter().map(|v| v.bulge).collect() };
             let widths = |p: &LwPolylineEntity| -> Vec<f64> {
-                p.widths.iter().flat_map(|w| [w.start, w.end]).collect()
+                p.vertices
+                    .iter()
+                    .flat_map(|v| [v.start_width, v.end_width])
+                    .collect()
             };
             assert!(
                 near(&xy(a), &xy(b)),
@@ -78,16 +86,16 @@ fn the_dwg_and_its_dxf_twin_agree_on_what_runs_between_the_vertices() {
                 b.vertices
             );
             assert!(
-                near(&a.bulges, &b.bulges),
+                near(&bulges(a), &bulges(b)),
                 "{what}: {:?} vs {:?}",
-                a.bulges,
-                b.bulges
+                a.vertices,
+                b.vertices
             );
             assert!(
                 near(&widths(a), &widths(b)),
                 "{what}: {:?} vs {:?}",
-                a.widths,
-                b.widths
+                a.vertices,
+                b.vertices
             );
             assert!(
                 near(&[a.const_width, a.elevation], &[b.const_width, b.elevation]),
@@ -95,7 +103,7 @@ fn the_dwg_and_its_dxf_twin_agree_on_what_runs_between_the_vertices() {
             );
             assert_eq!(a.extrusion, b.extrusion, "{what}");
             compared += 1;
-            bulged += usize::from(!a.bulges.is_empty());
+            bulged += usize::from(a.vertices.iter().any(|v| v.bulge != 0.0));
         }
     }
     assert!(compared >= 30, "{compared} polylines compared");
@@ -119,11 +127,14 @@ fn a_dxf_polyline_s_default_width_is_the_width_of_the_vertices_that_state_none()
                 _ => None,
             })
             .expect("the tick is a POLYLINE_2D");
-        let width = SegmentWidth {
-            start: 0.15,
-            end: 0.15,
-        };
-        assert_eq!(tick.widths, [width, width], "{extension}");
+        assert_eq!(
+            tick.vertices
+                .iter()
+                .map(|v| (v.start_width, v.end_width))
+                .collect::<Vec<_>>(),
+            [(0.15, 0.15), (0.15, 0.15)],
+            "{extension}"
+        );
         assert_eq!(tick.const_width, 0.0, "{extension}");
     }
 }
