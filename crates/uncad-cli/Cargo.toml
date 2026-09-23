@@ -22,6 +22,8 @@ path = "src/main.rs"
 uncad = { path = "../uncad", version = "0.2.0" }
 # SVG/PNG output. A version dependency, never a path.
 iron-render-cad = "0.1.0"
+# The LLM/VLM package behind `uncad export`.
+uncad-export = { path = "../uncad-export", version = "0.1.0" }
 
 [dev-dependencies]
 serde_json = "1.0.151"

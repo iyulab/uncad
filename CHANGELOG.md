@@ -8,6 +8,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `uncad export <input> -o <dir>`: the CLI writes the LLM/VLM package through the new
+  `uncad-export` crate (`--profile`, `--max-levels`, `--max-tiles`, `--no-sheets`,
+  `--svg`); an option the subcommand does not know is an error.
+
 - `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
   `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
   MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and
