@@ -84,7 +84,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "TEXT",
@@ -114,7 +120,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "TEXT",
@@ -144,7 +156,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "TEXT",
@@ -174,7 +192,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "TEXT",
@@ -204,7 +228,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "TEXT",
@@ -234,7 +264,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "CIRCLE",
@@ -378,7 +414,13 @@
         "x": 140.0,
         "y": -67.0
       },
-      "width_factor": 0.8
+      "width_factor": 0.8,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "INSERT",
@@ -414,6 +456,42 @@
       },
       "rotation": 0.5235987755982988,
       "attribs": [],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 275,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "113"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": -170.0,
+        "y": -72.0
+      },
+      "text_height": 2.5,
+      "text": "MIRROR",
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
         "y": 0.0,
@@ -520,7 +598,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "TEXT",
@@ -550,7 +634,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "TEXT",
@@ -580,7 +670,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "TEXT",
@@ -610,7 +706,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "TEXT",
@@ -640,7 +742,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "TEXT",
@@ -670,7 +778,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "CIRCLE",
@@ -814,7 +928,13 @@
               "x": 140.0,
               "y": -67.0
             },
-            "width_factor": 0.8
+            "width_factor": 0.8,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "INSERT",
@@ -850,6 +970,42 @@
             },
             "rotation": 0.5235987755982988,
             "attribs": [],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 275,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "113"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": -170.0,
+              "y": -72.0
+            },
+            "text_height": 2.5,
+            "text": "MIRROR",
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
               "y": 0.0,

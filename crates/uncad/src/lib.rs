@@ -316,6 +316,12 @@ mod missing_required_groups_tests {
             vertical_alignment: Default::default(),
             alignment_point: None,
             width_factor: 1.0,
+            elevation: 0.0,
+            extrusion: crate::model::Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            },
         });
         assert_eq!(
             missing_required_groups(&[untagged]),

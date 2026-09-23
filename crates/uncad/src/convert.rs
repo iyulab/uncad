@@ -735,6 +735,8 @@ unsafe fn convert_entity(
                 vertical_alignment,
                 alignment_point,
                 width_factor: get_field::<f64>(entity_ptr, "TEXT", "width_factor").unwrap_or(1.0),
+                elevation: get_field::<f64>(entity_ptr, "TEXT", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "TEXT"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
@@ -879,6 +881,8 @@ unsafe fn convert_entity(
                 vertical_alignment,
                 alignment_point,
                 width_factor: get_field::<f64>(entity_ptr, "ATTRIB", "width_factor").unwrap_or(1.0),
+                elevation: get_field::<f64>(entity_ptr, "ATTRIB", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "ATTRIB"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
@@ -954,6 +958,8 @@ unsafe fn convert_entity(
                 vertical_alignment,
                 alignment_point,
                 width_factor: get_field::<f64>(entity_ptr, "ATTDEF", "width_factor").unwrap_or(1.0),
+                elevation: get_field::<f64>(entity_ptr, "ATTDEF", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "ATTDEF"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {

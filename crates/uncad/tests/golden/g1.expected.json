@@ -462,7 +462,13 @@
           "horizontal_alignment": "LEFT",
           "vertical_alignment": "BASELINE",
           "alignment_point": null,
-          "width_factor": 1.0
+          "width_factor": 1.0,
+          "elevation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
         },
         {
           "common": {
@@ -492,7 +498,13 @@
           "horizontal_alignment": "LEFT",
           "vertical_alignment": "BASELINE",
           "alignment_point": null,
-          "width_factor": 1.0
+          "width_factor": 1.0,
+          "elevation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
         },
         {
           "common": {
@@ -522,7 +534,13 @@
           "horizontal_alignment": "LEFT",
           "vertical_alignment": "BASELINE",
           "alignment_point": null,
-          "width_factor": 1.0
+          "width_factor": 1.0,
+          "elevation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
         }
       ],
       "extrusion": {
@@ -560,7 +578,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "ATTRIB",
@@ -591,7 +615,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "ATTRIB",
@@ -622,7 +652,13 @@
       "horizontal_alignment": "LEFT",
       "vertical_alignment": "BASELINE",
       "alignment_point": null,
-      "width_factor": 1.0
+      "width_factor": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     }
   ],
   "tables": {
@@ -767,7 +803,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -889,7 +931,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1011,7 +1059,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1075,7 +1129,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1544,7 +1604,13 @@
                 "horizontal_alignment": "LEFT",
                 "vertical_alignment": "BASELINE",
                 "alignment_point": null,
-                "width_factor": 1.0
+                "width_factor": 1.0,
+                "elevation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
               },
               {
                 "common": {
@@ -1574,7 +1640,13 @@
                 "horizontal_alignment": "LEFT",
                 "vertical_alignment": "BASELINE",
                 "alignment_point": null,
-                "width_factor": 1.0
+                "width_factor": 1.0,
+                "elevation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
               },
               {
                 "common": {
@@ -1604,7 +1676,13 @@
                 "horizontal_alignment": "LEFT",
                 "vertical_alignment": "BASELINE",
                 "alignment_point": null,
-                "width_factor": 1.0
+                "width_factor": 1.0,
+                "elevation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
               }
             ],
             "extrusion": {
@@ -1707,7 +1785,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "ATTDEF",
@@ -1738,7 +1822,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "ATTDEF",
@@ -1769,7 +1859,13 @@
             "horizontal_alignment": "LEFT",
             "vertical_alignment": "BASELINE",
             "alignment_point": null,
-            "width_factor": 1.0
+            "width_factor": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       }
