@@ -12,7 +12,9 @@ Notable changes to this project are recorded here. The format follows
   the file gives none -- every weight is 1), and the `closed` / `periodic` bits as
   `Option<bool>`. A spline stored by its fit points has no periodic bit, and no
   closed bit before R2013; those are `None`, not `false`.
-
+- An MTEXT carries its `attachment` point (DXF 71): which of the text block's nine
+  points the insertion point is. Without it the insertion point does not say where the
+  text goes.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

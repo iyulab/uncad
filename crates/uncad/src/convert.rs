@@ -21,8 +21,8 @@ use uncad_model::model::{
     DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
     InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
-    LwPolylineEntity, MLineEntity, MLineVertex, MTextEntity, MultiLeaderEntity, Origin,
-    PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
+    LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
+    Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
     TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D};
@@ -837,6 +837,20 @@ unsafe fn convert_entity(
             let line_spacing_factor = get_field::<f64>(entity_ptr, "MTEXT", "linespace_factor")
                 .filter(|f| *f != 0.0)
                 .unwrap_or(1.0);
+            // DXF 71, 1 to 9: which point of the text block the insertion
+            // point is. Anything else is not a value this reader can state.
+            let attachment = match get_field::<u16>(entity_ptr, "MTEXT", "attachment") {
+                Some(1) => Some(MTextAttachment::TopLeft),
+                Some(2) => Some(MTextAttachment::TopCenter),
+                Some(3) => Some(MTextAttachment::TopRight),
+                Some(4) => Some(MTextAttachment::MiddleLeft),
+                Some(5) => Some(MTextAttachment::MiddleCenter),
+                Some(6) => Some(MTextAttachment::MiddleRight),
+                Some(7) => Some(MTextAttachment::BottomLeft),
+                Some(8) => Some(MTextAttachment::BottomCenter),
+                Some(9) => Some(MTextAttachment::BottomRight),
+                _ => None,
+            };
             Entity::MText(MTextEntity {
                 common,
                 insertion_point,
@@ -844,6 +858,7 @@ unsafe fn convert_entity(
                 text_height,
                 rotation,
                 line_spacing_factor,
+                attachment,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {

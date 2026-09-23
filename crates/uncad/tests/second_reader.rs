@@ -826,6 +826,12 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
                             format!("{:?}", t.line_spacing_factor),
                         ));
                         fields.push(("text", format!("{:?}", o.text), format!("{:?}", t.value)));
+                        fields.push((
+                            "attachment",
+                            o.attachment
+                                .map_or("unstated".to_string(), |a| format!("{a:?}")),
+                            format!("{:?}", t.attachment_point),
+                        ));
                     }
                     (uncad::Entity::Insert(o), E::Insert(t)) => {
                         let (i, ti) = (o.insertion_point, t.insert_point);
