@@ -1,0 +1,29 @@
+[package]
+name = "uncad-export"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+# The crate is GPL like the rest of this workspace (it links `uncad`, and so
+# LibreDWG); the font it bundles is data under the SIL Open Font License.
+# cargo-deny reads this expression as one license decision per crate --
+# see deny.toml -- and never looks at the font file itself, so the OFL is
+# stated here and in docs/THIRD_PARTY_NOTICES.md.
+license = "GPL-3.0-or-later AND OFL-1.1"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+description = "An LLM/VLM-readable package of a DWG/DXF drawing: sized images, a tile pyramid, sheets per paper layout and exact JSON records, built on uncad and iron-render-cad."
+keywords = ["cad", "dwg", "dxf", "llm", "vision"]
+categories = ["graphics", "multimedia::images"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# The parser, and the drawing's header (units, extents, the dimension
+# variables), which the model does not carry.
+uncad = { path = "../uncad", version = "0.2.0" }
+# The model and the renderer. Version dependencies, never paths: this crate
+# must build from a standalone checkout.
+uncad-model = "0.1.0"
+iron-render-cad = "0.1.0"

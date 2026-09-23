@@ -19,15 +19,24 @@ This project bundles or builds against the following third-party components.
 - **Modified**: no — consumed as published.
 - **Why it is named here**: MPL-2.0 § 3.2 asks anyone distributing an Executable Form built from Covered Software to tell recipients how to obtain the Source Code Form, and it asks that whether or not the Covered Software was modified. This entry is that notice. Its § 3.3 is why the rest of this workspace keeps its own terms.
 
+## Noto Sans KR (bundled font subset)
+
+- **Source**: https://github.com/notofonts/noto-cjk (`Sans/SubsetOTF/KR/NotoSansKR-Regular.otf`, v2.004)
+- **Copyright**: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- **License**: SIL Open Font License, Version 1.1 (OFL-1.1), licence text at `crates/uncad-export/fonts/OFL-NotoSansKR.txt`, inside the crate so it travels with every copy of the font
+- **Used for**: drawing and measuring text in the images of the LLM/VLM package `crates/uncad-export` writes (Latin, Greek, the 2350 common Hangul syllables and the CAD symbols), so they are the same on every machine
+- **Modified**: yes -- `crates/uncad-export/fonts/UncadSans-Regular.otf` is a subset (2755 glyphs, no layout tables) renamed to "Uncad Sans", as the OFL asks of a Modified Version; `crates/uncad-export/fonts/README.md` records the exact steps and the tools that produce it from the source above
+- **Why it is named here**: a font is data, not a Rust dependency, so cargo-deny never sees it. The crate states it in its licence expression (`GPL-3.0-or-later AND OFL-1.1`), `deny.toml` grants the OFL to that crate alone, and every binary linking `uncad-export` embeds the font bytes.
+
 ---
 
 Each published crate carries the full GPLv3 text as a `LICENSE` file in its own directory
-(`crates/libredwg-sys/`, `crates/uncad/`, `crates/uncad-cli/`), byte-identical to the
+(`crates/libredwg-sys/`, `crates/uncad/`, `crates/uncad-export/`, `crates/uncad-cli/`), byte-identical to the
 repository root's. They are copies rather than one shared file because `cargo package`
 never reaches outside a crate directory, and GPLv3 §4 asks for the licence to be conveyed
 with the source that is conveyed — a crates.io tarball is exactly that.
 
-This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party component bundled). See [`LICENSE`](../LICENSE).
+This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party *code* bundled; the second bundled component, the Noto Sans KR subset above, is data under the SIL Open Font License 1.1, which permits bundling in GPL software, and is why `uncad-export`'s licence expression names both). See [`LICENSE`](../LICENSE).
 
 DWF/DWFx support (previously provided by a vendored subset of
 [dwf-viewer](https://github.com/flyfish-dev/dwf-viewer), AGPL-3.0-only) was

@@ -60,12 +60,20 @@ allow = [
 # below.
 
 # Copyleft is granted per crate, never by license name. The GPL lives on the
-# three crates this workspace publishes and nowhere else -- a fourth crate
+# four crates this workspace publishes and nowhere else -- a fifth crate
 # named here means the boundary moved, which is a decision, not a dependency
 # bump.
 exceptions = [
     { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad", allow = ["GPL-3.0-or-later"] },
+    # The fourth, by decision: the LLM/VLM package moved out of `uncad` (which
+    # renders nothing) into a crate of its own. Its expression is
+    # `GPL-3.0-or-later AND OFL-1.1` because it bundles a font (a Noto Sans
+    # KR subset) under the SIL Open Font License. cargo-deny sees only that
+    # expression, never the font file, so the OFL is granted here for this
+    # crate alone and named in `docs/THIRD_PARTY_NOTICES.md`; a font arriving
+    # through any other crate is still refused.
+    { crate = "uncad-export", allow = ["GPL-3.0-or-later", "OFL-1.1"] },
     { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
     # Weak, file-scope copyleft, consumed unmodified and only by this
     # workspace's tests; where its source can be obtained is recorded in

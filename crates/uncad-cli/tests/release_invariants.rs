@@ -14,8 +14,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The three published crates, in workspace order.
-const MEMBERS: [&str; 3] = ["libredwg-sys", "uncad", "uncad-cli"];
+/// The four published crates, in workspace order.
+const MEMBERS: [&str; 4] = ["libredwg-sys", "uncad", "uncad-export", "uncad-cli"];
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -68,6 +68,38 @@ fn the_vendored_libredwg_ships_its_own_licence() {
     assert!(
         copying.contains("GNU GENERAL PUBLIC LICENSE"),
         "LibreDWG's own COPYING should stay beside the vendored sources"
+    );
+}
+
+/// The font `uncad-export` bundles is not GPL but OFL-1.1, and cargo-deny
+/// never sees a font: the licence has to travel beside the font inside the
+/// crate (the OFL asks for it with every copy), and the crate's licence
+/// expression has to say so, or crates.io would describe the tarball as GPL
+/// alone.
+#[test]
+fn the_bundled_font_ships_its_own_licence_and_the_manifest_names_it() {
+    let root = repo_root();
+    let crate_dir = root.join("crates/uncad-export");
+    assert!(
+        crate_dir.join("fonts/UncadSans-Regular.otf").exists(),
+        "the bundled font"
+    );
+    let ofl = read(crate_dir.join("fonts/OFL-NotoSansKR.txt"));
+    assert!(
+        ofl.contains("SIL OPEN FONT LICENSE Version 1.1"),
+        "the bundled font's OFL text should travel with the font"
+    );
+    let manifest = read(crate_dir.join("Cargo.toml"));
+    assert!(
+        manifest
+            .lines()
+            .any(|line| line.trim() == r#"license = "GPL-3.0-or-later AND OFL-1.1""#),
+        "crates/uncad-export/Cargo.toml should declare both licences"
+    );
+    let notices = read(root.join("docs/THIRD_PARTY_NOTICES.md"));
+    assert!(
+        notices.contains("crates/uncad-export/fonts/OFL-NotoSansKR.txt"),
+        "docs/THIRD_PARTY_NOTICES.md should name the font's licence"
     );
 }
 

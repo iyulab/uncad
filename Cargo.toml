@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/libredwg-sys", "crates/uncad", "crates/uncad-cli"]
+members = ["crates/libredwg-sys", "crates/uncad", "crates/uncad-export", "crates/uncad-cli"]
 
 [workspace.package]
 edition = "2021"
-# Minimum supported Rust version, for all three crates. Measured, not guessed:
+# Minimum supported Rust version, for all four crates. Measured, not guessed:
 # 1.87 fails (`slice::as_chunks`, stable since 1.88, in crates/uncad) and 1.88
 # passes. CI's `msrv` job reads this value and checks the workspace with
 # exactly that toolchain -- raise the two together, never this line alone.

@@ -133,9 +133,17 @@ Notable changes to this project are recorded here. The format follows
   here was not read, not empty; the edges used to be skipped in silence.
 - TRACE is read and drawn: `Entity::Trace`, which reuses `SolidEntity` the way `XLine`
   reuses `RayEntity`. It used to arrive as `Entity::Unknown`.
-- All three crates declare `rust-version = "1.88"`. Until now the minimum was whatever
+- Every crate declares `rust-version = "1.88"`. Until now the minimum was whatever
   happened to build. The value is measured (1.87 fails, 1.88 passes) and CI has an `msrv`
   job that checks the workspace with exactly the declared toolchain.
+- `uncad-export` 0.1.0, a new crate in this workspace: the LLM/VLM package, which does not
+  belong in `uncad` (a parser; it draws nothing) or in the renderer (which knows nothing of
+  who reads its pictures). It bundles the font its images are drawn and measured with,
+  `Uncad Sans`, a Noto Sans KR subset under the SIL Open Font License 1.1, handed to the
+  renderer as `fonts::bundled()` with the face's capital height (`fonts::UNCAD_SANS_CAP_HEIGHT`,
+  0.733). Its licence expression is `GPL-3.0-or-later AND OFL-1.1`; `deny.toml` grants the
+  crate both by name, and `uncad-cli`'s `tests/release_invariants.rs` checks its `LICENSE`,
+  the font's licence text beside the font and the expression.
 
 ### Changed
 
