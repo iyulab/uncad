@@ -522,13 +522,21 @@ index sitting directly in the `rgb` field. LibreDWG's own `bit_downconvert_CMC` 
 carries the identical `if (index == 256) index = rgb & 0xff;` fallback on the opposite
 conversion path; only the pure read path (`bit_read_CMC`) lacks it.
 
-`resolve_layer_color_index` in `crates/uncad/src/tables.rs` mirrors that fallback for the
+`resolve_layer_color_index` in `crates/uncad/src/table_convert.rs` mirrors that fallback for the
 read path. All 9 files were rendered and visually checked against AutoCAD's default and
 AIA layer-color conventions (roofs yellow, doors and windows green, outlines blue, piping
 cyan), but **never compared against an actual AutoCAD screen** -- unlike this project's
 other color bugs, this one was verified by plausibility rather than by reference. It also
 inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
 happens not to match the palette is misread as a small ACI index.
+
+**Later, the fallback turned out to be half of the rule.** Method `0xC3` is not a true color
+despite its name in `dwg.h`: it is a color *index*, and its low byte is the ACI number
+whether or not the palette lookup finds something. The lookup finds something for some
+values -- `0xC3000068` (ACI 104) is the RGB color (0, 0, 104), palette entry 176 -- and a
+layer came back as 176 where the same drawing saved as DXF says 104 and a second DWG reader
+reads 104. The low byte is now taken for every method-`0xC3` layer; the other methods keep
+the library's index.
 
 ## Fixed: SPLINE control points read at the wrong stride
 

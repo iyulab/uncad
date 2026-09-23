@@ -93,6 +93,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A DWG layer whose color is stored as an index color carries that index. The library
+  looks the stored value up as an RGB color, and for some indexes finds a different palette
+  entry (ACI 104 came back as 176).
 - A WIPEOUT's boundary lies where the image is: its clip vertices are in the image's
   pixel space, which starts at the upper left corner with pixel centers on whole numbers,
   so a vertex is `pt0 + (x + 0.5)*u + (h - 0.5 - y)*v`. The boundary was placed half the

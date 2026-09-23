@@ -188,31 +188,40 @@ fn convert_mlinestyle(text: &TextDecoder, object_ptr: *mut c_void) -> Option<(St
 fn convert_layer(text: &TextDecoder, object_ptr: *mut c_void) -> Option<LayerRecord> {
     let name = text.field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
-    let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
+    let color_index =
+        resolve_layer_color_index(color.index, color.method, color.rgb, text.read_from_dxf());
     Some(LayerRecord { name, color_index })
 }
 
-/// Recovers a usable ACI index from a LAYER's raw `Dwg_Color` when LibreDWG
-/// could not.
+/// A LAYER's ACI index from its raw `Dwg_Color`.
 ///
-/// `bit_read_CMC` sets `index` via `dwg_find_color_index(rgb)`, which returns
-/// `256` ("no exact palette match" -- not a real BYLAYER sentinel, since a
-/// layer cannot be BYLAYER against itself) whenever a TRUECOLOR-tagged layer's
-/// `rgb` is not bit-identical to one of the 256 palette entries. Real drawings
-/// hit exactly that case while storing the *intended* ACI index in `rgb`'s low
-/// byte rather than a genuine 24-bit color: layer `"0"` reads as
-/// `rgb = 0x..000007`, matching AutoCAD's real default of ACI 7. LibreDWG's own
-/// `bit_downconvert_CMC` already carries the identical `if index == 256 { index
-/// = rgb & 0xff }` fallback on its (differently gated) path; this mirrors it
-/// for the plain-read path, which lacks it.
+/// From R2004 a color is stored as a 32-bit value whose high byte says how
+/// to read the rest. Method `0xC3` -- which `dwg.h` names `TRUECOLOR` -- is a
+/// color *index*: the low byte is the ACI number. Layer `"0"` stores
+/// `0xC3000007`, AutoCAD's default of ACI 7, and a second, independent DWG
+/// reader and the same drawing saved as DXF agree on the index in the low
+/// byte wherever it was compared.
 ///
-/// **Known limitation**, inherited from that same fallback rather than
-/// introduced here: a layer with a genuine arbitrary truecolor that happens not
-/// to match any palette entry also reports `index = 256`, and its blue channel
-/// is reinterpreted as an ACI index. From the data available here the two cases
-/// are indistinguishable. See `docs/CAVEATS.md`.
-fn resolve_layer_color_index(index: i16, method: libredwg_sys::Dwg_Color_Method, rgb: u32) -> i16 {
-    if index == 256 && method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR {
+/// `bit_read_CMC` instead sets `index` from a palette lookup of the value as
+/// if it were an RGB color. That lookup fails (the "no match" `256`) for most
+/// small values, and -- worse -- succeeds for some: `0xC3000068` (ACI 104) is
+/// the RGB color (0, 0, 104), which is palette entry 176, so the layer came
+/// back as 176. For method `0xC3` read from a DWG the low byte is therefore
+/// taken whatever the lookup said; every other method keeps the library's
+/// index.
+///
+/// Read from DXF it is the other way round: the importer takes the index
+/// from group 62 and stores the palette's RGB color under the same method
+/// (white is `0xC3FFFFFF`), so there the library's index is the one the file
+/// stated, and only its "no match" `256` falls back to the low byte.
+fn resolve_layer_color_index(
+    index: i16,
+    method: libredwg_sys::Dwg_Color_Method,
+    rgb: u32,
+    from_dxf: bool,
+) -> i16 {
+    let index_color = method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR;
+    if index_color && (!from_dxf || index == 256) {
         (rgb & 0xff) as i16
     } else {
         index
@@ -224,32 +233,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn truecolor_with_no_palette_match_falls_back_to_rgbs_low_byte() {
+    fn an_index_colors_low_byte_is_its_aci_number_when_no_palette_entry_matches() {
         let resolved = resolve_layer_color_index(
             256,
             libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
             0xc3000007,
+            false,
         );
         assert_eq!(resolved, 7);
     }
 
     #[test]
-    fn non_256_index_passes_through_unchanged_regardless_of_method() {
+    fn an_index_colors_low_byte_wins_over_a_palette_match_of_the_same_value() {
+        // ACI 104, which the library's palette lookup of (0, 0, 104) turns
+        // into 176.
         let resolved = resolve_layer_color_index(
-            3,
+            176,
             libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
-            0xc3000007,
+            0xc3000068,
+            false,
         );
-        assert_eq!(resolved, 3);
+        assert_eq!(resolved, 104);
     }
 
     #[test]
-    fn index_256_with_non_truecolor_method_is_left_alone() {
-        // 256 only means "no ACI palette match" when it came from a
-        // TRUECOLOR-tagged rgb lookup -- for any other method it's just
-        // whatever LibreDWG actually read, not this fallback's business.
-        let resolved =
-            resolve_layer_color_index(256, libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI, 0);
+    fn another_method_keeps_the_librarys_index() {
+        let resolved = resolve_layer_color_index(
+            256,
+            libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI,
+            0,
+            false,
+        );
         assert_eq!(resolved, 256);
+    }
+
+    #[test]
+    fn read_from_dxf_the_importers_index_is_the_files() {
+        // White, from group 62 = 7: the importer stores the palette's RGB.
+        let resolved = resolve_layer_color_index(
+            7,
+            libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
+            0xc3ffffff,
+            true,
+        );
+        assert_eq!(resolved, 7);
     }
 }
