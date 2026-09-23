@@ -1,6 +1,6 @@
 # Port status: feat/0.3-readable onto the three-repository split
 
-Handoff for whoever continues this work (a person or an agent). Written 2026-09-23.
+Handoff to the upstream maintainer and their agent. Written 2026-09-23.
 
 ## What this is
 
@@ -11,12 +11,12 @@ Upstream then split the project into three repositories: `uncad` (parser, this r
 being re-expressed on that split, feature by feature, on branch `integrate/0.3` in
 all three repositories (pushed; each contains its repository's current `main`).
 
-Rules the owner set: do not publish crates (upstream releases them); do not push to
-`main`; after each step, merge upstream `main` into `integrate/0.3` (where both sides
-did the same thing, adopt upstream's shape), run the gates, push `integrate/0.3`.
-Upstream's own rules (MSRV 1.88, no std HashMap/HashSet, cargo-deny, "a version
-dependency, never a path", golden tests exact, "propose first" for new public API)
-apply to everything.
+**Handed over to upstream.** The iujunhyung side has stopped working on this; the
+branches are now upstream's to review, change, merge into `main` or drop. Nothing has
+been merged into any `main` and nothing has been published. While it was in progress
+the branches followed upstream's rules (MSRV 1.88, no std HashMap/HashSet,
+cargo-deny, "a version dependency, never a path", golden tests exact) and treated
+new public API as "propose first" -- the proposals are in the PR drafts below.
 
 ## Local setup to build the three together
 
@@ -84,7 +84,8 @@ Gates per repository: `cargo fmt --all --check`,
    active viewport and more PlotSettings fields, the renderer's light-colour
    darkening on white (a proposal).
 7. **docs/EVAL.md** from the archive tag, re-measured on this layout.
-8. **Upstream review.** `docs/UPSTREAM_PR_DRAFTS.md` has the three PR descriptions,
-   including the three decisions that reverse upstream's documents and the new public
-   API that is "propose first". Opening the PRs and releasing are the owner's and
-   upstream's calls.
+8. **Upstream review.** `docs/UPSTREAM_PR_DRAFTS.md` describes each repository's
+   changes, the three decisions that reverse upstream's own documents (vendored
+   LibreDWG patched, R2007+ DXF read instead of refused, the header beside the
+   model) and the new public API. Whether to take them, merge order
+   (uncad-model, then iron-render-cad, then uncad) and releases are upstream's.
