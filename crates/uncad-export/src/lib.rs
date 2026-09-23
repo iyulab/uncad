@@ -7,7 +7,9 @@
 //! and the exact numbers a picture cannot give.
 //!
 //! What is here so far: [`fonts`], the face the package draws and measures
-//! text with.
+//! text with, and [`geom`], the arithmetic its records carry -- a polyline's
+//! length and area with its bulge arcs, whether an outline crosses itself,
+//! the map from an entity's own plane to the world.
 //!
 //! # Licence
 //!
@@ -15,3 +17,4 @@
 //! bundled font (`fonts/OFL-NotoSansKR.txt`).
 
 pub mod fonts;
+pub mod geom;
