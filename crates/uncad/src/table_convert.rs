@@ -7,7 +7,10 @@ use crate::dynapi::{get_array_field, get_field, is_from_dxf, is_r2000_or_later};
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use uncad_model::tables::{BlockRecord, DimStyleRecord, LayerRecord, Tables};
+use uncad_model::tables::{
+    AngularUnitFormat, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord, LinearUnitFormat,
+    Tables,
+};
 
 /// # Safety
 /// `dwg` must be a successfully-`dwg_read_file`'d, not-yet-`dwg_free`'d
@@ -81,13 +84,19 @@ pub(crate) unsafe fn convert_tables(
 /// Reads a DIMSTYLE table entry -- the settings a dimension names rather than
 /// carries (see [`DimStyleRecord`]).
 ///
-/// Every value comes back `Some`. This library holds a style as a struct with
-/// no "the file did not write this group", so which of these the file stated
-/// and which are the values it starts from cannot be told apart here; the
-/// other reader of this format, which sees the groups themselves, can.
+/// Every number comes back `Some` (an enumeration only when its value is one
+/// the format defines). This library holds a style as a struct with no "the
+/// file did not write this group", so which of these the file stated and
+/// which are the values it starts from cannot be told apart here; the other
+/// reader of this format, which sees the groups themselves, can. What to do
+/// with a husk of a style -- one that states next to nothing -- is a
+/// consumer's decision, like the displayed text itself.
 fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimStyleRecord> {
     let name = text.field(object_ptr, "DIMSTYLE", "name")?;
     let number = |field: &str| get_field::<f64>(object_ptr, "DIMSTYLE", field);
+    // The 16-bit variables (BITCODE_BS). Read signed: DIMADEC's -1 ("as
+    // DIMDEC") is a value the format uses.
+    let small = |field: &str| get_field::<i16>(object_ptr, "DIMSTYLE", field).map(i32::from);
     Some(DimStyleRecord {
         name,
         post: text.field(object_ptr, "DIMSTYLE", "DIMPOST"),
@@ -101,13 +110,33 @@ fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimS
         tolerance_decimal_places: get_field::<i16>(object_ptr, "DIMSTYLE", "DIMTDEC")
             .map(i32::from),
         text_height: number("DIMTXT"),
-        arrow_size: None,
-        linear_unit_format: None,
-        zero_suppression: None,
-        rounding: None,
-        angular_unit_format: None,
-        angular_decimal_places: None,
-        fraction_format: None,
+        arrow_size: number("DIMASZ"),
+        linear_unit_format: small("DIMLUNIT").and_then(|v| match v {
+            1 => Some(LinearUnitFormat::Scientific),
+            2 => Some(LinearUnitFormat::Decimal),
+            3 => Some(LinearUnitFormat::Engineering),
+            4 => Some(LinearUnitFormat::Architectural),
+            5 => Some(LinearUnitFormat::Fractional),
+            6 => Some(LinearUnitFormat::WindowsDesktop),
+            _ => None,
+        }),
+        zero_suppression: small("DIMZIN"),
+        rounding: number("DIMRND"),
+        angular_unit_format: small("DIMAUNIT").and_then(|v| match v {
+            0 => Some(AngularUnitFormat::DecimalDegrees),
+            1 => Some(AngularUnitFormat::DegreesMinutesSeconds),
+            2 => Some(AngularUnitFormat::Gradians),
+            3 => Some(AngularUnitFormat::Radians),
+            4 => Some(AngularUnitFormat::SurveyorsUnits),
+            _ => None,
+        }),
+        angular_decimal_places: small("DIMADEC"),
+        fraction_format: small("DIMFRAC").and_then(|v| match v {
+            0 => Some(FractionFormat::Horizontal),
+            1 => Some(FractionFormat::Diagonal),
+            2 => Some(FractionFormat::NotStacked),
+            _ => None,
+        }),
     })
 }
 

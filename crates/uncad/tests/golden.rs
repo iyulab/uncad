@@ -144,6 +144,8 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
             (&mut style.tolerance_upper, read.tolerance_upper),
             (&mut style.tolerance_lower, read.tolerance_lower),
             (&mut style.text_height, read.text_height),
+            (&mut style.arrow_size, read.arrow_size),
+            (&mut style.rounding, read.rounding),
         ] {
             if want.is_none() {
                 *want = got;
@@ -163,10 +165,24 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
                 &mut style.tolerance_decimal_places,
                 read.tolerance_decimal_places,
             ),
+            (&mut style.zero_suppression, read.zero_suppression),
+            (
+                &mut style.angular_decimal_places,
+                read.angular_decimal_places,
+            ),
         ] {
             if want.is_none() {
                 *want = got;
             }
+        }
+        if style.linear_unit_format.is_none() {
+            style.linear_unit_format = read.linear_unit_format;
+        }
+        if style.angular_unit_format.is_none() {
+            style.angular_unit_format = read.angular_unit_format;
+        }
+        if style.fraction_format.is_none() {
+            style.fraction_format = read.fraction_format;
         }
         if style.post.is_none() {
             style.post = read.post.clone();

@@ -64,6 +64,11 @@ Notable changes to this project are recorded here. The format follows
 - ATTRIB and ATTDEF carry their `flags` (DXF 70): invisible, constant, verify, preset. An
   invisible attribute (a title block's hidden field, say) is no longer indistinguishable
   from a shown one.
+- A DIMSTYLE carries the rest of what a dimension's displayed text depends on, each as an
+  `Option` like the others: `arrow_size` (DIMASZ), `linear_unit_format` (DIMLUNIT),
+  `zero_suppression` (DIMZIN), `rounding` (DIMRND), `angular_unit_format` (DIMAUNIT),
+  `angular_decimal_places` (DIMADEC) and `fraction_format` (DIMFRAC). What to use where a
+  style states nothing is the consumer's decision.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
