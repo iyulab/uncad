@@ -787,13 +787,20 @@ unsafe fn convert_entity(
             let insertion_point = get_point3d(entity_ptr, "MTEXT", "ins_pt")?;
             let text = text.field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
-            // dwg.h's comment on x_axis_dir says it "defines the rotation",
-            // and atan2(x_axis_dir.y, x_axis_dir.x) looks like the right
-            // derivation -- but with no verified reference to confirm it, this
-            // stays 0 rather than guessing. See docs/CAVEATS.md.
-            let rotation = 0.0;
-            let line_spacing_factor =
-                get_field::<f64>(entity_ptr, "MTEXT", "linespace_factor").unwrap_or(1.0);
+            // The file states the rotation as the text's X-axis direction
+            // (DXF 11); the DXF reference defines a rotation angle given as
+            // input (DXF 50) as the same thing expressed as that vector, so
+            // the angle is the vector's direction. A drawing's own twin read
+            // by a second reader gives the same values.
+            let rotation =
+                get_point3d(entity_ptr, "MTEXT", "x_axis_dir").map_or(0.0, |d| d.y.atan2(d.x));
+            // The reference's range for this factor is 0.25 to 4.00, so a
+            // zero is not a value the file stated: a drawing older than
+            // R2000 has no such field, and the record comes back zero-filled.
+            // Unstated reads as 1 (a fraction of the default spacing).
+            let line_spacing_factor = get_field::<f64>(entity_ptr, "MTEXT", "linespace_factor")
+                .filter(|f| *f != 0.0)
+                .unwrap_or(1.0);
             Entity::MText(MTextEntity {
                 common,
                 insertion_point,
@@ -859,9 +866,8 @@ unsafe fn convert_entity(
             // Which of this backend's points is which DXF group depends on
             // the subtype: group 13 is the first extension line for a linear
             // dimension and the feature location for an ordinate one, and a
-            // two-line angular dimension does not store group 10 at all (its
-            // own "definition point" is a different point, and group 16 is
-            // its second extension line's end). The mapping is written out
+            // two-line angular dimension keeps its group 10 under a different
+            // field name than every other subtype does. The mapping is written out
             // per subtype rather than passing this backend's field names
             // through, so one model field never holds two different points.
             let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
@@ -886,10 +892,11 @@ unsafe fn convert_entity(
                 text_override: dimension_text_override(
                     text.field(entity_ptr, dxfname, "user_text").as_deref(),
                 ),
-                // A two-line angular dimension is the one subtype whose
-                // group 10 this backend does not keep.
+                // A two-line angular dimension keeps group 10 in the record's
+                // last point, which this library names `xline2end_pt` (its
+                // `def_pt` holds group 16 -- see `dimension_point_fields`).
                 definition_point: if kind == Some(DimensionKind::Angular2Line) {
-                    None
+                    get_point3d(entity_ptr, dxfname, "xline2end_pt")
                 } else {
                     get_point3d(entity_ptr, dxfname, "def_pt")
                 },
@@ -1618,9 +1625,11 @@ fn dimension_point_fields(
             None,
         ),
         // Measured against the same drawing in both formats: this
-        // library's `def_pt` holds group 16 here, and `xline2end_pt` comes
-        // back holding group 13's point instead of group 16's. The mapping
-        // follows the measurement, not the field names.
+        // library's `def_pt` holds group 16 here, and `xline2end_pt` holds
+        // group 10 (the dimension's definition point) rather than 16. The
+        // mapping follows the measurement, not the field names. (An earlier
+        // measurement read `xline2end_pt` as group 13's point; that drawing
+        // has groups 10 and 13 at the same place, so it could not tell.)
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => (
             Some("xline1start_pt"),
             Some("xline1end_pt"),

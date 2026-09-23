@@ -50,6 +50,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
+  which reported rotated multi-line text as horizontal.
+- A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
+  not stated: the library keeps it under the field name `xline2end_pt`.
+- An MTEXT from a drawing older than R2000 reports a line spacing factor of `1` (the format
+  has no such field there) instead of `0`, which is outside the factor's valid range.
 - A LEADER's `has_arrowhead` read from an R2010-or-later DWG is `None`. The vendored
   engine reads that record one field short from R2010 on (it skips the annotation offset,
   which those files still carry), so the value it returned for the flag was a bit of the

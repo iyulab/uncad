@@ -6,8 +6,9 @@
 //! implementation and compare what the two agree on.
 //!
 //! The comparison runs from coarse to fine: which drawings both open, which
-//! entity types each finds, and -- for leaders and the four commonest types
-//! so far -- every field both models carry, entity by entity.
+//! entity types each finds, and -- for leaders, lines, circles, arcs, texts,
+//! multi-line texts, block references and dimensions -- every field both
+//! models carry, entity by entity.
 //!
 //! The second reader is a development dependency: nothing a consumer builds
 //! reaches it.
@@ -742,5 +743,185 @@ fn the_two_readers_agree_on_every_line_circle_arc_and_text_field() {
         "compared {compared:?}, unmatched {unmatched:?}, {} disagreements:\n{}",
         disagreements.len(),
         disagreements.join("\n")
+    );
+}
+
+/// The same texts, block references and dimensions, field by field.
+///
+/// These are the records whose layout changes most across versions, which
+/// is where a reader that follows the wrong version's layout goes wrong --
+/// the leader comparison found exactly that. Matched by handle, compared
+/// exactly, names compared as the names each reader resolved.
+#[test]
+fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+    use uncad::model::Ref;
+
+    fn p3(x: f64, y: f64, z: f64) -> String {
+        format!("({x:?}, {y:?}, {z:?})")
+    }
+    fn name(r: &Ref<String>) -> String {
+        match r {
+            Ref::Resolved(n) => n.clone(),
+            Ref::Unresolved(n) => format!("unresolved {n}"),
+            Ref::Absent => "absent".to_string(),
+        }
+    }
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut unmatched: BTreeMap<&str, usize> = BTreeMap::new();
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let kind = match entity {
+                    uncad::Entity::MText(_) => "mtext",
+                    uncad::Entity::Insert(_) => "insert",
+                    uncad::Entity::Dimension(_) => "dimension",
+                    _ => continue,
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(theirs) = theirs.get(&id.value()) else {
+                    *unmatched.entry(kind).or_default() += 1;
+                    continue;
+                };
+                *compared.entry(kind).or_default() += 1;
+                let mut fields: Vec<(&str, String, String)> = Vec::new();
+                use acadrust::EntityType as E;
+                match (entity, theirs) {
+                    (uncad::Entity::MText(o), E::MText(t)) => {
+                        let (i, ti) = (o.insertion_point, t.insertion_point);
+                        fields.push(("insertion", p3(i.x, i.y, i.z), p3(ti.x, ti.y, ti.z)));
+                        fields.push((
+                            "height",
+                            format!("{:?}", o.text_height),
+                            format!("{:?}", t.height),
+                        ));
+                        fields.push((
+                            "rotation",
+                            format!("{:?}", o.rotation),
+                            format!("{:?}", t.rotation),
+                        ));
+                        fields.push((
+                            "line spacing",
+                            format!("{:?}", o.line_spacing_factor),
+                            format!("{:?}", t.line_spacing_factor),
+                        ));
+                        fields.push(("text", format!("{:?}", o.text), format!("{:?}", t.value)));
+                    }
+                    (uncad::Entity::Insert(o), E::Insert(t)) => {
+                        let (i, ti) = (o.insertion_point, t.insert_point);
+                        fields.push(("insertion", p3(i.x, i.y, i.z), p3(ti.x, ti.y, ti.z)));
+                        let s = o.scale;
+                        fields.push((
+                            "scale",
+                            p3(s.x, s.y, s.z),
+                            p3(t.x_scale(), t.y_scale(), t.z_scale()),
+                        ));
+                        fields.push((
+                            "rotation",
+                            format!("{:?}", o.rotation),
+                            format!("{:?}", t.rotation),
+                        ));
+                        fields.push(("block", name(&o.block_name), t.block_name.clone()));
+                    }
+                    (uncad::Entity::Dimension(o), E::Dimension(t)) => {
+                        let b = t.base();
+                        fields.push((
+                            "measurement",
+                            format!("{:?}", o.measurement),
+                            format!("{:?}", Some(b.actual_measurement)),
+                        ));
+                        let d = b.definition_point;
+                        fields.push((
+                            "definition point",
+                            format!("{:?}", o.definition_point.map(|p| p3(p.x, p.y, p.z))),
+                            format!("{:?}", Some(p3(d.x, d.y, d.z))),
+                        ));
+                        let (m, tm) = (o.text_midpoint, b.text_middle_point);
+                        fields.push((
+                            "text midpoint",
+                            format!("({:?}, {:?})", m.x, m.y),
+                            format!("({:?}, {:?})", tm.x, tm.y),
+                        ));
+                        fields.push((
+                            "text rotation",
+                            format!("{:?}", o.text_rotation),
+                            format!("{:?}", b.text_rotation),
+                        ));
+                        fields.push(("block", name(&o.block_name), b.block_name.clone()));
+                        fields.push(("style", name(&o.style_name), b.style_name.clone()));
+                    }
+                    _ => {
+                        disagreements.push(format!(
+                            "{version}/{file} {:X} kind: ours {kind}, theirs {}",
+                            id.value(),
+                            theirs_kind(theirs)
+                        ));
+                        continue;
+                    }
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{file} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(!compared.is_empty(), "nothing was read by both");
+    // What the pinned file holds, and why each kind of line is there. Every
+    // one was checked against the drawing's text twin where it has one, and
+    // in each such case this crate states what the twin states:
+    //
+    // - block names of anonymous blocks (`*D…`, `*U…`): the second reader
+    //   renames them with its own counters (`*D`, `*D0`, `*U`, …), and for a
+    //   dimension without a block it gives `*U0` where the twin writes no
+    //   block at all. For `*U…` references this crate's names are the
+    //   twin's. For `*D…` the twin itself numbers them differently from the
+    //   binary drawing -- anonymous names are not stable across a save --
+    //   so those lines are recorded, not judged.
+    // - an MTEXT string holding a `\U+2205`-style escape: the file (and its
+    //   twin) holds the escape; the second reader decodes it.
+    // - one dimension's definition point, where the twin agrees with this
+    //   crate.
+    //
+    // Fields that are not in the file: none. Rotations, spacing, insertion
+    // points, scales, heights, measurements and text midpoints agree
+    // exactly on every entity.
+    let report = format!(
+        "compared {compared:?} unmatched {unmatched:?}\n{}",
+        disagreements.join("\n")
+    );
+    let pinned = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/second-reader-mtext-insert-dimension.txt"
+    ))
+    .unwrap_or_default();
+    assert_eq!(
+        report.trim(),
+        pinned.trim(),
+        "\nthe two readers' agreement on these types moved; measured now:\n{report}"
     );
 }

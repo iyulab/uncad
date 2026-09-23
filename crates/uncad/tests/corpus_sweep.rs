@@ -252,16 +252,19 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
 
 /// Which of this library's point fields is which DXF group cannot be read off
 /// the field names for a two-line angular dimension: `def_pt` holds group 16
-/// there, and `xline2end_pt` comes back holding group 13's point. The mapping
-/// in the reader follows a measurement against the same drawing in both
-/// formats, so the measurement is pinned here -- if the library's field
-/// layout changes, this fails rather than the model quietly holding the wrong
-/// point.
+/// there, and `xline2end_pt` holds group 10. The mapping in the reader follows
+/// a measurement against the same drawing in both formats, so the measurement
+/// is pinned here -- if the library's field layout changes, this fails rather
+/// than the model quietly holding the wrong point.
+///
+/// The second drawing is what settles group 10: in the first, groups 10 and
+/// 13 are the same point, so a reading of either looks like the other.
 #[test]
 fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
     // Two unrelated drawings, so the mapping is not one file's accident.
     angular_groups_match_the_twin(
         "example_2000.dwg",
+        (490.6216519543077, 4118.24274338716),
         (490.6216519543077, 4118.24274338716),
         (-276.8548009664508, 4701.847034571434),
         (172.7442546208081, 3207.985617767696),
@@ -269,6 +272,7 @@ fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
     );
     angular_groups_match_the_twin(
         "2000/TS1.dwg",
+        (28.3894217039915, 46.63480213521191),
         (24.13153389940095, 44.46327921516783),
         (28.70342522096354, 44.46327921516783),
         (24.13153389940095, 44.46327921516783),
@@ -278,6 +282,7 @@ fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
 
 fn angular_groups_match_the_twin(
     drawing: &str,
+    g10: (f64, f64),
     g13: (f64, f64),
     g14: (f64, f64),
     g15: (f64, f64),
@@ -296,7 +301,7 @@ fn angular_groups_match_the_twin(
         })
         .expect("the drawing has a two-line angular dimension");
 
-    // The values the DXF twin writes for groups 13, 14, 15 and 16.
+    // The values the DXF twin writes for groups 10, 13, 14, 15 and 16.
     let near = |got: Option<uncad::model::Point3D>, want: (f64, f64), group: u32| {
         let got = got.unwrap_or_else(|| panic!("group {group} should be read"));
         assert!(
@@ -312,6 +317,5 @@ fn angular_groups_match_the_twin(
     near(dim.points.extension2, g14, 14);
     near(dim.points.radial, g15, 15);
     near(dim.points.arc, g16, 16);
-    // Group 10 is the one this library does not keep for this subtype.
-    assert_eq!(dim.definition_point, None);
+    near(dim.definition_point, g10, 10);
 }

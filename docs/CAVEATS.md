@@ -366,17 +366,15 @@ from rather than "not stated". The other reader of DXF, which sees the groups th
 reports the difference. Like the zero-measurement rule above, this one ends when this crate's
 DXF reading no longer goes through this importer.
 
-**Group 10 of a two-line angular dimension.** For that one subtype the library does not store
-group 10: its own `def_pt` holds group 16 instead. Reporting `def_pt` as group 10 would mean
-the field held one point for most drawings and another for these, so it is reported as "not
-stated" instead. Every other subtype reports it.
-
-That subtype is also the one place where the field names are not the mapping. Measured against
+**The field names of a two-line angular dimension are not the mapping.** Measured against
 the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
-groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` comes
-back holding group 13's point rather than group 16's. The reader follows the measurement, and
-`tests/corpus_sweep.rs` pins it against the values the DXF twin writes, so a change in the
-library's field layout fails the build instead of quietly putting the wrong point in the model.
+groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` is
+group 10 -- the definition point every other subtype keeps in `def_pt`. The reader follows
+the measurement, and `tests/corpus_sweep.rs` pins all five points against the values the DXF
+twin writes for two drawings, so a change in the library's field layout fails the build
+instead of quietly putting the wrong point in the model. (The second drawing matters: in the
+first, groups 10 and 13 are the same point, and an earlier reading of it took `xline2end_pt`
+for group 13 and reported group 10 as not stated.)
 
 An arc-length dimension is a separate entity in the format rather than a value of group 70 --
 the group says 5 on such a dimension, which would read as a three-point angular one. It is
@@ -427,12 +425,14 @@ handle value (the top bit set), and its `source_handle` is `Absent`. The corpus 
 that no file yields two different entities with one ID and counts how often the fallback
 was needed -- over the current corpus, never.
 
-## MTEXT rotation is always 0
+## MTEXT rotation is the direction of its X axis
 
-`dwg.h` says the `x_axis_dir` field "defines the rotation", and deriving an angle from it
-(`atan2(x_axis_dir.y, x_axis_dir.x)`) looks technically more accurate. Without a verified
-reference to confirm it, the value stays fixed at `0` rather than diverging on an
-unverified guess.
+The file states an MTEXT's rotation as the text's X-axis direction (`x_axis_dir`, DXF 11),
+not as an angle. The DXF reference defines a rotation given as input (DXF 50) as the same
+thing expressed as that vector, so `rotation` is the vector's direction,
+`atan2(x_axis_dir.y, x_axis_dir.x)`. An independent reader of the same corpus gives the same
+value for every MTEXT, to the last bit. (It was reported as a constant `0` until that
+confirmation, which put rotated text on its side without saying so.)
 
 ## There is no single ACI colour table
 
