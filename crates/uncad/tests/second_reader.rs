@@ -6,8 +6,8 @@
 //! implementation and compare what the two agree on.
 //!
 //! The comparison runs from coarse to fine: which drawings both open, which
-//! entity types each finds, and -- for leaders so far -- every field both
-//! models carry, entity by entity.
+//! entity types each finds, and -- for leaders and the four commonest types
+//! so far -- every field both models carry, entity by entity.
 //!
 //! The second reader is a development dependency: nothing a consumer builds
 //! reaches it.
@@ -260,13 +260,9 @@ fn the_two_readers_agree_on_every_layer_name_in_the_corpus() {
     assert!(compared > 0, "no drawing was read by both");
     assert!(
         disagreements.is_empty(),
-        "{} of {compared} drawings disagree on the set of layer names:
-{}",
+        "{} of {compared} drawings disagree on the set of layer names:\n{}",
         disagreements.len(),
-        disagreements.join(
-            "
-"
-        )
+        disagreements.join("\n")
     );
 }
 
@@ -596,5 +592,155 @@ fn the_two_readers_agree_on_every_leader_field_in_the_corpus() {
         report.trim(),
         pinned.trim(),
         "\nthe two readers' leader agreement moved; measured now:\n{report}"
+    );
+}
+
+/// The same lines, circles, arcs and texts, field by field.
+///
+/// The same shape as the leader comparison: entities are matched by handle
+/// and every field both models carry is compared exactly. Both readers take
+/// these values straight from the same bits, so an inexact match is not
+/// rounding -- it is one of them reading something else.
+#[test]
+fn the_two_readers_agree_on_every_line_circle_arc_and_text_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn p3(x: f64, y: f64, z: f64) -> String {
+        format!("({x:?}, {y:?}, {z:?})")
+    }
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut unmatched: BTreeMap<&str, usize> = BTreeMap::new();
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let kind = match entity {
+                    uncad::Entity::Line(_) => "line",
+                    uncad::Entity::Circle(_) => "circle",
+                    uncad::Entity::Arc(_) => "arc",
+                    uncad::Entity::Text(_) => "text",
+                    _ => continue,
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(theirs) = theirs.get(&id.value()) else {
+                    *unmatched.entry(kind).or_default() += 1;
+                    continue;
+                };
+                *compared.entry(kind).or_default() += 1;
+                let mut fields: Vec<(&str, String, String)> = Vec::new();
+                use acadrust::EntityType as E;
+                match (entity, theirs) {
+                    (uncad::Entity::Line(o), E::Line(t)) => {
+                        let (s, e) = (o.start_point, o.end_point);
+                        fields.push((
+                            "start",
+                            p3(s.x, s.y, s.z),
+                            p3(t.start.x, t.start.y, t.start.z),
+                        ));
+                        fields.push(("end", p3(e.x, e.y, e.z), p3(t.end.x, t.end.y, t.end.z)));
+                    }
+                    (uncad::Entity::Circle(o), E::Circle(t)) => {
+                        let c = o.center;
+                        fields.push((
+                            "center",
+                            p3(c.x, c.y, c.z),
+                            p3(t.center.x, t.center.y, t.center.z),
+                        ));
+                        fields.push((
+                            "radius",
+                            format!("{:?}", o.radius),
+                            format!("{:?}", t.radius),
+                        ));
+                    }
+                    (uncad::Entity::Arc(o), E::Arc(t)) => {
+                        let c = o.center;
+                        fields.push((
+                            "center",
+                            p3(c.x, c.y, c.z),
+                            p3(t.center.x, t.center.y, t.center.z),
+                        ));
+                        fields.push((
+                            "radius",
+                            format!("{:?}", o.radius),
+                            format!("{:?}", t.radius),
+                        ));
+                        fields.push((
+                            "start angle",
+                            format!("{:?}", o.start_angle),
+                            format!("{:?}", t.start_angle),
+                        ));
+                        fields.push((
+                            "end angle",
+                            format!("{:?}", o.end_angle),
+                            format!("{:?}", t.end_angle),
+                        ));
+                    }
+                    (uncad::Entity::Text(o), E::Text(t)) => {
+                        let s = o.start_point;
+                        let ti = t.insertion_point;
+                        fields.push((
+                            "start",
+                            format!("({:?}, {:?})", s.x, s.y),
+                            format!("({:?}, {:?})", ti.x, ti.y),
+                        ));
+                        fields.push((
+                            "height",
+                            format!("{:?}", o.text_height),
+                            format!("{:?}", t.height),
+                        ));
+                        fields.push((
+                            "rotation",
+                            format!("{:?}", o.rotation),
+                            format!("{:?}", t.rotation),
+                        ));
+                        fields.push(("text", format!("{:?}", o.text), format!("{:?}", t.value)));
+                    }
+                    _ => {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} kind: ours {kind}, theirs {}",
+                            id.value(),
+                            theirs_kind(theirs)
+                        ));
+                        continue;
+                    }
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // A requirement, not a measurement: on the corpus the two readers agree
+    // on every one of these fields, exactly, for every entity both hold.
+    assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(
+        unmatched.is_empty() && disagreements.is_empty(),
+        "compared {compared:?}, unmatched {unmatched:?}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
     );
 }
