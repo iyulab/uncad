@@ -40,6 +40,13 @@ const POLYLINE_CLOSED_FLAG: u16 = 1;
 /// whose spec said "closed" and whose outline came back as an open polyline.
 const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 
+/// POLYLINE_MESH's `flag` bit 1: the grid wraps in M ("closed polygon mesh
+/// in the M direction", DXF group 70).
+const POLYLINE_MESH_CLOSED_M_FLAG: u16 = 1;
+
+/// POLYLINE_MESH's `flag` bit 32: the grid wraps in N.
+const POLYLINE_MESH_CLOSED_N_FLAG: u16 = 32;
+
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
 
@@ -476,11 +483,19 @@ unsafe fn polyline_vertices(
 }
 
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
-/// `VERTEX_PFACE` (vertex positions, in order) and `VERTEX_PFACE_FACE` (up to
+/// subentities -- vertex positions, in order, then `VERTEX_PFACE_FACE` (up to
 /// 4 vertex indices per face, 1-based, negative meaning "invisible edge" --
-/// the sign carries no other meaning, so it is just dropped) subentities
-/// directly; LibreDWG's own accessor for this type is documented as not
-/// implemented.
+/// the sign carries no other meaning, so it is just dropped) -- directly;
+/// LibreDWG's own accessor for this type is documented as not implemented.
+///
+/// A position vertex is a `VERTEX_PFACE` *or* a `VERTEX_MESH`. Both mean the
+/// same thing inside a POLYLINE_PFACE's own chain, and the DXF importer hands
+/// back the second one for a polyface whose `AcDbPolyFaceMeshVertex` records
+/// name the block record as their owner rather than the POLYLINE: `in_dxf.c`
+/// picks between the two types by looking the VERTEX's own group 330 up and
+/// asking whether it is a POLYLINE_PFACE, and falls back to VERTEX_MESH when
+/// it is not. ezdxf writes exactly that shape (and its `audit()` passes it),
+/// and such a polyface found no positions at all.
 ///
 /// Face records may be interleaved with vertex records, so indices are only
 /// resolved once the whole chain has been walked. Faces referencing an
@@ -497,8 +512,13 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
         if !sub_entity_ptr.is_null() {
-            if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE {
-                if let Some(p) = get_point3d(sub_entity_ptr, "VERTEX_PFACE", "point") {
+            let position = match sub_fixedtype {
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE => Some("VERTEX_PFACE"),
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH => Some("VERTEX_MESH"),
+                _ => None,
+            };
+            if let Some(dxfname) = position {
+                if let Some(p) = get_point3d(sub_entity_ptr, dxfname, "point") {
                     positions.push(p);
                 }
             } else if sub_fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE {
@@ -531,6 +551,59 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
         }
     }
     edges
+}
+
+/// Resolves a POLYLINE_MESH ("polygon mesh") into the wireframe of its grid,
+/// in the order the model states for [`Entity::PolylineMesh`]: `m` rows of
+/// `n` VERTEX_MESH subentities, stored row by row (vertex `i * n + j` is row
+/// `i`, column `j`); first the edges `(i, j)-(i + 1, j)` row by row, then
+/// `(i, j)-(i, j + 1)` row by row. `flag` bit 1 wraps the grid in M and bit
+/// 32 in N (`dwg.spec`'s POLYLINE_MESH, DXF group 70), which adds the
+/// closing edges.
+///
+/// Returns the edges and how many the grid's definition promises but could
+/// not be drawn: unless exactly `m * n` vertices were found, no grid shape
+/// is guessed -- a smooth-surface mesh stores spline control points beside
+/// the approximated ones -- and every edge the definition implies is
+/// reported as skipped, so the mesh reads as "not read" rather than as an
+/// empty one.
+///
+/// # Safety
+/// `obj` must be a valid, non-null `POLYLINE_MESH` `Dwg_Object`.
+unsafe fn polyline_mesh_wireframe(
+    obj: *mut libredwg_sys::Dwg_Object,
+    m: usize,
+    n: usize,
+    flag: u16,
+) -> (Vec<[Point3D; 2]>, usize) {
+    let closed_m = flag & POLYLINE_MESH_CLOSED_M_FLAG != 0;
+    let closed_n = flag & POLYLINE_MESH_CLOSED_N_FLAG != 0;
+    let rows_joined = if closed_m { m } else { m.saturating_sub(1) };
+    let columns_joined = if closed_n { n } else { n.saturating_sub(1) };
+    let edge_count = rows_joined
+        .saturating_mul(n)
+        .saturating_add(m.saturating_mul(columns_joined));
+    let positions: Vec<Point3D> =
+        unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH) }
+            .into_iter()
+            .filter_map(|vertex| get_point3d(vertex, "VERTEX_MESH", "point"))
+            .collect();
+    if positions.is_empty() || positions.len() != m.saturating_mul(n) {
+        return (Vec::new(), edge_count);
+    }
+    let at = |i: usize, j: usize| positions[i * n + j];
+    let mut edges = Vec::with_capacity(edge_count);
+    for i in 0..rows_joined {
+        for j in 0..n {
+            edges.push([at(i, j), at((i + 1) % m, j)]);
+        }
+    }
+    for i in 0..m {
+        for j in 0..columns_joined {
+            edges.push([at(i, j), at(i, (j + 1) % n)]);
+        }
+    }
+    (edges, 0)
 }
 
 /// Resolves a WIPEOUT's clip boundary to local 2D points -- see
@@ -1327,6 +1400,21 @@ unsafe fn convert_entity(
                 wireframe_edges,
                 // A polyface mesh has no ACIS data to skip edges from.
                 skipped_edges: 0,
+            })
+        }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_MESH => {
+            let m = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_m_verts").unwrap_or(0);
+            let n = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "num_n_verts").unwrap_or(0);
+            let flag = get_field::<u16>(entity_ptr, "POLYLINE_MESH", "flag").unwrap_or(0);
+            // SAFETY: obj is a valid, non-null POLYLINE_MESH Dwg_Object*
+            // (matching fixedtype); the helper only walks its owned-subentity
+            // chain.
+            let (wireframe_edges, skipped_edges) =
+                unsafe { polyline_mesh_wireframe(obj, usize::from(m), usize::from(n), flag) };
+            Entity::PolylineMesh(Solid3DEntity {
+                common,
+                wireframe_edges,
+                skipped_edges,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TOLERANCE => {

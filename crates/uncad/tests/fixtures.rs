@@ -380,3 +380,47 @@ fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
     // And no VERTEX record is an entity of the block that holds them.
     assert_eq!(db.tables.block_records["*Model_Space"].entities.len(), 3);
 }
+
+// --------------------------------------------------------- mesh polylines
+
+/// A DXF whose one polygon mesh made an unpatched LibreDWG refuse the whole
+/// file, and whose polyface mesh found no vertex positions: the importer
+/// types its vertices VERTEX_MESH, because they name the block record as
+/// their owner.
+///
+/// The edge counts are the grids `make_fixtures.py` writes, worked out from
+/// the mesh definitions: the polyface has two quad faces, so 2 * 4 = 8
+/// edges; the polygon mesh is an open 3 by 4 grid, so 4 * (3 - 1) edges
+/// between the rows plus 3 * (4 - 1) along them = 17.
+#[test]
+fn a_dxf_with_mesh_polylines_reads_and_both_meshes_have_their_wireframe() {
+    let db = parse(POLYFACE_MESH);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("LINE", 1), ("POLYLINE_MESH", 1), ("POLYLINE_PFACE", 1)]),
+        "no VERTEX record may be reported as an entity"
+    );
+    let model = &db.tables.block_records["*Model_Space"].entities;
+    assert_eq!(model.len(), 3, "{model:?}");
+
+    let Entity::PolylinePFace(pface) = &db.entities[1] else {
+        panic!("expected the polyface second: {:?}", db.entities[1]);
+    };
+    assert_eq!(pface.common.source_handle, resolved("31"));
+    assert_eq!((pface.wireframe_edges.len(), pface.skipped_edges), (8, 0));
+
+    let Entity::PolylineMesh(mesh) = &db.entities[2] else {
+        panic!("expected the polygon mesh third: {:?}", db.entities[2]);
+    };
+    assert_eq!(mesh.common.source_handle, resolved("50"));
+    assert_eq!((mesh.wireframe_edges.len(), mesh.skipped_edges), (17, 0));
+    // Vertex i*4 + j sits at (i*10, j*5, 0): the first edge joins row 0 to
+    // row 1 in column 0, the first edge along a row is its column 0 to 1.
+    let point = |i: f64, j: f64| uncad::model::Point3D {
+        x: i * 10.0,
+        y: j * 5.0,
+        z: 0.0,
+    };
+    assert_eq!(mesh.wireframe_edges[0], [point(0.0, 0.0), point(1.0, 0.0)]);
+    assert_eq!(mesh.wireframe_edges[8], [point(0.0, 0.0), point(0.0, 1.0)]);
+}

@@ -39,6 +39,12 @@ Notable changes to this project are recorded here. The format follows
   A DXF's plot flag and lineweight are `None` where its importer cannot tell a stated 0
   from an absent group, and a drawing older than R2000 states neither. See
   `docs/CAVEATS.md`, "Layer state: what a DXF cannot say".
+- POLYLINE_MESH (a polygon mesh) is read, as `Entity::PolylineMesh`: the wireframe of its
+  M by N grid, closed in either direction where the file says so. It used to arrive as
+  `Entity::Unknown`. A polyface mesh whose vertices the DXF importer types `VERTEX_MESH`
+  (they name the block record as their owner, the shape ezdxf writes) finds its vertex
+  positions: `example_2000.dxf`'s and `example_r13.dxf`'s polyface had no edges where
+  their DWG twins have six.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
