@@ -633,7 +633,8 @@ plot flag (DXF 290) and the lineweight (DXF 370). An R2000-or-later DWG states b
 DXF importer leaves a 290 or a 370 the file left out at 0, so a stated "do not plot" and
 silence read the same, as do a stated 0.00 mm and silence: `plot` is `Some(true)` or
 `None` for a DXF, never `Some(false)`, and a lineweight code of 0 is `None`. A drawing
-older than R2000 has neither (`None`).
+older than R2000 has neither (`None`). The golden case G14 states `290 = 0` on one layer;
+`tests/golden.rs` pins the difference as a known deviation.
 
 ## Fixed: SPLINE control points read at the wrong stride
 

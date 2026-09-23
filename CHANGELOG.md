@@ -71,6 +71,10 @@ Notable changes to this project are recorded here. The format follows
   style states nothing is the consumer's decision.
 - An MLINE carries its `scale` (DXF 40), the factor its style's offsets are drawn at: a
   wall drawn 20 units thick in a style of unit offsets was drawn 1 unit thick.
+- The drawing's layouts are read into `Tables::layouts`: every LAYOUT object -- a tab, the
+  block it shows (`block_name`), its tab order and limits -- with the plot settings
+  embedded in it (paper name and size, margins, plot origin, paper unit, rotation and the
+  custom scale), read through LibreDWG's dynapi into the embedded `PLOTSETTINGS` struct.
 - A VIEWPORT carries what it shows of the model: its `view` (centre and height in the
   view's own coordinates, target, direction, twist and lens length; `None` before R2000,
   whose viewports keep it in extended data), whether it is `on`, its `viewport_id` (a

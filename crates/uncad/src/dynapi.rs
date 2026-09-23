@@ -511,6 +511,114 @@ pub fn get_text_bytes(entity: *mut c_void, dxfname: &str, field: &str) -> Option
     Some(owned)
 }
 
+/// Reads a field of a struct embedded in an object -- LAYOUT's
+/// `plotsettings` (a `Dwg_Object_PLOTSETTINGS`), say -- by adding the
+/// embedded struct's offset from the parent's dynapi table and reading the
+/// field through the embedded type's own table
+/// (`dwg_dynapi_subclass_value`, a plain copy of the field's bytes), with
+/// the same size check as [`get_field`].
+///
+/// `object` must be a live pointer to a `dxfname` object; `sub_field` is the
+/// parent's field holding the struct, `sub_dxfname` the struct's dynapi name
+/// (`"PLOTSETTINGS"`), `field` the field inside it.
+pub fn get_sub_field<T: DwgRaw>(
+    object: *mut c_void,
+    dxfname: &str,
+    sub_field: &str,
+    sub_dxfname: &str,
+    field: &str,
+) -> Option<T> {
+    if object.is_null() {
+        return None;
+    }
+    let c_dxfname = CString::new(dxfname).expect("dxfname has no interior NUL");
+    let c_sub_field = CString::new(sub_field).expect("field name has no interior NUL");
+    // SAFETY: pure name -> descriptor lookups, no write through any pointer.
+    let sub_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_dxfname.as_ptr(), c_sub_field.as_ptr()) };
+    if sub_desc.is_null() {
+        return None;
+    }
+    let offset = unsafe { (*sub_desc).offset } as usize;
+    let c_sub_dxfname = CString::new(sub_dxfname).expect("dxfname has no interior NUL");
+    let c_field = CString::new(field).expect("field name has no interior NUL");
+    let field_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_sub_dxfname.as_ptr(), c_field.as_ptr()) };
+    if field_desc.is_null() {
+        return None;
+    }
+    if !field_write_size_matches::<T>(unsafe { &*field_desc }, sub_dxfname, field) {
+        return None;
+    }
+    // dwg_dynapi_subclass_value wants the "Dwg_Object_<NAME>" spelling (it
+    // strips the prefix and falls back to the entity table); the plain
+    // "PLOTSETTINGS" is refused.
+    let c_subclass =
+        CString::new(format!("Dwg_Object_{sub_dxfname}")).expect("dxfname has no interior NUL");
+    let mut out = MaybeUninit::<T>::uninit();
+    let mut fp: libredwg_sys::Dwg_DYNAPI_field = Default::default();
+    // SAFETY: `object` is a live `dxfname` object (caller contract), so
+    // `object + offset` is its embedded struct, and the size check above
+    // confirms dynapi writes exactly `size_of::<T>()` bytes into `out`.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_subclass_value(
+            object.cast::<u8>().add(offset).cast::<c_void>(),
+            c_subclass.as_ptr(),
+            c_field.as_ptr(),
+            out.as_mut_ptr().cast::<c_void>(),
+            &mut fp,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    // SAFETY: dynapi reported success and wrote size_of::<T>() bytes.
+    Some(unsafe { out.assume_init() })
+}
+
+/// The longest string [`get_sub_text_bytes`] reads, in characters: far past
+/// any name a plot setting holds, and a bound on a pointer into damaged data.
+const MAX_SUB_TEXT: usize = 1 << 16;
+
+/// [`get_sub_field`] for a text field, as the bytes a text field of the
+/// parent itself comes back as through [`get_text_bytes`]: the stored
+/// 8-bit bytes, or -- `wide`, a drawing whose strings are UTF-16 (R2007 and
+/// later) -- that string converted to UTF-8. `dwg_dynapi_entity_utf8text`,
+/// which does the conversion for a parent's own fields, cannot see through
+/// the embedded struct. `None` for a missing field or a null string.
+pub fn get_sub_text_bytes(
+    object: *mut c_void,
+    dxfname: &str,
+    sub_field: &str,
+    sub_dxfname: &str,
+    field: &str,
+    wide: bool,
+) -> Option<Vec<u8>> {
+    let raw = get_sub_field::<*const u8>(object, dxfname, sub_field, sub_dxfname, field)?;
+    if raw.is_null() {
+        return None;
+    }
+    if wide {
+        let units: Vec<u16> = (0..MAX_SUB_TEXT)
+            // SAFETY: a TU string the live Dwg_Data owns, NUL-terminated
+            // (caller contract, as for any text field); read up to its
+            // terminator or the bound, whichever comes first.
+            .map(|i| unsafe { raw.cast::<u16>().add(i).read_unaligned() })
+            .take_while(|&unit| unit != 0)
+            .collect();
+        return Some(String::from_utf16_lossy(&units).into_bytes());
+    }
+    // SAFETY: an 8-bit NUL-terminated string the live Dwg_Data owns.
+    Some(
+        unsafe { CStr::from_ptr(raw.cast()) }
+            .to_bytes()
+            .iter()
+            .take(MAX_SUB_TEXT)
+            .copied()
+            .collect(),
+    )
+}
+
 /// Reads a `(count_field, array_field)` pair -- e.g. LWPOLYLINE's
 /// `num_points`/`points` -- as an owned `Vec<T>`. The array field is a raw
 /// pointer into memory LibreDWG itself owns (freed by `dwg_free`, not by

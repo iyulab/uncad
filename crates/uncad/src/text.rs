@@ -175,6 +175,28 @@ impl TextDecoder {
         }))
     }
 
+    /// A text field of a struct embedded in an object (a LAYOUT's plot
+    /// settings), decoded like [`Self::field`] -- see
+    /// `dynapi::get_sub_text_bytes`.
+    pub fn sub_field(
+        &self,
+        object: *mut c_void,
+        dxfname: &str,
+        sub_field: &str,
+        sub_dxfname: &str,
+        field: &str,
+    ) -> Option<String> {
+        let bytes =
+            dynapi::get_sub_text_bytes(object, dxfname, sub_field, sub_dxfname, field, self.wide)?;
+        Some(self.decode(&bytes, || {
+            // SAFETY: object is the type-specific struct pointer of a live
+            // object (get_sub_text_bytes just read through it); the accessor
+            // answers 0 when it cannot find the owning object.
+            let handle = unsafe { libredwg_sys::dwg_obj_generic_handlevalue(object) };
+            format!("{dxfname}.{sub_field}.{field} (handle {handle:X})")
+        }))
+    }
+
     /// The name of whatever a handle reference points at, decoded -- see
     /// `dynapi::handle_name_bytes`.
     pub fn handle_name(

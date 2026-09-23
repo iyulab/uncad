@@ -310,6 +310,12 @@ fn the_title_block_fixture_keeps_every_string_in_paper_space() {
     };
     assert_eq!(texts("*Paper_Space"), ["GARDEN PAVILION"]);
     assert_eq!(texts("TITLEBLOCK"), ["SHEET 1 OF 2"]);
+    // One A4 sheet, the layout that shows paper space.
+    assert_eq!(db.tables.layouts.keys().collect::<Vec<_>>(), ["Layout1"]);
+    assert_eq!(
+        db.tables.layouts["Layout1"].block_name,
+        resolved("*Paper_Space")
+    );
 }
 
 // --------------------------------------------------- polyline vertices

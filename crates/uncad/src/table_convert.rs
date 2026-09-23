@@ -1,15 +1,26 @@
-//! Conversion of the non-entity OBJECT-supertype tables an entity resolves
-//! against: LAYER, BLOCK_RECORD and MLINESTYLE -- from LibreDWG's structures
-//! into the model's [`Tables`].
+//! Conversion of the non-entity OBJECT-supertype records an entity or a
+//! sheet resolves against -- LAYER, BLOCK_RECORD, DIMSTYLE, MLINESTYLE, and
+//! LAYOUT with its embedded plot settings -- from LibreDWG's structures into
+//! the model's [`Tables`].
+//!
+//! All of them are collected by one pass over the objects, dispatching on
+//! `dwg_object_get_fixedtype`. The named object dictionary is never walked:
+//! a file with no LAYOUT object -- a DXF without an OBJECTS section, or a
+//! drawing older than R2000 that no application with layouts saved -- has
+//! no layouts.
 
 use crate::convert::{owned_entities, reference};
-use crate::dynapi::{get_array_field, get_field, is_from_dxf, is_r2000_or_later};
+use crate::dynapi::{
+    get_array_field, get_field, get_point2d, get_sub_field, is_from_dxf, is_r2000_or_later,
+    RawPoint2D,
+};
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
+use uncad_model::model::Point2D;
 use uncad_model::tables::{
-    AngularUnitFormat, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord, LinearUnitFormat,
-    Tables,
+    AngularUnitFormat, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord, LayoutRecord,
+    LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings, Tables,
 };
 
 /// # Safety
@@ -29,6 +40,7 @@ pub(crate) unsafe fn convert_tables(
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
     let mut dim_styles = BTreeMap::new();
+    let mut layouts = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -62,6 +74,13 @@ pub(crate) unsafe fn convert_tables(
                     dim_styles.insert(record.name.clone(), record);
                 }
             }
+        } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LAYOUT {
+            let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
+            if !object_ptr.is_null() {
+                if let Some(record) = convert_layout(dwg, text, object_ptr) {
+                    layouts.insert(record.name.clone(), record);
+                }
+            }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINESTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
@@ -77,8 +96,90 @@ pub(crate) unsafe fn convert_tables(
         dim_styles,
         block_records,
         mlinestyles,
-        layouts: Default::default(),
+        layouts,
     }
+}
+
+/// Reads a LAYOUT object -- a tab of the drawing, the block it shows -- and
+/// the plot settings embedded in it (`plotsettings`, a
+/// `Dwg_Object_PLOTSETTINGS` read through its own dynapi table; see
+/// [`get_sub_field`]).
+///
+/// Every value is what the object holds. Two of them a DXF may leave out
+/// and the importer fills in, so they cannot be told from a stated value:
+/// the zero points, and the paper-units side of the custom scale (DXF 142),
+/// which the importer sets to 1 on every LAYOUT before it reads the groups.
+/// A plot unit or rotation outside the format's range is `None`.
+fn convert_layout(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    object_ptr: *mut c_void,
+) -> Option<LayoutRecord> {
+    let name = text.field(object_ptr, "LAYOUT", "layout_name")?;
+    let block_name = reference(
+        dwg,
+        text,
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYOUT", "block_header"),
+        c"BLOCK",
+        |handle_ptr| resolve_block_name(text, handle_ptr),
+    );
+    let point = |field: &str| get_point2d(object_ptr, "LAYOUT", field).unwrap_or_default();
+    let plot = |field: &str| {
+        get_sub_field::<f64>(object_ptr, "LAYOUT", "plotsettings", "PLOTSETTINGS", field)
+            .unwrap_or(0.0)
+    };
+    let plot_code = |field: &str| {
+        get_sub_field::<u16>(object_ptr, "LAYOUT", "plotsettings", "PLOTSETTINGS", field)
+    };
+    let plot_settings = PlotSettings {
+        paper_name: text
+            .sub_field(
+                object_ptr,
+                "LAYOUT",
+                "plotsettings",
+                "PLOTSETTINGS",
+                "canonical_media_name",
+            )
+            .unwrap_or_default(),
+        paper_width: plot("paper_width"),
+        paper_height: plot("paper_height"),
+        margin_left: plot("left_margin"),
+        margin_bottom: plot("bottom_margin"),
+        margin_right: plot("right_margin"),
+        margin_top: plot("top_margin"),
+        plot_origin: get_sub_field::<RawPoint2D>(
+            object_ptr,
+            "LAYOUT",
+            "plotsettings",
+            "PLOTSETTINGS",
+            "plot_origin",
+        )
+        .map(Point2D::from)
+        .unwrap_or_default(),
+        paper_units: plot_code("plot_paper_unit").and_then(|v| match v {
+            0 => Some(PlotPaperUnits::Inches),
+            1 => Some(PlotPaperUnits::Millimeters),
+            2 => Some(PlotPaperUnits::Pixels),
+            _ => None,
+        }),
+        rotation: plot_code("plot_rotation_mode").and_then(|v| match v {
+            0 => Some(PlotRotation::Unrotated),
+            1 => Some(PlotRotation::Counterclockwise90),
+            2 => Some(PlotRotation::UpsideDown),
+            3 => Some(PlotRotation::Clockwise90),
+            _ => None,
+        }),
+        scale_numerator: plot("paper_units"),
+        scale_denominator: plot("drawing_units"),
+    };
+    Some(LayoutRecord {
+        name,
+        tab_order: get_field::<u16>(object_ptr, "LAYOUT", "tab_order").map_or(0, i32::from),
+        block_name,
+        limits_min: point("LIMMIN"),
+        limits_max: point("LIMMAX"),
+        plot_settings,
+    })
 }
 
 /// Reads a DIMSTYLE table entry -- the settings a dimension names rather than

@@ -20,7 +20,7 @@ use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 13] = [
+const CASES: [(&str, &[u8], &str); 14] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -77,6 +77,11 @@ const CASES: [(&str, &[u8], &str); 13] = [
         include_str!("golden/g13.expected.json"),
     ),
     (
+        "g14",
+        include_bytes!("golden/g14.dxf"),
+        include_str!("golden/g14.expected.json"),
+    ),
+    (
         "g15",
         include_bytes!("golden/g15.dxf"),
         include_str!("golden/g15.expected.json"),
@@ -126,6 +131,12 @@ impl Drop for Fixture {
 /// STANDARD entry instead, the entry an absent group 7 means. The name the
 /// file wrote is lost the same way; what arrives is a resolved reference
 /// to a style the entity did not name.
+///
+/// A layer's plot flag goes the same way from the other side. The importer
+/// leaves an absent group 290 at 0, so a layer that states `290 = 0` (G14's
+/// NOPLOT) cannot be told from one that states nothing, and this reader
+/// reports both as "not stated" rather than guess: `None` where the spec
+/// says `Some(false)`.
 ///
 /// The style table carries a second, smaller one. A DIMSTYLE writes a
 /// variable only when it differs from the value the application starts from,
@@ -191,6 +202,12 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
         }
         if style.post.is_none() {
             style.post = read.post.clone();
+        }
+    }
+
+    for layer in expected.tables.layers.values_mut() {
+        if layer.plot == Some(false) {
+            layer.plot = None;
         }
     }
 
@@ -301,6 +318,16 @@ fn the_dxf_importer_still_drops_an_undeclared_name() {
         undeclared,
         &Ref::Absent,
         "the importer kept the name of an undeclared style -- remove the known deviation"
+    );
+
+    let fixture = Fixture::write("golden-g14-deviation.dxf", include_bytes!("golden/g14.dxf"));
+    let db = uncad::parse(&fixture.0).expect("g14 should parse");
+    let expected: CadDatabase =
+        serde_json::from_str(include_str!("golden/g14.expected.json")).unwrap();
+    assert_eq!(expected.tables.layers["NOPLOT"].plot, Some(false));
+    assert_eq!(
+        db.tables.layers["NOPLOT"].plot, None,
+        "the importer told a stated 290 = 0 from an absent one -- remove the known deviation"
     );
 
     let fixture = Fixture::write("golden-g13-deviation.dxf", include_bytes!("golden/g13.dxf"));
