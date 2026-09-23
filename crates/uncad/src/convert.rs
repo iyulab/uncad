@@ -1988,7 +1988,10 @@ fn convert_mline(
         vertices,
         closed: flags & MLINE_CLOSED_FLAG != 0,
         mlinestyle_name,
-        scale: None,
+        // DXF 40, which the format requires: the factor the style's
+        // offsets are drawn at. Carried as stated -- a 0 collapses every
+        // element onto the centreline, which is what the file says.
+        scale: get_field::<f64>(entity_ptr, "MLINE", "scale"),
     }
 }
 

@@ -69,6 +69,8 @@ Notable changes to this project are recorded here. The format follows
   `zero_suppression` (DIMZIN), `rounding` (DIMRND), `angular_unit_format` (DIMAUNIT),
   `angular_decimal_places` (DIMADEC) and `fraction_format` (DIMFRAC). What to use where a
   style states nothing is the consumer's decision.
+- An MLINE carries its `scale` (DXF 40), the factor its style's offsets are drawn at: a
+  wall drawn 20 units thick in a style of unit offsets was drawn 1 unit thick.
 - An ordinate DIMENSION carries its `ordinate_axis` (DXF 70, bit 64): whether it measures
   its feature's x or y distance from the datum.
 ### Changed

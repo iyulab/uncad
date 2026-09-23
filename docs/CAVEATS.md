@@ -710,7 +710,9 @@ vector LibreDWG has already computed with the miter angle applied, so this is on
 multiply, no trigonometry. When the style cannot be found (empty handle, failed
 resolution) it is treated as a single `offset = 0.0`, which reproduces the old
 centerline rendering exactly through the same `mline_offset_points` function, with no
-separate branch.
+separate branch. The offsets are in the style's units: the MLINE's own `scale` (DXF 40,
+which the model carries as the file states it) is what turns them into drawing units --
+the corpus's MLINEs state 20 and 1.
 
 **bindgen**: `Dwg_MLINESTYLE_line` (`offset`/`color`/`lt_index`/`lt_ltype`) hits the same
 cascade through `parent: struct _dwg_object_MLINESTYLE *`, handled the same way (hand
