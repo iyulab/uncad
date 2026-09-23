@@ -30,6 +30,40 @@ const TEST_DATA: &str = concat!(
     "/../../lib/libredwg/test/test-data/"
 );
 
+/// Every R2007+ DXF in the corpus that LibreDWG reads (`$ACADVER` AC1021 or
+/// later; `2013/gh109_1`, `2018/Constraints`, `Dynblocks`, `LiveSection1`
+/// and `TS1` fail in LibreDWG itself). All of them declare an empty
+/// `$DIMPOST` (`grep -A1 '^\$DIMPOST'` over the files).
+const R2007_PLUS_DXFS: &[&str] = &[
+    "example_2007.dxf",
+    "example_2010.dxf",
+    "example_2013.dxf",
+    "example_2018.dxf",
+    "sample_2007.dxf",
+    "sample_2010.dxf",
+    "sample_2013.dxf",
+    "sample_2018.dxf",
+    "2007/Arc.dxf",
+    "2007/circle.dxf",
+    "2007/Constraints.dxf",
+    "2007/ConstructionLine.dxf",
+    "2007/Donut.dxf",
+    "2007/Ellipse.dxf",
+    "2007/Helix.dxf",
+    "2007/Leader.dxf",
+    "2007/Line.dxf",
+    "2007/Polygon.dxf",
+    "2007/Polyline.dxf",
+    "2007/RAY.dxf",
+    "2007/Text.dxf",
+    "2010/Constraints.dxf",
+    "2010/gh209_1.dxf",
+    "2010/Leader.dxf",
+    "2013/Constraints.dxf",
+    "2013/Leader.dxf",
+    "2018/Leader.dxf",
+];
+
 fn header_of(path: &str) -> Header {
     uncad::parse_with_header(path)
         .unwrap_or_else(|e| panic!("{path} must parse: {e}"))
@@ -197,6 +231,34 @@ fn a_chinese_r2013_file_reports_its_code_page_and_unitless_units() {
     );
 }
 
+#[test]
+fn r2007_and_later_dxf_header_text_variables_are_not_read_as_utf16() {
+    // LibreDWG parses the HEADER section before it sets header.version (only
+    // R13..R2000 get it from $ACADVER; dxf_fixup_header runs afterwards), so
+    // every $ text variable is a plain 8-bit copy of the file's bytes even
+    // in an R2007+ DXF. Read as UTF-16, the 1-byte allocation of an empty
+    // $DIMPOST was overrun into "DIMSE..."-style heap garbage on every one of
+    // these files.
+    for name in R2007_PLUS_DXFS {
+        let (db, h) = uncad::parse_with_header(format!("{TEST_DATA}{name}"))
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(
+            ["r2007", "r2010", "r2013", "r2018"].contains(&h.version.as_deref().unwrap_or("")),
+            "{name}: {:?}",
+            h.version
+        );
+        assert_eq!(h.dimpost.as_deref(), Some(""), "{name}");
+        assert!(
+            !db.read_diagnostics
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("TEXT_ENCODING")),
+            "{name}: {:?}",
+            db.read_diagnostics.warnings
+        );
+    }
+}
+
 /// A DXF of version `acadver` whose only header variables are `$ACADVER`
 /// and `$DIMPOST` (`dimpost` written as the raw bytes), padded with LINEs
 /// past LibreDWG's 256-byte minimum.
@@ -217,12 +279,16 @@ fn dxf_with_dimpost(acadver: &str, dimpost: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn a_dimpost_suffix_round_trips() {
+fn a_dimpost_suffix_round_trips_through_every_dxf_version() {
     // "<> mm" is the DXF reference's own example of $DIMPOST (the "<>" is
-    // where the measurement goes). The non-ASCII variant is CP1252 (B5 =
-    // U+00B5; with no $DWGCODEPAGE, LibreDWG assumes ANSI_1252).
-    let cases: [(&str, &[u8], &str); 2] = [
+    // where the measurement goes); a 6-byte allocation that used to come
+    // back as 13 UTF-16 units of heap. The R2018 non-ASCII variant is UTF-8
+    // in the file (AC1021+ DXF), the R2000 one CP1252 (B5 = U+00B5; with no
+    // $DWGCODEPAGE, LibreDWG assumes ANSI_1252).
+    let cases: [(&str, &[u8], &str); 4] = [
+        ("AC1032", b"<> mm", "<> mm"),
         ("AC1015", b"<> mm", "<> mm"),
+        ("AC1032", b"<> \xC2\xB5m", "<> \u{B5}m"),
         ("AC1015", b"<> \xB5m", "<> \u{B5}m"),
     ];
     for (acadver, raw, expected) in cases {

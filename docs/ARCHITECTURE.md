@@ -17,7 +17,7 @@ crates/
                          cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
                          conversion that runs on a copy rather than the original,
                          readers that decode a DWG or DXF from a memory buffer rather
-                         than a path, the file-header fields (version, codepage,
+                         than a path, and the file-header fields (version, codepage,
                          string width, a pre-R13 header's length, whether the Template
                          section was read) that decoding a drawing's text and header
                          need, and string conversions.
@@ -146,12 +146,15 @@ That suits the design rather than fighting it: entity fields were always going t
 through `dwg_dynapi_entity_value`/`dwg_dynapi_common_value`, LibreDWG's own
 reflection API keyed by string field name, with runtime type and range checks.
 `uncad::dynapi` wraps it in the generic helpers `get_field::<T>`, `get_common_field::<T>`,
-`get_header_field::<T>`, `get_text_bytes` and `get_array_field::<C, T>`, comparing the field size dynapi reports
-against the requested Rust type's size so a wrong type mapping fails loudly instead of
-quietly corrupting data. Text fields come back as bytes on purpose: for a pre-R2007
-drawing they are codepage bytes, not UTF-8, and `uncad::text::TextDecoder` (one per
-`parse()`) is the only place they become `String`s -- through LibreDWG's codepage tables,
-with what could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
+`get_header_field::<T>`, `get_text` and `get_array_field::<C, T>`, comparing the field size
+dynapi reports against the requested Rust type's size so a wrong type mapping fails loudly
+instead of quietly corrupting data. Text fields come back undecoded on purpose, as LibreDWG
+hands them out: a UTF-8 copy it converted (R2007+ DWG), or the stored string -- codepage
+bytes before R2007, and in an R2007+ DXF the UTF-16 its importer wrote or, for the few
+fields it copies byte for byte, the file's UTF-8. `uncad::text::TextDecoder` (one per
+`parse()`) says which width a stored string is read in and is the only place any of them
+become `String`s -- through LibreDWG's codepage tables where a codepage applies, with what
+could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
 
 **The same bindgen failure recurs for individual types.** Even with the whole `tio` union
 opaque, allowlisting a nested struct on its own (`Dwg_HATCH_Path`, `Dwg_HATCH_PathSeg`,

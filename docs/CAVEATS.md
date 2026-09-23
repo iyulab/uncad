@@ -142,11 +142,12 @@ A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
 
-Which entities the importer keeps also depends on the declared version, not only on the
-content: the corpus R2000 file `2000/entities-2d.dxf` reads as 12 entities, and the same
-bytes with `$ACADVER` rewritten to `AC1018` (R2004) read as 14 -- an ATTDEF and an ATTRIB
-appear that the R2000 pass drops without a message. Nothing on this side can tell that
-they were dropped.
+The declared version, by contrast, does not change what is read: the corpus R2000 file
+`2000/entities-2d.dxf` gives the same model under every `$ACADVER` from `AC1015` to
+`AC1032` (`tests/dxf_pipeline.rs`), although from `AC1021` on the importer stores its
+strings as UTF-16. (It used to read 12 entities at R2000 and 14 at R2004; the two that
+went missing, an ATTDEF and an ATTRIB, are read since this crate walks the R13..R2000
+attribute chains itself -- see "Attributes".)
 
 Two DXF-only defects that *were* patched are recorded under "Local patches to the vendored
 LibreDWG" below: a polygon mesh made the reader refuse the whole file, and the importer
@@ -154,42 +155,56 @@ compared an R2007+ DXF's table-record names in the wrong width. The per-entity
 degradation this section describes -- a type dropping out, or arriving as
 `Entity::Unknown` -- is what a DXF should cost; a whole-file refusal was not.
 
-### DXF saved as R2007 or later is refused with an explicit error
+### DXF saved as R2007 or later is read, each string in the width it was stored in
 
-`parse()` returns `Err(ParseError::UnsupportedDxfVersion)` for a DXF whose `$ACADVER`
-is `AC1021` (R2007) or later -- R2007, R2010, R2013 and R2018 files, which is what
-current CAD software writes by default. The decision is made from the file's own HEADER
-section before LibreDWG sees it. R2000/R2004 DXF (`AC1015`/`AC1018`) and older, DXF files
-without a `$ACADVER` (pre-R10), and every DWG version are unaffected. Binary DXF is not
-inspected and goes to LibreDWG as before.
+A DXF whose `$ACADVER` is `AC1021` (R2007) or later -- R2007, R2010, R2013 and R2018
+files, which is what current CAD software writes by default -- is read like any other.
+Until 0.3.0 such a file came back from LibreDWG as a drawing with no entities and no
+error, and this crate refused it with `ParseError::UnsupportedDxfVersion` instead. The
+cause was string width, in two places, and both are fixed:
 
-Why refuse rather than read: LibreDWG's DXF importer stores strings as UTF-16 for R2007+
-input, but its own text accessor treats imported data as 8-bit. Every name therefore comes
-back cut off after its first character -- `*Model_Space` arrives as `*` -- and this crate
-finds the entities by looking up the model- and paper-space block records by name. The
-entities are in memory (the block record that arrives as `*` has them); they are just
-never matched, and LibreDWG reports no error. Left alone, that surfaced as `Ok` with zero
-entities, indistinguishable from an empty drawing.
+- **In this crate.** LibreDWG's DXF importer stores every string it sets through its
+  field setter as UTF-16 once the version is R2007 or later, exactly as for a DWG -- but
+  its text accessors convert UTF-16 back only for a DWG, and hand an R2007+ DXF's strings
+  out as if they were 8-bit, which stops at the first NUL byte: `*Model_Space` arrived as
+  `*`, and this crate, which finds the entities by looking the model- and paper-space
+  block records up by name, found none. `uncad::text::TextDecoder` now knows which kind
+  of drawing it is reading and reads each stored string in its width. The importer's
+  exceptions are read 8-bit: MTEXT's text (groups 1 and 3, copied byte for byte) and the
+  HEADER variables (parsed before the importer knows the version). Those are the file's
+  own bytes, UTF-8 in an R2007+ DXF, and are checked as UTF-8 and reported in
+  `read_diagnostics` when they are not; reading them as UTF-16 would look for a 16-bit
+  NUL past their allocation.
+- **In LibreDWG's importer.** It resolves layer and block names through the same 8-bit
+  reading while it builds the drawing, so those lookups had already failed by the time
+  the data got here: with this crate's half alone, `example_2018.dxf` yields its 72
+  entities with 65 of them on no layer and every INSERT without its block. A local patch
+  to the vendored `dwg.c` (see "Local patches to the vendored LibreDWG" below) makes the
+  importer decode a record's name before it compares it.
 
-Correcting the width on this side is not enough either. The importer resolves layer and
-block names through that same accessor while it builds the drawing, so those lookups have
-already failed by the time the data gets here: with the width corrected, the corpus files
-do yield their 72 entities, but 65 of them without a layer, every INSERT and DIMENSION
-without its block, and MTEXT content garbled (the importer stores that one field 8-bit). A
-drawing that looks read and is quietly missing that much is worse than an obviously empty
-one, and an obviously empty one is worse than an error. The fix belongs in LibreDWG's
-accessor, or in reading DXF without LibreDWG.
+Measured on the corpus: 27 of its 32 R2007+ DXFs read; 24 of those have the same drawing
+as a DWG beside them, and 22 of the 24 state the same entities on the same layers with
+the same INSERT blocks as their twin. The two that do not are recorded, not hidden:
+`2010/gh209_1.dxf`, whose entities LibreDWG's importer leaves without a layer handle
+(the model says `Absent`), and `2018/Leader.dxf`, whose DXF text itself puts one entity
+on a layer `0 @ 1` the DWG does not have. The other five (`2013/gh109_1`,
+`2018/Constraints`, `Dynblocks`, `LiveSection1`, `TS1`) fail inside LibreDWG's importer
+with critical error 2048, as a few older DXFs do. `tests/dxf_pipeline.rs` pins all of
+that, and also reads one drawing restamped `AC1015`, `AC1018`, `AC1021`, `AC1024`,
+`AC1027` and `AC1032` and requires the same model from every stamp;
+`tests/r2007_dxf_handles.rs` compares `example_2018.dxf` with its DWG twin and with its
+own text, and `tests/codepage.rs` covers the two widths.
 
-The library's half of that fix is now in the vendored copy: a local patch to `dwg.c` (see
-"Local patches to the vendored LibreDWG" below) makes the importer decode a record's name
-before it compares it, so its own layer and block lookups no longer stop at the first
-character. This crate's half -- reading each of an R2007+ DXF's strings in the width the
-importer stored it in -- is not done yet, so the refusal stays.
-
-What to do: save the drawing as R2004 DXF or as DWG (any version). A test walks every DXF
-in the LibreDWG corpus and checks that exactly the R2007+ files are refused; a second one
-feeds the same minimal drawing with two `$ACADVER` values and requires one refusal and one
-successful read.
+**The silent case is guarded.** Should an R2007+ DXF still come out with no entity in
+the model while LibreDWG itself placed entities in its model or paper space (the
+`entmode` the importer sets from each entity's owner handle, which no name
+lookup of this crate's is involved in), `parse()` returns
+`ParseError::UnsupportedDxfVersion` rather than an empty drawing: an obviously empty
+drawing is worse than an error, and one that looks read but is empty is worse still. No
+corpus file trips it; with this crate's half of the width fix disabled, exactly the 27
+readable files do. The guard is limited to R2007+ DXF on purpose: applied to every input
+it would also refuse two pre-R13 DWGs (`r11/ACEB10.dwg`, `r2.10/block.dwg`) that read
+today with an empty model space, which is a different question.
 
 ## Text before R2007 is decoded here, through the drawing's codepage
 
@@ -239,8 +254,8 @@ from Python's own encoders, with the Windows twins (936, 950, 932) of the same b
 the control.
 
 **Escapes are text.** `\U+XXXX` and `\M+nXXXX` in a string are passed through as the file
-wrote them; expanding them is a consumer's decision, as the rest of MTEXT's inline codes
-are.
+wrote them, whatever its version or format; expanding them is a consumer's decision, as
+the rest of MTEXT's inline codes are.
 
 **What is trusted, and what cannot be told:**
 
@@ -258,8 +273,10 @@ are.
   reads as U+0223). Title-block strings of more than one or two syllables are never valid UTF-8 as a
   whole, and a DWG never holds UTF-8 in a codepage string, so the codepage always applies
   there.
-- R2007 and later: the library converts from UTF-16 itself and the codepage is moot; the
-  result is checked to be UTF-8 and reported if it is not.
+- R2007 and later: the codepage is moot. From a DWG the library converts its UTF-16
+  itself; from a DXF this crate reads the UTF-16 the importer stored, and the strings the
+  importer keeps 8-bit as the UTF-8 such a file is (see "DXF saved as R2007 or later is
+  read" above). Whatever is not valid UTF-16 or UTF-8 is reported.
 - A codepage LibreDWG has no table for -- `CP_UNDEFINED`, or a corrupt value in a DWG
   header, which the library would index its tables with unchecked -- is not guessed at
   (as `ANSI_1252`, say): its strings are read as UTF-8 and reported where they are not.
@@ -277,8 +294,8 @@ the CLI prints them as a warning. Every example DWG in the LibreDWG corpus comes
 `UNHANDLEDCLASS` set, and `example_2018.dwg` with `UNHANDLEDCLASS | VALUEOUTOFBOUNDS`; the
 R2000 DXF from the same corpus comes back clean. Across the whole corpus (208 files: 141 DWG,
 67 DXF), 100 DWG read clean, 17 with `UNHANDLEDCLASS`, 31 with `VALUEOUTOFBOUNDS` (some with
-both); every DXF that LibreDWG read at all (31) read clean, 32 were refused as R2007+ and 4
-failed critically (3 `INVALIDDWG`, 1 `IOERROR`). What the bits mean for the result is
+both); every DXF that LibreDWG read at all (58) read clean, and 9 failed critically (8
+`INVALIDDWG`, 5 of them R2007+ files, and 1 `IOERROR`). What the bits mean for the result is
 LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
 were skipped, and nothing else in the model shows that they existed.
 
@@ -315,8 +332,10 @@ measured with hand-written files: an INSERT naming a block the BLOCKS section do
 reads as *absent* (the importer stores no handle), a defined one resolves, and a LINE on a
 layer no LAYER table declares is not readable at all (`IOERROR`) -- so an unresolved *layer*
 comes from DWG files with broken handles, not from anything one can write into a DXF by hand.
-The R2007+ DXF case that this crate now refuses was the large-scale version of "unresolved":
-65 of 72 entities with a layer handle that no longer matched its table row.
+The R2007+ DXF case was the large-scale version of "unresolved" before the importer's
+lookups were patched: 65 of `example_2018.dxf`'s 72 entities without a layer handle, where
+its DWG twin names four layers. One corpus R2007+ DXF, `2010/gh209_1.dxf`, still reads that
+way -- all of its entities are absent-layered, which is what LibreDWG's importer leaves.
 
 Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
 the model still says which it was.
@@ -670,17 +689,19 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
   for DXF and JSON input even when the record's name is stored as UTF-16 -- which it is for
-  an R2007+ DXF (see "DXF saved as R2007 or later is refused with an explicit error"
-  above). So "Tavolo 3" compared as "T", and every name the importer resolves while it
+  an R2007+ DXF (see "DXF saved as R2007 or later is read, each string in the width it was
+  stored in" above). So "Tavolo 3" compared as "T", and every name the importer resolves while it
   builds the drawing (the group 8 layer, the group 2 block name, the linetype, text
   style, dimstyle, UCS, VPORT and APPID names) failed for any name longer than one
   character. The three functions now share one helper, `uncad_record_name_utf8()`, whose
-  predicate `UNCAD_IS_TU_DWG()` is the one the storage actually follows, and the one the
-  shim's `uncad_tv_to_utf8` uses. The patch deliberately stops there: the strings
+  predicate `UNCAD_IS_TU_DWG()` is the one the storage actually follows, and the one
+  `crates/uncad/src/text.rs` reads the strings by. The patch deliberately stops there: the strings
   `in_dxf.c` stores through `dwg_add_u8_input()` (`DICTIONARY.texts`,
   `LTYPE.dashes[].text`) really are 8-bit for DXF input, so `dwg_find_dictionary()` and
   `dwg_find_dicthandle()` keep the original predicate. LibreDWG has the same gap; it is not
-  reported there yet.
+  reported there yet. `crates/uncad/tests/r2007_dxf_handles.rs` is the regression: without
+  the patch its three tests fail, `example_2018.dxf` putting 65 of its 72 entities on no
+  layer, and so do `tests/dxf_pipeline.rs`'s two R2007+ twin tests.
 - **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
   and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
   caller passes the result straight to `strftime()` (`dec_macros.h`'s `FIELD_TIMEBLL` and

@@ -80,12 +80,13 @@ pub enum ParseError {
     /// The file could not be read from disk ([`parse`] only; [`parse_bytes`]
     /// never produces it).
     Io(std::io::Error),
-    /// The DXF declares `$ACADVER` R2007 or later (`AC1021` and up). LibreDWG's
-    /// DXF importer reads these files without reporting an error but loses
-    /// every layer and block name on the way, so this crate refuses them
-    /// instead of returning a drawing that is silently incomplete. The value
-    /// is the `$ACADVER` string as written in the file. See `docs/CAVEATS.md`,
-    /// "DXF reading".
+    /// A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) that this
+    /// crate could not read: LibreDWG's importer placed entities in its model
+    /// or paper space, and none of them reached the model -- the way every
+    /// such file used to come out, as a drawing with no entities and no
+    /// error. The value is the `$ACADVER` string as written in the file (or
+    /// LibreDWG's name for the version, for a binary DXF). See
+    /// `docs/CAVEATS.md`, "DXF saved as R2007 or later".
     UnsupportedDxfVersion(String),
 }
 
@@ -96,7 +97,7 @@ impl std::fmt::Display for ParseError {
             ParseError::Io(e) => write!(f, "cannot read the file: {e}"),
             ParseError::UnsupportedDxfVersion(v) => write!(
                 f,
-                "DXF version {v} (R2007 or later) is not supported: LibreDWG's DXF importer would return a silently incomplete drawing -- save it as R2004 DXF or as DWG"
+                "DXF version {v} (R2007 or later) could not be read: none of the entities LibreDWG's DXF importer placed in model or paper space reached the drawing -- save it as R2004 DXF or as DWG"
             ),
         }
     }
@@ -192,10 +193,11 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
 ///
 /// How complete DXF reading is depends on the entity type: LibreDWG's own
 /// DXF reader is documented as working "for most objects" rather than being
-/// feature-complete the way DWG reading is. A DXF whose `$ACADVER` is R2007
-/// or later is refused up front with [`ParseError::UnsupportedDxfVersion`]
-/// rather than handed to LibreDWG, because the importer would return it as a
-/// drawing with no entities and no error. See `docs/CAVEATS.md`.
+/// feature-complete the way DWG reading is. A DXF saved as R2007 or later is
+/// read like any other; one whose
+/// entities nonetheless reach no model or paper space is
+/// [`ParseError::UnsupportedDxfVersion`] rather than an empty drawing. See
+/// `docs/CAVEATS.md`.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     parse_with_header(path).map(|(db, _)| db)
 }
@@ -228,21 +230,6 @@ pub fn parse_bytes_with_header(
     bytes: &[u8],
     format: Format,
 ) -> Result<(CadDatabase, Header), ParseError> {
-    // A DXF's HEADER section, scanned from the bytes: which variables it
-    // states, and its $ACADVER. No lock needed -- this is plain text.
-    let scan = match format {
-        Format::Dwg => None,
-        Format::Dxf => header::scan_dxf_header(bytes),
-    };
-    // Decided from the file's own header, before LibreDWG sees it: the R2007+
-    // failure is silent on the C side (error code 0, zero entities), so the
-    // only place it can be turned into an error is here.
-    if let Some(acadver) = scan.as_ref().and_then(|scan| scan.acadver.as_ref()) {
-        if dxf_version_number(acadver).is_some_and(|n| n >= DXF_VERSION_R2007) {
-            return Err(ParseError::UnsupportedDxfVersion(acadver.clone()));
-        }
-    }
-
     // See LIBREDWG_LOCK: the whole read/convert/free cycle must run without
     // another thread's LibreDWG call interleaved. Recovering from a poisoned
     // lock rather than propagating the poison is deliberate -- a panic here
@@ -258,7 +245,7 @@ pub fn parse_bytes_with_header(
     // instance -- an uninitialized one aborts with
     // STATUS_STACK_BUFFER_OVERRUN (garbage in dwg.opts feeding the runtime
     // loglevel global). Boxed so the C side fills it in place at a stable
-    // heap address; it lives only until the two conversion walks below have
+    // heap address; it lives only until the conversion walks below have
     // copied out everything this crate exposes.
     let mut dwg: Box<libredwg_sys::Dwg_Data> =
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
@@ -291,17 +278,17 @@ pub fn parse_bytes_with_header(
     // result instead of being dropped here.
     let mut read_diagnostics = read_diagnostics_from_libredwg_bits(error);
 
-    // Every string the two walks below read goes through this decoder: the
-    // library returns a pre-R2007 string as the codepage bytes the file
-    // holds, and what could not be decoded is reported, never dropped.
-    let text = unsafe { text::TextDecoder::new(dwg.as_mut(), format == Format::Dxf) };
+    // Every string the walks below read goes through this decoder: it knows
+    // how this drawing's strings sit in LibreDWG's memory, and what could
+    // not be decoded is reported, never dropped.
+    let text = unsafe { text::TextDecoder::new(dwg.as_mut()) };
 
-    // Two walks over the live C structure, neither of which mutates it.
+    // Walks over the live C structure, none of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
     let entities = unsafe { convert::convert_entities(dwg.as_mut(), &text) };
     let tables = unsafe { table_convert::convert_tables(dwg.as_mut(), &text) };
-    let (acadver, stated) = match (format, scan) {
-        (Format::Dwg, _) => (
+    let (acadver, stated) = match format {
+        Format::Dwg => (
             header::dwg_magic(bytes),
             // SAFETY: the shims read file-header fields of a live Dwg_Data.
             header::Stated::Dwg {
@@ -310,10 +297,27 @@ pub fn parse_bytes_with_header(
                 template_read: unsafe { libredwg_sys::uncad_dwg_template_read(dwg.as_mut()) } != 0,
             },
         ),
-        (Format::Dxf, Some(scan)) => (scan.acadver, header::Stated::Dxf(scan.variables)),
-        (Format::Dxf, None) => (None, header::Stated::Unknown),
+        Format::Dxf => match header::scan_dxf_header(bytes) {
+            Some(scan) => (scan.acadver, header::Stated::Dxf(scan.variables)),
+            None => (None, header::Stated::Unknown),
+        },
     };
     let header = unsafe { header::read_header(dwg.as_mut(), &text, format, acadver, &stated) };
+
+    // The one way an R2007+ DXF used to fail was silently: the importer
+    // stored its strings in a width the lookups did not expect, no block
+    // record was found by name, and the result was a drawing with no
+    // entities and no error. The width is handled now (text.rs, and the
+    // vendored dwg.c patch for the importer's own lookups); should a file
+    // still come out that way, it is an error, not an empty drawing.
+    let unplaced = entities_went_missing(
+        format,
+        is_r2007_or_later(dwg.as_mut()),
+        entities.len(),
+        // SAFETY: the Dwg_Data is live until the dwg_free below.
+        || unsafe { entities_placed_in_a_space(dwg.as_mut()) },
+    );
+
     read_diagnostics.warnings.extend(text.into_warnings());
     read_diagnostics
         .warnings
@@ -325,6 +329,15 @@ pub fn parse_bytes_with_header(
     // Drop, no C memory, Send + Sync by construction).
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
+    if unplaced {
+        let version = header
+            .acadver
+            .clone()
+            .or_else(|| header.version.clone())
+            .unwrap_or_default();
+        return Err(ParseError::UnsupportedDxfVersion(version));
+    }
+
     Ok((
         CadDatabase {
             entities,
@@ -335,17 +348,54 @@ pub fn parse_bytes_with_header(
     ))
 }
 
-/// `$ACADVER` value of the first DXF release LibreDWG's importer reads back
-/// incompletely: `AC1021` = R2007, the release that switched DXF strings to
-/// UTF-16 in the importer's storage. Every later code (`AC1024`, `AC1027`,
-/// `AC1032`, ...) is numerically above it.
-const DXF_VERSION_R2007: u32 = 1021;
+/// The guard against the silent R2007+ DXF failure: a DXF saved as R2007 or
+/// later whose model holds no entity although LibreDWG placed some in model
+/// or paper space. Scoped to R2007+ DXF because that is where the failure
+/// lived: measured on the corpus, the same test applied to every input would
+/// also refuse two pre-R13 DWGs (`r11/ACEB10.dwg`, `r2.10/block.dwg`) that
+/// read today with an empty model space -- a different question, and not an
+/// error this change is entitled to introduce.
+fn entities_went_missing(
+    format: Format,
+    r2007_or_later: bool,
+    converted: usize,
+    placed_in_a_space: impl FnOnce() -> usize,
+) -> bool {
+    format == Format::Dxf && r2007_or_later && converted == 0 && placed_in_a_space() > 0
+}
 
-/// The numeric part of an `$ACADVER` code (`AC1021` -> `1021`), or `None` for
-/// anything that is not shaped like one. An unrecognised value never rejects a
-/// file: the decision falls back to LibreDWG, as it did before this check.
-fn dxf_version_number(acadver: &str) -> Option<u32> {
-    acadver.strip_prefix("AC")?.parse().ok()
+/// Whether the drawing was read from an R2007-or-later source.
+fn is_r2007_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    // SAFETY: the shim reads one header field of a live Dwg_Data.
+    let version = unsafe { libredwg_sys::uncad_dwg_from_version(dwg) };
+    #[allow(clippy::unnecessary_cast)]
+    let r2007 = libredwg_sys::DWG_VERSION_TYPE_R_2007 as i32;
+    version >= r2007
+}
+
+/// How many entities LibreDWG itself placed in model or paper space
+/// (`entmode` 2 or 1) -- found without any name lookup, so a drawing whose
+/// block records failed to resolve by name still counts what it holds.
+///
+/// # Safety
+/// `dwg` must be a live, successfully read `Dwg_Data`.
+unsafe fn entities_placed_in_a_space(dwg: *mut libredwg_sys::Dwg_Data) -> usize {
+    let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    (0..num_objects)
+        .filter(|&i| {
+            // SAFETY: i is below the object count of the live Dwg_Data; the
+            // shim answers NULL for an object that is not an entity.
+            let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
+            if obj.is_null() {
+                return false;
+            }
+            let entity = unsafe { libredwg_sys::uncad_object_entity_ptr(obj) };
+            matches!(
+                dynapi::get_common_field::<u8>(entity, "entmode"),
+                Some(1 | 2)
+            )
+        })
+        .count()
 }
 
 #[cfg(test)]
@@ -402,5 +452,58 @@ mod missing_required_groups_tests {
     fn the_unsupported_version_message_reads_as_one_sentence() {
         let message = super::ParseError::UnsupportedDxfVersion("AC1024".to_string()).to_string();
         assert!(!message.contains("  "), "{message}");
+    }
+}
+
+#[cfg(test)]
+mod unplaced_entities_tests {
+    use super::*;
+
+    #[test]
+    fn only_an_r2007_plus_dxf_whose_placed_entities_all_went_missing_is_refused() {
+        assert!(entities_went_missing(Format::Dxf, true, 0, || 72));
+        // Something reached the model, or nothing was there to reach it.
+        assert!(!entities_went_missing(Format::Dxf, true, 1, || 72));
+        assert!(!entities_went_missing(Format::Dxf, true, 0, || 0));
+        // Not the case the guard is for; the count is not even taken.
+        assert!(!entities_went_missing(
+            Format::Dxf,
+            false,
+            0,
+            || unreachable!()
+        ));
+        assert!(!entities_went_missing(
+            Format::Dwg,
+            true,
+            0,
+            || unreachable!()
+        ));
+    }
+
+    /// The count the guard compares against comes from LibreDWG's own
+    /// placement of each entity, not from any name lookup: it is there for
+    /// an R2007+ DXF whatever its strings did.
+    #[test]
+    fn libredwg_places_an_r2018_dxfs_entities_without_a_name_lookup() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../lib/libredwg/test/test-data/example_2018.dxf"
+        );
+        let bytes = std::fs::read(path).expect("the corpus DXF is readable");
+        let _guard = LIBREDWG_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut dwg: Box<libredwg_sys::Dwg_Data> =
+            Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
+        let error = unsafe {
+            libredwg_sys::uncad_dxf_read_bytes(bytes.as_ptr(), bytes.len(), dwg.as_mut())
+        };
+        assert_eq!(error, 0);
+        let placed = unsafe { entities_placed_in_a_space(dwg.as_mut()) };
+        let r2007 = is_r2007_or_later(dwg.as_mut());
+        unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
+        assert!(r2007);
+        // 69 on this file when measured; any count at all is the point.
+        assert!(placed > 0, "{placed}");
     }
 }

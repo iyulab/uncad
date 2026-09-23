@@ -10,9 +10,12 @@
 //! header date ends that build's process with 0xC0000409, and the polygon
 //! mesh makes it refuse the whole file with critical error 2048.
 //!
-//! Two of the five are not observable through `parse()` yet, so they have no
-//! test here. The `dwg.c` one decodes an R2007+ DXF's table names, and this
-//! crate still refuses such a DXF before LibreDWG reads it. The
+//! The `dwg.c` one, which makes the DXF importer decode an R2007+ file's
+//! table-record names before it compares them, is pinned in
+//! `tests/r2007_dxf_handles.rs`: an R2018 DXF must resolve the same layers
+//! and block records as its DWG twin, which without the patch it does not
+//! (every name longer than one character missed its lookup). One of the
+//! five is not observable through `parse()` yet, so it has no test: the
 //! `common_entity_data.spec` one puts an entity's true colour and its
 //! transparency back in their own fields, and the entity it was measured on
 //! (HATCH 29F in `test-data/2004/HatchG.dwg`) comes out of this crate without

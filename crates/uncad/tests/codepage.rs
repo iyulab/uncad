@@ -2,8 +2,9 @@
 //! pages keep every character, a byte the declared code page has no
 //! character for is U+FFFD *and* a `TEXT_ENCODING` warning, the DOS-era
 //! double-byte pages (Big5, GB2312, CP932) pair only the bytes that can
-//! pair, and a code page LibreDWG has no table for is reported and read as
-//! UTF-8. The 8-bit fixtures are written by the
+//! pair, a code page LibreDWG has no table for is reported and read as
+//! UTF-8, and an R2007+ DXF's strings are read in the width LibreDWG's DXF
+//! importer stored each of them in. The 8-bit fixtures are written by the
 //! tests themselves from group codes, so the expected strings are the ones
 //! the test encoded; `text.rs` has the byte-level cases.
 
@@ -225,4 +226,138 @@ fn a_corrupt_code_page_in_the_file_header_is_reported_not_guessed() {
             "{expected}"
         );
     }
+}
+
+// --- R2007 and later: strings in the width the DXF importer stored them ---
+
+const EXAMPLE_2018_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2018.dwg"
+);
+const EXAMPLE_2007_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2007.dxf"
+);
+const EXAMPLE_2018_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2018.dxf"
+);
+const TEXT_2007_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/2007/Text.dxf"
+);
+const LEADER_2018_DXF: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/2018/Leader.dxf"
+);
+
+/// A DXF of version `acadver` (no `$DWGCODEPAGE`) with one TEXT per entry
+/// of `texts` and one MTEXT per entry of `mtexts`, the string bytes written
+/// as they are.
+fn dxf_with_strings(acadver: &str, texts: &[&[u8]], mtexts: &[&[u8]]) -> Vec<u8> {
+    let mut dxf = Vec::new();
+    dxf.extend_from_slice(b"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\n");
+    dxf.extend_from_slice(acadver.as_bytes());
+    dxf.extend_from_slice(b"\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n");
+    for (i, text) in texts.iter().enumerate() {
+        dxf.extend_from_slice(b"  0\nTEXT\n  8\n0\n 10\n0.0\n 20\n");
+        dxf.extend_from_slice(format!("{}.0\n", i * 5).as_bytes());
+        dxf.extend_from_slice(b" 40\n2.5\n  1\n");
+        dxf.extend_from_slice(text);
+        dxf.extend_from_slice(b"\n");
+    }
+    for (i, text) in mtexts.iter().enumerate() {
+        dxf.extend_from_slice(b"  0\nMTEXT\n  8\n0\n100\nAcDbMText\n 10\n50.0\n 20\n");
+        dxf.extend_from_slice(format!("{}.0\n", i * 5).as_bytes());
+        dxf.extend_from_slice(b" 40\n2.5\n 41\n50.0\n 71\n1\n  1\n");
+        dxf.extend_from_slice(text);
+        dxf.extend_from_slice(b"\n");
+    }
+    for i in 0..8 {
+        dxf.extend_from_slice(
+            format!("  0\nLINE\n  8\n0\n 10\n{i}.0\n 20\n0.0\n 11\n{i}.0\n 21\n1.0\n").as_bytes(),
+        );
+    }
+    dxf.extend_from_slice(b"  0\nENDSEC\n  0\nEOF\n");
+    dxf
+}
+
+fn mtext_values(db: &CadDatabase) -> Vec<String> {
+    db.entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::MText(m) => Some(m.text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn r2007_and_later_dxf_input_decodes_its_utf16_strings() {
+    for (path, version) in [(TEXT_2007_DXF, "r2007"), (LEADER_2018_DXF, "r2018")] {
+        let (db, header) = uncad::parse_with_header(path).expect("corpus file must parse");
+        assert_eq!(header.version.as_deref(), Some(version), "{path}");
+        // Read 8-bit, every block name stopped at the first NUL byte of its
+        // UTF-16 storage: "*Model_Space" read as "*", nothing was selected.
+        assert!(
+            db.tables.block_records.contains_key("*Model_Space"),
+            "{path}: {:?}",
+            db.tables.block_records.keys().collect::<Vec<_>>()
+        );
+        assert!(!db.entities.is_empty(), "{path} should project to entities");
+        assert!(text_encoding_warnings(&db).is_empty(), "{path}");
+    }
+}
+
+#[test]
+fn r2007_and_later_dxf_mtext_is_read_as_the_utf8_it_is_stored_as() {
+    // in_dxf.c stores MTEXT's group 1/3 text 8-bit (strdup) with no R2007
+    // branch, unlike every other string, which becomes UTF-16. Reading it as
+    // UTF-16 gave "\u{6554}\u{736b}..." ("Te", "ks" as one unit each) plus
+    // whatever heap bytes followed the NUL. The reference is the same
+    // drawing as a DWG, which LibreDWG converts itself.
+    let dwg = uncad::parse(EXAMPLE_2018_DWG).expect("corpus file must parse");
+    let mut expected = mtext_values(&dwg);
+    expected.sort();
+    assert_eq!(
+        expected,
+        vec!["Teksto granda nur por testi.\\PAlia linio.\\PAlia pli.".to_string()],
+        "the reference drawing's MTEXT, as the DXF twin spells it too"
+    );
+    for path in [EXAMPLE_2007_DXF, EXAMPLE_2018_DXF] {
+        let db = uncad::parse(path).expect("corpus file must parse");
+        let mut got = mtext_values(&db);
+        got.sort();
+        assert_eq!(got, expected, "{path}");
+    }
+}
+
+#[test]
+fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_as_written() {
+    // An AC1021+ DXF is UTF-8 by definition. "가나" is U+AC00 U+B098, the
+    // bytes EA B0 80 EB 82 98. TEXT goes through the importer's UTF-16
+    // storage, MTEXT stays 8-bit: both must come back the same. The escaped
+    // spelling older writers use is text too, kept as written in both.
+    let hangul: &[u8] = b"\xEA\xB0\x80\xEB\x82\x98 AB";
+    let escaped: &[u8] = b"\\U+AC00\\U+B098 AB";
+    let bytes = dxf_with_strings("AC1032", &[hangul, escaped], &[hangul, escaped]);
+    let (db, header) =
+        uncad::parse_bytes_with_header(&bytes, Format::Dxf).expect("the DXF must parse");
+    assert_eq!(header.version.as_deref(), Some("r2018"));
+    let expected = vec!["가나 AB".to_string(), "\\U+AC00\\U+B098 AB".to_string()];
+    assert_eq!(mtext_values(&db), expected);
+    assert_eq!(text_values(&db), expected);
+    assert!(text_encoding_warnings(&db).is_empty());
+}
+
+#[test]
+fn an_r2018_dxf_mtext_that_is_not_utf8_is_reported() {
+    // CP949 bytes in a file that must be UTF-8: kept as U+FFFD and said so,
+    // not guessed at through a code page the file does not use.
+    let bytes = dxf_with_strings("AC1032", &[], &[b"\xB5\xB5\xB8\xE9"]);
+    let db = uncad::parse_bytes(&bytes, Format::Dxf).expect("the DXF must parse");
+    assert_eq!(mtext_values(&db), vec!["\u{FFFD}".repeat(4)]);
+    let warnings = text_encoding_warnings(&db);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("MTEXT.text"), "{}", warnings[0]);
 }

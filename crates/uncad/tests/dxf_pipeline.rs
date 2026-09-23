@@ -17,6 +17,7 @@
 //! stay at the level of properties a drawing file has by construction, rather
 //! than counts copied out of this project's own output.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -201,14 +202,15 @@ fn no_corpus_example_makes_the_parser_panic() {
     assert!(seen >= 5, "expected the corpus example DXFs, found {seen}");
 }
 
-// --- R2007+ DXF is refused, and only R2007+ -------------------------------
+// --- R2007+ DXF reads, and reads like its DWG twin ------------------------
 //
-// LibreDWG reads a DXF saved as R2007 or later without any error and hands
-// back a drawing with no entities (`docs/CAVEATS.md`, "DXF reading"). The
-// crate now decides from `$ACADVER` before LibreDWG sees the file. Two tests
-// pin that decision from both sides: an input that must be refused, and one
-// that must keep reading -- a check that only looked at the refusal could not
-// tell "R2007+ is rejected" from "every DXF is rejected".
+// LibreDWG's DXF importer stores an R2007+ file's strings in two widths
+// (`docs/CAVEATS.md`, "DXF saved as R2007 or later"), and until both were
+// read in the right one such a file came back as a drawing with no entities
+// and no error -- which is why it used to be refused. Two tests pin the
+// reading from both sides the refusal was pinned from: every corpus DXF of
+// that age, against the DWG of the same drawing where the corpus has one;
+// and one drawing under several `$ACADVER` stamps, against itself.
 
 /// Root of the LibreDWG corpus (submodule); every `.dxf` under it is walked.
 const CORPUS_ROOT: &str = concat!(
@@ -243,58 +245,114 @@ fn dxf_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A reference as one comparable string: the name, or its state.
+fn ref_name(r: &uncad::model::Ref<String>) -> String {
+    match r {
+        uncad::model::Ref::Resolved(name) => name.clone(),
+        uncad::model::Ref::Absent => "<absent>".to_string(),
+        uncad::model::Ref::Unresolved(handle) => format!("<unresolved {handle}>"),
+    }
+}
+
+/// What the parser states about a drawing that two decoders of the same
+/// drawing must agree on: how many entities, on which layers, and which
+/// block record each INSERT names.
+fn names(db: &uncad::CadDatabase) -> (usize, BTreeMap<String, usize>, BTreeMap<String, usize>) {
+    let mut layers = BTreeMap::new();
+    let mut blocks = BTreeMap::new();
+    for entity in &db.entities {
+        *layers.entry(ref_name(&entity.common().layer)).or_insert(0) += 1;
+        if let uncad::Entity::Insert(insert) = entity {
+            *blocks.entry(ref_name(&insert.block_name)).or_insert(0) += 1;
+        }
+    }
+    (db.entities.len(), layers, blocks)
+}
+
 #[test]
-fn refuses_exactly_the_corpus_dxfs_saved_as_r2007_or_later() {
+fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin_or_fails_in_libredwg() {
     let mut files = Vec::new();
     dxf_files_under(Path::new(CORPUS_ROOT), &mut files);
     files.sort();
-    assert!(!files.is_empty(), "the corpus should contain DXF files");
 
-    let (mut refused, mut accepted) = (0usize, 0usize);
+    // Known deviations, each pinned with a tripwire: if the twins ever
+    // agree, the entry is stale and must go.
+    // - 2010/gh209_1: LibreDWG's importer leaves every entity without a
+    //   layer handle (the DWG puts them on five layers); the model says so
+    //   with `Absent`, which is what the parser owes.
+    // - 2018/Leader: the DXF itself puts one LEADER on a layer "0 @ 1" that
+    //   the DWG does not have (groups 8 at lines 1836 and 2606 of the file).
+    let deviations = ["2010/gh209_1.dxf", "2018/Leader.dxf"];
+
+    let (mut read, mut failed, mut twins) = (Vec::new(), Vec::new(), 0usize);
     for path in &files {
-        let declared = acadver_by_search(path);
-        let is_r2007_plus = declared
+        let is_r2007_plus = acadver_by_search(path)
             .as_deref()
             .and_then(|v| v.strip_prefix("AC")?.parse::<u32>().ok())
             .is_some_and(|n| n >= 1021);
-
-        match uncad::parse(path) {
-            Err(uncad::ParseError::UnsupportedDxfVersion(v)) => {
-                assert!(
-                    is_r2007_plus,
-                    "{} was refused as {v} but declares {declared:?}",
-                    path.display()
-                );
-                assert_eq!(Some(v.as_str()), declared.as_deref(), "{}", path.display());
-                refused += 1;
-            }
-            other => {
-                assert!(
-                    !is_r2007_plus,
-                    "{} declares {declared:?} (R2007+) but was not refused: {:?}",
-                    path.display(),
-                    other.map(|db| db.entities.len())
-                );
-                accepted += 1;
-            }
+        if !is_r2007_plus {
+            continue;
         }
+        let rel = path
+            .strip_prefix(CORPUS_ROOT)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let db = match uncad::parse(path) {
+            Ok(db) => db,
+            // LibreDWG's own reader gives up on these, as it does on the
+            // older DXFs that fail: an error, never an empty drawing.
+            Err(uncad::ParseError::Critical(_)) => {
+                failed.push(rel);
+                continue;
+            }
+            Err(e) => panic!("{rel}: {e}"),
+        };
+        assert!(!db.entities.is_empty(), "{rel} read as an empty drawing");
+        read.push(rel.clone());
+
+        let twin = path.with_extension("dwg");
+        if !twin.exists() {
+            continue;
+        }
+        twins += 1;
+        let dwg = uncad::parse(&twin).expect("the DWG twin parses");
+        let agree = names(&db) == names(&dwg);
+        let deviates = deviations.contains(&rel.as_str());
+        assert!(
+            agree != deviates,
+            "{rel}: {}\n  dxf {:?}\n  dwg {:?}",
+            if deviates {
+                "now agrees with its DWG twin -- drop it from `deviations`"
+            } else {
+                "must state what its DWG twin states"
+            },
+            names(&db),
+            names(&dwg)
+        );
     }
-    // Both sides must be populated for the test to have discriminated at all.
-    assert!(
-        refused > 0,
-        "no corpus DXF was refused -- the version check is not running"
+    eprintln!(
+        "R2007+ corpus DXF: {} read ({twins} against a DWG twin), {} failed in LibreDWG: {failed:?}",
+        read.len(),
+        failed.len()
     );
-    assert!(
-        accepted > 0,
-        "every corpus DXF was refused -- the version check is too broad"
+    assert_eq!((read.len(), twins), (27, 24));
+    assert_eq!(
+        failed,
+        [
+            "2013/gh109_1.dxf",
+            "2018/Constraints.dxf",
+            "2018/Dynblocks.dxf",
+            "2018/LiveSection1.dxf",
+            "2018/TS1.dxf"
+        ]
     );
-    eprintln!("corpus DXF: {refused} refused (R2007+), {accepted} handed to LibreDWG");
 }
 
 /// The corpus R2000 drawing with its `$ACADVER` value line rewritten -- the
-/// same file otherwise, so the two sides of the control differ in nothing but
-/// the version stamp. (A synthetic HEADER holding only `$ACADVER` is not
-/// enough for LibreDWG's importer, which is why the control is not built
+/// same file otherwise, so every reading of it differs in nothing but the
+/// version stamp. (A synthetic HEADER holding only `$ACADVER` is not
+/// enough for LibreDWG's importer, which is why the drawing is not built
 /// from scratch.)
 fn corpus_dxf_stamped(acadver: &str) -> String {
     let text = fs::read_to_string(CORPUS_DXF).expect("the corpus DXF should be readable text");
@@ -319,39 +377,19 @@ fn corpus_dxf_stamped(acadver: &str) -> String {
 }
 
 #[test]
-fn the_same_drawing_is_refused_at_r2007_and_read_at_r2004() {
-    let r2007 = TempFile::new("acadver-r2007.dxf");
-    fs::write(r2007.path(), corpus_dxf_stamped("AC1021")).expect("temp dir writable");
-    match uncad::parse(r2007.path()) {
-        Err(uncad::ParseError::UnsupportedDxfVersion(v)) => assert_eq!(v, "AC1021"),
-        other => panic!(
-            "an R2007 DXF must be refused, got {:?}",
-            other.map(|db| db.entities.len())
-        ),
-    }
-
-    // Restamping with the file's own version is the null control: it proves
-    // the rewrite itself changes nothing before the other stamps are judged.
+fn the_same_drawing_reads_the_same_whatever_release_it_is_stamped() {
+    // The drawing is its own reference: stamped R2007 and later, the
+    // importer stores every string it sets as UTF-16 instead of 8-bit, and
+    // nothing of what comes out may change -- not a name, not a text, not a
+    // reference. Restamping with the file's own version is the null control.
     let reference = uncad::parse(CORPUS_DXF).expect("the untouched corpus DXF should parse");
-    let same = TempFile::new("acadver-r2000.dxf");
-    fs::write(same.path(), corpus_dxf_stamped("AC1015")).expect("temp dir writable");
-    let db = uncad::parse(same.path()).expect("the R2000 restamp must still be read");
-    assert_eq!(
-        db.entities.len(),
-        reference.entities.len(),
-        "restamping with the same version must not change what is read"
-    );
-
-    // One step below the threshold: handed to LibreDWG and read. Only the
-    // *decision* is asserted here -- how many entities LibreDWG's importer
-    // produces for an R2004 stamp of R2000 content is its business (it does
-    // differ: 14 against 12 for this file), and pinning it would test the
-    // importer, not this crate's version check.
-    let r2004 = TempFile::new("acadver-r2004.dxf");
-    fs::write(r2004.path(), corpus_dxf_stamped("AC1018")).expect("temp dir writable");
-    let db = uncad::parse(r2004.path()).expect("an R2004 DXF must still be read");
-    assert!(
-        !db.entities.is_empty(),
-        "the R2004 control should read entities"
-    );
+    assert!(!reference.entities.is_empty());
+    for acadver in ["AC1015", "AC1018", "AC1021", "AC1024", "AC1027", "AC1032"] {
+        let stamped = TempFile::new(&format!("acadver-{acadver}.dxf"));
+        fs::write(stamped.path(), corpus_dxf_stamped(acadver)).expect("temp dir writable");
+        let (db, header) = uncad::parse_with_header(stamped.path())
+            .unwrap_or_else(|e| panic!("the {acadver} stamp must be read: {e}"));
+        assert_eq!(header.acadver.as_deref(), Some(acadver));
+        assert_eq!(db, reference, "the {acadver} stamp read differently");
+    }
 }

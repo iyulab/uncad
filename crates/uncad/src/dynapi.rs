@@ -324,15 +324,95 @@ pub fn get_common_field<T: DwgRaw>(entity: *mut c_void, field: &str) -> Option<T
     Some(unsafe { out.assume_init() })
 }
 
+/// A string as LibreDWG hands it out, before [`crate::text::TextDecoder`]
+/// turns it into a `String`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RawText {
+    /// The library converted the string itself, from the UTF-16 it stores
+    /// for an R2007+ DWG: UTF-8 bytes.
+    Converted(Vec<u8>),
+    /// The string as stored, read as 8-bit bytes up to their NUL.
+    Bytes(Vec<u8>),
+    /// The string as stored, read as UTF-16 code units up to their 16-bit
+    /// NUL.
+    Wide(Vec<u16>),
+}
+
+/// How a string the library hands out *unconverted* -- a pointer straight
+/// into the parsed `Dwg_Data` -- is laid out in memory. The library cannot
+/// be asked: the text accessors hand out such a pointer both for 8-bit
+/// strings and, in an R2007+ DXF, for the UTF-16 ones its DXF importer
+/// wrote, so the caller ([`crate::text::TextDecoder`]) says which it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoredWidth {
+    /// 8-bit bytes, NUL-terminated.
+    Bytes,
+    /// UTF-16 code units, terminated by a 16-bit NUL.
+    Wide,
+}
+
+/// Copies an unconverted string out of the parsed `Dwg_Data`, in the width
+/// the caller says it is stored in.
+///
+/// # Safety
+/// `ptr` must be non-null and point at a NUL-terminated string of that
+/// width which stays alive for the duration of the call. Reading an 8-bit
+/// string as [`StoredWidth::Wide`] would look for a 16-bit NUL past its
+/// allocation, which is why the width is never guessed here.
+pub unsafe fn read_stored(ptr: *const std::os::raw::c_char, width: StoredWidth) -> RawText {
+    match width {
+        // SAFETY: a NUL-terminated 8-bit string (caller contract).
+        StoredWidth::Bytes => RawText::Bytes(unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec()),
+        StoredWidth::Wide => {
+            let units = ptr.cast::<u16>();
+            let mut out = Vec::new();
+            loop {
+                // SAFETY: a string of 16-bit units ending in a 16-bit NUL
+                // (caller contract); every unit read is at or before it.
+                // Unaligned reads, because nothing in the contract promises
+                // the pointer's alignment.
+                let unit = unsafe { units.add(out.len()).read_unaligned() };
+                if unit == 0 {
+                    break;
+                }
+                out.push(unit);
+            }
+            RawText::Wide(out)
+        }
+    }
+}
+
+/// Takes what a LibreDWG text accessor handed out: a buffer it converted and
+/// allocated (`is_new`, freed here once copied), or a pointer into the
+/// `Dwg_Data`, read in `stored` width.
+///
+/// # Safety
+/// `ptr` must be non-null and valid per the accessor's contract.
+unsafe fn take_text(ptr: *mut std::os::raw::c_char, is_new: bool, stored: StoredWidth) -> RawText {
+    if is_new {
+        // SAFETY: a NUL-terminated UTF-8 buffer the accessor malloc'd for
+        // its caller (documented in dwg_api.h); ours to free once copied,
+        // and nothing else holds a reference to it.
+        let owned = unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec();
+        unsafe { libc::free(ptr.cast()) };
+        RawText::Converted(owned)
+    } else {
+        // SAFETY: a stored string of the width the caller named.
+        unsafe { read_stored(ptr, stored) }
+    }
+}
+
 /// Resolves a `BITCODE_H` handle reference (e.g. an entity's `layer`
-/// field) to the name bytes of the object it points at (undecoded -- see
-/// [`get_text_bytes`]), via
-/// `dwg_dynapi_handle_name`. Returns `None` for a null handle or an object
-/// with no name field (not every handle target has one).
-pub fn handle_name_bytes(
+/// field) to the name of the object it points at, as the library hands it
+/// out (see [`RawText`]), via `dwg_dynapi_handle_name`. `stored` is the
+/// width of that name when the library does not convert it. Returns `None`
+/// for a null handle or an object with no name field (not every handle
+/// target has one).
+pub fn handle_name(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle: *mut libredwg_sys::Dwg_Object_Ref,
-) -> Option<Vec<u8>> {
+    stored: StoredWidth,
+) -> Option<RawText> {
     if handle.is_null() {
         return None;
     }
@@ -343,14 +423,9 @@ pub fn handle_name_bytes(
     if name_ptr.is_null() {
         return None;
     }
-    // SAFETY: name_ptr is a valid NUL-terminated C string per dynapi's contract.
-    let owned = unsafe { CStr::from_ptr(name_ptr) }.to_bytes().to_vec();
-    if alloced != 0 {
-        // SAFETY: alloced != 0 means dwg_dynapi_handle_name malloc'd this
-        // buffer itself (documented in dwg_api.h); ours to free.
-        unsafe { libc::free(name_ptr.cast()) };
-    }
-    Some(owned)
+    // SAFETY: alloced != 0 means dwg_dynapi_handle_name malloc'd a
+    // converted copy; otherwise name_ptr is the record's own stored name.
+    Some(unsafe { take_text(name_ptr, alloced != 0, stored) })
 }
 
 /// `true` when the drawing was read from a pre-R13 source (DWG R1.4 .. R12,
@@ -394,7 +469,9 @@ pub fn is_r2013_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
 /// pre-R13 drawing the library matches the reference's `r11_idx` against the
 /// table's entry order, since such references carry no handle; from R13 on it
 /// matches the handle. Returns `None` when there is no such table or entry.
-/// The library always hands back a copy, freed here once it has been read.
+/// The library always hands back a copy, freed here once it has been read:
+/// UTF-8 it converted for an R2007+ drawing (a DXF one too, through the
+/// vendored `dwg.c` patch), the stored 8-bit bytes before R2007.
 pub fn table_entry_name_bytes(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle: *mut libredwg_sys::Dwg_Object_Ref,
@@ -417,20 +494,24 @@ pub fn table_entry_name_bytes(
     Some(owned)
 }
 
-/// Reads a text field (`BITCODE_T`/`TV`/`TU`) as the bytes LibreDWG holds
-/// for it, via `dwg_dynapi_entity_utf8text`. For an R2007+ drawing those
-/// bytes are UTF-8 (the library converts its UTF-16 strings); for an older
-/// one they are the file's own 8-bit bytes in the drawing's codepage, which
-/// the function does not decode despite its name. [`crate::text::TextDecoder`]
-/// is what turns either into a `String`; nothing else reads text fields.
-/// Returns `None` if the field doesn't exist or is a null string.
+/// Reads a text field (`BITCODE_T`/`TV`/`TU`) as LibreDWG hands it out, via
+/// `dwg_dynapi_entity_utf8text`. [`crate::text::TextDecoder`] is what turns
+/// it into a `String`; nothing else reads text fields. Returns `None` if the
+/// field doesn't exist or is a null string.
 ///
-/// The C function may return a freshly `malloc`'d buffer (r2007+ conversion
-/// path) or a pointer straight into the parsed `Dwg_Data` (older formats) --
-/// `isnew` tells us which. We always copy before returning, and `free()` the
-/// malloc'd buffer ourselves in the `isnew` case so this doesn't leak one
-/// string per TEXT/MTEXT/... field read for the lifetime of the process.
-pub fn get_text_bytes(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Vec<u8>> {
+/// Despite its name the C function converts only an R2007+ *DWG*'s UTF-16
+/// strings, into a freshly `malloc`'d UTF-8 buffer (`isnew`, freed here once
+/// copied so no string leaks per field read). For every other drawing it
+/// returns a pointer straight into the parsed `Dwg_Data`: the file's own
+/// 8-bit bytes before R2007, and in an R2007+ DXF the UTF-16 its importer
+/// stored -- or, for the few fields that importer keeps 8-bit, the file's
+/// bytes. `stored` says which width that pointer is read in.
+pub fn get_text(
+    entity: *mut c_void,
+    dxfname: &str,
+    field: &str,
+    stored: StoredWidth,
+) -> Option<RawText> {
     if entity.is_null() {
         return None;
     }
@@ -455,19 +536,9 @@ pub fn get_text_bytes(entity: *mut c_void, dxfname: &str, field: &str) -> Option
     if !ok || text_ptr.is_null() {
         return None;
     }
-
-    // SAFETY: text_ptr is a valid, NUL-terminated C string per dynapi's
-    // contract (checked non-null above).
-    let owned = unsafe { CStr::from_ptr(text_ptr) }.to_bytes().to_vec();
-
-    if is_new != 0 {
-        // SAFETY: is_new != 0 means dwg_dynapi_entity_utf8text malloc'd
-        // this buffer itself (documented in dwg_api.h); it's ours to free
-        // and nothing else holds a reference to it.
-        unsafe { libc::free(text_ptr.cast()) };
-    }
-
-    Some(owned)
+    // SAFETY: text_ptr is non-null and, per dynapi's contract, either a
+    // converted copy (is_new) or the field's stored string.
+    Some(unsafe { take_text(text_ptr, is_new != 0, stored) })
 }
 
 /// Reads a plain-old-data header variable (`INSUNITS`, `EXTMIN`,
@@ -508,10 +579,15 @@ pub fn get_header_field<T: DwgRaw>(dwg: *const libredwg_sys::Dwg_Data, name: &st
     Some(unsafe { out.assume_init() })
 }
 
-/// Reads a text header variable (`DIMPOST`, ...) as the bytes LibreDWG holds
-/// for it, via `dwg_dynapi_header_utf8text` -- the same contract as
-/// [`get_text_bytes`]. Returns `None` for an unknown name or a null string.
-pub fn get_header_text_bytes(dwg: *const libredwg_sys::Dwg_Data, name: &str) -> Option<Vec<u8>> {
+/// Reads a text header variable (`DIMPOST`, ...) as LibreDWG hands it out,
+/// via `dwg_dynapi_header_utf8text` -- the same contract as [`get_text`],
+/// with `stored` the width of an unconverted string. Returns `None` for an
+/// unknown name or a null string.
+pub fn get_header_text(
+    dwg: *const libredwg_sys::Dwg_Data,
+    name: &str,
+    stored: StoredWidth,
+) -> Option<RawText> {
     if dwg.is_null() {
         return None;
     }
@@ -532,14 +608,8 @@ pub fn get_header_text_bytes(dwg: *const libredwg_sys::Dwg_Data, name: &str) -> 
     if !ok || text_ptr.is_null() {
         return None;
     }
-    // SAFETY: text_ptr is a valid, NUL-terminated C string per dynapi's
-    // contract (checked non-null above).
-    let owned = unsafe { CStr::from_ptr(text_ptr) }.to_bytes().to_vec();
-    if is_new != 0 {
-        // SAFETY: as in get_text_bytes -- a malloc'd copy that is ours.
-        unsafe { libc::free(text_ptr.cast()) };
-    }
-    Some(owned)
+    // SAFETY: as in get_text.
+    Some(unsafe { take_text(text_ptr, is_new != 0, stored) })
 }
 
 /// Reads a `(count_field, array_field)` pair -- e.g. LWPOLYLINE's

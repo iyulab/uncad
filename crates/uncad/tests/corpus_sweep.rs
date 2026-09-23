@@ -203,8 +203,13 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     }
 
     // --- how the files read ---
+    // (31, 32, 4) while every R2007+ DXF was refused. Read now: 27 of the 32
+    // parse, and the other 5 (2013/gh109_1, 2018/Constraints, Dynblocks,
+    // LiveSection1, TS1) fail inside LibreDWG's importer with critical
+    // error 2048. None trips the guard against an R2007+ DXF whose entities
+    // all go missing (`dxf_refused`).
     assert_eq!((s.files, s.dwg_parsed), (208, 141));
-    assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (31, 32, 4));
+    assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (58, 0, 9));
 
     // --- LibreDWG's non-fatal error bits, which used to be discarded ---
     assert_eq!(s.clean_dwg, 100);
@@ -233,8 +238,11 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // 64,697 before the attribute-chain fix: 36 more entities (all ATTDEFs in
     // blocks with several of them, in the R2000 and R13/R14 files) are read
     // now that this crate walks the R13..R2000 block chain itself instead of
-    // through the library's walker, which skipped them.
-    assert_eq!(layers, 64_733);
+    // through the library's walker, which skipped them. 64,733 then; 1,331
+    // more since the 27 readable R2007+ DXFs are read instead of refused --
+    // all resolved but the 21 of 2010/gh209_1.dxf, whose entities LibreDWG's
+    // importer leaves without a layer handle (absent, as the model says).
+    assert_eq!(layers, 66_064);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
     // file, and the index fallback is measured, not assumed ---

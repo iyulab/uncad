@@ -104,14 +104,15 @@ Notable changes to this project are recorded here. The format follows
   "Local patches to the vendored LibreDWG". A DXF holding a polygon mesh is read instead
   of refused as a whole (critical error 2048: the importer did not know the mesh
   vertices' `AcDbPolygonMeshVertex` marker). A corrupt header date no longer ends the
-  process from inside the C library (0xC0000409 on Windows, from `strftime`). Two more
-  are not visible in this crate's output yet: an R2004+ entity carrying both a true
-  colour and a transparency no longer has the two swapped in the library's fields (this
-  crate reads a true colour only under the TRUECOLOR method, which the entities measured
-  do not have), and the importer compares an R2007+ DXF's table-record names decoded, so
-  its layer and block lookups no longer stop at the first character (such a DXF is still
-  refused). On the 208 corpus drawings the JSON output is byte-identical with and without
-  the patches. `build.rs` refuses to build when a patch's marker has gone missing,
+  process from inside the C library (0xC0000409 on Windows, from `strftime`). The
+  importer compares an R2007+ DXF's table-record names decoded, so its layer and block
+  lookups no longer stop at the first character: without that patch `example_2018.dxf`
+  reads with 65 of its 72 entities on no layer (`tests/r2007_dxf_handles.rs`). One more is
+  not visible in this crate's output yet: an R2004+ entity carrying both a true colour and
+  a transparency no longer has the two swapped in the library's fields (this crate reads a
+  true colour only under the TRUECOLOR method, which the entities measured do not have).
+  Before R2007+ DXF was read, the 208 corpus drawings gave byte-identical JSON with and
+  without the patches. `build.rs` refuses to build when a patch's marker has gone missing,
   which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
   silence.
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
@@ -125,9 +126,9 @@ Notable changes to this project are recorded here. The format follows
   which those files still carry), so the value it returned for the flag was a bit of the
   offset's encoding -- "no arrowhead" whenever the offset's z was zero -- not the file's
   flag. Earlier versions are unaffected and still read the flag.
-- Two user-facing messages carried a run of spaces in mid-sentence: the refusal of an
-  R2007+ DXF (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag
-  diagnostic. Both now read as one sentence, pinned by tests.
+- Two user-facing messages carried a run of spaces in mid-sentence: the R2007+ DXF error
+  (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag diagnostic. Both
+  now read as one sentence, pinned by tests.
 - **Text before R2007 is decoded through the drawing's codepage** (`header.codepage`, DXF
   `$DWGCODEPAGE`). LibreDWG returns such strings as the 8-bit bytes
   the file holds; they were read as UTF-8, so every non-ASCII character of a CP949 or CP1252
@@ -189,8 +190,8 @@ Notable changes to this project are recorded here. The format follows
   directories `cc` located. Bindings are also generated *before* the C compile, so a
   libclang problem fails in seconds rather than after the whole LibreDWG compile.
 - A DXF saved as R2007 or later used to read as an empty drawing without any error; it
-  is now refused (see "Changed"). `docs/CAVEATS.md` explains the cause (string width in
-  LibreDWG's DXF importer) and why reading it partially was rejected.
+  is now read (see "Changed"). `docs/CAVEATS.md` explains the cause (string width, both in
+  LibreDWG's DXF importer and in how this crate read what it stored).
 - `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
   several types that have a shape still arrive as `Unknown`. The section now states the
   supported list as the contract.
@@ -248,14 +249,18 @@ Notable changes to this project are recorded here. The format follows
   shape** of every entity (`common.layer`) and is the reason the next release is a 0.x
   minor. `Ref::name()` gives the resolved name or `""` for consumers that only need a
   lookup key.
-- A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is now refused with
-  `ParseError::UnsupportedDxfVersion` instead of being returned as a drawing with no
-  entities and no error. The decision is made from the file's HEADER section before
-  LibreDWG reads it; R2000/R2004 DXF, files without `$ACADVER`, binary DXF and every DWG
-  are unaffected. Callers that treated the empty result as success will now see an error
-  -- that is the point. `ParseError` is `#[non_exhaustive]`, so the new variant is not a
-  breaking change to matches. Two tests pin it: a walk of the corpus that requires exactly
-  the R2007+ files to be refused, and one drawing under two `$ACADVER` values.
+- **A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is read**, instead of being
+  returned as a drawing with no entities and no error. LibreDWG's importer holds such a
+  file's strings in two widths -- UTF-16 for everything it sets through its field setter,
+  the file's own UTF-8 for MTEXT text and the HEADER variables -- and hands both out as if
+  they were 8-bit; `TextDecoder` now reads each in its width, and the vendored `dwg.c`
+  patch does the same for the importer's own layer and block lookups. Measured on the
+  corpus: 27 of the 32 R2007+ DXFs read (the other 5 fail inside LibreDWG with critical
+  error 2048), and 22 of the 24 with a DWG twin state the same layers and INSERT blocks
+  as it; `tests/dxf_pipeline.rs`, `tests/r2007_dxf_handles.rs` and `tests/codepage.rs`
+  pin it. `ParseError::UnsupportedDxfVersion` stays, for the case this used to be: an
+  R2007+ DXF whose entities LibreDWG placed in model or paper space and none of which
+  reached the model is an error, not an empty drawing (no corpus file is).
 - `ParseError::InvalidPath` is gone: `parse()` no longer hands LibreDWG a C path, and a
   file it cannot read is `ParseError::Io`. Breaking for code that names the variant.
 - No `std` hash collections anywhere in the workspace: `clippy.toml` disallows `HashMap`
