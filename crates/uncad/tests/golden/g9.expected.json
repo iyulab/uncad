@@ -58,7 +58,14 @@
           "text_height": 3.5,
           "tag": "DWGNO",
           "text": "BP-1042",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "RIGHT",
+          "vertical_alignment": "MIDDLE",
+          "alignment_point": {
+            "x": 45.0,
+            "y": -43.25
+          },
+          "width_factor": 0.9
         }
       ]
     },
@@ -87,7 +94,14 @@
       "text_height": 3.5,
       "tag": "DWGNO",
       "text": "BP-1042",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "RIGHT",
+      "vertical_alignment": "MIDDLE",
+      "alignment_point": {
+        "x": 45.0,
+        "y": -43.25
+      },
+      "width_factor": 0.9
     },
     {
       "type": "INSERT",
@@ -147,7 +161,14 @@
           "text_height": 3.5,
           "tag": "DWGNO",
           "text": "BP-2077",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "RIGHT",
+          "vertical_alignment": "MIDDLE",
+          "alignment_point": {
+            "x": 165.0,
+            "y": -43.25
+          },
+          "width_factor": 0.9
         }
       ]
     },
@@ -176,7 +197,14 @@
       "text_height": 3.5,
       "tag": "DWGNO",
       "text": "BP-2077",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "RIGHT",
+      "vertical_alignment": "MIDDLE",
+      "alignment_point": {
+        "x": 165.0,
+        "y": -43.25
+      },
+      "width_factor": 0.9
     }
   ],
   "tables": {
@@ -252,7 +280,14 @@
                 "text_height": 3.5,
                 "tag": "DWGNO",
                 "text": "BP-1042",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "RIGHT",
+                "vertical_alignment": "MIDDLE",
+                "alignment_point": {
+                  "x": 45.0,
+                  "y": -43.25
+                },
+                "width_factor": 0.9
               }
             ]
           },
@@ -314,7 +349,14 @@
                 "text_height": 3.5,
                 "tag": "DWGNO",
                 "text": "BP-2077",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "RIGHT",
+                "vertical_alignment": "MIDDLE",
+                "alignment_point": {
+                  "x": 165.0,
+                  "y": -43.25
+                },
+                "width_factor": 0.9
               }
             ]
           }
@@ -408,7 +450,11 @@
             "text_height": 3.5,
             "tag": "DWGNO",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -435,7 +481,11 @@
             "text_height": 3.5,
             "tag": "REV",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -462,7 +512,11 @@
             "text_height": 3.5,
             "tag": "MATERIAL",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       }

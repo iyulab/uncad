@@ -458,7 +458,11 @@
           "text_height": 3.5,
           "tag": "DWGNO",
           "text": "BP-1042",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         },
         {
           "common": {
@@ -484,7 +488,11 @@
           "text_height": 3.5,
           "tag": "REV",
           "text": "B",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         },
         {
           "common": {
@@ -510,7 +518,11 @@
           "text_height": 3.5,
           "tag": "MATERIAL",
           "text": "SS400",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         }
       ]
     },
@@ -539,7 +551,11 @@
       "text_height": 3.5,
       "tag": "DWGNO",
       "text": "BP-1042",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "ATTRIB",
@@ -566,7 +582,11 @@
       "text_height": 3.5,
       "tag": "REV",
       "text": "B",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "ATTRIB",
@@ -593,7 +613,11 @@
       "text_height": 3.5,
       "tag": "MATERIAL",
       "text": "SS400",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     }
   ],
   "tables": {
@@ -1511,7 +1535,11 @@
                 "text_height": 3.5,
                 "tag": "DWGNO",
                 "text": "BP-1042",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               },
               {
                 "common": {
@@ -1537,7 +1565,11 @@
                 "text_height": 3.5,
                 "tag": "REV",
                 "text": "B",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               },
               {
                 "common": {
@@ -1563,7 +1595,11 @@
                 "text_height": 3.5,
                 "tag": "MATERIAL",
                 "text": "SS400",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               }
             ]
           }
@@ -1657,7 +1693,11 @@
             "text_height": 3.5,
             "tag": "DWGNO",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -1684,7 +1724,11 @@
             "text_height": 3.5,
             "tag": "REV",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -1711,7 +1755,11 @@
             "text_height": 3.5,
             "tag": "MATERIAL",
             "default_value": "-",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       }

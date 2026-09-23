@@ -114,7 +114,11 @@
           "text_height": 3.5,
           "tag": "DWGNO",
           "text": "BP-1042",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         },
         {
           "common": {
@@ -140,7 +144,11 @@
           "text_height": 3.5,
           "tag": "MATERIAL",
           "text": "SS400 일반구조용 압연강재",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         },
         {
           "common": {
@@ -166,7 +174,11 @@
           "text_height": 3.5,
           "tag": "DRAWN",
           "text": "홍길동",
-          "rotation": 0.0
+          "rotation": 0.0,
+          "horizontal_alignment": "LEFT",
+          "vertical_alignment": "BASELINE",
+          "alignment_point": null,
+          "width_factor": 1.0
         }
       ]
     },
@@ -195,7 +207,11 @@
       "text_height": 3.5,
       "tag": "DWGNO",
       "text": "BP-1042",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "ATTRIB",
@@ -222,7 +238,11 @@
       "text_height": 3.5,
       "tag": "MATERIAL",
       "text": "SS400 일반구조용 압연강재",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "ATTRIB",
@@ -249,7 +269,11 @@
       "text_height": 3.5,
       "tag": "DRAWN",
       "text": "홍길동",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -415,7 +439,11 @@
                 "text_height": 3.5,
                 "tag": "DWGNO",
                 "text": "BP-1042",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               },
               {
                 "common": {
@@ -441,7 +469,11 @@
                 "text_height": 3.5,
                 "tag": "MATERIAL",
                 "text": "SS400 일반구조용 압연강재",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               },
               {
                 "common": {
@@ -467,7 +499,11 @@
                 "text_height": 3.5,
                 "tag": "DRAWN",
                 "text": "홍길동",
-                "rotation": 0.0
+                "rotation": 0.0,
+                "horizontal_alignment": "LEFT",
+                "vertical_alignment": "BASELINE",
+                "alignment_point": null,
+                "width_factor": 1.0
               }
             ]
           },
@@ -591,7 +627,11 @@
             "text_height": 3.5,
             "tag": "DWGNO",
             "default_value": "",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -618,7 +658,11 @@
             "text_height": 3.5,
             "tag": "MATERIAL",
             "default_value": "SS400",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "ATTDEF",
@@ -645,7 +689,11 @@
             "text_height": 3.5,
             "tag": "DRAWN",
             "default_value": "미정",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       }

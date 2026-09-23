@@ -1589,3 +1589,172 @@ fn the_two_readers_agree_on_every_solid_and_trace_field() {
         disagreements.join("\n")
     );
 }
+
+/// The same attribute values and definitions, field by field: where each is,
+/// what it says, and how it is aligned.
+///
+/// An attribute's vertical alignment is the one code whose DXF group differs
+/// from a TEXT's (74, not 73), which is where a reader that treats an
+/// attribute as a text goes wrong. Matched by handle, compared exactly.
+#[test]
+fn the_two_readers_agree_on_every_attribute_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut aligned = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            let attribs = ours.all_entities().flat_map(|e| match e {
+                uncad::Entity::Insert(i) => i
+                    .attribs
+                    .iter()
+                    .cloned()
+                    .map(uncad::Entity::Attrib)
+                    .collect(),
+                other => vec![other.clone()],
+            });
+            for entity in attribs {
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                use acadrust::EntityType as E;
+                let (kind, fields): (&str, Vec<(&str, String, String)>) =
+                    match (&entity, theirs.get(&id.value())) {
+                        (uncad::Entity::Attrib(o), Some(E::AttributeEntity(t))) => {
+                            let t_aligned =
+                                format!("{:?} {:?}", t.horizontal_alignment, t.vertical_alignment)
+                                    != "Left Baseline";
+                            (
+                                "attrib",
+                                vec![
+                                    (
+                                        "start",
+                                        format!("{:?}", (o.start_point.x, o.start_point.y)),
+                                        format!("{:?}", (t.insertion_point.x, t.insertion_point.y)),
+                                    ),
+                                    ("tag", o.tag.clone(), t.tag.clone()),
+                                    ("value", o.text.clone(), t.value.clone()),
+                                    (
+                                        "alignment",
+                                        format!(
+                                            "{:?} {:?}",
+                                            o.horizontal_alignment, o.vertical_alignment
+                                        ),
+                                        format!(
+                                            "{:?} {:?}",
+                                            t.horizontal_alignment, t.vertical_alignment
+                                        ),
+                                    ),
+                                    (
+                                        "alignment point",
+                                        format!("{:?}", o.alignment_point.map(|a| (a.x, a.y))),
+                                        format!(
+                                            "{:?}",
+                                            t_aligned.then_some((
+                                                t.alignment_point.x,
+                                                t.alignment_point.y
+                                            ))
+                                        ),
+                                    ),
+                                    (
+                                        "width factor",
+                                        format!("{:?}", o.width_factor),
+                                        format!("{:?}", t.width_factor),
+                                    ),
+                                ],
+                            )
+                        }
+                        (uncad::Entity::Attdef(o), Some(E::AttributeDefinition(t))) => {
+                            let t_aligned =
+                                format!("{:?} {:?}", t.horizontal_alignment, t.vertical_alignment)
+                                    != "Left Baseline";
+                            (
+                                "attdef",
+                                vec![
+                                    (
+                                        "start",
+                                        format!("{:?}", (o.start_point.x, o.start_point.y)),
+                                        format!("{:?}", (t.insertion_point.x, t.insertion_point.y)),
+                                    ),
+                                    ("tag", o.tag.clone(), t.tag.clone()),
+                                    (
+                                        "alignment",
+                                        format!(
+                                            "{:?} {:?}",
+                                            o.horizontal_alignment, o.vertical_alignment
+                                        ),
+                                        format!(
+                                            "{:?} {:?}",
+                                            t.horizontal_alignment, t.vertical_alignment
+                                        ),
+                                    ),
+                                    (
+                                        "alignment point",
+                                        format!("{:?}", o.alignment_point.map(|a| (a.x, a.y))),
+                                        format!(
+                                            "{:?}",
+                                            t_aligned.then_some((
+                                                t.alignment_point.x,
+                                                t.alignment_point.y
+                                            ))
+                                        ),
+                                    ),
+                                    (
+                                        "width factor",
+                                        format!("{:?}", o.width_factor),
+                                        format!("{:?}", t.width_factor),
+                                    ),
+                                ],
+                            )
+                        }
+                        _ => continue,
+                    };
+                *compared.entry(kind).or_default() += 1;
+                if fields
+                    .iter()
+                    .any(|(f, o, _)| *f == "alignment" && o != "Left Baseline")
+                {
+                    aligned += 1;
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // A requirement, not a measurement: every attribute both readers hold
+    // agrees on these fields, exactly -- aligned ones included.
+    assert!(!compared.is_empty(), "no attribute was read by both");
+    assert!(
+        aligned > 0,
+        "the corpus holds no aligned attribute to compare"
+    );
+    assert!(
+        disagreements.is_empty(),
+        "compared {compared:?} ({aligned} aligned), {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}

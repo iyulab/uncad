@@ -399,13 +399,23 @@ unsafe fn polyline_vertices<T>(
         .collect()
 }
 
-/// A TEXT's alignment from its record's two codes (DXF 72, 73). A value
-/// outside the format's range is reported and read as the default.
-fn text_alignment(
+/// Where a TEXT, ATTRIB or ATTDEF record (`dxfname`) is aligned: its two
+/// alignment codes (DXF 72, and 73 -- 74 in an attribute's DXF form) and
+/// its alignment point, which the record stores only for an alignment other
+/// than left and baseline. A code outside the format's range is reported and
+/// read as the default.
+fn placement(
     text: &TextDecoder,
-    horizontal: u16,
-    vertical: u16,
-) -> (TextHorizontalAlignment, TextVerticalAlignment) {
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+) -> (
+    TextHorizontalAlignment,
+    TextVerticalAlignment,
+    Option<Point2D>,
+) {
+    let horizontal = get_field::<u16>(entity_ptr, dxfname, "horiz_alignment").unwrap_or(0);
+    let vertical = get_field::<u16>(entity_ptr, dxfname, "vert_alignment").unwrap_or(0);
+    let vertical_group = if dxfname == "TEXT" { 73 } else { 74 };
     let h = match horizontal {
         0 => TextHorizontalAlignment::Left,
         1 => TextHorizontalAlignment::Center,
@@ -415,7 +425,7 @@ fn text_alignment(
         5 => TextHorizontalAlignment::Fit,
         other => {
             text.warn(format!(
-                "TEXT_ALIGNMENT: a TEXT states horizontal alignment {other} (group 72), outside 0 to 5; it is read as left"
+                "TEXT_ALIGNMENT: a {dxfname} states horizontal alignment {other} (group 72), outside 0 to 5; it is read as left"
             ));
             TextHorizontalAlignment::Left
         }
@@ -427,12 +437,19 @@ fn text_alignment(
         3 => TextVerticalAlignment::Top,
         other => {
             text.warn(format!(
-                "TEXT_ALIGNMENT: a TEXT states vertical alignment {other} (group 73), outside 0 to 3; it is read as baseline"
+                "TEXT_ALIGNMENT: a {dxfname} states vertical alignment {other} (group {vertical_group}), outside 0 to 3; it is read as baseline"
             ));
             TextVerticalAlignment::Baseline
         }
     };
-    (h, v)
+    let point = ((h, v)
+        != (
+            TextHorizontalAlignment::Left,
+            TextVerticalAlignment::Baseline,
+        ))
+        .then(|| get_point2d(entity_ptr, dxfname, "alignment_pt"))
+        .flatten();
+    (h, v, point)
 }
 
 /// Pairs a polyline's vertex positions with the bulges its record stores as a
@@ -687,20 +704,8 @@ unsafe fn convert_entity(
                 .field(entity_ptr, "TEXT", "text_value")
                 .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
-            let (horizontal_alignment, vertical_alignment) = text_alignment(
-                text,
-                get_field::<u16>(entity_ptr, "TEXT", "horiz_alignment").unwrap_or(0),
-                get_field::<u16>(entity_ptr, "TEXT", "vert_alignment").unwrap_or(0),
-            );
-            // The record stores an alignment point only for a text aligned
-            // otherwise than the default, as the DXF form writes group 11.
-            let alignment_point = ((horizontal_alignment, vertical_alignment)
-                != (
-                    TextHorizontalAlignment::Left,
-                    TextVerticalAlignment::Baseline,
-                ))
-                .then(|| get_point2d(entity_ptr, "TEXT", "alignment_pt"))
-                .flatten();
+            let (horizontal_alignment, vertical_alignment, alignment_point) =
+                placement(text, entity_ptr, "TEXT");
             Entity::Text(TextEntity {
                 common,
                 start_point,
@@ -830,6 +835,8 @@ unsafe fn convert_entity(
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
             // Read before `text` is shadowed by the value below.
             let tag = text.field(entity_ptr, "ATTRIB", "tag").unwrap_or_default();
+            let (horizontal_alignment, vertical_alignment, alignment_point) =
+                placement(text, entity_ptr, "ATTRIB");
             let text = text
                 .field(entity_ptr, "ATTRIB", "text_value")
                 .unwrap_or_default();
@@ -841,6 +848,10 @@ unsafe fn convert_entity(
                 tag,
                 text,
                 rotation,
+                horizontal_alignment,
+                vertical_alignment,
+                alignment_point,
+                width_factor: get_field::<f64>(entity_ptr, "ATTRIB", "width_factor").unwrap_or(1.0),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
@@ -902,6 +913,8 @@ unsafe fn convert_entity(
                 .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
             let tag = text.field(entity_ptr, "ATTDEF", "tag").unwrap_or_default();
+            let (horizontal_alignment, vertical_alignment, alignment_point) =
+                placement(text, entity_ptr, "ATTDEF");
             Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
@@ -909,6 +922,10 @@ unsafe fn convert_entity(
                 tag,
                 default_value,
                 rotation,
+                horizontal_alignment,
+                vertical_alignment,
+                alignment_point,
+                width_factor: get_field::<f64>(entity_ptr, "ATTDEF", "width_factor").unwrap_or(1.0),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {

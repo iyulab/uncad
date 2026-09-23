@@ -31,7 +31,8 @@ Notable changes to this project are recorded here. The format follows
 - A TEXT carries its `horizontal_alignment` and `vertical_alignment` (DXF 72, 73), its
   `alignment_point` (DXF 11, for an aligned text only) and its `width_factor` (DXF 41).
   An aligned text answers to its alignment point, not to its start point. An alignment
-  value outside the format's range is reported as `TEXT_ALIGNMENT`.
+  value outside the format's range is reported as `TEXT_ALIGNMENT`. An ATTRIB and an
+  ATTDEF carry the same four fields.
 - `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
   before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
   found, and named. It used to arrive with no vertices and no signal.

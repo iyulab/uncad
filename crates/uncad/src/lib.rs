@@ -312,6 +312,10 @@ mod missing_required_groups_tests {
             tag: String::new(),
             text: "X".to_string(),
             rotation: 0.0,
+            horizontal_alignment: Default::default(),
+            vertical_alignment: Default::default(),
+            alignment_point: None,
+            width_factor: 1.0,
         });
         assert_eq!(
             missing_required_groups(&[untagged]),
