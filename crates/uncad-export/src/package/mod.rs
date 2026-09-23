@@ -3,6 +3,7 @@
 
 mod output;
 mod records;
+mod tiles;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -29,7 +30,7 @@ use crate::geom;
 use crate::text::decode_text;
 
 pub use output::WrittenFile;
-use output::{clear_previous_package, to_rgb, Writer};
+use output::{clear_previous_package, sha256_hex, to_rgb, Writer};
 use records::{
     capped_confidence, coord_decimals, handle_of, id_key, layer_name, placed_texts, text_record,
     PlacedText, Record, Rounder,
@@ -761,17 +762,95 @@ pub fn export_package(
         "glyph outlines as the renderer laid them out"
     };
 
-    // --- records -----------------------------------------------------------
-    let extent_of: BTreeMap<EntityId, Rect> = shown
+    // --- the drawn extents, widened by the measured texts ------------------
+    // The renderer's extents count a text by its 0.6-em estimate; the text
+    // boxes above are its glyphs. A Hangul syllable advances about 0.92
+    // heights, so a long Korean note runs some 12 % past its estimate, while
+    // `texts.json` lists a text's tiles from its measured box: the frames,
+    // the frame overviews and the tiles are culled by these extents, so each
+    // drawn part grows by the measured boxes of the texts it draws (the part
+    // is the first ID of a text's path). An estimate that was generous is
+    // never shrunk.
+    let mut extent_of: BTreeMap<EntityId, Rect> = shown
         .iter()
         .filter_map(|(p, _)| p.extent.map(|r| (p.id, Rect::from(r))))
         .collect();
+    for t in texts.iter().filter(|t| t.measured) {
+        if let Some(e) = extent_of.get_mut(&t.part) {
+            *e = e.union(&t.bbox);
+        }
+    }
+    // In drawing order: the frames are the groups of these.
+    let extents: Vec<Rect> = shown
+        .iter()
+        .filter_map(|(p, _)| extent_of.get(&p.id).copied())
+        .collect();
+
+    // --- frames: the primary group and each detached group ----------------
+    let plan = tiles::plan_frames(
+        &extents,
+        crop_rect,
+        &texts,
+        &overview,
+        options,
+        &rounder,
+        &mut warnings,
+    );
+    let frame_overviews: Vec<&ImageInfo> = plan
+        .frames
+        .iter()
+        .map(|f| &f.report.overview)
+        .filter(|ov| ov.id != "ov")
+        .collect();
+    let mut tile_images: Vec<ImageInfo> = Vec::new();
+    for build in &plan.frames {
+        for level in &build.report.levels {
+            for tile in build.tiles.iter().filter(|t| t.z == level.z && !t.empty) {
+                let png = format!(
+                    "frames/{}/tiles/z{}/r{:02}_c{:02}.png",
+                    tile.frame, tile.z, tile.row, tile.col
+                );
+                tile_images.push(ImageInfo::new(
+                    &tile.id,
+                    &png,
+                    tile.world,
+                    level.ppu,
+                    tile.width,
+                    tile.height,
+                ));
+            }
+        }
+    }
+    // Every image but the overview, drawn on as many threads as there are:
+    // each is a window of the one walk, holding only the parts that reach
+    // it.
+    let to_draw: Vec<&ImageInfo> = frame_overviews
+        .iter()
+        .copied()
+        .chain(tile_images.iter())
+        .collect();
+    let drawn = tiles::render_images(&scene, fonts, &extent_of, &to_draw)?;
+
+    // --- records with their images -------------------------------------------
+    let images_for = |bbox: &Rect| -> Vec<&ImageInfo> {
+        tile_images
+            .iter()
+            .filter(|img| img.world.intersects(bbox))
+            .collect()
+    };
     let px_map = |bbox: &Rect| -> Value {
         let mut m = Map::new();
         m.insert("ov".to_string(), json!(overview.px_box(bbox)));
+        for ov in frame_overviews.iter().filter(|o| o.world.intersects(bbox)) {
+            m.insert(ov.id.clone(), json!(ov.px_box(bbox)));
+        }
+        for img in images_for(bbox) {
+            m.insert(img.id.clone(), json!(img.px_box(bbox)));
+        }
         Value::Object(m)
     };
-    let tiles_for = |_: &Rect| -> Vec<String> { Vec::new() };
+    let tiles_for =
+        |bbox: &Rect| -> Vec<String> { images_for(bbox).iter().map(|i| i.id.clone()).collect() };
     let with_images = |mut r: Record| -> Record {
         r.value.insert("tiles".into(), json!(tiles_for(&r.bbox)));
         r.value.insert("px".into(), px_map(&r.bbox));
@@ -826,24 +905,12 @@ pub fn export_package(
             }
         }
     }
-
-    // --- the frames ------------------------------------------------------------
-    let frame = FrameReport {
-        id: "f0".into(),
-        kind: "primary".into(),
-        content: crop_rect,
-        entities: extent_of.len(),
-        texts: texts
-            .iter()
-            .filter(|t| crop_rect.intersects(&t.bbox))
-            .count(),
-        overview: overview.clone(),
-        levels: Vec::new(),
-        z_max: 0,
-        reached: true,
-        height_classes: Vec::new(),
-    };
-    let frame_reports = vec![frame];
+    let frame_reports: Vec<FrameReport> = plan.frames.iter().map(|b| b.report.clone()).collect();
+    let written_total: usize = frame_reports
+        .iter()
+        .flat_map(|f| f.levels.iter())
+        .map(|l| l.tiles_written)
+        .sum();
 
     // --- write -----------------------------------------------------------------
     let mut writer = Writer {
@@ -859,6 +926,15 @@ pub fn export_package(
         shard_kb: options.shard_kb,
     };
     writer.write_bytes("overview.png", &overview_png, "image")?;
+    // Tile id -> its PNG's byte count and SHA-256, for `tiles.json`.
+    let mut tile_png: BTreeMap<&str, (u64, String)> = BTreeMap::new();
+    for (image, bytes) in to_draw.iter().zip(&drawn) {
+        let is_tile = !frame_overviews.iter().any(|ov| ov.id == image.id);
+        if is_tile {
+            tile_png.insert(&image.id, (bytes.len() as u64, sha256_hex(bytes)));
+        }
+        writer.write_bytes(&image.png, bytes, if is_tile { "tile" } else { "image" })?;
+    }
     writer.write_records("texts", "text", &text_records)?;
     writer.write_records("dimensions", "dimension", &dim_records)?;
     writer.write_records("geometry", "geometry", &geo_records)?;
@@ -876,6 +952,58 @@ pub fn export_package(
             "strings": strings,
         }),
         "strings",
+    )?;
+
+    // --- sidecars and tiles.json -------------------------------------------------
+    let on_tiles = tiles::OnTiles {
+        texts: &text_records,
+        dims: &dim_records,
+        blocks: &block_records,
+        regions: &region_records,
+        geometry: &geo_records,
+    };
+    let mut tiles_json: Vec<Value> = Vec::new();
+    for build in &plan.frames {
+        for tile in &build.tiles {
+            let mut entry = json!({
+                "id": tile.id,
+                "frame": tile.frame,
+                "z": tile.z,
+                "row": tile.row,
+                "col": tile.col,
+                "px": [tile.width, tile.height],
+                "world": rounder.rect(&tile.world),
+                "empty": tile.empty,
+            });
+            if tile.empty {
+                // One reason a planned tile is not written: nothing visible
+                // reaches it. A reader following `children` or a record's
+                // `tiles` must know an absent file was meant to be absent.
+                entry["reason"] = json!("no_visible_entity_on_tile");
+            }
+            if let Some(img) = tile_images.iter().find(|i| i.id == tile.id) {
+                entry["png"] = json!(img.png);
+                if let Some((bytes, sha)) = tile_png.get(img.id.as_str()) {
+                    entry["bytes"] = json!(bytes);
+                    entry["sha256"] = json!(sha);
+                }
+                let sidecar =
+                    tiles::sidecar(img, tile, &build.tiles, &profile, &on_tiles, &rounder);
+                let sidecar_path = img.png.replace(".png", ".json");
+                writer.write_json_compact(&sidecar_path, &sidecar, "sidecar")?;
+                entry["sidecar"] = json!(sidecar_path);
+            }
+            tiles_json.push(entry);
+        }
+    }
+    writer.write_json(
+        "tiles.json",
+        &json!({
+            "$schema": SCHEMA,
+            "frames": frame_reports.iter().map(|f| json!({ "id": f.id, "kind": f.kind, "content": rounder.rect(&f.content), "levels": f.levels })).collect::<Vec<_>>(),
+            "tiles": tiles_json,
+        }),
+        "tiles",
     )?;
     writer.write_json(
         "drawing.json",
@@ -971,7 +1099,7 @@ pub fn export_package(
         blocks: block_records.len(),
         hidden: scene.hidden,
         excluded: excluded_json.len(),
-        tiles: 0,
+        tiles: written_total,
         frames: frame_reports.len(),
         sheets: 0,
     };
@@ -1014,6 +1142,8 @@ pub fn export_package(
         svg_origin,
         overview: &overview,
         frames: &frame_reports,
+        frames_dropped: &plan.dropped,
+        frames_dropped_total: plan.dropped_total,
         counts: &counts,
         texts: written_texts,
         dims: &dim_records,
@@ -1708,6 +1838,8 @@ struct ManifestInput<'a, 'w> {
     svg_origin: Option<[f64; 2]>,
     overview: &'a ImageInfo,
     frames: &'a [FrameReport],
+    frames_dropped: &'a [Value],
+    frames_dropped_total: usize,
     counts: &'a Counts,
     texts: &'a [Record],
     dims: &'a [Record],
@@ -1777,9 +1909,16 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
         "display_source": ["user_text", "cached_block", "formatted", "suppressed", "none"],
         "region_labels": "`labels` holds the ids of the text records whose anchor falls inside the region",
         "px_boxes": "`px` maps an image id to [x0, y0, x1, y1] in that image's pixels, y down, clipped to the image; the record's full extent is its world `bbox`, and the rest of it is on the other images it lists",
+        "tile_sidecar": "`records` holds positional rows described by the sidecar's own `columns`; `counts` is the true number of records of each kind on the tile, which `records_truncated` does not affect, and `geometry_by_kind` summarises the geometry whether or not its rows fit",
         "shard_lookup": "manifest.shard_index resolves a record id to its file: the entry whose [first_key, last_key] contains int(id.split('/')[0]). `first_id`/`last_id` are the same bounds as strings and do not compare as numbers",
+        "legibility": "`target_met` is whether every text height class reaches `target_px` in the deepest image of that frame; `pyramid_complete` is whether the tile budget let the pyramid reach the depth the text asked for",
     });
-    let guidance = "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; `legend` says what `confidence` and the package's other vocabularies mean and which records carry them. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), resolve the id through shard_index -- the entry whose [first_key, last_key] contains int(id.split('/')[0]), since the id does not say its kind and one id can be in two. overview.png shows the whole crop. report.json lists what was left out and why.".to_string();
+    // The tile and overlap numbers come from the profile in use, not from
+    // the prose: claude-hires writes 1932 px tiles with 392 px of overlap.
+    let guidance = format!(
+        "Read manifest.json first. Numbers (lengths, areas, dimension values, text) come from the JSON records, never from pixels; `legend` says what `confidence` and the package's other vocabularies mean and which records carry them. To find something: look its text up in strings.json (normalised: trimmed, lower-case, single spaces), resolve the id through shard_index -- the entry whose [first_key, last_key] contains int(id.split('/')[0]), since the id does not say its kind and one id can be in two -- then open the tile(s) in its `tiles` list; every tile's .json sidecar lists what is on it with pixel boxes, its own `columns` legend and a `counts` object that stays exact when rows are cut. Pixel boxes are clipped to the image they are quoted in; the record's world `bbox` is its full extent. overview.png shows the whole crop; each frame in `frames` (f0 the main drawing, f1.. details drawn beside it) has its own overview and tiles z1..zN, {} px with {} px overlap (2x zooms), row 0 at the top; a group too small to be framed is in `frames_dropped` and its records carry `tiles: []`. report.json lists what was left out and why.",
+        profile.tile, profile.overlap
+    );
     m.writer.files.push(WrittenFile {
         path: "manifest.json".into(),
         bytes: None,
@@ -1807,6 +1946,8 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
         "svg_origin": m.svg_origin,
         "overview": m.overview,
         "frames": m.frames,
+        "frames_dropped": m.frames_dropped,
+        "frames_dropped_total": m.frames_dropped_total,
         "legibility": { "target_px": m.options.target_text_px, "per_frame": m.frames.iter().map(|f| json!({"frame": f.id, "z_max": f.z_max, "target_met": f.height_classes.iter().all(|c| c.legible), "pyramid_complete": f.reached, "height_classes": f.height_classes})).collect::<Vec<_>>() },
         "counts": m.counts,
         "capabilities": capabilities,
@@ -1820,7 +1961,7 @@ fn manifest_json(m: ManifestInput<'_, '_>) -> Value {
 
 fn readme(options: &ExportOptions) -> String {
     format!(
-        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines; `legend` explains the record vocabularies, `guidance` how to look something up\n  2. strings.json    find a text or a number, get record ids; shard_index turns an id into a file (compare int(id.split('/')[0]) against first_key/last_key, not the strings)\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index); blocks.json holds the INSERT instances, drawing.json the block definitions\n  4. overview.png    the whole drawing\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units, layer states and block definitions; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
+        "uncad package ({SCHEMA})\n\nReading order:\n  1. manifest.json   what is here, the crop, the images and their affines; `legend` explains the record vocabularies, `guidance` how to look something up\n  2. strings.json    find a text or a number, get record ids; shard_index turns an id into a file (compare int(id.split('/')[0]) against first_key/last_key, not the strings)\n  3. texts.json / dimensions.json / geometry.json / regions.json / blocks.json   the records (sharded above {} KB, see shard_index); blocks.json holds the INSERT instances, drawing.json the block definitions\n  4. overview.png    the whole drawing; frames/f*/overview.png and frames/f*/tiles/z*/  zoomed tiles with .json sidecars; tiles.json lists every tile, written or empty with a reason, with its size and sha256\n  5. report.json     what was left out and why\n\ndrawing.json holds the header, units, layer states and block definitions; entities.json and drawing.svg (when present) are tool inputs, not for reading.\n",
         options.shard_kb
     )
 }

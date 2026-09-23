@@ -152,8 +152,11 @@ Notable changes to this project are recorded here. The format follows
   instances -- whose ids are the model's reference IDs, with the file's handle beside
   them; an NFKC string index; record shards with an index a consumer can search;
   `drawing.json`, `report.json` (what was left out, hidden and bounded, and why) and a
-  manifest saying what the package can answer. The same input gives the same bytes,
-  `report.json` included.
+  manifest saying what the package can answer. The drawing splits into frames (a detail
+  beside the plan is its own), each with a pyramid of overlapping tiles as deep as its
+  text needs, culled to the tiles something visible reaches -- by the measured text boxes,
+  not the estimate -- and hashed in `tiles.json`; every tile has a sidecar under 32 KB
+  saying what is on it. The same input gives the same bytes, `report.json` included.
 
 ### Changed
 

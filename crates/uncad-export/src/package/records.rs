@@ -184,6 +184,8 @@ fn entity_hidden(e: &Entity, tables: &Tables, reference_layer: Option<&str>) -> 
 /// A text placed in the world (or on a sheet's paper).
 pub(crate) struct PlacedText {
     pub(crate) id: String,
+    /// The top-level entity whose part draws the text: its path's first ID.
+    pub(crate) part: EntityId,
     pub(crate) handle: Value,
     pub(crate) kind: &'static str,
     pub(crate) layer: String,
@@ -456,6 +458,7 @@ fn place(index: &mut PathIndex<'_>, b: &TextBox) -> Option<PlacedText> {
         .unwrap_or(Rect::at(anchor.x, anchor.y));
     Some(PlacedText {
         id: record_id(&b.path),
+        part: b.path[0],
         handle: handle_of(common),
         kind: leaf.kind,
         layer: effective_layer(common.layer.name(), reference).to_string(),

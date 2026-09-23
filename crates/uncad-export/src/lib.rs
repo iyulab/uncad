@@ -15,13 +15,19 @@
 //! ```text
 //! dir/
 //!   README.txt        reading order
-//!   manifest.json     source, units, profile, crop, overview, frames, legibility,
-//!                     capabilities, counts, warnings, files, shard_index, legend, guidance
+//!   manifest.json     source, units, profile, crop, overview, frames, frames_dropped,
+//!                     legibility, capabilities, counts, warnings, files, shard_index,
+//!                     legend, guidance
 //!   drawing.json      header, units, layers with their state, the block definitions, counts
 //!   overview.png      the whole crop, fitted to the profile (Claude: <= 1568 px edge,
 //!                     <= 1568 patches)
+//!   frames/fN/tiles/z{z}/r{rr}_c{cc}.png + .json   tiles (Claude: 1092 px, 224 px
+//!                     overlap) and their sidecars
+//!   frames/fN/overview.png   one per frame when the drawing splits into several
+//!   tiles.json        every tile of every level and frame: written (with its bytes and
+//!                     sha256) or empty (with a reason)
 //!   texts.json        TEXT/MTEXT/ATTRIB/TOLERANCE, block contents included, with the
-//!                     world box of their glyph outlines
+//!                     world box of their glyph outlines and the tiles they are on
 //!   dimensions.json   measured value and where it came from, display string, points
 //!   geometry.json     every other visible entity: key points, length, area, bbox
 //!   regions.json      closed polylines: area, perimeter, centroid, the texts inside
@@ -40,9 +46,16 @@
 //! leaves anything else there alone.
 //!
 //! The drawing is walked once (the renderer's `Scene`), and every image is
-//! a window of that walk. A text record's box is measured from the glyph
-//! outlines of the bundled font ([`fonts`]) as the renderer laid them out;
-//! a record's id is the model's reference ID (a path of them for a text
+//! a window of that walk: the overview, one per frame (a detail drawn
+//! beside the plan is a frame of its own), and a pyramid of overlapping
+//! tiles per frame, 2x per level, as deep as the frame's dominant text needs
+//! to reach the target pixel height and the tile budget allows. A tile is
+//! drawn from the parts that reach it, on as many threads as there are.
+//!
+//! A text record's box is measured from the glyph outlines of the bundled
+//! font ([`fonts`]) as the renderer laid them out, and those boxes widen the
+//! drawn extents before the frames are grouped and the tiles culled; a
+//! record's id is the model's reference ID (a path of them for a text
 //! inside a block), and the file's handle is beside it. What the package
 //! derives -- a text's readable string ([`text`]), a dimension's value, the
 //! trust in its stored measurement and its label ([`dimension`]), lengths,
