@@ -21,6 +21,12 @@ This project bundles or builds against the following third-party components.
 
 ---
 
+Each published crate carries the full GPLv3 text as a `LICENSE` file in its own directory
+(`crates/libredwg-sys/`, `crates/uncad/`, `crates/uncad-cli/`), byte-identical to the
+repository root's. They are copies rather than one shared file because `cargo package`
+never reaches outside a crate directory, and GPLv3 §4 asks for the licence to be conveyed
+with the source that is conveyed — a crates.io tarball is exactly that.
+
 This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party component bundled). See [`LICENSE`](../LICENSE).
 
 DWF/DWFx support (previously provided by a vendored subset of
