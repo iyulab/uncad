@@ -1299,6 +1299,8 @@ unsafe fn convert_entity(
                 pattern_lines,
                 elevation: get_field::<f64>(entity_ptr, "HATCH", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "HATCH"),
+                style: get_field::<u16>(entity_ptr, "HATCH", "style")
+                    .and_then(|s| crate::model::HatchStyle::from_code(i64::from(s))),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DSOLID => {

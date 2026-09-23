@@ -28,6 +28,8 @@ Notable changes to this project are recorded here. The format follows
   hides the edges its faces share.
 - A SOLID and a TRACE carry their `elevation` and `extrusion`: their corners are points
   of their own coordinate system too.
+- A HATCH carries its fill `style` (DXF 75): whether nested areas alternate, only the
+  outermost is filled, or islands are ignored.
 - A HATCH carries its `elevation` and `extrusion`: its boundary paths and pattern lines
   are points and directions of its own coordinate system.
 - A TEXT, an ATTRIB and an ATTDEF carry their `elevation` and `extrusion`: their start and
