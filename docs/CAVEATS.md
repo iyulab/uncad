@@ -155,6 +155,27 @@ compared an R2007+ DXF's table-record names in the wrong width. The per-entity
 degradation this section describes -- a type dropping out, or arriving as
 `Entity::Unknown` -- is what a DXF should cost; a whole-file refusal was not.
 
+**DXF parse time grows faster than the file does.** Reading a DXF costs more than the
+square of its entity count inside LibreDWG's importer, so sizes that are unremarkable for
+a real drawing take minutes. Measured on DXFs of nothing but LINEs, each with its handle
+and subclass markers (release build, wall clock around `uncad <file>`, summary only, no
+rendering, one Windows machine):
+
+| Entities | Bytes | Time |
+|---|---|---|
+| 25 000 | 2.3 MB | 2.8 s |
+| 50 000 | 4.6 MB | 16.4 s |
+| 100 000 | 9.2 MB | 72.0 s |
+
+The time is the importer's, not this crate's: the 0.2 CLI, whose conversion code is a
+different one, takes the same on the same files (3.0 s and 14.0 s for the first two). When
+the importer was instrumented on the 0.3 feature branch (commit `75b0461`), nearly all of
+it was inside `dxf_entities_read`, where LibreDWG re-resolves its whole object-reference
+vector every time `dwg_add_object` reallocates the object pool. There is nothing to fix on
+this side of the FFI boundary, and a DWG does not go through the importer at all. A caller
+that must accept large DXFs should bound the work itself (a size or entity-count limit
+before calling `parse`, and a timeout).
+
 ### DXF saved as R2007 or later is read, each string in the width it was stored in
 
 A DXF whose `$ACADVER` is `AC1021` (R2007) or later -- R2007, R2010, R2013 and R2018

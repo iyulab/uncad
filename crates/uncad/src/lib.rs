@@ -193,8 +193,9 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
 ///
 /// How complete DXF reading is depends on the entity type: LibreDWG's own
 /// DXF reader is documented as working "for most objects" rather than being
-/// feature-complete the way DWG reading is. A DXF saved as R2007 or later is
-/// read like any other; one whose
+/// feature-complete the way DWG reading is, and it costs more than the
+/// square of the entity count, so a DXF of ten megabytes takes over a
+/// minute. A DXF saved as R2007 or later is read like any other; one whose
 /// entities nonetheless reach no model or paper space is
 /// [`ParseError::UnsupportedDxfVersion`] rather than an empty drawing. See
 /// `docs/CAVEATS.md`.

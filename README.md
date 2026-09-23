@@ -57,8 +57,8 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
    included: such a file holds its strings in two widths in LibreDWG's memory,
    and each is read in its own — see `docs/CAVEATS.md`, "DXF saved as R2007 or
    later is read". LibreDWG's own DXF importer is documented as working "for most
-   objects", so it is less complete than its DWG reading
-   ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
+   objects", so it is less complete than its DWG reading, and slower than linear
+   in the entity count ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
 3. **Output** — the parsed model as JSON (`CadDatabase::to_json`, from
    `uncad-model`). SVG and PNG come from the
    [`iron-render-cad`](https://github.com/iyulab/iron-render-cad) crate (MIT), which
