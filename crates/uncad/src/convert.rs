@@ -43,6 +43,25 @@ const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
 
+/// How deep the conversion of an entity's owned *sub*entities may recurse.
+///
+/// Only one kind of nesting is real: an INSERT owns its ATTRIBs, which are
+/// entities themselves, so converting an INSERT converts them too (depth 1;
+/// an entity a block owns is depth 0). A file whose handles are damaged can
+/// point an INSERT's attribute chain back at the INSERT, or around a cycle
+/// of them, and the conversion then recurses until the stack runs out -- a
+/// 512 MB stack did not survive one byte-flipped `example_2000.dwg`. One
+/// level is what the format has; two is the cap.
+const MAX_SUBENTITY_DEPTH: u32 = 2;
+
+/// How many subentities one owned-subentity walk may hand back.
+///
+/// The same damaged handles can make a chain a *ring* instead of a list,
+/// which is not recursion but a loop that never ends. No real entity owns
+/// anything like this many: the largest polyline in the corpus has a few
+/// thousand vertices.
+const MAX_OWNED_SUBENTITIES: usize = 100_000;
+
 fn is_model_space(name: &str) -> bool {
     name.to_uppercase() == "*MODEL_SPACE"
 }
@@ -139,7 +158,7 @@ pub(crate) unsafe fn owned_entities(
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
-        if let Some(entity) = unsafe { convert_entity(dwg, text, owned) } {
+        if let Some(entity) = unsafe { convert_entity(dwg, text, owned, 0) } {
             entities.push(entity);
         }
         owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
@@ -229,7 +248,7 @@ unsafe fn chained_block_entities(
         let fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(obj) } as libredwg_sys::DWG_OBJECT_TYPE;
         if !is_sub_entity(fixedtype) {
-            if let Some(entity) = unsafe { convert_entity(dwg, text, obj) } {
+            if let Some(entity) = unsafe { convert_entity(dwg, text, obj, 0) } {
                 entities.push(entity);
             }
         }
@@ -252,13 +271,20 @@ unsafe fn chained_block_entities(
 /// every attribute of an imported INSERT was lost. A drawing decoded from
 /// DWG carries the chain and no array, so the chain is the fallback.
 ///
+/// Either source is data from the file, so both are bounded: only ATTRIB
+/// objects are converted (an INSERT owns nothing else, and converting what
+/// a damaged reference points at instead -- the INSERT itself, say -- is
+/// endless recursion), at `depth + 1`, and neither yields more than
+/// [`MAX_OWNED_SUBENTITIES`].
+///
 /// # Safety
 /// `dwg` must be live and `entity_ptr` the type-specific struct pointer of a
-/// valid INSERT object of it.
+/// valid INSERT object of it, converted at `depth`.
 unsafe fn chained_insert_attribs(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
     entity_ptr: *mut std::ffi::c_void,
+    depth: u32,
 ) -> Vec<AttribEntity> {
     let mut attribs = Vec::new();
     let owned = get_array_field::<u32, *mut libredwg_sys::Dwg_Object_Ref>(
@@ -268,12 +294,14 @@ unsafe fn chained_insert_attribs(
         "attribs",
     );
     if !owned.is_empty() {
-        for reference in owned {
+        for reference in owned.into_iter().take(MAX_OWNED_SUBENTITIES) {
             let sub = unsafe { referenced_object(dwg, reference) };
-            if sub.is_null() {
+            if sub.is_null() || !unsafe { is_attrib(sub) } {
                 continue;
             }
-            if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) } {
+            if let Some(Entity::Attrib(attrib)) =
+                unsafe { convert_entity(dwg, text, sub, depth + 1) }
+            {
                 attribs.push(attrib);
             }
         }
@@ -288,14 +316,12 @@ unsafe fn chained_insert_attribs(
     let mut sub = unsafe { referenced_object(dwg, first) };
     let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
     let mut steps = 0;
-    while !sub.is_null() && steps <= max_steps {
+    while !sub.is_null() && steps <= max_steps && attribs.len() < MAX_OWNED_SUBENTITIES {
         steps += 1;
-        let fixedtype =
-            unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
-        if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB {
+        if !unsafe { is_attrib(sub) } {
             break;
         }
-        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) } {
+        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub, depth + 1) } {
             attribs.push(attrib);
         }
         if sub == last_obj {
@@ -304,6 +330,51 @@ unsafe fn chained_insert_attribs(
         sub = unsafe { libredwg_sys::dwg_next_entity(sub) };
     }
     attribs
+}
+
+/// An INSERT's attributes from R2004 on, where the library keeps them as an
+/// owned array its own subentity walker resolves correctly -- walked from
+/// the INSERT's own `Dwg_Object`, not from its type-specific struct.
+///
+/// Bounded three ways, because damaged handles can turn the chain into a
+/// ring (an endless walk), point it back at the INSERT (endless recursion
+/// through [`convert_entity`]) or run it off the end of the object list: an
+/// INSERT owns ATTRIBs and nothing else, so the walk stops the moment the
+/// chain says otherwise; it converts at `depth + 1`; and it hands back at
+/// most [`MAX_OWNED_SUBENTITIES`].
+///
+/// # Safety
+/// `dwg` must be live and `obj` a valid INSERT object of it, converted at
+/// `depth`.
+unsafe fn owned_insert_attribs(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    obj: *mut libredwg_sys::Dwg_Object,
+    depth: u32,
+) -> Vec<AttribEntity> {
+    let mut attribs = Vec::new();
+    let mut walked = 0usize;
+    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+    while !sub.is_null() && walked < MAX_OWNED_SUBENTITIES {
+        walked += 1;
+        if !unsafe { is_attrib(sub) } {
+            break;
+        }
+        if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub, depth + 1) } {
+            attribs.push(attrib);
+        }
+        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
+    }
+    attribs
+}
+
+/// # Safety
+/// `obj` must be a valid, non-null `Dwg_Object`.
+unsafe fn is_attrib(obj: *mut libredwg_sys::Dwg_Object) -> bool {
+    // Cast for cross-platform bindgen enum-width consistency -- see
+    // convert_entities().
+    (unsafe { libredwg_sys::dwg_object_get_fixedtype(obj) } as libredwg_sys::DWG_OBJECT_TYPE)
+        == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
 }
 
 /// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
@@ -354,8 +425,11 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     let mut positions = Vec::new();
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
+    // Bounded against a chain damaged handles turned into a ring.
+    let mut walked = 0usize;
     let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    while !sub.is_null() {
+    while !sub.is_null() && walked < MAX_OWNED_SUBENTITIES {
+        walked += 1;
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
@@ -464,6 +538,10 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
         .collect()
 }
 
+/// `depth` is how many owned-*sub*entity steps were taken to reach `obj` (0
+/// for an entity a block owns); past [`MAX_SUBENTITY_DEPTH`] nothing is
+/// converted.
+///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `obj` was obtained from; `obj` must be a
 /// valid pointer from `dwg_get_object` on that same `Dwg_Data`.
@@ -471,7 +549,11 @@ unsafe fn convert_entity(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
+    depth: u32,
 ) -> Option<Entity> {
+    if depth > MAX_SUBENTITY_DEPTH {
+        return None;
+    }
     // Cast for cross-platform bindgen enum-width consistency -- see the
     // comment on the same call in convert_entities() above.
     let fixedtype =
@@ -763,18 +845,9 @@ unsafe fn convert_entity(
             // from the INSERT's own Dwg_Object rather than from entity_ptr
             // (the type-specific struct dynapi needs, a different pointer).
             let attribs = if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
-                unsafe { chained_insert_attribs(dwg, text, entity_ptr) }
+                unsafe { chained_insert_attribs(dwg, text, entity_ptr, depth) }
             } else {
-                let mut attribs = Vec::new();
-                let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-                while !sub.is_null() {
-                    if let Some(Entity::Attrib(attrib)) = unsafe { convert_entity(dwg, text, sub) }
-                    {
-                        attribs.push(attrib);
-                    }
-                    sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
-                }
-                attribs
+                unsafe { owned_insert_attribs(dwg, text, obj, depth) }
             };
 
             Entity::Insert(InsertEntity {
