@@ -571,16 +571,18 @@ fn the_two_readers_agree_on_every_leader_field_in_the_corpus() {
     assert!(compared > 0, "no leader was read by both");
     assert_eq!(unmatched, 0, "a leader one reader has and the other lacks");
     // What the pinned file holds, and why: every other field agrees on every
-    // leader, and every line left is the arrowhead flag, with this crate
-    // reading "no arrowhead" and the second reader reading "arrowhead".
+    // leader, and every line left is the arrowhead flag of an R2010-or-later
+    // drawing, which this crate reports as unknown.
     //
-    // Which is right is not established. Where a text twin states the flag
-    // (group 71), both readers match it in every version. The lines here are
-    // leaders whose twin omits the flag or that have no twin. The two
-    // readers' layouts of this record differ from R2010 on (which of an
-    // offset vector and a text-box size comes before the flag), which could
-    // put either one on the wrong bit; the values each reads there do not
-    // settle it one way. Recorded, not resolved.
+    // That is this crate's engine, not a disagreement about the file: from
+    // R2010 on it reads the LEADER record one field short (it skips the
+    // annotation offset those files still carry), so its flag there is a bit
+    // of the offset's encoding -- always off when the offset's z is zero.
+    // Its own text-box fields in those files hold exactly the offset the
+    // earlier versions read, which is what settled it. This comparison is
+    // what first showed the difference; before the flag was reported as
+    // unknown, seven of these lines read "no arrowhead" against the second
+    // reader's "arrowhead", and the others agreed only by that accident.
     let report = format!(
         "leaders compared {compared} {per_version:?}\n{}",
         disagreements.join("\n")

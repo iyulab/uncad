@@ -304,7 +304,18 @@ the file did not state them (`has_arrowhead` and `path_type` are `Option`s). Fro
 crate reports them as stated instead -- no arrowhead, straight -- because the importer leaves
 both fields at their zero value when the groups are absent, and nothing downstream can tell
 that from a file that wrote zero. A test in `tests/references.rs` asserts the deviation is
-still there. DWG files always store both values and are unaffected.
+still there. DWG files always store both values, so this deviation does not reach them -- though from R2010 on the arrowhead flag is unknown in DWG for another reason, below.
+
+**A LEADER's arrowhead flag is unknown in DWG from R2010 on.** The vendored engine's record
+layout for LEADER reads the annotation offset only up to R2007, but files from R2010 on
+still carry it; everything the engine reads after that point in such a file comes from the
+wrong bits. Reading the engine's own fields for one leader across versions shows it: from
+R2010 its text-box height and width are exactly the offset vector the earlier versions
+read. The only field of that stretch this crate carries is `has_arrowhead`, and what the
+engine returns there is a bit of the offset's encoding (always "off" when the offset's z is
+zero), so it is reported as `None` instead. The fields read before that point (vertices,
+path type, annotation kind) and the references (read from a separate stream) are
+unaffected; a second, independent reader agrees with this crate on all of them.
 
 Two cases carry no handle at all and are told apart by the drawing's version. Before R13 a
 drawing points at its tables by *index*, not by handle; those references are looked up by

@@ -662,3 +662,38 @@ fn the_dxf_importer_still_fills_a_leaders_omitted_flags() {
         "an omitted flag no longer reads as stated -- take the recorded deviation out"
     );
 }
+
+/// A leader's arrowhead flag from DWG, across versions, against the text
+/// twin that states it (group 71 = 0 on this leader in every version).
+///
+/// Up to R2007 the flag is read and matches the twin. From R2010 on the
+/// engine's record layout for LEADER skips a field those files still carry
+/// (the annotation offset), so what it reads as the flag is a bit of that
+/// offset's encoding; this crate reports the flag as unknown there rather
+/// than pass the misread bit on. The misalignment was established by
+/// reading the engine's own fields for the same leader: from R2010 its
+/// "text box" height and width are exactly the offset vector the earlier
+/// versions read.
+#[test]
+fn a_leader_arrowhead_is_read_up_to_r2007_and_unknown_from_r2010() {
+    let arrowhead = |version: &str| {
+        let path = format!(
+            "{}/../../lib/libredwg/test/test-data/{version}/Leader.dwg",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let db = uncad::parse(&path).expect("the corpus drawing parses");
+        let found = db.all_entities().find_map(|e| match e {
+            Entity::Leader(l) if l.common.source_handle == Ref::Resolved("72E".into()) => {
+                Some(l.has_arrowhead)
+            }
+            _ => None,
+        });
+        found.expect("the leader, handle 72E")
+    };
+    for version in ["r14", "2000", "2004", "2007"] {
+        assert_eq!(arrowhead(version), Some(false), "{version}");
+    }
+    for version in ["2010", "2013", "2018"] {
+        assert_eq!(arrowhead(version), None, "{version}");
+    }
+}

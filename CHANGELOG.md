@@ -50,6 +50,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A LEADER's `has_arrowhead` read from an R2010-or-later DWG is `None`. The vendored
+  engine reads that record one field short from R2010 on (it skips the annotation offset,
+  which those files still carry), so the value it returned for the flag was a bit of the
+  offset's encoding -- "no arrowhead" whenever the offset's z was zero -- not the file's
+  flag. Earlier versions are unaffected and still read the flag.
 - Two user-facing messages carried a run of spaces in mid-sentence: the refusal of an
   R2007+ DXF (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag
   diagnostic. Both now read as one sentence, pinned by tests.

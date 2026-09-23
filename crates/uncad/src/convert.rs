@@ -12,7 +12,7 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, is_pre_r13, SplineControlPoint,
+    get_point3d_array, is_pre_r13, is_r2010_or_later, SplineControlPoint,
 };
 use crate::text::TextDecoder;
 use std::ffi::CStr;
@@ -1113,8 +1113,17 @@ unsafe fn convert_entity(
             // field -- *which* arrowhead, not whether -- and the format does
             // not write it to DXF at all, so reading it here reported an
             // arrowhead for a leader whose file says it has none.
-            let has_arrowhead =
-                get_field::<u8>(entity_ptr, "LEADER", "arrowhead_on").map(|on| on != 0);
+            //
+            // From R2010 on the library reads this record one field short:
+            // it skips the annotation offset, which those files still carry,
+            // and every field after it comes from the wrong bits. Its
+            // "arrowhead" there is part of the offset's encoding (always
+            // off when the offset's z is zero), so it is not reported.
+            let has_arrowhead = if is_r2010_or_later(dwg) {
+                None
+            } else {
+                get_field::<u8>(entity_ptr, "LEADER", "arrowhead_on").map(|on| on != 0)
+            };
             // 0 straight, 1 spline (dwg.spec). The format does not state
             // what an absent group means, so an unreadable field is nothing.
             let path_type = match get_field::<u16>(entity_ptr, "LEADER", "path_type") {

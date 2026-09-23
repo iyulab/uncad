@@ -365,6 +365,19 @@ pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     unsafe { libredwg_sys::uncad_dwg_is_pre_r13(dwg) != 0 }
 }
 
+/// `true` when the drawing was read from an R2010-or-later DWG. The
+/// library's LEADER record layout loses its place in such a file after the
+/// annotation offset, so the fields it reads past that point -- the
+/// arrowhead flag among them -- are not what the file says.
+pub fn is_r2010_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: dwg is a live Dwg_Data (caller contract, same as the rest of
+    // this crate's conversion pass); the shim null-checks it again itself.
+    unsafe { libredwg_sys::uncad_dwg_is_r2010_or_later(dwg) != 0 }
+}
+
 /// Resolves a table reference to the name of the entry it points at in
 /// `table` (`LAYER`, `BLOCK`, `LTYPE`, ...) via `dwg_handle_name`. For a
 /// pre-R13 drawing the library matches the reference's `r11_idx` against the

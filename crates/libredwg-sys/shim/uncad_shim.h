@@ -132,6 +132,19 @@ int uncad_dwg_is_pre_r13(const Dwg_Data *dwg);
  */
 int uncad_dwg_is_r13_to_r2000(const Dwg_Data *dwg);
 
+/* 1 when the drawing was read from an R2010-or-later source, 0 otherwise or
+ * when `dwg` is NULL. Reads `from_version`, falling back to `version`, like
+ * uncad_dwg_is_pre_r13.
+ *
+ * The library's record layout for LEADER stops reading the annotation
+ * offset (`endptproj`) after R2007 while files from R2010 on still carry
+ * it, so every field it reads after that point in such a file comes from
+ * the wrong bits -- among them the arrowhead flag. The Rust side needs to
+ * know when that is the case, to say it cannot read the flag rather than
+ * report the misread value.
+ */
+int uncad_dwg_is_r2010_or_later(const Dwg_Data *dwg);
+
 /* `dwg->header.codepage`: the codepage the drawing's 8-bit strings (every
  * string before R2007) are in, as the Dwg_Codepage number -- read from the
  * DWG header, or from `$DWGCODEPAGE` by the DXF importer (which defaults to
