@@ -205,6 +205,68 @@
       "text_height": 3.5,
       "text": "SS400",
       "rotation": 0.0
+    },
+    {
+      "type": "CIRCLE",
+      "common": {
+        "id": 267,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10B"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "center": {
+        "x": -170.0,
+        "y": -50.0,
+        "z": 0.0
+      },
+      "radius": 3.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      }
+    },
+    {
+      "type": "ARC",
+      "common": {
+        "id": 268,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10C"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "center": {
+        "x": -110.0,
+        "y": -50.0,
+        "z": 0.0
+      },
+      "radius": 4.0,
+      "start_angle": 0.5235987755982988,
+      "end_angle": 2.6179938779914944,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": -1.0
+      }
     }
   ],
   "tables": {
@@ -427,6 +489,68 @@
             "text_height": 3.5,
             "text": "SS400",
             "rotation": 0.0
+          },
+          {
+            "type": "CIRCLE",
+            "common": {
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "center": {
+              "x": -170.0,
+              "y": -50.0,
+              "z": 0.0
+            },
+            "radius": 3.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -1.0
+            }
+          },
+          {
+            "type": "ARC",
+            "common": {
+              "id": 268,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10C"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "center": {
+              "x": -110.0,
+              "y": -50.0,
+              "z": 0.0
+            },
+            "radius": 4.0,
+            "start_angle": 0.5235987755982988,
+            "end_angle": 2.6179938779914944,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": -1.0
+            }
           }
         ]
       },

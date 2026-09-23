@@ -426,6 +426,17 @@ fn with_bulges(
         .collect()
 }
 
+/// An entity's extrusion direction (DXF 210): the normal of its plane, and
+/// for an entity stored in its own coordinate system the Z axis of that
+/// system. The default is the world Z axis.
+fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
+    get_point3d(entity_ptr, dxfname, "extrusion").unwrap_or(Point3D {
+        x: 0.0,
+        y: 0.0,
+        z: 1.0,
+    })
+}
+
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
 /// `VERTEX_PFACE` (vertex positions, in order) and `VERTEX_PFACE_FACE` (up to
 /// 4 vertex indices per face, 1-based, negative meaning "invisible edge" --
@@ -629,6 +640,7 @@ unsafe fn convert_entity(
                 common,
                 center,
                 radius,
+                extrusion: extrusion(entity_ptr, "CIRCLE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
@@ -672,6 +684,7 @@ unsafe fn convert_entity(
                 radius,
                 start_angle,
                 end_angle,
+                extrusion: extrusion(entity_ptr, "ARC"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ELLIPSE => {
@@ -680,11 +693,7 @@ unsafe fn convert_entity(
             let axis_ratio = get_field::<f64>(entity_ptr, "ELLIPSE", "axis_ratio")?;
             let start_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "end_angle")?;
-            let extrusion = get_point3d(entity_ptr, "ELLIPSE", "extrusion").unwrap_or(Point3D {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            });
+            let extrusion = extrusion(entity_ptr, "ELLIPSE");
             Entity::Ellipse(EllipseEntity {
                 common,
                 center,
