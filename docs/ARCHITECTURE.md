@@ -75,11 +75,15 @@ immediately as a compile error. `build.rs` registers the whole `vendor/libredwg/
 directory with `cargo:rerun-if-changed`, so an incremental build really does recompile the
 C sources and regenerate the bindings after a re-vendor -- no `cargo clean` needed.
 
-`build.rs` also carries two drift detectors:
+`build.rs` also carries three drift detectors:
 
 1. It compares the `.c` file count in `vendor/libredwg/src` against `LIBREDWG_SOURCES`.
    A mismatch means the vendored copy is damaged or out of step, and it `panic!`s.
-2. When the `lib/libredwg` submodule is checked out (local development and CI only, never
+2. It counts the `uncad local patch` markers in every file under `vendor/libredwg` and
+   compares them, file by file, against `LOCAL_PATCHES`. A re-vendor replaces a patched
+   file with upstream's without changing any file count, so this is what notices that the
+   local patches are gone; it `panic!`s, naming the files.
+3. When the `lib/libredwg` submodule is checked out (local development and CI only, never
    for a published-crate consumer), it cross-checks that submodule's `.c` file count
    against the vendored copy and emits a `cargo:warning` if they have diverged, without
    failing the build.

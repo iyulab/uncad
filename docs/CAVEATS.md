@@ -638,8 +638,10 @@ source with a dated `uncad local patch` comment saying why, and each is listed a
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
 **`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
-these patches is part of any submodule update.** None of them has been sent to LibreDWG
-yet.
+these patches is part of any submodule update.** `build.rs` counts the markers per file
+against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
+a re-vendor that drops a patch fails by name instead of compiling upstream's code. None of
+the patches has been sent to LibreDWG yet.
 
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
@@ -783,8 +785,9 @@ exceptions, plus one weak-copyleft test-only dependency granted by name. Develop
 dependencies are license-checked as well (`include-dev`): nothing distributed contains
 them, but they are still dependencies this repository chose. The gate reads `Cargo.lock`
 too, so the same submodule caveat applies -- what
-watches the vendored C side is the source-file drift detector in
-`crates/libredwg-sys/build.rs`. The
+watches the vendored C side is the pair of drift detectors in
+`crates/libredwg-sys/build.rs`: the source-file count, and the count of local-patch
+markers per file. The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
 than written by hand, and the handful of harmless lints it raises (`useless_transmute`,
 `missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`, `manual_div_ceil`) are allowed at

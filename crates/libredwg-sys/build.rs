@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Core LibreDWG sources actually needed for DWG/DXF *reading*, mirroring the
 // former WASM build's `emmake make -C src` scope (which itself excludes
@@ -40,6 +40,24 @@ const LIBREDWG_SOURCES: &[&str] = &[
     "out_dxfb.c",
     "print.c",
     "reedsolomon.c",
+];
+
+/// The comment every local change to the vendored LibreDWG carries.
+const LOCAL_PATCH_MARKER: &[u8] = b"uncad local patch";
+
+// The local patches the vendored copy carries, as (path under
+// vendor/libredwg, times LOCAL_PATCH_MARKER occurs in that file). NOTICE.md
+// lists the same five changes and docs/CAVEATS.md, "Local patches to the
+// vendored LibreDWG", says why each exists. scripts/sync-libredwg-vendor.sh
+// deletes and recopies the whole directory, so a re-vendor silently drops
+// every one of them; main() compares the tree against this table so that it
+// cannot.
+const LOCAL_PATCHES: &[(&str, usize)] = &[
+    ("src/common.c", 3),
+    ("src/common_entity_data.spec", 2),
+    ("src/dwg.c", 5),
+    ("src/dynapi.c", 1),
+    ("src/in_dxf.c", 2),
 ];
 
 fn main() {
@@ -102,6 +120,28 @@ fn main() {
              (see docs/ARCHITECTURE.md).",
             actual_c_files.len(),
             LIBREDWG_SOURCES.len()
+        );
+    }
+
+    // Patch detector: the file count above does not change when a re-vendor
+    // replaces a patched file with upstream's, so the markers are counted too.
+    // A file that lost (or gained) a marker fails the build by name.
+    let vendor_root = libredwg_src
+        .parent()
+        .expect("vendor/libredwg/src always has a parent directory");
+    let found_patches = local_patch_markers(vendor_root);
+    let expected_patches: Vec<(String, usize)> = LOCAL_PATCHES
+        .iter()
+        .map(|&(path, count)| (path.to_string(), count))
+        .collect();
+    if found_patches != expected_patches {
+        panic!(
+            "vendor/libredwg carries these `uncad local patch` markers (file, count): \
+             {found_patches:?}, but build.rs expects {expected_patches:?}. \
+             scripts/sync-libredwg-vendor.sh deletes the local patches on every run: re-apply \
+             them (docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\"), or, if one \
+             was dropped or added on purpose, update LOCAL_PATCHES in build.rs, NOTICE.md and \
+             docs/CAVEATS.md together."
         );
     }
 
@@ -379,6 +419,43 @@ fn main() {
             .expect("vendor/libredwg/src always has a parent directory")
             .display()
     );
+}
+
+/// Every file under `root` that contains [`LOCAL_PATCH_MARKER`], as its
+/// `/`-separated path relative to `root` and the number of times the marker
+/// occurs in it, sorted by path.
+fn local_patch_markers(root: &Path) -> Vec<(String, usize)> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, usize)>) {
+        let entries =
+            std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|e| panic!("cannot read an entry of {}: {e}", dir.display()))
+                .path();
+            if path.is_dir() {
+                walk(&path, root, out);
+                continue;
+            }
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            let count = bytes
+                .windows(LOCAL_PATCH_MARKER.len())
+                .filter(|window| *window == LOCAL_PATCH_MARKER)
+                .count();
+            if count > 0 {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("the walk stays under its root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push((relative, count));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
 }
 
 /// Fails early, and by name, when libclang is missing.

@@ -18,7 +18,8 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
 - **Modified**: **yes**, in five files. Each change carries an
   `uncad local patch` comment in the source saying what changed and why
   (GPLv3 §5(a)); `grep -rn "uncad local patch" vendor/libredwg/` finds every
-  marker.
+  marker, and `build.rs` refuses to build when the markers per file differ
+  from the list it carries.
 
 ### The five changes
 

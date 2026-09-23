@@ -24,7 +24,8 @@
 # WARNING: the vendored copy carries local patches (grep it for
 # "uncad local patch"; they are listed in docs/CAVEATS.md under "Local
 # patches to the vendored LibreDWG"). This script deletes and recopies the
-# whole directory, so re-apply or re-check them after every run.
+# whole directory, so re-apply or re-check them after every run: build.rs
+# counts the markers per file and fails the build until they are back.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
