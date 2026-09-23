@@ -136,6 +136,14 @@ Notable changes to this project are recorded here. The format follows
   tables, and a byte the declared codepage has no character for is now U+FFFD *and* a
   `TEXT_ENCODING: ...` warning in `read_diagnostics` naming the entity and field. See
   `docs/CAVEATS.md`, "Text before R2007 is decoded here".
+- **The DOS-era double-byte codepages decode.** LibreDWG's tables pair every byte of a
+  Big5 or GB2312 string, ASCII included, so a drawing declaring either lost its
+  `*Model_Space` (read as `*M`, `od`, ...) and every entity, and `中国 AB` read as four
+  U+FFFD; CP932 (DOS Shift-JIS) was read one byte at a time. Only bytes >= 0x80 open a
+  pair now, a GB2312 pair is looked up in the 7-bit form the library's table is indexed
+  by, and CP932 is double-byte. ASCII is never looked up in any codepage's table, so a
+  0x5C stays the backslash of `\P` and `\U+XXXX` where CP932's and JOHAB's tables say yen
+  and won. `tests/codepage.rs`.
 - **Closed LWPOLYLINEs are closed.** The `closed` field read bit 1 of the entity's `flag`,
   which in the library's LWPOLYLINE layout means "has extrusion"; closed is bit 512. Not one
   of the corpus's 1,137 LWPOLYLINEs had ever been reported closed, so every closed outline

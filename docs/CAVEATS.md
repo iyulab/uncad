@@ -219,8 +219,28 @@ Asian one, and reports what it could not decode:
   and reported otherwise.
 
 The library's own converter for this (`bit_TV_to_utf8_codepage`) is not used: it writes a
-NUL for an unmapped character, which cuts the string short at that point, and in some
-cases returns its input aliased rather than copied.
+NUL for an unmapped character, which cuts the string short at that point, sizes its output
+at 1.5 times the input for a single-byte codepage and stops reading when that is full (a
+CP1251 `Стена` came back as `Стен`), and in some cases returns its input aliased rather
+than copied.
+
+**The DOS-era double-byte codepages are read by their bytes.** LibreDWG's tables treat
+every byte of a Big5 (24) or GB2312 (31) string as the first of a pair, ASCII included:
+`*Model_Space` paired up into `*M`, `od`, ..., so a drawing declaring either lost its model
+space and every entity, and `中国 AB` came back as four U+FFFD. Both are EUC-style
+encodings whose lead and trail bytes all have the high bit set, so only such a byte opens
+a pair here; a GB2312 pair is masked to the 7-bit ISO-2022 form the library's table is
+indexed by, since the file holds EUC-CN bytes; and CP932 (22, DOS Shift-JIS), which
+`dwg_codepage_isasian` leaves out, is read as the double-byte encoding it is rather than
+one byte at a time through a single-byte table. **ASCII is never looked up**, in any
+codepage: the CP932 and JOHAB tables map 0x5C to a yen and a won sign, but in a drawing it
+is the backslash of `\P` and `\U+XXXX`. `tests/codepage.rs` writes each case with bytes
+from Python's own encoders, with the Windows twins (936, 950, 932) of the same bytes as
+the control.
+
+**Escapes are text.** `\U+XXXX` and `\M+nXXXX` in a string are passed through as the file
+wrote them; expanding them is a consumer's decision, as the rest of MTEXT's inline codes
+are.
 
 **What is trusted, and what cannot be told:**
 
@@ -240,6 +260,9 @@ cases returns its input aliased rather than copied.
   there.
 - R2007 and later: the library converts from UTF-16 itself and the codepage is moot; the
   result is checked to be UTF-8 and reported if it is not.
+- A codepage LibreDWG has no table for -- `CP_UNDEFINED`, or a corrupt value in a DWG
+  header, which the library would index its tables with unchecked -- is not guessed at
+  (as `ANSI_1252`, say): its strings are read as UTF-8 and reported where they are not.
 
 The golden case G8 (a title block with Korean layer and block names, attribute values and
 defaults, and a text, written as CP949 with `$DWGCODEPAGE = ANSI_949`) reads back exactly,

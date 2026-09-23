@@ -22,6 +22,13 @@ use crate::dynapi;
 /// `Dwg_Codepage` values this module treats specially; the numbers are the
 /// `header.codepage` values LibreDWG's `codepages.h` fixes them to.
 const CP_UTF8: u16 = 0;
+/// DOS Shift-JIS: double-byte, although `dwg_codepage_isasian` leaves it out.
+const CP_CP932: u16 = 22;
+/// DOS Big5: an EUC-style encoding whose lead and trail bytes are all >= 0x80.
+const CP_BIG5: u16 = 24;
+/// EUC-CN: like Big5, and the library's table for it is indexed by the 7-bit
+/// ISO-2022 form of a pair (`0x2121..0x777E`), not by the bytes in the file.
+const CP_GB2312: u16 = 31;
 const CP_UTF16: u16 = 43;
 /// The last codepage the library has a table for (`CP_ANSI_1258`).
 const CP_LAST: u16 = 44;
@@ -56,38 +63,73 @@ fn codepage_label(codepage: u16) -> String {
     }
 }
 
+/// Whether `lead` (a byte >= 0x80) opens a two-byte sequence in the
+/// double-byte `codepage`.
+///
+/// The library's `dwg_codepage_is_twobyte` answers "always" for the DOS-era
+/// Big5 and GB2312 pages, ASCII included. Both are EUC-style encodings whose
+/// lead and trail bytes are all >= 0x80, so the high bit is the rule there;
+/// ASCII never reaches this function at all (see [`decode_codepage`]).
+fn opens_pair(codepage: u16, lead: u8) -> bool {
+    if codepage == CP_GB2312 || codepage == CP_BIG5 {
+        return true;
+    }
+    // SAFETY: a pure table predicate on a codepage number with tables.
+    unsafe { libredwg_sys::dwg_codepage_is_twobyte(codepage as libredwg_sys::Dwg_Codepage, lead) }
+}
+
 /// Decodes `bytes` in `codepage` through the library's tables: one byte or,
-/// in an East Asian codepage, a lead byte plus its trail byte per
+/// in a double-byte codepage, a lead byte plus its trail byte per
 /// character. Returns the text and how many input bytes had no mapping;
 /// each of those became U+FFFD in the text.
 ///
 /// The library's own converter (`bit_TV_to_utf8_codepage`) is not used
 /// because it writes a NUL for an unmapped character -- which cuts the
 /// string short at that point -- and returns its input aliased rather than
-/// copied in some cases. The loop here is the same walk, with the unmapped
-/// count kept.
+/// copied in some cases. The loop here is the same walk with the unmapped
+/// count kept, and with three corrections to how the library reads the
+/// DOS-era double-byte pages:
+///
+/// - **ASCII is never looked up.** No double-byte page has a lead byte below
+///   0x80, and the tables' only differences there -- 0x5C as a yen sign in
+///   CP932 and a won sign in JOHAB -- would turn the backslash of MTEXT's
+///   `\P` and of every `\U+XXXX` escape into a currency sign. So a byte
+///   below 0x80 is itself, in every codepage.
+/// - **Big5 and GB2312 pair only bytes >= 0x80** (see [`opens_pair`]). The
+///   library pairs every byte there, which consumed `*Model_Space` as `*M`,
+///   `od`, ... and left such a drawing with no model space and no entities.
+/// - **CP932 (DOS Shift-JIS) is double-byte**, although
+///   `dwg_codepage_isasian` leaves it out, so its kanji are not looked up
+///   one byte at a time in a single-byte table. And a GB2312 pair is
+///   masked to its 7-bit form before the lookup, because that is how the
+///   library's table is indexed while the file holds EUC-CN bytes.
 pub fn decode_codepage(bytes: &[u8], codepage: u16) -> (String, usize) {
     debug_assert!(has_codepage_tables(codepage));
     let cp = codepage as libredwg_sys::Dwg_Codepage;
     // SAFETY: pure table predicates on a codepage number within the range
     // has_codepage_tables admits.
-    let two_byte_codepage = unsafe { libredwg_sys::dwg_codepage_isasian(cp) };
+    let two_byte_codepage =
+        unsafe { libredwg_sys::dwg_codepage_isasian(cp) } || codepage == CP_CP932;
     let mut text = String::with_capacity(bytes.len());
     let mut unmapped = 0;
     let mut i = 0;
     while i < bytes.len() {
         let lead = bytes[i];
         i += 1;
+        if lead < 0x80 {
+            text.push(char::from(lead));
+            continue;
+        }
         let code = if two_byte_codepage {
-            // The wide lookup is applied to every byte, as the library's own
-            // walk does: a few single bytes map differently in these
-            // codepages (0x5C is a yen sign in CP932, a won sign in JOHAB).
             let mut c = u16::from(lead);
-            if unsafe { libredwg_sys::dwg_codepage_is_twobyte(cp, lead) } {
+            if opens_pair(codepage, lead) {
                 match bytes.get(i) {
                     Some(&trail) => {
                         c = (c << 8) | u16::from(trail);
                         i += 1;
+                        if codepage == CP_GB2312 {
+                            c &= 0x7F7F;
+                        }
                     }
                     None => {
                         // A lead byte at the very end: nothing to pair it with.
@@ -97,10 +139,10 @@ pub fn decode_codepage(bytes: &[u8], codepage: u16) -> (String, usize) {
                     }
                 }
             }
+            // SAFETY: a pure table lookup (see above).
             unsafe { libredwg_sys::dwg_codepage_uwc(cp, c) as u32 }
-        } else if lead < 0x80 {
-            u32::from(lead)
         } else {
+            // SAFETY: a pure table lookup (see above).
             unsafe { libredwg_sys::dwg_codepage_uc(cp, lead) as u32 }
         };
         // The tables answer 0 for a code they do not contain.
@@ -286,6 +328,9 @@ mod tests {
 
     const ANSI_949: u16 = 40;
     const ANSI_1252: u16 = 30;
+    const ANSI_936: u16 = 39;
+    const ANSI_950: u16 = 41;
+    const ANSI_932: u16 = 38;
 
     fn decoder(codepage: u16, wide: bool, utf8_first: bool) -> TextDecoder {
         TextDecoder {
@@ -313,6 +358,21 @@ mod tests {
     }
 
     #[test]
+    fn single_byte_codepages_keep_every_character_of_a_non_ascii_string() {
+        // CP1251 "Стена" (all five bytes non-ASCII) and CP1252 "€€€" (three
+        // bytes of UTF-8 each): the library's own converter sizes its output
+        // at 1.5x the input and stops reading when it is full.
+        assert_eq!(
+            decode_codepage(b"\xD1\xF2\xE5\xED\xE0", 29),
+            ("Стена".to_string(), 0)
+        );
+        assert_eq!(
+            decode_codepage(b"\x80\x80\x80", ANSI_1252),
+            ("€€€".to_string(), 0)
+        );
+    }
+
+    #[test]
     fn an_unmapped_byte_is_replaced_and_counted() {
         // 0x81 is unassigned in Windows-1252.
         let (text, unmapped) = decode_codepage(b"a\x81b", ANSI_1252);
@@ -322,6 +382,52 @@ mod tests {
         let (text, unmapped) = decode_codepage(b"ok\xB5", ANSI_949);
         assert_eq!(text, "ok\u{FFFD}");
         assert_eq!(unmapped, 1);
+    }
+
+    #[test]
+    fn the_dos_era_double_byte_codepages_pair_only_high_bytes() {
+        // Byte sequences from Python: '中国 AB'.encode('gb2312') (EUC-CN),
+        // '中文 AB'.encode('big5'), '日本 AB'.encode('shift_jis'). The
+        // Windows twins 936/950/932 read the same bytes and are the control.
+        // Before these rules GB2312 gave four U+FFFD (the ASCII paired up and
+        // lost), Big5 '中文' plus two U+FFFD, CP932 U+FFFD for each kanji.
+        let cases: [(u16, &[u8], &str); 6] = [
+            (CP_GB2312, b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
+            (ANSI_936, b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
+            (CP_BIG5, b"\xA4\xA4\xA4\xE5 AB", "中文 AB"),
+            (ANSI_950, b"\xA4\xA4\xA4\xE5 AB", "中文 AB"),
+            (CP_CP932, b"\x93\xFA\x96\x7B AB", "日本 AB"),
+            (ANSI_932, b"\x93\xFA\x96\x7B AB", "日本 AB"),
+        ];
+        for (codepage, bytes, expected) in cases {
+            assert_eq!(
+                decode_codepage(bytes, codepage),
+                (expected.to_string(), 0),
+                "codepage {codepage}"
+            );
+        }
+        // ASCII is never paired: a block name survives whole.
+        for codepage in [CP_GB2312, CP_BIG5, CP_CP932] {
+            assert_eq!(
+                decode_codepage(b"*Model_Space", codepage),
+                ("*Model_Space".to_string(), 0)
+            );
+        }
+    }
+
+    #[test]
+    fn ascii_is_never_looked_up_so_a_backslash_stays_a_backslash() {
+        // The library's CP932 and JOHAB tables map 0x5C to a currency sign;
+        // in a drawing it is the backslash of \P and \U+XXXX.
+        for codepage in [CP_CP932, ANSI_932] {
+            assert_eq!(
+                decode_codepage(b"\x93\xFA\\P\\U+00B1", codepage),
+                ("日\\P\\U+00B1".to_string(), 0)
+            );
+        }
+        const JOHAB: u16 = 26;
+        let (text, _) = decode_codepage(b"\xC8\\P", JOHAB);
+        assert!(text.ends_with("\\P"), "{text}");
     }
 
     #[test]
