@@ -907,6 +907,36 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
   true colour is what the file states" for how the colour is read).
 
+## The LLM/VLM package (`uncad-export`, `uncad export`)
+
+`crates/uncad-export` writes the directory `docs/VLM_EXPORT_DESIGN.md`
+describes. It is a consumer: it parses with `uncad::parse_with_header`,
+renders through iron-render-cad's scene API, and computes every derived value
+the model does not carry (display strings, lengths, areas, how far a
+dimension's stored value is trusted). Known limits:
+
+- **The crop is decided before text is laid out.** Text boxes in `texts.json`
+  are the measured glyph outlines of the bundled font, but the crop that
+  frames the overview still uses the renderer's estimate. The frames and the
+  tile culling use the measured boxes.
+- **A character the bundled subset lacks is drawn as a box.** The subset holds
+  Latin, Greek, the 2350 common Hangul syllables and the CAD symbols; the
+  record says `font_ok: false` and the manifest warns.
+- **A tile costs what touches it.** Each tile draws only the entities whose
+  extent meets it, so a drawing whose every entity crosses every tile costs
+  tiles x content. `--max-tiles` (400) and `--max-levels` (5) bound the total.
+- **Sheets are plan views composited by rule.** A viewport that is off, not a
+  plan view or the layout's overall frame is not composited; `sheets.json`
+  says which, per viewport.
+- **Record ids are the model's entity ids.** They differ from the handle
+  strings the earlier monolithic export used; `source_handle` keeps the
+  file's handle.
+- **Its numbers were measured against the earlier implementation on five
+  drawings only** (the corpus's `example_2000.dwg` and `example_2018.dxf` and
+  three local samples): every manifest count matched except the ATTDEF and
+  ATTRIB records the attribute walk now reads. A full comparison over the
+  corpus has not been run on this layout.
+
 ## No DWG/DXF writing
 
 0.1.0's `CadDatabase::write_dwg`/`write_dxf`, `uncad::dwg_to_dxf`, `WriteError` and the
