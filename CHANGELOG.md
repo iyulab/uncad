@@ -178,23 +178,13 @@ Notable changes to this project are recorded here. The format follows
   process from inside the C library (0xC0000409 on Windows, from `strftime`). The
   importer compares an R2007+ DXF's table-record names decoded, so its layer and block
   lookups no longer stop at the first character: without that patch `example_2018.dxf`
-  reads with 65 of its 72 entities on no layer (`tests/r2007_dxf_handles.rs`). One more is
-  not visible in this crate's output yet: an R2004+ entity carrying both a true colour and
-  a transparency no longer has the two swapped in the library's fields (this crate reads a
-  true colour only under the TRUECOLOR method, which the entities measured do not have).
-  Before R2007+ DXF was read, the 208 corpus drawings gave byte-identical JSON with and
-  without the patches. `build.rs` refuses to build when a patch's marker has gone missing,
-  which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
-  silence.
-  process from inside the C library (0xC0000409 on Windows, from `strftime`). An R2004+
+  reads with 65 of its 72 entities on no layer (`tests/r2007_dxf_handles.rs`). An R2004+
   entity carrying both a true colour and a transparency no longer has the two swapped in
-  the library's fields (`2004/HatchG.dwg`'s HATCH 29F: `0x1ae464`, not `0x0000e5`). One
-  more is not visible in this crate's output yet: the importer compares an R2007+ DXF's
-  table-record names decoded, so its layer and block lookups no longer stop at the first
-  character (such a DXF is still refused). When the patches landed, the JSON output of
-  the 208 corpus drawings was byte-identical with and without them; the colour-order one
-  shows since true colours are read as the file states them (below). `build.rs` refuses
-  to build when a patch's marker has gone missing, which a re-vendor through
+  the library's fields (`2004/HatchG.dwg`'s HATCH 29F: `0x1ae464`, not `0x0000e5`). When
+  the patches landed, the JSON output of the 208 corpus drawings was byte-identical with
+  and without them; the colour-order one shows since true colours are read as the file
+  states them (below), and the name-lookup one since R2007+ DXF is read. `build.rs`
+  refuses to build when a patch's marker has gone missing, which a re-vendor through
   `scripts/sync-libredwg-vendor.sh` would otherwise do in silence.
 - A 2D or 3D POLYLINE from an R13 to R2000 drawing no longer loses its last vertex. The
   library's point accessors stop one record early in that range; the vertex records are
