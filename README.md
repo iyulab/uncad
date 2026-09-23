@@ -150,3 +150,5 @@ Further reading:
   test layout, the FFI/bindgen boundary, thread safety, the entity model
 - [`docs/CAVEATS.md`](./docs/CAVEATS.md) — entity type coverage, known
   limitations and bugs, cross-platform notes
+- [`docs/VLM_EXPORT_DESIGN.md`](./docs/VLM_EXPORT_DESIGN.md) — the LLM/VLM
+  package `uncad export` writes: its files, coordinates, tiling and crop rules
