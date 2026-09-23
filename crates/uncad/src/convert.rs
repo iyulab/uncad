@@ -26,7 +26,7 @@ use uncad_model::model::{
     Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity, SolidEntity,
     SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
-use uncad_model::model::{Point2D, Point3D};
+use uncad_model::model::{HorizontalJustification, Point2D, Point3D, VerticalJustification};
 
 /// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
 /// as in DXF group 70 and as `dwg.h` documents for `Dwg_Entity_POLYLINE_2D`.
@@ -659,6 +659,88 @@ fn stated_widths(widths: Vec<SegmentWidth>, const_width: f64) -> Vec<SegmentWidt
     }
 }
 
+/// How a TEXT, ATTRIB or ATTDEF is placed beyond its start point: the
+/// fields the three share, under the same dynapi names.
+struct TextPlacement {
+    horizontal: HorizontalJustification,
+    vertical: VerticalJustification,
+    alignment_point: Option<Point2D>,
+    width_factor: f64,
+    oblique_angle: f64,
+    style_name: Ref<String>,
+}
+
+/// Reads a TEXT's, ATTRIB's or ATTDEF's [`TextPlacement`] off
+/// `entity_ptr`, the type-specific struct pointer of a live `dxfname`
+/// entity of `dwg`.
+///
+/// - The justifications are DXF 72 and 73 (74 on ATTRIB/ATTDEF), 0 to 5 and
+///   0 to 3; a value outside the format's range reads as the format's
+///   default, left and baseline, which is also what an absent group means.
+/// - The alignment point (DXF 11) exists only for a justified text:
+///   dwg.h's `alignment_pt` is "optional, when dataflags & 2, i.e. 72/73 !=
+///   0", and for left/baseline text the field holds whatever the decoder
+///   left in it, which is not a point the file stated.
+/// - The width factor (DXF 41) is a ratio whose default is 1; a 0 is no
+///   width at all, and it is what a hand-written DXF that leaves the group
+///   out reads as, so it is 1 too.
+/// - The oblique angle (DXF 51) arrives in radians from both readers.
+fn text_placement(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+) -> TextPlacement {
+    let horizontal = match get_field::<u16>(entity_ptr, dxfname, "horiz_alignment") {
+        Some(1) => HorizontalJustification::Center,
+        Some(2) => HorizontalJustification::Right,
+        Some(3) => HorizontalJustification::Aligned,
+        Some(4) => HorizontalJustification::Middle,
+        Some(5) => HorizontalJustification::Fit,
+        _ => HorizontalJustification::Left,
+    };
+    let vertical = match get_field::<u16>(entity_ptr, dxfname, "vert_alignment") {
+        Some(1) => VerticalJustification::Bottom,
+        Some(2) => VerticalJustification::Middle,
+        Some(3) => VerticalJustification::Top,
+        _ => VerticalJustification::Baseline,
+    };
+    let justified =
+        horizontal != HorizontalJustification::Left || vertical != VerticalJustification::Baseline;
+    TextPlacement {
+        horizontal,
+        vertical,
+        alignment_point: justified
+            .then(|| get_point2d(entity_ptr, dxfname, "alignment_pt"))
+            .flatten(),
+        width_factor: get_field::<f64>(entity_ptr, dxfname, "width_factor")
+            .filter(|w| *w != 0.0)
+            .unwrap_or(1.0),
+        oblique_angle: get_field::<f64>(entity_ptr, dxfname, "oblique_angle").unwrap_or(0.0),
+        style_name: text_style(dwg, text, entity_ptr, dxfname),
+    }
+}
+
+/// The text style (DXF 7) a TEXT, ATTRIB, ATTDEF or MTEXT names, as a
+/// reference like a layer. The DXF reference's default for an absent group
+/// is the style named STANDARD, and LibreDWG's DXF importer already points
+/// such an entity at that entry when the drawing declares it; a drawing
+/// that declares none leaves the reference null, which is `Absent`.
+fn text_style(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+) -> Ref<String> {
+    reference(
+        dwg,
+        text,
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, dxfname, "style"),
+        c"STYLE",
+        |handle_ptr| text.handle_name(dwg, handle_ptr),
+    )
+}
+
 /// Resolves a WIPEOUT's clip boundary to local 2D points -- see
 /// [`crate::model::WipeoutEntity`] for the risk this carries.
 ///
@@ -816,6 +898,7 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
             let start_point = get_point2d(entity_ptr, "TEXT", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
+            let placement = text_placement(dwg, text, entity_ptr, "TEXT");
             let text = text
                 .field(entity_ptr, "TEXT", "text_value")
                 .unwrap_or_default();
@@ -826,12 +909,12 @@ unsafe fn convert_entity(
                 text_height,
                 text,
                 rotation,
-                horizontal_justification: Default::default(),
-                vertical_justification: Default::default(),
-                alignment_point: None,
-                width_factor: 1.0,
-                oblique_angle: 0.0,
-                style_name: uncad_model::Ref::Absent,
+                horizontal_justification: placement.horizontal,
+                vertical_justification: placement.vertical,
+                alignment_point: placement.alignment_point,
+                width_factor: placement.width_factor,
+                oblique_angle: placement.oblique_angle,
+                style_name: placement.style_name,
                 elevation: get_field::<f64>(entity_ptr, "TEXT", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "TEXT"),
             })
@@ -982,6 +1065,7 @@ unsafe fn convert_entity(
             let text_height = get_field::<f64>(entity_ptr, "ATTRIB", "height")?;
             // Read before `text` is shadowed by the value below.
             let tag = text.field(entity_ptr, "ATTRIB", "tag").unwrap_or_default();
+            let placement = text_placement(dwg, text, entity_ptr, "ATTRIB");
             let text = text
                 .field(entity_ptr, "ATTRIB", "text_value")
                 .unwrap_or_default();
@@ -994,12 +1078,12 @@ unsafe fn convert_entity(
                 text,
                 rotation,
                 flags: Default::default(),
-                horizontal_justification: Default::default(),
-                vertical_justification: Default::default(),
-                alignment_point: None,
-                width_factor: 1.0,
-                oblique_angle: 0.0,
-                style_name: uncad_model::Ref::Absent,
+                horizontal_justification: placement.horizontal,
+                vertical_justification: placement.vertical,
+                alignment_point: placement.alignment_point,
+                width_factor: placement.width_factor,
+                oblique_angle: placement.oblique_angle,
+                style_name: placement.style_name,
                 elevation: get_field::<f64>(entity_ptr, "ATTRIB", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "ATTRIB"),
             })
@@ -1055,6 +1139,7 @@ unsafe fn convert_entity(
                 .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "ATTDEF", "rotation").unwrap_or(0.0);
             let tag = text.field(entity_ptr, "ATTDEF", "tag").unwrap_or_default();
+            let placement = text_placement(dwg, text, entity_ptr, "ATTDEF");
             Entity::Attdef(AttdefEntity {
                 common,
                 start_point,
@@ -1063,12 +1148,12 @@ unsafe fn convert_entity(
                 default_value,
                 rotation,
                 flags: Default::default(),
-                horizontal_justification: Default::default(),
-                vertical_justification: Default::default(),
-                alignment_point: None,
-                width_factor: 1.0,
-                oblique_angle: 0.0,
-                style_name: uncad_model::Ref::Absent,
+                horizontal_justification: placement.horizontal,
+                vertical_justification: placement.vertical,
+                alignment_point: placement.alignment_point,
+                width_factor: placement.width_factor,
+                oblique_angle: placement.oblique_angle,
+                style_name: placement.style_name,
                 elevation: get_field::<f64>(entity_ptr, "ATTDEF", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "ATTDEF"),
             })
@@ -1159,6 +1244,14 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MTEXT => {
             let insertion_point = get_point3d(entity_ptr, "MTEXT", "ins_pt")?;
+            let style_name = text_style(dwg, text, entity_ptr, "MTEXT");
+            // DXF 41: 0 is a text that is not wrapped, which is what an absent
+            // group means too.
+            let rect_width = get_field::<f64>(entity_ptr, "MTEXT", "rect_width").unwrap_or(0.0);
+            // DXF 42/43, a measurement of the laid-out text: zero measures no
+            // text, so it is "not stated" rather than a size.
+            let extent =
+                |field: &str| get_field::<f64>(entity_ptr, "MTEXT", field).filter(|v| *v != 0.0);
             let text = text.field(entity_ptr, "MTEXT", "text").unwrap_or_default();
             let text_height = get_field::<f64>(entity_ptr, "MTEXT", "text_height").unwrap_or(1.0);
             // The file states the rotation as the text's X-axis direction
@@ -1197,10 +1290,10 @@ unsafe fn convert_entity(
                 rotation,
                 line_spacing_factor,
                 attachment,
-                rect_width: 0.0,
-                extents_width: None,
-                extents_height: None,
-                style_name: uncad_model::Ref::Absent,
+                rect_width,
+                extents_width: extent("extents_width"),
+                extents_height: extent("extents_height"),
+                style_name,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {

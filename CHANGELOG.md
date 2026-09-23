@@ -55,6 +55,12 @@ Notable changes to this project are recorded here. The format follows
   segment is straight and every width the constant one. A DXF POLYLINE's default widths
   (its groups 40/41) are the widths of the vertices that state none, so a DXF and its DWG
   twin agree. See `docs/CAVEATS.md`, "Polyline bulges and widths are carried as stated".
+- TEXT, ATTRIB and ATTDEF carry how they are placed beyond their start point: the
+  horizontal and vertical justification (DXF 72, 73/74), the alignment point (DXF 11,
+  only for a justified text), the width factor (DXF 41), the oblique angle (DXF 51,
+  radians) and the text style they name (DXF 7). An MTEXT carries its reference width
+  (DXF 41), the extents its writer measured (DXF 42/43, `None` when not stated) and its
+  text style.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
