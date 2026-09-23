@@ -27,3 +27,4 @@ uncad = { path = "../uncad", version = "0.2.0" }
 # must build from a standalone checkout.
 uncad-model = "0.1.0"
 iron-render-cad = "0.1.0"
+serde = { version = "1.0.229", features = ["derive"] }

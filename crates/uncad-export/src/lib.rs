@@ -7,9 +7,10 @@
 //! and the exact numbers a picture cannot give.
 //!
 //! What is here so far: [`fonts`], the face the package draws and measures
-//! text with, and [`geom`], the arithmetic its records carry -- a polyline's
+//! text with; [`geom`], the arithmetic its records carry -- a polyline's
 //! length and area with its bulge arcs, whether an outline crosses itself,
-//! the map from an entity's own plane to the world.
+//! the map from an entity's own plane to the world; and [`text`], the
+//! string a reader sees for a text the file stores with its codes.
 //!
 //! # Licence
 //!
@@ -18,3 +19,4 @@
 
 pub mod fonts;
 pub mod geom;
+pub mod text;

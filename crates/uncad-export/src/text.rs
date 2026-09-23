@@ -1,0 +1,413 @@
+//! The text a record carries: a TEXT, MTEXT, ATTRIB or TOLERANCE string,
+//! or a dimension's label, with AutoCAD's inline codes read -- MTEXT's `\P`,
+//! `\S` stacked fractions, `{...}` groups and `\A`/`\H`/`\f`-style format
+//! codes, the `%%c` / `%%d` / `%%p` / `%%u` symbol and toggle codes TEXT,
+//! ATTRIB and dimension labels use, and the `\U+XXXX` escapes both use.
+//!
+//! The model keeps every string as the file states it, codes and all; what
+//! a reader sees is this consumer's derivation, so the package's records
+//! carry both (`text` and, when it differs, `raw`), and its string index
+//! keys on this one. Getting it right matters for numbers:
+//! `3{\H0.7x;\S1#2;}"` is three and a half inches, and stripping the codes
+//! turns it into `31/2"`.
+//!
+//! The renderer reads the same codes for what it draws, with a few choices
+//! of its own: `%%c` is U+2300 in the picture (a glyph the bundled font does
+//! not have) and the `∅` (U+2205) the font has here, and a tolerance stack
+//! keeps its `^` here. The record is the reader's string; the picture is the
+//! renderer's.
+//!
+//! Not attempted: `\M+nXXXX` multibyte escapes (LibreDWG expands them for
+//! pre-R2007 files; in an R2007+ file they are left as written), `\p...;`
+//! paragraph properties beyond dropping them, and any visual formatting.
+
+use serde::{Deserialize, Serialize};
+
+/// A text decoration one of the toggle codes switched on somewhere in the
+/// string (`\L`/`\l`, `%%u` underline; `\O`/`\o`, `%%o` overline; `\K`/`\k`
+/// strike-through). Recorded per string, not per character.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Decoration {
+    Underline,
+    Overline,
+    Strikethrough,
+}
+
+/// Which separator a `\S` stack used, i.e. how AutoCAD draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StackKind {
+    /// `\S1/2;` -- a horizontal fraction bar (`DIMFRAC` 0).
+    Horizontal,
+    /// `\S1#2;` -- a diagonal bar (`DIMFRAC` 1).
+    Diagonal,
+    /// `\S+0.1^-0.2;` -- one value over the other with no bar: a tolerance
+    /// stack, or a super/subscript when one side is empty.
+    Tolerance,
+}
+
+/// One `\S` stack found in an MTEXT string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fraction {
+    pub numerator: String,
+    pub denominator: String,
+    pub kind: StackKind,
+}
+
+/// What a raw text string decodes to.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DecodedText {
+    /// The readable text. Paragraph breaks (`\P`, `\X`, `\N`) are `\n`;
+    /// a stack `\S a#b;` reads as `a/b` (`a^b` for a tolerance stack), with a
+    /// space inserted when a digit precedes it so `3 1/2` cannot read as
+    /// thirty-one halves.
+    pub plain: String,
+    pub decorations: Vec<Decoration>,
+    pub fractions: Vec<Fraction>,
+}
+
+/// Decodes an MTEXT string (also what a dimension's cached label holds).
+pub fn decode_mtext(raw: &str) -> DecodedText {
+    decode(raw, true)
+}
+
+/// Decodes a TEXT / ATTRIB / TOLERANCE string: only the `%%` codes and
+/// `\U+XXXX` escapes apply, a backslash is otherwise a backslash.
+pub fn decode_text(raw: &str) -> DecodedText {
+    decode(raw, false)
+}
+
+fn decode(raw: &str, mtext: bool) -> DecodedText {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = DecodedText::default();
+    let mut plain = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' && i + 1 < chars.len() {
+            let code = chars[i + 1];
+            // \U+XXXX is the one backslash escape TEXT shares with MTEXT.
+            if let Some((ch, len)) = unicode_escape(&chars[i..]) {
+                plain.push(ch);
+                i += len;
+                continue;
+            }
+            if !mtext {
+                plain.push(c);
+                i += 1;
+                continue;
+            }
+            match code {
+                'P' | 'X' | 'N' => plain.push('\n'),
+                '~' => plain.push(' '),
+                '\\' | '{' | '}' => plain.push(code),
+                'L' => add_decoration(&mut out, Decoration::Underline),
+                'O' => add_decoration(&mut out, Decoration::Overline),
+                'K' => add_decoration(&mut out, Decoration::Strikethrough),
+                'l' | 'o' | 'k' => {}
+                'S' => {
+                    let end = chars[i + 2..]
+                        .iter()
+                        .position(|&ch| ch == ';')
+                        .map(|p| i + 2 + p);
+                    match end {
+                        Some(end) => {
+                            let body: String = chars[i + 2..end].iter().collect();
+                            push_stack(&mut out, &mut plain, &body);
+                            i = end + 1;
+                            continue;
+                        }
+                        // Unterminated: nothing sensible to do but keep it.
+                        None => plain.push_str("\\S"),
+                    }
+                }
+                // Format codes with a `;` terminator: alignment, colour,
+                // font, height, slant, tracking, width, paragraph properties.
+                'A' | 'C' | 'c' | 'f' | 'F' | 'H' | 'Q' | 'T' | 'W' | 'p' => {
+                    // No terminator: drop just the code letter.
+                    if let Some(p) = chars[i + 2..].iter().position(|&ch| ch == ';') {
+                        i += 2 + p + 1;
+                        continue;
+                    }
+                }
+                // Anything else: an unknown code, or a stray backslash in
+                // text that was never escaped. Keep the character.
+                other => plain.push(other),
+            }
+            i += 2;
+            continue;
+        }
+        if mtext && (c == '{' || c == '}') {
+            i += 1;
+            continue;
+        }
+        if c == '%' && i + 2 < chars.len() && chars[i + 1] == '%' {
+            if let Some((replacement, len)) = percent_code(&mut out, &chars[i..]) {
+                plain.push_str(&replacement);
+                i += len;
+                continue;
+            }
+        }
+        plain.push(c);
+        i += 1;
+    }
+    // A stray control byte in a label (or a `\U+0001` escape) must not
+    // reach the SVG: roxmltree rejects the whole document, and the PNG and
+    // the export package with it. U+FFFD marks where it was.
+    if plain.chars().any(is_xml_illegal) {
+        plain = plain
+            .chars()
+            .map(|c| if is_xml_illegal(c) { '\u{FFFD}' } else { c })
+            .collect();
+    }
+    out.plain = plain;
+    out
+}
+
+/// Whether XML 1.0 forbids `c` in a document altogether: the C0 controls
+/// other than tab, LF and CR, and the non-characters U+FFFE / U+FFFF. (A
+/// lone surrogate cannot occur in a Rust `char`.) The renderer's SVG is
+/// parsed by roxmltree, which refuses a document containing one.
+pub(crate) fn is_xml_illegal(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0}'..='\u{8}' | '\u{B}' | '\u{C}' | '\u{E}'..='\u{1F}' | '\u{FFFE}' | '\u{FFFF}'
+    )
+}
+
+fn add_decoration(out: &mut DecodedText, decoration: Decoration) {
+    if !out.decorations.contains(&decoration) {
+        out.decorations.push(decoration);
+    }
+}
+
+/// `\U+XXXX` (four hex digits) at the start of `chars`, as the character and
+/// the number of chars consumed.
+fn unicode_escape(chars: &[char]) -> Option<(char, usize)> {
+    if chars.len() < 7 || chars[0] != '\\' || chars[1] != 'U' || chars[2] != '+' {
+        return None;
+    }
+    let hex: String = chars[3..7].iter().collect();
+    if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let code = u32::from_str_radix(&hex, 16).ok()?;
+    char::from_u32(code).map(|ch| (ch, 7))
+}
+
+/// The `%%` codes: `%%c` diameter, `%%d` degree, `%%p` plus-minus, `%%%` a
+/// percent sign, `%%u`/`%%o` underline/overline toggles (recorded, nothing
+/// emitted), `%%nnn` a character by code (Latin-1 for the upper half, which
+/// matches the Western code pages these codes were written for; a control
+/// code below 32 other than tab, LF and CR is not a code, since it could
+/// only produce a character XML forbids). Returns the replacement and the
+/// number of chars consumed, or `None` when the `%%` is not a code.
+fn percent_code(out: &mut DecodedText, chars: &[char]) -> Option<(String, usize)> {
+    let code = chars.get(2)?;
+    match code.to_ascii_lowercase() {
+        'c' => Some(("\u{2205}".to_string(), 3)),
+        'd' => Some(("\u{00B0}".to_string(), 3)),
+        'p' => Some(("\u{00B1}".to_string(), 3)),
+        '%' => Some(("%".to_string(), 3)),
+        'u' => {
+            add_decoration(out, Decoration::Underline);
+            Some((String::new(), 3))
+        }
+        'o' => {
+            add_decoration(out, Decoration::Overline);
+            Some((String::new(), 3))
+        }
+        _ if code.is_ascii_digit() => {
+            let digits: String = chars[2..].iter().take(3).collect();
+            if digits.len() == 3 && digits.chars().all(|c| c.is_ascii_digit()) {
+                let n: u32 = digits.parse().ok()?;
+                let ch = if n < 256 {
+                    let ch = char::from_u32(n)?;
+                    if is_xml_illegal(ch) {
+                        // `%%001`: left as written, like any other non-code.
+                        return None;
+                    }
+                    ch
+                } else {
+                    '\u{FFFD}'
+                };
+                Some((ch.to_string(), 5))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Emits the plain form of a `\S` stack body (`1#2`, `1/2`, `+0.1^-0.2`,
+/// `2^` ...) and records it.
+fn push_stack(out: &mut DecodedText, plain: &mut String, body: &str) {
+    let (kind, sep) = if let Some(p) = body.find('^') {
+        (StackKind::Tolerance, p)
+    } else if let Some(p) = body.find('#') {
+        (StackKind::Diagonal, p)
+    } else if let Some(p) = body.find('/') {
+        (StackKind::Horizontal, p)
+    } else {
+        // No separator: AutoCAD shows the text unstacked.
+        plain.push_str(body);
+        return;
+    };
+    let numerator = body[..sep].trim().to_string();
+    let denominator = body[sep + 1..].trim().to_string();
+
+    // "3" immediately followed by "1/2" would read as thirty-one halves.
+    if plain.chars().last().is_some_and(|c| c.is_ascii_digit()) {
+        plain.push(' ');
+    }
+    match (numerator.is_empty(), denominator.is_empty()) {
+        (true, true) => {}
+        (false, true) => plain.push_str(&numerator),
+        (true, false) => plain.push_str(&denominator),
+        (false, false) => {
+            plain.push_str(&numerator);
+            plain.push(if kind == StackKind::Tolerance {
+                '^'
+            } else {
+                '/'
+            });
+            plain.push_str(&denominator);
+        }
+    }
+    out.fractions.push(Fraction {
+        numerator,
+        denominator,
+        kind,
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain_mtext(raw: &str) -> String {
+        decode_mtext(raw).plain
+    }
+
+    #[test]
+    fn dimension_labels_keep_their_numbers_readable() {
+        // The cases measured on the sample drawings.
+        assert_eq!(plain_mtext(r#"\A1;7'-4""#), r#"7'-4""#);
+        assert_eq!(plain_mtext(r#"3{\H0.7x;\S1#2;}""#), r#"3 1/2""#);
+        assert_eq!(plain_mtext(r#"\A1;{\H0.750000x;\S1#2;}""#), r#"1/2""#);
+        assert_eq!(
+            plain_mtext(r#"\A1;1'-1{\H0.750000x;\S1#8;}""#),
+            r#"1'-1 1/8""#
+        );
+        assert_eq!(plain_mtext(r#"\A1;2"%%C"#), "2\"\u{2205}");
+        assert_eq!(plain_mtext(r#"\A1;R10'-0""#), r#"R10'-0""#);
+    }
+
+    #[test]
+    fn every_stack_separator_is_understood() {
+        let d = decode_mtext(r"\S1/2;");
+        assert_eq!(d.plain, "1/2");
+        assert_eq!(d.fractions[0].kind, StackKind::Horizontal);
+        let d = decode_mtext(r"\S1#2;");
+        assert_eq!(d.fractions[0].kind, StackKind::Diagonal);
+        let d = decode_mtext(r"\S+0.1^-0.2;");
+        assert_eq!(d.plain, "+0.1^-0.2");
+        assert_eq!(
+            d.fractions,
+            vec![Fraction {
+                numerator: "+0.1".into(),
+                denominator: "-0.2".into(),
+                kind: StackKind::Tolerance
+            }]
+        );
+        // Super/subscripts are one-sided stacks.
+        assert_eq!(plain_mtext(r"m\S2^;"), "m2");
+        assert_eq!(plain_mtext(r"H\S^2;"), "H2");
+        assert_eq!(plain_mtext(r"\Sabc;"), "abc");
+    }
+
+    #[test]
+    fn paragraphs_groups_and_format_codes() {
+        assert_eq!(plain_mtext(r"A\PB\XC\ND"), "A\nB\nC\nD");
+        assert_eq!(plain_mtext(r"\~x"), " x");
+        assert_eq!(
+            plain_mtext(r"\pi102.25;{\f@Arial Unicode MS|b1|i0|c0|p34;A T M O S}"),
+            "A T M O S"
+        );
+        assert_eq!(plain_mtext(r"\C1;red\C256;bylayer"), "redbylayer");
+        assert_eq!(plain_mtext(r"\fArial|b0|i0;\W0.8;\Q10;\T1.2;\H2.5;x"), "x");
+        assert_eq!(plain_mtext(r"a\\b\{c\}"), r"a\b{c}");
+        assert_eq!(plain_mtext(r"\Lunder\l plain"), "under plain");
+        let d = decode_mtext(r"\Lunder\l \Oover\o \Kstrike\k");
+        assert_eq!(d.plain, "under over strike");
+        assert_eq!(
+            d.decorations,
+            vec![
+                Decoration::Underline,
+                Decoration::Overline,
+                Decoration::Strikethrough
+            ]
+        );
+        // An unterminated format code drops only its letter.
+        assert_eq!(plain_mtext(r"\Hoops"), "oops");
+    }
+
+    #[test]
+    fn percent_codes_and_unicode_escapes() {
+        assert_eq!(decode_text("%%c50").plain, "\u{2205}50");
+        assert_eq!(decode_text("108%%d").plain, "108\u{00B0}");
+        assert_eq!(decode_text("%%P0.5").plain, "\u{00B1}0.5");
+        assert_eq!(decode_text("50%%%").plain, "50%");
+        let d = decode_text("%%UBOOK RETURN%%U");
+        assert_eq!(d.plain, "BOOK RETURN");
+        assert_eq!(d.decorations, vec![Decoration::Underline]);
+        assert_eq!(decode_text("%%176").plain, "\u{00B0}");
+        assert_eq!(decode_text("%%065").plain, "A");
+        assert_eq!(decode_text(r"\U+00B1 3").plain, "\u{00B1} 3");
+        assert_eq!(decode_mtext(r"\U+2205 50").plain, "\u{2205} 50");
+        // Not codes: a lone percent, a bad escape.
+        assert_eq!(decode_text("50%").plain, "50%");
+        assert_eq!(decode_text("a%%zb").plain, "a%%zb");
+        assert_eq!(decode_text(r"\U+ZZZZ").plain, r"\U+ZZZZ");
+    }
+
+    #[test]
+    fn text_strings_keep_backslashes_and_braces() {
+        assert_eq!(decode_text(r"C:\Temp\{x}").plain, r"C:\Temp\{x}");
+        assert_eq!(
+            decode_text(r"\P is not a paragraph here").plain,
+            r"\P is not a paragraph here"
+        );
+        assert_eq!(decode_text("").plain, "");
+        assert_eq!(decode_mtext("trailing\\").plain, "trailing\\");
+    }
+
+    #[test]
+    fn xml_illegal_characters_never_survive_decoding() {
+        // A raw control byte in the string, and one written as a \U+ escape,
+        // each become one U+FFFD; tab, LF and CR (the C0 controls XML 1.0
+        // allows) are kept.
+        assert_eq!(decode_text("ZE\u{1}\u{B}RO").plain, "ZE\u{FFFD}\u{FFFD}RO");
+        assert_eq!(decode_mtext(r"A\U+0001B").plain, "A\u{FFFD}B");
+        assert_eq!(decode_text("a\tb\nc\r").plain, "a\tb\nc\r");
+        assert_eq!(decode_text("\u{FFFE}\u{FFFF}").plain, "\u{FFFD}\u{FFFD}");
+        // %%nnn below 32 is not a code (it could only yield a forbidden
+        // character), so it stays as written -- while %%009 (tab) and the
+        // printable %%065 still decode.
+        assert_eq!(decode_text("ZE%%001RO").plain, "ZE%%001RO");
+        assert_eq!(decode_text("%%031").plain, "%%031");
+        assert_eq!(decode_text("a%%009b").plain, "a\tb");
+        assert_eq!(decode_text("%%065").plain, "A");
+        assert!(!decode_text("ZE%%001RO").plain.chars().any(is_xml_illegal));
+    }
+
+    #[test]
+    fn korean_text_passes_through() {
+        assert_eq!(
+            plain_mtext("방 101\\P면적 32.5\u{33A1}"),
+            "방 101\n면적 32.5\u{33A1}"
+        );
+    }
+}
