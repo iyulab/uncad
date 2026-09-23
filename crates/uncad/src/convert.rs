@@ -47,6 +47,19 @@ const POLYLINE_MESH_CLOSED_M_FLAG: u16 = 1;
 /// POLYLINE_MESH's `flag` bit 32: the grid wraps in N.
 const POLYLINE_MESH_CLOSED_N_FLAG: u16 = 32;
 
+/// LWPOLYLINE's `flag` bit 1 in the library's layout: an extrusion is
+/// stored. The decoder reads the field only then; otherwise it is the
+/// default normal.
+const LWPOLYLINE_EXTRUSION_FLAG: u16 = 1;
+
+/// The default normal of an object coordinate system (DXF 210): the world's
+/// z axis, which makes the OCS the world's own axes.
+const Z_AXIS: Point3D = Point3D {
+    x: 0.0,
+    y: 0.0,
+    z: 1.0,
+};
+
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
 
@@ -606,6 +619,17 @@ unsafe fn polyline_mesh_wireframe(
     (edges, 0)
 }
 
+/// An OCS entity's normal (`extrusion`, DXF 210), as the file states it.
+/// A zero vector is not a direction, and the format's default is the z
+/// axis, so an unreadable or zero normal is the z axis. Not normalised:
+/// the model carries what the file states, and taking the entity's
+/// coordinates to the world through it is the consumer's step.
+fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
+    get_point3d(entity_ptr, dxfname, "extrusion")
+        .filter(|e| e.x != 0.0 || e.y != 0.0 || e.z != 0.0)
+        .unwrap_or(Z_AXIS)
+}
+
 /// Resolves a WIPEOUT's clip boundary to local 2D points -- see
 /// [`crate::model::WipeoutEntity`] for the risk this carries.
 ///
@@ -757,11 +781,7 @@ unsafe fn convert_entity(
                 common,
                 center,
                 radius,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                extrusion: extrusion(entity_ptr, "CIRCLE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
@@ -783,12 +803,8 @@ unsafe fn convert_entity(
                 width_factor: 1.0,
                 oblique_angle: 0.0,
                 style_name: uncad_model::Ref::Absent,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "TEXT", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "TEXT"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
@@ -802,11 +818,11 @@ unsafe fn convert_entity(
                 bulges: Vec::new(),
                 widths: Vec::new(),
                 const_width: 0.0,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
+                elevation: get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0),
+                extrusion: if flag & LWPOLYLINE_EXTRUSION_FLAG != 0 {
+                    extrusion(entity_ptr, "LWPOLYLINE")
+                } else {
+                    Z_AXIS
                 },
             })
         }
@@ -821,11 +837,7 @@ unsafe fn convert_entity(
                 radius,
                 start_angle,
                 end_angle,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                extrusion: extrusion(entity_ptr, "ARC"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ELLIPSE => {
@@ -871,12 +883,8 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "SOLID", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "SOLID"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TRACE => {
@@ -892,12 +900,8 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "TRACE", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "TRACE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
@@ -944,12 +948,8 @@ unsafe fn convert_entity(
                 width_factor: 1.0,
                 oblique_angle: 0.0,
                 style_name: uncad_model::Ref::Absent,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "ATTRIB", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "ATTRIB"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
@@ -992,11 +992,7 @@ unsafe fn convert_entity(
                 scale,
                 rotation,
                 attribs,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                extrusion: extrusion(entity_ptr, "INSERT"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTDEF => {
@@ -1021,12 +1017,8 @@ unsafe fn convert_entity(
                 width_factor: 1.0,
                 oblique_angle: 0.0,
                 style_name: uncad_model::Ref::Absent,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "ATTDEF", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "ATTDEF"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {
@@ -1195,12 +1187,8 @@ unsafe fn convert_entity(
                 bulges: Vec::new(),
                 widths: Vec::new(),
                 const_width: 0.0,
-                elevation: 0.0,
-                extrusion: uncad_model::Point3D {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 1.0,
-                },
+                elevation: get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "POLYLINE_2D"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE

@@ -45,6 +45,11 @@ Notable changes to this project are recorded here. The format follows
   (they name the block record as their owner, the shape ezdxf writes) finds its vertex
   positions: `example_2000.dxf`'s and `example_r13.dxf`'s polyface had no edges where
   their DWG twins have six.
+- The object coordinate system of CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB,
+  ATTDEF, INSERT, SOLID and TRACE is read: each carries its `extrusion` (DXF 210) and the
+  planar ones their `elevation`, with the coordinates as the file states them. A
+  mirrored entity used to be indistinguishable from an upright one. See
+  `docs/CAVEATS.md`, "Object coordinate systems".
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

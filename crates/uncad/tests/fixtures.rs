@@ -424,3 +424,109 @@ fn a_dxf_with_mesh_polylines_reads_and_both_meshes_have_their_wireframe() {
     assert_eq!(mesh.wireframe_edges[0], [point(0.0, 0.0), point(1.0, 0.0)]);
     assert_eq!(mesh.wireframe_edges[8], [point(0.0, 0.0), point(0.0, 1.0)]);
 }
+
+// ------------------------------------------------------------- mirrored
+
+const DOWN: uncad::model::Point3D = uncad::model::Point3D {
+    x: 0.0,
+    y: 0.0,
+    z: -1.0,
+};
+const UP: uncad::model::Point3D = uncad::model::Point3D {
+    x: 0.0,
+    y: 0.0,
+    z: 1.0,
+};
+
+#[test]
+fn mirrored_ocs_fixture_has_the_expected_entity_mix() {
+    let db = parse(MIRRORED);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[
+            ("ARC", 1),
+            ("CIRCLE", 1),
+            ("LINE", 1),
+            ("LWPOLYLINE", 2),
+            ("TEXT", 1)
+        ])
+    );
+    // No TABLES section in this file: no layer resolves.
+    assert!(db
+        .entities
+        .iter()
+        .all(|e| !matches!(e.common().layer, Ref::Resolved(_))));
+}
+
+/// Coordinates are carried as the file states them, in the entity's object
+/// coordinate system, beside the normal (DXF 210) that defines it: taking
+/// them to the world is the consumer's step. The feature branch moved them
+/// to world coordinates while reading; the model does not.
+#[test]
+fn mirrored_ocs_entities_keep_their_stated_coordinates_and_carry_their_normal() {
+    let db = parse(MIRRORED);
+    let polylines: Vec<&uncad::model::LwPolylineEntity> = db
+        .entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::LwPolyline(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(polylines.len(), 2);
+    let xy = |p: &uncad::model::LwPolylineEntity| -> Vec<(f64, f64)> {
+        p.vertices.iter().map(|v| (v.x, v.y)).collect()
+    };
+    let outline = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
+
+    // Handle 20: DXF 70 = 1 with extrusion (0,0,-1); LibreDWG stores
+    // flag = 513 (512 closed | 1 has-extrusion).
+    let mirrored = polylines[0];
+    assert_eq!(mirrored.common.source_handle, resolved("20"));
+    assert!(mirrored.closed);
+    assert_eq!(mirrored.extrusion, DOWN);
+    assert_eq!(xy(mirrored), outline);
+    assert_eq!(mirrored.elevation, 0.0);
+
+    // Handle 21: DXF 70 = 0 (flag = 16: neither bit set), extrusion
+    // (0,0,1) stated.
+    let upright = polylines[1];
+    assert_eq!(upright.common.source_handle, resolved("21"));
+    assert!(!upright.closed);
+    assert_eq!(upright.extrusion, UP);
+    assert_eq!(xy(upright), outline);
+
+    let mut seen = 0;
+    for e in &db.entities {
+        match e {
+            Entity::Circle(c) => {
+                assert_eq!((c.center.x, c.center.y, c.center.z), (10.0, 10.0, 0.0));
+                assert_eq!((c.radius, c.extrusion), (5.0, DOWN));
+                seen += 1;
+            }
+            Entity::Arc(a) => {
+                // Stated 0 to 90 degrees; in the world the arc runs
+                // clockwise from 90 to 180, which is not the model's to say.
+                assert_eq!((a.center.x, a.center.y, a.center.z), (0.0, 0.0, 0.0));
+                assert_eq!((a.radius, a.extrusion), (20.0, DOWN));
+                assert_eq!(a.start_angle, 0.0);
+                assert_eq!(a.end_angle, std::f64::consts::FRAC_PI_2);
+                seen += 1;
+            }
+            Entity::Text(t) => {
+                assert_eq!(t.text, "MIRROR");
+                assert_eq!((t.start_point.x, t.start_point.y), (10.0, 10.0));
+                assert_eq!((t.extrusion, t.elevation), (DOWN, 0.0));
+                seen += 1;
+            }
+            Entity::Line(l) => {
+                // A LINE is stated in world coordinates and has no OCS.
+                assert_eq!((l.start_point.x, l.start_point.y), (-5.0, -5.0));
+                assert_eq!((l.end_point.x, l.end_point.y), (5.0, 5.0));
+                seen += 1;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(seen, 4);
+}

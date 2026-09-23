@@ -397,6 +397,22 @@ An arc-length dimension is a separate entity in the format rather than a value o
 the group says 5 on such a dimension, which would read as a three-point angular one. It is
 filed by the entity it is.
 
+## Object coordinate systems: coordinates as stated, with their normal
+
+CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB, ATTDEF, INSERT, SOLID and TRACE state
+their coordinates in an object coordinate system whose normal the entity carries (DXF 210,
+`extrusion`), at an elevation (DXF 30/38) for the planar ones. The model carries both as
+the file states them and moves nothing to the world: a mirrored circle stated at (10, 10)
+with the normal (0, 0, -1) is carried at (10, 10), where its world centre is (-10, 10),
+and a mirrored arc keeps its stated angles although it runs clockwise in the world. Taking
+the coordinates to the world (the DXF reference's arbitrary axis algorithm) is a
+consumer's step; `Affine2::from_insert` in the model does it for a block reference. The
+normal is not normalised either; only a zero vector, which is no direction, reads as the
+default (0, 0, 1). An LWPOLYLINE's normal is read only when its flag says one is stored
+(bit 1 in LibreDWG's layout), as the decoder itself does. Of the corpus and the nine local
+sample drawings, three samples carry such entities -- 240 SOLIDs, 95 LWPOLYLINEs and 66
+INSERTs, every one with the normal (0, 0, -1) that AutoCAD's MIRROR leaves behind.
+
 ## The polyline "closed" flag
 
 Two layouts, one field name. POLYLINE_2D/3D keep DXF's convention (bit 1 of `flag` is
