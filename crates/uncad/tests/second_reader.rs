@@ -1375,3 +1375,96 @@ fn the_two_readers_agree_on_every_2d_and_3d_polyline_vertex() {
         disagreements.join("\n")
     );
 }
+
+/// The same 3DFACEs, field by field: the four corners and which edges are
+/// invisible. A mesh of faces hides the edges its faces share, so the flags
+/// decide what outline is drawn; the comparison is required to have met
+/// faces with hidden edges.
+#[test]
+fn the_two_readers_agree_on_every_3dface_corner_and_hidden_edge() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let (mut compared, mut unmatched, mut with_hidden) = (0usize, 0usize, 0usize);
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let uncad::Entity::Face3D(o) = entity else {
+                    continue;
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(acadrust::EntityType::Face3D(t)) = theirs.get(&id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                with_hidden += usize::from(o.invisible_edges.iter().any(|h| *h));
+                let p = |x: f64, y: f64, z: f64| format!("({x:?}, {y:?}, {z:?})");
+                let ours_corners = [o.corner1, o.corner2, o.corner3, o.corner4]
+                    .iter()
+                    .map(|c| p(c.x, c.y, c.z))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let their_corners = [
+                    t.first_corner,
+                    t.second_corner,
+                    t.third_corner,
+                    t.fourth_corner,
+                ]
+                .iter()
+                .map(|c| p(c.x, c.y, c.z))
+                .collect::<Vec<_>>()
+                .join(" ");
+                let flags = &t.invisible_edges;
+                let their_hidden = [
+                    flags.is_first_invisible(),
+                    flags.is_second_invisible(),
+                    flags.is_third_invisible(),
+                    flags.is_fourth_invisible(),
+                ];
+                for (field, a, b) in [
+                    ("corners", ours_corners, their_corners),
+                    (
+                        "invisible edges",
+                        format!("{:?}", o.invisible_edges),
+                        format!("{their_hidden:?}"),
+                    ),
+                ] {
+                    if a != b {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} 3dface {field}: ours {a}, theirs {b}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared}, with hidden edges {with_hidden}, unmatched {unmatched}");
+    assert!(compared > 0, "nothing was read by both");
+    assert!(with_hidden > 0, "no face with a hidden edge was compared");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}

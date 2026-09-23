@@ -868,12 +868,14 @@ unsafe fn convert_entity(
             let corner2 = get_point3d(entity_ptr, "3DFACE", "corner2")?;
             let corner3 = get_point3d(entity_ptr, "3DFACE", "corner3")?;
             let corner4 = get_point3d(entity_ptr, "3DFACE", "corner4")?;
+            let invis_flags = get_field::<u16>(entity_ptr, "3DFACE", "invis_flags").unwrap_or(0);
             Entity::Face3D(Face3DEntity {
                 common,
                 corner1,
                 corner2,
                 corner3,
                 corner4,
+                invisible_edges: Face3DEntity::invisible_edges_from_bits(u32::from(invis_flags)),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SPLINE => {
