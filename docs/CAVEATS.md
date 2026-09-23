@@ -373,6 +373,12 @@ The rule is worth only what the DXF path costs. The binary format always stores 
 once this crate's DXF reading no longer goes through this importer the rule buys nothing and
 only loses genuine zeros: remove it then, together with the deviation in `tests/golden.rs`.
 
+**The measurement, when it is -1.** Writers leave `-1` in group 42 for a dimension they did
+not measure -- 58 of the dimensions of one AutoCAD-written sample drawing and 5 of another
+carry it -- and no length or angle is negative, so `-1` is "not stated" too. Every other
+value is carried as the file states it, radians for an angular dimension, even where it
+disagrees with the dimension's own points: whether to trust it is a consumer's judgement.
+
 **Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
 rather than carries, and the format writes a style variable only when it differs from the value
 the application starts from. This library holds a style as a struct with no "the file did not

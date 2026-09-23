@@ -1433,8 +1433,12 @@ unsafe fn convert_entity(
                 // Drawings older than R2000 routinely omit the group, and
                 // reporting 0.0 for them would put a false difference
                 // between a drawing and its own twin in the other format.
+                // -1 is the other "not measured" the format's writers leave
+                // behind (no length or angle is negative); any other value
+                // is the file's, whether or not it agrees with the points --
+                // judging that is a consumer's step.
                 measurement: get_field::<f64>(entity_ptr, dxfname, "act_measurement")
-                    .filter(|m| *m != 0.0),
+                    .filter(|m| *m != 0.0 && *m != -1.0),
                 text_override: dimension_text_override(
                     text.field(entity_ptr, dxfname, "user_text").as_deref(),
                 ),

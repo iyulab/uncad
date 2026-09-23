@@ -73,6 +73,8 @@ Notable changes to this project are recorded here. The format follows
   its feature's x or y distance from the datum.
 ### Changed
 
+- A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
+  measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
   entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
   entity answers to it, `Absent` is a leader that names nothing. The `Option` it
