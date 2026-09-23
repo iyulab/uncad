@@ -37,7 +37,8 @@ crates/
     examples/            dump.rs / blocks.rs -- manual checks
   uncad-cli/             the CLI binary (uncad)
     tests/               documented_invocations.rs -- every call README and --help
-                         advertise
+                         advertise; release_invariants.rs -- the licence text and the
+                         vendored-patch notice every published crate has to carry
 ```
 
 ## Build: the `cc` crate instead of autotools, a vendored copy instead of the submodule
