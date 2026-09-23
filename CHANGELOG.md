@@ -48,6 +48,9 @@ Notable changes to this project are recorded here. The format follows
   it was read and dropped, so an arc segment arrived as its chord. A bulge array that
   cannot be matched to the vertices is reported as `POLYLINE_BULGE` and read as
   straight.
+- `libredwg-sys` no longer binds `dwg_object_polyline_2d_get_points`,
+  `dwg_object_polyline_2d_get_numpoints`, `dwg_object_polyline_3d_get_points` or
+  `dwg_object_polyline_3d_get_numpoints` (see Fixed), and binds `dwg_next_object`.
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
   entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
