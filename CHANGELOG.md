@@ -8,6 +8,21 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
+  `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
+  MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and
+  exposes what decoding a drawing's text needs: `uncad_dwg_version`,
+  `uncad_dwg_from_version`, `uncad_dwg_from_dxf`, `uncad_codepage_name`, and the
+  code-page string conversions `uncad_tv_to_utf8`, `uncad_bytes_to_utf8`, their
+  `uncad_entity_*` twins, `uncad_dwg_string_to_utf8` and `uncad_free_string`, with
+  bindings for `dwg_version_type` and `dwg_next_object`. `uncad` does not call them yet.
+- Every crate carries the GPLv3 text as its own `LICENSE`; `cargo package` never
+  reaches the repository root's, so of the 0.2.0 tarballs only `libredwg-sys` had the
+  text (as LibreDWG's own `COPYING`) and `uncad-cli` had no licence file at all.
+  `libredwg-sys` also carries `NOTICE.md`, the modification notice for its vendored
+  LibreDWG. `uncad-cli`'s `tests/release_invariants.rs` keeps both true.
+- `libredwg-sys`'s build names libclang, and the command that installs it, when bindgen
+  cannot find it, instead of bindgen's own message.
 - A SPLINE carries what defines its curve: `degree`, `knots`, `weights` (empty when
   the file gives none -- every weight is 1), and the `closed` / `periodic` bits as
   `Option<bool>`. A spline stored by its fit points has no periodic bit, and no
@@ -63,6 +78,21 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- **The vendored LibreDWG carries five local patches**, each marked `uncad local patch`
+  in the source and listed in `crates/libredwg-sys/NOTICE.md` and `docs/CAVEATS.md`,
+  "Local patches to the vendored LibreDWG". A DXF holding a polygon mesh is read instead
+  of refused as a whole (critical error 2048: the importer did not know the mesh
+  vertices' `AcDbPolygonMeshVertex` marker). A corrupt header date no longer ends the
+  process from inside the C library (0xC0000409 on Windows, from `strftime`). Two more
+  are not visible in this crate's output yet: an R2004+ entity carrying both a true
+  colour and a transparency no longer has the two swapped in the library's fields (this
+  crate reads a true colour only under the TRUECOLOR method, which the entities measured
+  do not have), and the importer compares an R2007+ DXF's table-record names decoded, so
+  its layer and block lookups no longer stop at the first character (such a DXF is still
+  refused). On the 208 corpus drawings the JSON output is byte-identical with and without
+  the patches. `build.rs` refuses to build when a patch's marker has gone missing,
+  which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
+  silence.
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
