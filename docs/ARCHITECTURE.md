@@ -28,16 +28,31 @@ crates/
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
                          table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
-                         LAYOUT with its plot settings), with acis.rs
-                         for 3DSOLID wireframes and hatch_color.rs for the gradient
-                         stop colors the model carries. The model and its JSON form
-                         are the uncad-model crate's; SVG/PNG rendering is the
-                         iron-render-cad crate's (uncad-cli and this crate's tests use
-                         it). Read-only: there is no DWG/DXF write path.
-    tests/               integration tests against the public API (dxf_pipeline.rs,
-                         acis_sab.rs)
+                         LAYOUT with its plot settings), with text.rs (TextDecoder:
+                         code pages, R2007+ widths, diagnostics), header.rs (the
+                         drawing's Header, returned beside the model by
+                         parse_with_header) and acis.rs for 3DSOLID wireframes. The
+                         model and its JSON form are the uncad-model crate's; SVG/PNG
+                         rendering is the iron-render-cad crate's (uncad-cli,
+                         uncad-export and this crate's tests use it). Read-only: there
+                         is no DWG/DXF write path.
+    tests/               integration tests against the public API: the golden cases,
+                         corpus sweep and second-reader comparison, R2007+ DXF twins,
+                         code pages, header, layouts, layer state, polylines,
+                         dimensions, the vendored patches, the fixtures in
+                         tests/fixtures (authored by make_fixtures.py)
     examples/            dump.rs / blocks.rs -- manual checks
-  uncad-cli/             the CLI binary (uncad)
+  uncad-export/          the LLM/VLM package, a consumer of the parser and the
+                         renderer: frame.rs (crop, padding, lattice, detached groups),
+                         package/ (overview, tile pyramid, sheets, records, strings
+                         index, shards, manifest, report), dimension.rs (display
+                         strings and how far a value is trusted), geom.rs (lengths,
+                         areas), text.rs (plain strings for records), fonts.rs (the
+                         bundled Noto Sans KR subset, OFL-1.1, under fonts/). Derived
+                         values live here because the model carries none.
+    tests/               the package end to end, tiles, sheets, dimensions, geometry,
+                         and acceptance questions answered from a package alone
+  uncad-cli/             the CLI binary (uncad), including `uncad export`
     tests/               documented_invocations.rs -- every call README and --help
                          advertise; release_invariants.rs -- the licence text and the
                          vendored-patch notice every published crate has to carry

@@ -4,7 +4,9 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 An open-source Rust library that parses CAD files (DWG/DXF) into a model and
-exports that model as JSON, SVG or PNG. Read-only: it does not write DWG or DXF,
+exports that model as JSON, SVG or PNG -- and, through the `uncad-export` crate,
+as a directory an LLM or VLM can read (overview and tile images, sheet images,
+and JSON records that point into them). Read-only: it does not write DWG or DXF,
 and does not convert between them.
 
 ## Quick start
@@ -33,6 +35,14 @@ std::fs::write("drawing.json", json)?;
 // Rendering is the iron-render-cad crate's (uncad-cli uses it):
 let result = iron_render_cad::to_svg(&db, iron_render_cad::ToSvgOptions::default());
 std::fs::write("drawing.svg", result.svg)?;
+
+// The LLM/VLM package (the uncad-export crate; uncad-cli's `uncad export`):
+let report = uncad_export::export_file(
+    std::path::Path::new("drawing.dwg"),
+    std::path::Path::new("drawing.pkg"),
+    &uncad_export::ExportOptions::default(),
+)?;
+println!("{} files, {} sheets", report.files.len(), report.sheets.len());
 ```
 
 ## CLI
@@ -46,7 +56,15 @@ cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # rasterize at 
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim   # keep outlying coordinates
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document
+cargo run -p uncad-cli -- drawing.dwg -o all.svg --include-hidden # also what layers hide
+cargo run -p uncad-cli -- export drawing.dwg -o drawing.pkg       # the LLM/VLM package
+cargo run -p uncad-cli -- export drawing.dwg -o drawing.pkg --profile openai-patch --max-levels 2
+cargo run -p uncad-cli -- --version
 ```
+
+An option the CLI does not know is an error that names it, on both commands.
+`uncad export` writes `manifest.json` last; start reading a package there (its
+`README.txt` says the same in prose).
 
 ## Scope
 
@@ -110,7 +128,10 @@ crates/
                          vendor-config/config.h stands in for autotools
   uncad/                 the safe API: parse() / parse_bytes() -> uncad_model::CadDatabase,
                          and the drawing's Header beside it from parse_with_header()
-  uncad-cli/             the CLI binary (uncad)
+  uncad-export/          the LLM/VLM package: export_file() / export_package() write a
+                         directory of images and JSON records; bundles a Noto Sans KR
+                         subset (OFL-1.1) so Korean text renders anywhere
+  uncad-cli/             the CLI binary (uncad), including `uncad export`
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
                          manual-check tools, and #[cfg(test)] blocks inside src/*.rs are
                          unit tests -- docs/ARCHITECTURE.md's "Test layout" says which
