@@ -1261,6 +1261,8 @@ unsafe fn convert_entity(
                 solid_fill,
                 gradient,
                 pattern_lines,
+                elevation: get_field::<f64>(entity_ptr, "HATCH", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "HATCH"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DSOLID => {
