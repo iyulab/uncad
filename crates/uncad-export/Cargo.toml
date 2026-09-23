@@ -29,3 +29,8 @@ uncad-model = "0.1.0"
 iron-render-cad = "0.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# The package's images are 8-bit RGB; the renderer's encoder writes RGBA.
+# Already in the renderer's own tree (tiny-skia encodes through it).
+png = "0.18"
+# NFKC for the package's string index (㎡ -> m2, full-width digits, ...).
+unicode-normalization = "0.1"

@@ -3,10 +3,9 @@
 //! coverage, the reason for it and how to rebuild it, and
 //! `fonts/OFL-NotoSansKR.txt` for its licence).
 //!
-//! The renderer bundles no font: it draws text with whatever
-//! [`Fonts`](iron_render_cad::Fonts) it is handed, and needs to be told
-//! the face's capital height, since a CAD text height is the height of the
-//! capitals rather than the em. [`bundled`] and [`UNCAD_SANS_CAP_HEIGHT`] are
+//! The renderer bundles no font: it draws text with whatever [`Fonts`] it
+//! is handed, and needs to be told the face's capital height, since a CAD
+//! text height is the height of the capitals rather than the em. [`bundled`] and [`UNCAD_SANS_CAP_HEIGHT`] are
 //! those two things for the bundled face.
 
 use std::sync::{Arc, OnceLock};

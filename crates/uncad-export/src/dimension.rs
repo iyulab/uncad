@@ -218,11 +218,10 @@ const MEASUREMENT_DISAGREEMENT: f64 = 0.01;
 ///   still carry it);
 /// - it is negative or zero and the kind's measurement cannot be (every
 ///   kind but ORDINATE, which is a signed offset from a datum);
-/// - it disagrees with the definition points by more than
-///   [`MEASUREMENT_DISAGREEMENT`]. Magnitudes are compared, so a sign
-///   convention reconstructed differently (ORDINATE's datum axis) does not
-///   throw a good value away, and a computed value of 0 is no evidence
-///   against a stored one.
+/// - it disagrees with the definition points by more than 1 %. Magnitudes
+///   are compared, so a sign convention reconstructed differently
+///   (ORDINATE's datum axis) does not throw a good value away, and a
+///   computed value of 0 is no evidence against a stored one.
 pub fn usable_stored_measurement(
     stored: Option<f64>,
     kind: Option<DimensionKind>,

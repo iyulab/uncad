@@ -144,6 +144,16 @@ Notable changes to this project are recorded here. The format follows
   0.733). Its licence expression is `GPL-3.0-or-later AND OFL-1.1`; `deny.toml` grants the
   crate both by name, and `uncad-cli`'s `tests/release_invariants.rs` checks its `LICENSE`,
   the font's licence text beside the font and the expression.
+  `export_package(db, header, dir, options)` (and `export_file`) writes the package: an
+  overview image fitted to a model's patch budget (`Profile`: Claude, Claude hi-res,
+  OpenAI), drawn once through the renderer's `Scene`; JSON records -- texts with the box
+  their glyph outlines fill, dimensions with their value, where it came from and their
+  label, geometry with lengths and areas, closed regions with their labels, block
+  instances -- whose ids are the model's reference IDs, with the file's handle beside
+  them; an NFKC string index; record shards with an index a consumer can search;
+  `drawing.json`, `report.json` (what was left out, hidden and bounded, and why) and a
+  manifest saying what the package can answer. The same input gives the same bytes,
+  `report.json` included.
 
 ### Changed
 
