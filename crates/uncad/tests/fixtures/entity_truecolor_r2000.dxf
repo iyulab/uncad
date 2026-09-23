@@ -1,0 +1,144 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+2
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+LAYER
+  2
+GREEN
+ 70
+0
+ 62
+3
+  6
+Continuous
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  5
+30
+330
+1F
+  8
+GREEN
+420
+65407
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+100.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  5
+31
+330
+1F
+  8
+GREEN
+ 62
+1
+ 10
+0.0
+ 20
+10.0
+ 30
+0.0
+ 11
+100.0
+ 21
+10.0
+ 31
+0.0
+  0
+LINE
+  5
+32
+330
+1F
+  8
+GREEN
+ 62
+1
+420
+255
+ 10
+0.0
+ 20
+20.0
+ 30
+0.0
+ 11
+100.0
+ 21
+20.0
+ 31
+0.0
+  0
+LINE
+  5
+33
+330
+1F
+  8
+GREEN
+ 10
+0.0
+ 20
+30.0
+ 30
+0.0
+ 11
+100.0
+ 21
+30.0
+ 31
+0.0
+  0
+ENDSEC
+  0
+EOF

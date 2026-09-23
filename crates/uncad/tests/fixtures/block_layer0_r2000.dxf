@@ -1,0 +1,232 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+3
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+LAYER
+  2
+RED
+ 70
+0
+ 62
+1
+  6
+Continuous
+  0
+LAYER
+  2
+BLUE
+ 70
+0
+ 62
+5
+  6
+Continuous
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+ 70
+2
+  0
+BLOCK_RECORD
+  5
+1F
+  2
+*Model_Space
+ 70
+0
+  0
+BLOCK_RECORD
+  5
+40
+  2
+SYM
+ 70
+0
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+41
+330
+40
+  8
+0
+100
+AcDbBlockBegin
+  2
+SYM
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+SYM
+  0
+LINE
+  5
+42
+330
+40
+  8
+0
+ 62
+256
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+10.0
+ 21
+0.0
+ 31
+0.0
+  0
+LINE
+  5
+43
+330
+40
+  8
+0
+ 62
+0
+ 10
+0.0
+ 20
+2.0
+ 30
+0.0
+ 11
+10.0
+ 21
+2.0
+ 31
+0.0
+  0
+LINE
+  5
+44
+330
+40
+  8
+BLUE
+ 62
+256
+ 10
+0.0
+ 20
+4.0
+ 30
+0.0
+ 11
+10.0
+ 21
+4.0
+ 31
+0.0
+  0
+TEXT
+  5
+45
+330
+40
+  8
+0
+ 10
+0.0
+ 20
+6.0
+ 30
+0.0
+ 40
+2.5
+  1
+L0
+  0
+ENDBLK
+  5
+46
+330
+40
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+INSERT
+  5
+50
+330
+1F
+  8
+RED
+100
+AcDbEntity
+100
+AcDbBlockReference
+  2
+SYM
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  0
+ENDSEC
+  0
+EOF
