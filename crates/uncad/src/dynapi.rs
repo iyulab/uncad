@@ -365,6 +365,35 @@ pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     unsafe { libredwg_sys::uncad_dwg_is_pre_r13(dwg) != 0 }
 }
 
+/// `true` when the drawing was read from a DXF rather than a DWG. The two
+/// readers leave some fields in different states -- the DXF importer
+/// applies the binary format's bit layout to a LAYER's group 70, and fills
+/// a two-line angular dimension's points by group code rather than in
+/// stream order -- so a field's meaning can depend on which of them read it.
+pub fn is_from_dxf(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: dwg is a live Dwg_Data (caller contract, same as the rest of
+    // this crate's conversion pass); the shim null-checks it again itself.
+    unsafe { libredwg_sys::uncad_dwg_from_dxf(dwg) != 0 }
+}
+
+/// `true` when the drawing is R2000 or later: the first version whose
+/// LAYER records carry a plot flag and a lineweight.
+pub fn is_r2000_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: as `is_from_dxf`.
+    let version = unsafe { libredwg_sys::uncad_dwg_version(dwg) };
+    // The enum constant's width is whatever bindgen inferred for the target
+    // (see convert.rs on DWG_OBJECT_TYPE); the shim returns a plain int.
+    #[allow(clippy::unnecessary_cast)]
+    let r2000 = libredwg_sys::DWG_VERSION_TYPE_R_2000 as i32;
+    version >= r2000
+}
+
 /// `true` when the drawing was read from an R2010-or-later DWG. The
 /// library's LEADER record layout loses its place in such a file after the
 /// annotation offset, so the fields it reads past that point -- the

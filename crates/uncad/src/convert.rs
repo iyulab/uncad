@@ -1829,7 +1829,7 @@ fn entity_reference(
 ///   `Unresolved("idx:<n>")` -- the index is kept the way a handle would be.
 /// - From R13 on, a handle whose value is zero is a reference the file does
 ///   not carry (a DIMENSION without a block, for instance): `Absent`.
-fn reference(
+pub(crate) fn reference(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
     handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,

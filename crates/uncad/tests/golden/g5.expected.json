@@ -55,7 +55,8 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -112,7 +113,8 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -169,7 +171,8 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -227,7 +230,8 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -284,7 +288,8 @@
       "style_name": {
         "type": "UNRESOLVED",
         "data": "NOT-DECLARED"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -338,7 +343,8 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     },
     {
       "type": "DIMENSION",
@@ -399,18 +405,37 @@
       "style_name": {
         "type": "RESOLVED",
         "data": "ISO-25"
-      }
+      },
+      "ordinate_axis": null
     }
   ],
   "tables": {
     "layers": {
       "0": {
         "name": "0",
-        "color_index": 7
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       },
       "DIMS": {
         "name": "DIMS",
-        "color_index": 3
+        "color_index": 3,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       }
     },
     "block_records": {
@@ -528,7 +553,21 @@
             },
             "text_height": 2.5,
             "text": "<>",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -646,7 +685,21 @@
             },
             "text_height": 2.5,
             "text": "",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -764,7 +817,21 @@
             },
             "text_height": 2.5,
             "text": " ",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -882,7 +949,21 @@
             },
             "text_height": 2.5,
             "text": "125",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1000,7 +1081,21 @@
             },
             "text_height": 2.5,
             "text": "<>",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1060,7 +1155,21 @@
             },
             "text_height": 2.5,
             "text": "%%C20",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1120,7 +1229,21 @@
             },
             "text_height": 2.5,
             "text": "<>",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -1182,7 +1305,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1239,7 +1363,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1296,7 +1421,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1354,7 +1480,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1411,7 +1538,8 @@
             "style_name": {
               "type": "UNRESOLVED",
               "data": "NOT-DECLARED"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1465,7 +1593,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           },
           {
             "type": "DIMENSION",
@@ -1526,7 +1655,8 @@
             "style_name": {
               "type": "RESOLVED",
               "data": "ISO-25"
-            }
+            },
+            "ordinate_axis": null
           }
         ]
       },
@@ -1547,10 +1677,18 @@
         "tolerance_lower": null,
         "decimal_places": 2,
         "tolerance_decimal_places": null,
-        "text_height": 2.5
+        "text_height": 2.5,
+        "arrow_size": null,
+        "linear_unit_format": null,
+        "zero_suppression": null,
+        "rounding": null,
+        "angular_unit_format": null,
+        "angular_decimal_places": null,
+        "fraction_format": null
       }
     },
-    "mlinestyles": {}
+    "mlinestyles": {},
+    "layouts": {}
   },
   "read_diagnostics": {
     "warnings": []

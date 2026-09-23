@@ -2,8 +2,8 @@
 //! against: LAYER, BLOCK_RECORD and MLINESTYLE -- from LibreDWG's structures
 //! into the model's [`Tables`].
 
-use crate::convert::owned_entities;
-use crate::dynapi::{get_array_field, get_field};
+use crate::convert::{owned_entities, reference};
+use crate::dynapi::{get_array_field, get_field, is_from_dxf, is_r2000_or_later};
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -40,7 +40,7 @@ pub(crate) unsafe fn convert_tables(
         if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LAYER {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(record) = convert_layer(text, object_ptr) {
+                if let Some(record) = convert_layer(dwg, text, object_ptr) {
                     layers.insert(record.name.clone(), record);
                 }
             }
@@ -193,20 +193,87 @@ fn convert_mlinestyle(text: &TextDecoder, object_ptr: *mut c_void) -> Option<(St
     Some((name, offsets))
 }
 
-fn convert_layer(text: &TextDecoder, object_ptr: *mut c_void) -> Option<LayerRecord> {
+/// Reads a LAYER table entry: its colour, its state and the linetype it
+/// names.
+///
+/// Which fields state the layer's state depends on who read the file. The
+/// binary format's decoder fills the `off`, `frozen` and `locked` bits (for
+/// a drawing older than R13 it derives them from group 70 and the colour's
+/// sign itself). LibreDWG's DXF importer instead applies the binary layout
+/// to group 70 -- bit 2 becomes "off", 4 "frozen in new viewports", 8
+/// "locked" -- where a DXF means 1 frozen, 2 frozen in new viewports, 4
+/// locked, and says "off" with a negative colour; so for a DXF the raw
+/// group 70 and the colour's sign are read instead. A negative colour
+/// means "off" whoever read it, as [`LayerRecord::color_index`] documents.
+///
+/// The plot flag (DXF 290) and the lineweight (DXF 370) exist from R2000
+/// on. A DWG states both. The DXF importer leaves a flag the file left out
+/// at 0, so a DXF's stated "do not plot" (290 = 0) and its silence read the
+/// same -- `None`, not `Some(false)` -- and likewise a lineweight code of 0
+/// (0.00 mm, or absent).
+fn convert_layer(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    object_ptr: *mut c_void,
+) -> Option<LayerRecord> {
     let name = text.field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
     let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
+    let bit = |field: &str| get_field::<u8>(object_ptr, "LAYER", field).is_some_and(|b| b != 0);
+    let from_dxf = is_from_dxf(dwg);
+    let (off, frozen, locked) = if from_dxf {
+        let flag = get_field::<u8>(object_ptr, "LAYER", "flag").unwrap_or(0);
+        (color.index < 0, flag & 1 != 0, flag & 4 != 0)
+    } else {
+        (bit("off") || color.index < 0, bit("frozen"), bit("locked"))
+    };
+    let r2000 = is_r2000_or_later(dwg);
+    let plot = if !r2000 {
+        None
+    } else if from_dxf {
+        bit("plotflag").then_some(true)
+    } else {
+        Some(bit("plotflag"))
+    };
+    let lineweight = get_field::<u8>(object_ptr, "LAYER", "linewt")
+        .filter(|&code| r2000 && !(from_dxf && code == 0))
+        .and_then(layer_lineweight);
+    let linetype = reference(
+        dwg,
+        text,
+        get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYER", "ltype"),
+        c"LTYPE",
+        |handle_ptr| text.handle_name(dwg, handle_ptr),
+    );
     Some(LayerRecord {
         name,
         color_index,
-        off: false,
-        frozen: false,
-        locked: false,
-        plot: None,
-        lineweight: None,
-        linetype: uncad_model::Ref::Absent,
+        off,
+        frozen,
+        locked,
+        plot,
+        lineweight,
+        linetype,
     })
+}
+
+/// The standard lineweights in hundredths of a millimetre, indexed by the
+/// code the library stores in `linewt` (`lweights[]` in its `dwg.c` and
+/// `in_dxf.c`).
+const LINEWEIGHTS: [i16; 24] = [
+    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200,
+    211,
+];
+
+/// A layer's lineweight for the library's `linewt` code: codes 0 to 23 are
+/// the standard weights, 31 is "the default" (DXF -3). 29 and 30 are BYLAYER
+/// and BYBLOCK, which a layer cannot be, and 24 to 28 are unused: none of
+/// those is a lineweight a layer states.
+fn layer_lineweight(code: u8) -> Option<i16> {
+    match code {
+        31 => Some(-3),
+        code => LINEWEIGHTS.get(usize::from(code)).copied(),
+    }
 }
 
 /// Recovers a usable ACI index from a LAYER's raw `Dwg_Color` when LibreDWG
@@ -239,6 +306,17 @@ fn resolve_layer_color_index(index: i16, method: libredwg_sys::Dwg_Color_Method,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_layer_lineweight_is_the_standard_weight_or_the_default() {
+        assert_eq!(layer_lineweight(0), Some(0));
+        assert_eq!(layer_lineweight(11), Some(50), "0.50 mm");
+        assert_eq!(layer_lineweight(23), Some(211));
+        assert_eq!(layer_lineweight(31), Some(-3), "the default");
+        for not_a_layer_weight in [24, 28, 29, 30, 32, 255] {
+            assert_eq!(layer_lineweight(not_a_layer_weight), None);
+        }
+    }
 
     #[test]
     fn truecolor_with_no_palette_match_falls_back_to_rgbs_low_byte() {

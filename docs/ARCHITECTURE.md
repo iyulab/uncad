@@ -203,8 +203,10 @@ is pinned to `dwg.h`'s) and converts them into the model's plain `Point2D`/`Poin
 read C memory by accident -- the compiler refuses it.
 
 The model is deliberately lossy: it keeps what consumers of the drawing's content need and
-nothing else -- no linetypes, lineweights, layer on/off state, text styles, object
-dictionaries or header variables. It cannot be used to write a DWG/DXF back out, and this
+nothing else. A layer carries its state (off, frozen, locked, plotted), its lineweight and
+the name of its linetype, but the linetype and text style definitions those names resolve
+in, object dictionaries and header variables are not carried. It cannot be used to write a
+DWG/DXF back out, and this
 project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
 `CHANGELOG.md`).
 

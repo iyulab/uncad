@@ -550,6 +550,22 @@ other color bugs, this one was verified by plausibility rather than by reference
 inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
 happens not to match the palette is misread as a small ACI index.
 
+## Layer state: what a DXF cannot say
+
+A layer's `off`, `frozen` and `locked` are read from the fields LibreDWG's DWG decoder
+fills. Its DXF importer applies the binary format's bit layout to a LAYER's group 70
+instead (bit 2 becomes "off", 4 "frozen in new viewports", 8 "locked"), where a DXF means
+1 frozen, 2 frozen in new viewports and 4 locked, and says "off" with a negative colour --
+so for a DXF this crate reads the raw group 70 and the colour's sign. `tests/layer_state.rs`
+checks both readers against `hidden_layers_r2000.dxf` and the `example_2000` twins.
+
+Two more fields exist from R2000 on and are read only where the file can be heard: the
+plot flag (DXF 290) and the lineweight (DXF 370). An R2000-or-later DWG states both. The
+DXF importer leaves a 290 or a 370 the file left out at 0, so a stated "do not plot" and
+silence read the same, as do a stated 0.00 mm and silence: `plot` is `Some(true)` or
+`None` for a DXF, never `Some(false)`, and a lineweight code of 0 is `None`. A drawing
+older than R2000 has neither (`None`).
+
 ## Fixed: SPLINE control points read at the wrong stride
 
 Rendering 9 real files to SVG and reviewing the screenshots turned up nonsensical
