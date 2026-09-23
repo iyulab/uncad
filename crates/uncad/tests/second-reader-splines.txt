@@ -1,0 +1,19 @@
+compared 586 unmatched 0
+2018/Dynblocks.dwg BD31 spline periodic: ours unstated, theirs false
+2018/Dynblocks.dwg BD32 spline periodic: ours unstated, theirs false
+2018/Dynblocks.dwg BD3E spline periodic: ours unstated, theirs false
+2018/Dynblocks.dwg BD3F spline periodic: ours unstated, theirs false
+2018/Dynblocks.dwg BCD1 spline periodic: ours unstated, theirs false
+2018/Dynblocks.dwg BCD2 spline periodic: ours unstated, theirs false
+2018/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2013/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2010/Spline.dwg 1BE spline closed: ours unstated, theirs false
+2010/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2007/Spline.dwg 1BE spline closed: ours unstated, theirs false
+2007/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2004/Spline.dwg 1BE spline closed: ours unstated, theirs false
+2004/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2000/Spline.dwg 1BE spline closed: ours unstated, theirs false
+2000/Spline.dwg 1BE spline periodic: ours unstated, theirs false
+2000/TS1.dwg 225 spline closed: ours unstated, theirs false
+2000/TS1.dwg 225 spline periodic: ours unstated, theirs false

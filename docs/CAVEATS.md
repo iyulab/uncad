@@ -402,6 +402,17 @@ bulge, as do 67 of the 122 HATCH polyline-boundary vertices. The library reads t
 (`bulges[]` on LWPOLYLINE, `bulge` on each 2D vertex); carrying them is a change to the
 model, not to this reader.
 
+## A fit-point spline's closed and periodic bits
+
+A SPLINE record is stored in one of two forms: by control points (with knots, weights and
+the closed, periodic and weighted bits) or by fit points (with end tangents). The fit-point
+form stores no periodic bit at all, and no closed bit before R2013 -- from R2013 on the
+record's `splineflags` carries it (bit 4). Where the record does not state a bit this crate
+reports `None`. Before R2013 the library fills `splineflags` in itself from the record's
+form, so the field is read only for R2013-or-later files. In the test corpus every
+R2013-or-later fit-point spline is open, so reading bit 4 is checked against the format
+description and a second reader; no closed example has been observed.
+
 ## Attributes: the block chain and the INSERT chain are walked here, not by the library
 
 In R13..R2000 drawings the library links a block's entities as a `first_entity` ..

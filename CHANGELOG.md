@@ -6,6 +6,13 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A SPLINE carries what defines its curve: `degree`, `knots`, `weights` (empty when
+  the file gives none -- every weight is 1), and the `closed` / `periodic` bits as
+  `Option<bool>`. A spline stored by its fit points has no periodic bit, and no
+  closed bit before R2013; those are `None`, not `false`.
+
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

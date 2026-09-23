@@ -378,6 +378,17 @@ pub fn is_r2010_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     unsafe { libredwg_sys::uncad_dwg_is_r2010_or_later(dwg) != 0 }
 }
 
+/// `true` when the drawing was read from an R2013-or-later DWG. Only from
+/// that version does a SPLINE record carry `splineflags` itself; before it
+/// the library fills the field in from the record's form.
+pub fn is_r2013_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: as `is_r2010_or_later`.
+    unsafe { libredwg_sys::uncad_dwg_is_r2013_or_later(dwg) != 0 }
+}
+
 /// Resolves a table reference to the name of the entry it points at in
 /// `table` (`LAYER`, `BLOCK`, `LTYPE`, ...) via `dwg_handle_name`. For a
 /// pre-R13 drawing the library matches the reference's `r11_idx` against the

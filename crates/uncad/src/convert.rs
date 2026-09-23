@@ -12,7 +12,7 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, is_pre_r13, is_r2010_or_later, SplineControlPoint,
+    get_point3d_array, is_pre_r13, is_r2010_or_later, is_r2013_or_later, SplineControlPoint,
 };
 use crate::text::TextDecoder;
 use std::ffi::CStr;
@@ -768,19 +768,55 @@ unsafe fn convert_entity(
             // (BITCODE_BL/u32) -- see get_array_field's doc comment.
             let fit_points: Vec<Point3D> =
                 get_point3d_array::<u16>(entity_ptr, "SPLINE", "num_fit_pts", "fit_pts");
-            let control_points: Vec<Point3D> = get_array_field::<u32, SplineControlPoint>(
+            let control: Vec<SplineControlPoint> = get_array_field::<u32, SplineControlPoint>(
                 entity_ptr,
                 "SPLINE",
                 "num_ctrl_pts",
                 "ctrl_pts",
-            )
-            .into_iter()
-            .map(Into::into)
-            .collect();
+            );
+            let degree = u32::from(get_field::<u16>(entity_ptr, "SPLINE", "degree")?);
+            // The record has two forms (`scenario`): 1 stores the curve by
+            // control points, knots and weights, with the closed / periodic /
+            // weighted bits beside them; 2 stores fit points and end tangents
+            // and none of those bits, so there they are not stated -- not
+            // false. From R2013 on the record also carries `splineflags`,
+            // whose bit 4 states "closed" for either form; before R2013 the
+            // library fills that field in itself.
+            let by_control_points = get_field::<u16>(entity_ptr, "SPLINE", "scenario") == Some(1);
+            let bit = |name: &str| {
+                by_control_points
+                    .then(|| get_field::<u8>(entity_ptr, "SPLINE", name).map(|b| b != 0))
+                    .flatten()
+            };
+            let closed = bit("closed_b").or_else(|| {
+                is_r2013_or_later(dwg)
+                    .then(|| get_field::<u32>(entity_ptr, "SPLINE", "splineflags"))
+                    .flatten()
+                    .map(|f| f & 4 != 0)
+            });
+            let periodic = bit("periodic");
+            let knots = if by_control_points {
+                get_array_field::<u32, f64>(entity_ptr, "SPLINE", "num_knots", "knots")
+            } else {
+                Vec::new()
+            };
+            // Weights are stored only when the `weighted` bit is set; the
+            // library leaves `w` at 0 otherwise, which is not a weight. No
+            // weights means every weight is 1.
+            let weights = if bit("weighted") == Some(true) {
+                control.iter().map(|p| p.w).collect()
+            } else {
+                Vec::new()
+            };
             Entity::Spline(SplineEntity {
                 common,
+                degree,
+                closed,
+                periodic,
+                knots,
+                weights,
                 fit_points,
-                control_points,
+                control_points: control.into_iter().map(Into::into).collect(),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MTEXT => {

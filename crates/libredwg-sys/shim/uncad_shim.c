@@ -198,6 +198,17 @@ uncad_dwg_is_r2010_or_later (const Dwg_Data *dwg)
   return v >= R_2010;
 }
 
+int
+uncad_dwg_is_r2013_or_later (const Dwg_Data *dwg)
+{
+  if (!dwg)
+    return 0;
+  Dwg_Version_Type v = dwg->header.from_version;
+  if (v == R_INVALID)
+    v = dwg->header.version;
+  return v >= R_2013b;
+}
+
 uint16_t
 uncad_dwg_codepage (const Dwg_Data *dwg)
 {

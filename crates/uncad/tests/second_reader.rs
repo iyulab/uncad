@@ -1069,3 +1069,115 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
         disagreements.join("\n")
     );
 }
+
+/// The same splines, field by field: degree, the closed and periodic bits,
+/// knots, weights, control points and fit points.
+///
+/// A spline record comes in two forms -- by control points or by fit
+/// points -- and which one a record is decides which fields exist at all,
+/// so the form is compared first, as whichever of the two point lists each
+/// reader filled.
+#[test]
+fn the_two_readers_agree_on_every_spline_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn pts(points: impl Iterator<Item = (f64, f64, f64)>) -> String {
+        points
+            .map(|(x, y, z)| format!("({x:?}, {y:?}, {z:?})"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+    let mut unmatched = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let uncad::Entity::Spline(o) = entity else {
+                    continue;
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(acadrust::EntityType::Spline(t)) = theirs.get(&id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                let flag = |b: Option<bool>| b.map_or("unstated".to_string(), |b| b.to_string());
+                let fields: Vec<(&str, String, String)> = vec![
+                    ("degree", o.degree.to_string(), t.degree.to_string()),
+                    (
+                        "control points",
+                        pts(o.control_points.iter().map(|p| (p.x, p.y, p.z))),
+                        pts(t.control_points.iter().map(|p| (p.x, p.y, p.z))),
+                    ),
+                    (
+                        "fit points",
+                        pts(o.fit_points.iter().map(|p| (p.x, p.y, p.z))),
+                        pts(t.fit_points.iter().map(|p| (p.x, p.y, p.z))),
+                    ),
+                    ("knots", format!("{:?}", o.knots), format!("{:?}", t.knots)),
+                    (
+                        "weights",
+                        format!("{:?}", o.weights),
+                        format!("{:?}", t.weights),
+                    ),
+                    ("closed", flag(o.closed), t.flags.closed.to_string()),
+                    ("periodic", flag(o.periodic), t.flags.periodic.to_string()),
+                ];
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} spline {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared > 0, "nothing was read by both");
+    // Every remaining line is a fit-point spline whose record states no
+    // periodic bit in any version, and no closed bit before R2013: this
+    // reader reports those as unstated, the other reader as false. Degree,
+    // knots, weights, control points and fit points agree exactly on every
+    // spline both read.
+    let report = format!(
+        "compared {compared} unmatched {unmatched}
+{}",
+        disagreements.join(
+            "
+"
+        )
+    );
+    let pinned = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/second-reader-splines.txt"
+    ))
+    .unwrap_or_default();
+    assert_eq!(
+        report.trim(),
+        pinned.trim(),
+        "
+the two readers' agreement on splines moved; measured now:
+{report}"
+    );
+}

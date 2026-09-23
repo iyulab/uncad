@@ -199,6 +199,7 @@ fn main() {
         .allowlist_function("uncad_dwg_is_pre_r13")
         .allowlist_function("uncad_dwg_is_r13_to_r2000")
         .allowlist_function("uncad_dwg_is_r2010_or_later")
+        .allowlist_function("uncad_dwg_is_r2013_or_later")
         .allowlist_function("uncad_dwg_codepage")
         .allowlist_function("uncad_dwg_is_wide_string")
         // The codepage tables (src/codepages.h): what decodes a pre-R2007

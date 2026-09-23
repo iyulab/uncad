@@ -145,6 +145,15 @@ int uncad_dwg_is_r13_to_r2000(const Dwg_Data *dwg);
  */
 int uncad_dwg_is_r2010_or_later(const Dwg_Data *dwg);
 
+/*
+ * Nonzero when the drawing was read from an R2013-or-later DWG (the file's
+ * own version, as `uncad_dwg_is_r2010_or_later`). From that version on a
+ * SPLINE record stores `splineflags`, whose bit 4 says a fit-point spline
+ * is closed; before it the library fills `splineflags` in itself from the
+ * record's form, so the bit is not the file's.
+ */
+int uncad_dwg_is_r2013_or_later(const Dwg_Data *dwg);
+
 /* `dwg->header.codepage`: the codepage the drawing's 8-bit strings (every
  * string before R2007) are in, as the Dwg_Codepage number -- read from the
  * DWG header, or from `$DWGCODEPAGE` by the DXF importer (which defaults to
