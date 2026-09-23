@@ -253,9 +253,9 @@ fn main() {
         .allowlist_function("uncad_dwg_is_r2013_or_later")
         .allowlist_function("uncad_dwg_codepage")
         .allowlist_function("uncad_dwg_is_wide_string")
-        // Reading from memory (Unicode paths on Windows, in-memory inputs),
-        // the file-header accessors, and the code-page string conversion --
-        // see shim/uncad_shim.h for why each exists.
+        // Reading from memory (Unicode paths on Windows, in-memory inputs)
+        // and the file-header accessors -- see shim/uncad_shim.h for why
+        // each exists.
         .allowlist_function("uncad_dwg_read_bytes")
         .allowlist_function("uncad_dxf_read_bytes")
         .allowlist_function("uncad_dwg_version")
@@ -263,15 +263,6 @@ fn main() {
         .allowlist_function("uncad_dwg_from_dxf")
         .allowlist_function("uncad_dwg_numheader_vars")
         .allowlist_function("uncad_dwg_template_read")
-        .allowlist_function("uncad_dwg_string_to_utf8")
-        .allowlist_function("uncad_tv_to_utf8")
-        .allowlist_function("uncad_entity_tv_to_utf8")
-        // The strings in_dxf.c stores 8-bit whatever the version (HEADER
-        // variables, MTEXT.text) -- never to be run through bit_convert_TU.
-        .allowlist_function("uncad_bytes_to_utf8")
-        .allowlist_function("uncad_entity_bytes_to_utf8")
-        .allowlist_function("uncad_free_string")
-        .allowlist_function("uncad_codepage_name")
         // Version enum -> "r2004"-style name, for the parsed header.
         .allowlist_function("dwg_version_type")
         // The codepage tables (src/codepages.h): what decodes a pre-R2007

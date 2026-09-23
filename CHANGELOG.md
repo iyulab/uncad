@@ -11,15 +11,12 @@ Notable changes to this project are recorded here. The format follows
 - `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
   `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
   MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and
-  exposes what decoding a drawing's text and header needs: `uncad_dwg_version`,
-  `uncad_dwg_from_version`, `uncad_dwg_from_dxf`, `uncad_dwg_numheader_vars` (how long a
-  pre-R13 header is), `uncad_dwg_template_read` (whether the section holding
-  `$MEASUREMENT` was read), `uncad_codepage_name`, and the
-  code-page string conversions `uncad_tv_to_utf8`, `uncad_bytes_to_utf8`, their
-  `uncad_entity_*` twins, `uncad_dwg_string_to_utf8` and `uncad_free_string`, with
-  bindings for `dwg_version_type` and `dwg_next_object`. `uncad` reads every drawing
-  through the two memory readers and its header through the file-header accessors; it
-  does not call the string conversions.
+  exposes the file-header facts decoding a drawing's text and header needs:
+  `uncad_dwg_version`, `uncad_dwg_from_version`, `uncad_dwg_from_dxf`,
+  `uncad_dwg_numheader_vars` (how long a pre-R13 header is) and `uncad_dwg_template_read`
+  (whether the section holding `$MEASUREMENT` was read), with bindings for
+  `dwg_version_type` and `dwg_next_object`. Strings are not converted in C: `uncad`'s
+  `TextDecoder` does that, and reports what it cannot.
 - `uncad::parse_bytes(bytes, Format)` parses a drawing already in memory, and
   `uncad::Format` (`Dwg`, `Dxf`, with `Format::from_path`) says which it is. `parse()`
   now reads the file itself and decodes it from memory, so a path LibreDWG could not

@@ -2352,8 +2352,8 @@ dwg_find_table_control (Dwg_Data *restrict dwg, const char *restrict table)
    INSERT->block_header NULL.
 
    UNCAD_IS_TU_DWG() is the predicate that storage actually follows, and
-   matches what this crate's own shim uses (uncad_tv_to_utf8 in
-   shim/uncad_shim.c). uncad_record_name_utf8() is the single place that
+   matches the rule the uncad crate reads these strings by
+   (crates/uncad/src/text.rs). uncad_record_name_utf8() is the single place that
    reads a record's "name" through dynapi and decodes it when needed.
 
    Scope: *only* fields dynapi itself wrote. The strings in_dxf.c stores

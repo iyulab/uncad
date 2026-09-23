@@ -20,7 +20,7 @@ crates/
                          than a path, and the file-header fields (version, codepage,
                          string width, a pre-R13 header's length, whether the Template
                          section was read) that decoding a drawing's text and header
-                         need, and string conversions.
+                         need. Strings themselves are decoded on the Rust side.
     vendor/libredwg/     the upstream C sources actually compiled (see "Build"), five
                          of them carrying a local patch (NOTICE.md)
     vendor-config/       config.h -- hand-written, standing in for autotools' output
