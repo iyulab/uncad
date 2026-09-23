@@ -13,8 +13,12 @@ crates/
                          bindings with bindgen.
     shim/                uncad_shim.c -- accessors that reach entity pointers behind
                          opaque types, a walker that flattens nested structs dynapi
-                         cannot reach (MULTILEADER leader lines), and a 3DSOLID SAB->SAT
-                         conversion that runs on a copy rather than the original.
+                         cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
+                         conversion that runs on a copy rather than the original,
+                         readers that decode a DWG or DXF from a memory buffer rather
+                         than a path, and the header fields (version, codepage,
+                         string width) and string conversions that decoding a
+                         drawing's text needs.
     vendor/libredwg/     the upstream C sources actually compiled (see "Build")
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")

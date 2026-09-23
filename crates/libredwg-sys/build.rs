@@ -190,6 +190,11 @@ fn main() {
         .allowlist_function("dwg_object_polyline_2d_get_points")
         .allowlist_function("dwg_object_polyline_3d_get_numpoints")
         .allowlist_function("dwg_object_polyline_3d_get_points")
+        // The next object in file order. Pre-R13 files fill neither a
+        // POLYLINE's `first_vertex` nor its `vertex[]`, so its vertices are
+        // reachable only by object order there -- which is what LibreDWG's own
+        // pre-R13 branch walks.
+        .allowlist_function("dwg_next_object")
         // Named explicitly because src/lib.rs's hand-written
         // Dwg_MLINE_vertex refers to it, not only because the polyline
         // accessors above return it.
@@ -208,6 +213,25 @@ fn main() {
         .allowlist_function("uncad_dwg_is_r2013_or_later")
         .allowlist_function("uncad_dwg_codepage")
         .allowlist_function("uncad_dwg_is_wide_string")
+        // Reading from memory (Unicode paths on Windows, in-memory inputs),
+        // the file-header accessors, and the code-page string conversion --
+        // see shim/uncad_shim.h for why each exists.
+        .allowlist_function("uncad_dwg_read_bytes")
+        .allowlist_function("uncad_dxf_read_bytes")
+        .allowlist_function("uncad_dwg_version")
+        .allowlist_function("uncad_dwg_from_version")
+        .allowlist_function("uncad_dwg_from_dxf")
+        .allowlist_function("uncad_dwg_string_to_utf8")
+        .allowlist_function("uncad_tv_to_utf8")
+        .allowlist_function("uncad_entity_tv_to_utf8")
+        // The strings in_dxf.c stores 8-bit whatever the version (HEADER
+        // variables, MTEXT.text) -- never to be run through bit_convert_TU.
+        .allowlist_function("uncad_bytes_to_utf8")
+        .allowlist_function("uncad_entity_bytes_to_utf8")
+        .allowlist_function("uncad_free_string")
+        .allowlist_function("uncad_codepage_name")
+        // Version enum -> "r2004"-style name, for the parsed header.
+        .allowlist_function("dwg_version_type")
         // The codepage tables (src/codepages.h): what decodes a pre-R2007
         // string's bytes, since the library's text accessors return them
         // undecoded. Predicates plus the byte -> code point lookups.
