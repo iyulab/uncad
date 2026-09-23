@@ -25,7 +25,7 @@ use uncad_model::model::{
     Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
     TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
-use uncad_model::model::{Point2D, Point3D};
+use uncad_model::model::{Point2D, Point3D, PolylineVertex};
 
 /// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
 /// as in DXF group 70 and as `dwg.h` documents for `Dwg_Entity_POLYLINE_2D`.
@@ -306,35 +306,100 @@ unsafe fn chained_insert_attribs(
     attribs
 }
 
-/// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
-/// returns into an owned `Vec`, then frees its buffer.
+/// A 2D or 3D POLYLINE's VERTEX records, in order.
 ///
-/// Those dedicated C functions are used rather than a generic owned-subentity
-/// walk because their traversal is version-dependent (pre-R2004 files chain
-/// `first_vertex..last_vertex` through the raw object list). A generic walk was
-/// tried and over-collected a vertex on a real file.
+/// Before R13 a polyline's vertices simply follow it in the object stream,
+/// up to its SEQEND. From R13 on the polyline owns them, and LibreDWG's own
+/// owned-subentity walk returns them -- through `first_vertex..last_vertex`,
+/// last included, up to R2000, and through the `vertex` handle array after.
+///
+/// LibreDWG's dedicated point accessors (`dwg_object_polyline_{2,3}d_get_points`)
+/// are not used: from R13 to R2000 their loop stops *before* `last_vertex`,
+/// so a polyline arrived one vertex short -- a file's DXF twin writes the
+/// vertex they drop.
 ///
 /// # Safety
-/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object matching the
-/// accessors passed in, and `T` must have the same layout as the
-/// `dwg_point_2d`/`dwg_point_3d` they return.
-unsafe fn read_polyline_points<P, T: Copy>(
+/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object of `dwg`.
+unsafe fn polyline_vertex_records(
+    dwg: *mut libredwg_sys::Dwg_Data,
     obj: *mut libredwg_sys::Dwg_Object,
-    get_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> *mut P,
-    get_num_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> u32,
-) -> Vec<T> {
-    let mut error = 0i32;
-    let points_ptr = unsafe { get_points(obj, &mut error) };
-    let num_points = unsafe { get_num_points(obj, &mut error) };
-    if points_ptr.is_null() || num_points == 0 {
-        return Vec::new();
+) -> Vec<*mut libredwg_sys::Dwg_Object> {
+    let mut records = Vec::new();
+    if is_pre_r13(dwg) {
+        let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+        let mut sub = unsafe { libredwg_sys::dwg_next_object(obj) };
+        let mut steps = 0;
+        while !sub.is_null() && steps <= max_steps {
+            steps += 1;
+            let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
+                as libredwg_sys::DWG_OBJECT_TYPE;
+            if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND {
+                break;
+            }
+            records.push(sub);
+            sub = unsafe { libredwg_sys::dwg_next_object(sub) };
+        }
+    } else {
+        let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+        while !sub.is_null() {
+            records.push(sub);
+            sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
+        }
     }
-    // SAFETY: on success the accessor calloc's exactly num_points entries of
-    // the layout T mirrors; copied out here before the buffer is freed.
-    let points =
-        unsafe { std::slice::from_raw_parts(points_ptr.cast::<T>(), num_points as usize) }.to_vec();
-    unsafe { libc::free(points_ptr.cast()) };
+    records
+}
+
+/// The positions (and whatever else `read` takes) of a polyline's vertex
+/// records of type `vertex_type`, in order. A record of another type -- a
+/// polyface's face record, say -- is not a vertex and is skipped.
+///
+/// # Safety
+/// As [`polyline_vertex_records`].
+unsafe fn polyline_vertices<T>(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    obj: *mut libredwg_sys::Dwg_Object,
+    vertex_type: libredwg_sys::DWG_OBJECT_TYPE,
+    mut read: impl FnMut(*mut std::ffi::c_void) -> Option<T>,
+) -> Vec<T> {
+    unsafe { polyline_vertex_records(dwg, obj) }
+        .into_iter()
+        .filter_map(|sub| {
+            let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
+                as libredwg_sys::DWG_OBJECT_TYPE;
+            let entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
+            (fixedtype == vertex_type && !entity_ptr.is_null())
+                .then(|| read(entity_ptr))
+                .flatten()
+        })
+        .collect()
+}
+
+/// Pairs a polyline's vertex positions with the bulges its record stores as a
+/// separate array. The array is empty when every segment is straight, and
+/// otherwise has one entry per vertex; any other length does not say which
+/// bulge belongs to which vertex, so none is used and the read says so.
+fn with_bulges(
+    text: &TextDecoder,
+    dxfname: &str,
+    points: Vec<Point2D>,
+    bulges: Vec<f64>,
+) -> Vec<PolylineVertex> {
+    if !bulges.is_empty() && bulges.len() != points.len() {
+        text.warn(format!(
+            "POLYLINE_BULGE: a {dxfname} stores {} bulges for {} vertices; its segments are read as straight",
+            bulges.len(),
+            points.len()
+        ));
+    }
+    let matched = bulges.len() == points.len();
     points
+        .into_iter()
+        .enumerate()
+        .map(|(i, point)| PolylineVertex {
+            point,
+            bulge: if matched { bulges[i] } else { 0.0 },
+        })
+        .collect()
 }
 
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
@@ -558,8 +623,13 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
-            let vertices: Vec<Point2D> =
+            let points: Vec<Point2D> =
                 get_point2d_array::<u32>(entity_ptr, "LWPOLYLINE", "num_points", "points");
+            // The record stores the bulges as a separate array that is either
+            // empty (every segment straight) or one per vertex.
+            let bulges: Vec<f64> =
+                get_array_field::<u32, f64>(entity_ptr, "LWPOLYLINE", "num_bulges", "bulges");
+            let vertices = with_bulges(text, "LWPOLYLINE", points, bulges);
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
             Entity::LwPolyline(LwPolylineEntity {
                 common,
@@ -870,13 +940,13 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
-            // SAFETY: obj is a POLYLINE_3D per fixedtype, and Point3D mirrors
-            // dwg_point_3d's layout.
+            // SAFETY: obj is a POLYLINE_3D of dwg per fixedtype.
             let vertices: Vec<Point3D> = unsafe {
-                read_polyline_points(
+                polyline_vertices(
+                    dwg,
                     obj,
-                    libredwg_sys::dwg_object_polyline_3d_get_points,
-                    libredwg_sys::dwg_object_polyline_3d_get_numpoints,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D,
+                    |v| get_point3d(v, "VERTEX_3D", "point"),
                 )
             };
             // POLYLINE_3D.flag is BITCODE_RC (1 byte), unlike LWPOLYLINE's
@@ -890,13 +960,21 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // SAFETY: obj is a POLYLINE_2D per fixedtype, and Point2D mirrors
-            // dwg_point_2d's layout.
-            let vertices: Vec<Point2D> = unsafe {
-                read_polyline_points(
+            // Each VERTEX_2D carries its own bulge (the segment to the next
+            // vertex); an unreadable one is a straight segment.
+            // SAFETY: obj is a POLYLINE_2D of dwg per fixedtype.
+            let vertices: Vec<PolylineVertex> = unsafe {
+                polyline_vertices(
+                    dwg,
                     obj,
-                    libredwg_sys::dwg_object_polyline_2d_get_points,
-                    libredwg_sys::dwg_object_polyline_2d_get_numpoints,
+                    libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D,
+                    |v| {
+                        let p = get_point3d(v, "VERTEX_2D", "point")?;
+                        Some(PolylineVertex {
+                            point: Point2D { x: p.x, y: p.y },
+                            bulge: get_field::<f64>(v, "VERTEX_2D", "bulge").unwrap_or(0.0),
+                        })
+                    },
                 )
             };
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
@@ -1306,12 +1384,15 @@ fn convert_hatch_path(path: &libredwg_sys::Dwg_HATCH_Path) -> HatchBoundaryPath 
         // SAFETY: polyline_paths/num_segs_or_paths are LibreDWG's own matched
         // array-length convention (see Dwg_HATCH_Path in dwg.h); valid until
         // dwg_free, which outlives this whole conversion pass.
-        let vertices: Vec<Point2D> =
+        let vertices: Vec<PolylineVertex> =
             unsafe { read_raw_array(path.polyline_paths, path.num_segs_or_paths) }
                 .into_iter()
-                .map(|v| Point2D {
-                    x: v.point.x,
-                    y: v.point.y,
+                .map(|v| PolylineVertex {
+                    point: Point2D {
+                        x: v.point.x,
+                        y: v.point.y,
+                    },
+                    bulge: v.bulge,
                 })
                 .collect();
         HatchBoundaryPath::Polyline(vertices)

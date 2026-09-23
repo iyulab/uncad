@@ -934,11 +934,12 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
 
 /// The same lightweight polylines and ellipses, field by field.
 ///
-/// Matched by handle and compared exactly, like the other field comparisons.
-/// The second reader also carries each polyline vertex's bulge and widths,
-/// which the model does not; how many vertices carry a non-zero one is
-/// printed alongside, because a bulge is an arc segment and dropping it
-/// changes the drawing's geometry.
+/// Matched by handle and compared exactly, like the other field comparisons,
+/// each polyline vertex with its bulge (an arc segment's). The second reader
+/// also carries vertex widths, which the model does not; how many vertices
+/// carry a non-zero one is printed alongside. The comparison is required to
+/// have met bulged vertices, so that it cannot pass by comparing only
+/// straight segments.
 #[test]
 fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
     use std::collections::{BTreeMap, BTreeSet};
@@ -991,12 +992,14 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
                         let ov: Vec<String> = o
                             .vertices
                             .iter()
-                            .map(|v| format!("({:?}, {:?})", v.x, v.y))
+                            .map(|v| format!("({:?}, {:?}) b{:?}", v.point.x, v.point.y, v.bulge))
                             .collect();
                         let tv: Vec<String> = t
                             .vertices
                             .iter()
-                            .map(|v| format!("({:?}, {:?})", v.location.x, v.location.y))
+                            .map(|v| {
+                                format!("({:?}, {:?}) b{:?}", v.location.x, v.location.y, v.bulge)
+                            })
                             .collect();
                         fields.push(("vertex count", ov.len().to_string(), tv.len().to_string()));
                         for (i, (a, b)) in ov.iter().zip(&tv).enumerate() {
@@ -1074,6 +1077,7 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
          (in {bulged_polylines} polylines), width != 0 on {widened}"
     );
     assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(bulged > 0, "no bulged vertex was compared");
     assert!(
         unmatched.is_empty() && disagreements.is_empty(),
         "compared {compared:?}, unmatched {unmatched:?}, {} disagreements:\n{}",
@@ -1249,4 +1253,125 @@ fn the_two_readers_agree_on_which_entities_are_invisible() {
         disagreements.join("\n")
     );
     println!("compared {compared}, invisible {invisible}");
+}
+
+/// The same 2D and 3D POLYLINEs, vertex by vertex: every position, each 2D
+/// vertex with its bulge, and the closed bit.
+///
+/// The vertex list is the field most at risk here: a POLYLINE stores its
+/// vertices as separate records chained to it, and walking that chain is
+/// version-dependent -- a walk that stops one record early drops the last
+/// vertex without an error. So the count is compared too, and the
+/// comparison is required to have met polylines from before R2004 (where the
+/// chain runs `first_vertex..last_vertex`) as well as after.
+#[test]
+fn the_two_readers_agree_on_every_2d_and_3d_polyline_vertex() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut unmatched = 0usize;
+    let mut chained = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let id = entity.common().id;
+                let (kind, ov, oc): (&str, Vec<String>, bool) = match entity {
+                    uncad::Entity::Polyline2D(o) => (
+                        "polyline 2d",
+                        o.vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?}) b{:?}", v.point.x, v.point.y, v.bulge))
+                            .collect(),
+                        o.closed,
+                    ),
+                    uncad::Entity::Polyline3D(o) => (
+                        "polyline 3d",
+                        o.vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?}, {:?})", v.x, v.y, v.z))
+                            .collect(),
+                        o.closed,
+                    ),
+                    _ => continue,
+                };
+                if !seen.insert(id) {
+                    continue;
+                }
+                use acadrust::EntityType as E;
+                let (tv, tc): (Vec<String>, bool) = match (kind, theirs.get(&id.value())) {
+                    ("polyline 2d", Some(E::Polyline2D(t))) => (
+                        t.vertices
+                            .iter()
+                            .map(|v| {
+                                format!("({:?}, {:?}) b{:?}", v.location.x, v.location.y, v.bulge)
+                            })
+                            .collect(),
+                        t.flags.is_closed(),
+                    ),
+                    ("polyline 3d", Some(E::Polyline3D(t))) => (
+                        t.vertices
+                            .iter()
+                            .map(|v| {
+                                format!(
+                                    "({:?}, {:?}, {:?})",
+                                    v.position.x, v.position.y, v.position.z
+                                )
+                            })
+                            .collect(),
+                        t.flags.closed,
+                    ),
+                    _ => {
+                        unmatched += 1;
+                        continue;
+                    }
+                };
+                *compared.entry(kind).or_default() += 1;
+                if matches!(*version, "2000" | "r14") {
+                    chained += 1;
+                }
+                let mut fields = vec![
+                    ("vertex count", ov.len().to_string(), tv.len().to_string()),
+                    ("closed", oc.to_string(), tc.to_string()),
+                ];
+                for (i, (a, b)) in ov.iter().zip(&tv).enumerate() {
+                    if a != b {
+                        fields.push(("vertex", format!("[{i}] {a}"), format!("[{i}] {b}")));
+                    }
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared:?}, from before R2004 {chained}, unmatched {unmatched}");
+    assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(chained > 0, "no polyline from before R2004 was compared");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared:?}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
 }

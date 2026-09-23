@@ -154,7 +154,7 @@ impl TextDecoder {
         self.warnings.into_inner()
     }
 
-    fn warn(&self, message: String) {
+    pub(crate) fn warn(&self, message: String) {
         let mut warnings = self.warnings.borrow_mut();
         if !warnings.contains(&message) {
             warnings.push(message);

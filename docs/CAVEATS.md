@@ -391,16 +391,30 @@ corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported close
 constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
 carry the distinction.
 
-## Polyline bulges are not carried
+## Where a polyline's bulges come from
 
-A polyline vertex can carry a bulge: the segment to the next vertex is then an arc, not a
-straight line. The model has no field for it, so this crate reads the vertices and drops the
-bulges -- an arc segment arrives as its chord, with no error and no diagnostic. This applies
-to LWPOLYLINE, to 2D POLYLINE, and to the polyline boundaries of a HATCH. It is not rare: in
-the test corpus, 677 of the 4,955 LWPOLYLINE vertices another reader finds carry a non-zero
-bulge, as do 67 of the 122 HATCH polyline-boundary vertices. The library reads the bulges
-(`bulges[]` on LWPOLYLINE, `bulge` on each 2D vertex); carrying them is a change to the
-model, not to this reader.
+Each polyline vertex carries the bulge of the segment that leaves it (an arc segment's; `0`
+is straight). They are read from three places:
+
+- **LWPOLYLINE** stores its bulges as an array separate from its points, empty when every
+  segment is straight. An array of any other length than the points' does not say which bulge
+  belongs to which vertex: every segment is then read as straight, and the read reports
+  `POLYLINE_BULGE`.
+- **2D POLYLINE** stores each bulge on its own `VERTEX_2D` record, beside the position; both
+  come from the same record (see the next section for how the records are found).
+- **A HATCH polyline boundary** stores the bulge beside each point.
+
+## How a 2D or 3D POLYLINE's vertices are found
+
+A heavy POLYLINE keeps its vertices as separate records. Before R13 they follow it in the
+object stream up to its SEQEND; from R13 to R2000 the polyline chains them from
+`first_vertex` to `last_vertex`; from R2004 on it lists them by handle. This crate walks the
+records itself, by version, rather than through the library's dedicated point accessors:
+from R13 to R2000 those stop one record short of `last_vertex`, so a polyline arrived without
+its last vertex. On the test corpus the walk's vertex count matches each drawing's DXF twin
+for every polyline except one closed 2D polyline in each of two pre-R11 drawings (`r9`,
+`r10`), for which the library yields no vertex record at all; that polyline is read with no
+vertices.
 
 ## A fit-point spline's closed and periodic bits
 

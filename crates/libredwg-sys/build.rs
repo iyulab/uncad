@@ -180,13 +180,8 @@ fn main() {
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")
         .allowlist_function("get_next_owned_subentity")
-        .allowlist_function("dwg_object_polyline_2d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_2d_get_points")
-        .allowlist_function("dwg_object_polyline_3d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_3d_get_points")
         // Named explicitly because src/lib.rs's hand-written
-        // Dwg_MLINE_vertex refers to it, not only because the polyline
-        // accessors above return it.
+        // Dwg_MLINE_vertex refers to it.
         .allowlist_type("dwg_point_3d")
         .allowlist_function("uncad_object_entity_ptr")
         .allowlist_function("uncad_object_object_ptr")
@@ -220,6 +215,9 @@ fn main() {
         // left unresolved.
         .allowlist_function("dwg_next_entity")
         .allowlist_function("dwg_resolve_handle")
+        // Before R13 a POLYLINE's vertices follow it in the object stream up
+        // to its SEQEND; the consumer walks them with this.
+        .allowlist_function("dwg_next_object")
         // Resolves a table reference to the entry's name by index for
         // pre-R13 drawings (their references carry no handle), and by handle
         // otherwise.

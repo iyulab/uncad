@@ -19,26 +19,6 @@ Notable changes to this project are recorded here. The format follows
   hidden visibility states are the common case (5,499 of the test corpus's entities).
 - An ELLIPSE carries its `extrusion` (DXF 210), the normal of its plane: a mirrored
   ellipse's parameters run the other way.
-### Changed
-
-- A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
-  entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
-  entity answers to it, `Absent` is a leader that names nothing. The `Option` it
-  replaces carried the first two as the same `Some`.
-- A LEADER's `has_arrowhead` is `Option<bool>`; `None` where the flag cannot be read.
-- `LightEntity::has_target` is gone and `LightEntity::light_type`
-  (`Option<LightType>`: distant, point, spot) takes its place. `has_target` was not
-  something the file states but a conclusion drawn from the type and two points; the
-  type is what the file states, and whether a light aims at its target follows from
-  it. Breaking for consumers reading any of the three fields.
-- `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
-  `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
-  instead of two rendered hex strings. The parser no longer decides how a
-  single-color gradient fades or whether white is flipped for a white background;
-  those are a renderer's derivations. Breaking for consumers reading the two fields.
-
-### Added
-
 - `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value
   answers to. A title block's values were readable but not which field each one filled.
 - `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while
@@ -61,8 +41,35 @@ Notable changes to this project are recorded here. The format follows
   happened to build. The value is measured (1.87 fails, 1.88 passes) and CI has an `msrv`
   job that checks the workspace with exactly the declared toolchain.
 
+### Changed
+
+- A polyline's vertices are `PolylineVertex { point, bulge }` -- LWPOLYLINE, 2D
+  POLYLINE and a HATCH's polyline boundaries. The bulge (DXF 42) is an arc segment's;
+  it was read and dropped, so an arc segment arrived as its chord. A bulge array that
+  cannot be matched to the vertices is reported as `POLYLINE_BULGE` and read as
+  straight.
+
+- A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
+  entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
+  entity answers to it, `Absent` is a leader that names nothing. The `Option` it
+  replaces carried the first two as the same `Some`.
+- A LEADER's `has_arrowhead` is `Option<bool>`; `None` where the flag cannot be read.
+- `LightEntity::has_target` is gone and `LightEntity::light_type`
+  (`Option<LightType>`: distant, point, spot) takes its place. `has_target` was not
+  something the file states but a conclusion drawn from the type and two points; the
+  type is what the file states, and whether a light aims at its target follows from
+  it. Breaking for consumers reading any of the three fields.
+- `HatchGradient` carries its stops as packed 24-bit RGB (`color1: u32`,
+  `color2: Option<u32>`) plus the single-color `tint`, as the file states them,
+  instead of two rendered hex strings. The parser no longer decides how a
+  single-color gradient fades or whether white is flipped for a white background;
+  those are a renderer's derivations. Breaking for consumers reading the two fields.
+
 ### Fixed
 
+- A 2D or 3D POLYLINE from an R13 to R2000 drawing no longer loses its last vertex. The
+  library's point accessors stop one record early in that range; the vertex records are
+  now walked directly.
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
