@@ -93,6 +93,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A WIPEOUT's boundary lies where the image is: its clip vertices are in the image's
+  pixel space, which starts at the upper left corner with pixel centers on whole numbers,
+  so a vertex is `pt0 + (x + 0.5)*u + (h - 0.5 - y)*v`. The boundary was placed half the
+  image away and upside down. A first vertex repeated at the end is dropped.
 - An arc-length dimension read from a DWG carries its group 16 (the first leader point)
   whether or not it has a leader: the record always stores it, and the same drawing
   saved as DXF states the same point. Read from DXF, a stated leader is still what

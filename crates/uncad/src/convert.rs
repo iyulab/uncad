@@ -564,13 +564,17 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
 /// `clip_boundary_type` 1 ("rect") stores exactly 2 `clip_verts`, two opposite
 /// corners of a pixel-space-axis-aligned rectangle; anything else (2,
 /// "polygon", or unset) is used as an explicit vertex list. With no usable
-/// `clip_verts` at all this falls back to the full image rectangle implied by
-/// `image_size`: clipping is optional in the format, but every WIPEOUT still
-/// has its full image extent.
+/// `clip_verts` at all this falls back to the full image, whose pixel extent
+/// runs from -0.5 to `image_size - 0.5` on each axis.
 ///
-/// Each pixel-space `(u, v)` maps to `pt0 + u*uvec + v*vvec` -- `uvec`/`vvec`
-/// are already one-pixel-length vectors in the entity's local space, not
-/// normalized directions.
+/// The clip vertices are in the image's pixel space, which runs from the
+/// image's *upper* left corner with each pixel's center on a whole number:
+/// a vertex `(x, y)` lies at `pt0 + (x + 0.5)*uvec + (h - 0.5 - y)*vvec`,
+/// `h` being `image_size.y`. `uvec`/`vvec` are one pixel long in the
+/// entity's local space. A WIPEOUT's image is one pixel square, so its
+/// vertices run from -0.5 to 0.5 and span `pt0` to `pt0 + uvec + vvec`.
+/// Two independent readers of the format (ezdxf's image boundary and
+/// acadrust's wipeout) agree on this.
 fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     let Some(pt0) = get_point3d(entity_ptr, "WIPEOUT", "pt0") else {
         return Vec::new();
@@ -585,42 +589,50 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
         y: 1.0,
         z: 0.0,
     });
-    let clip_verts: Vec<Point2D> =
+    let size =
+        get_point2d(entity_ptr, "WIPEOUT", "image_size").unwrap_or(Point2D { x: 1.0, y: 1.0 });
+    let mut clip_verts: Vec<Point2D> =
         get_point2d_array::<u32>(entity_ptr, "WIPEOUT", "num_clip_verts", "clip_verts");
+    // A polygon stored closed repeats its first vertex at the end; the loop
+    // is closed either way, and the repeat is not a vertex.
+    if clip_verts.len() > 2 && clip_verts.first() == clip_verts.last() {
+        clip_verts.pop();
+    }
     // BITCODE_BS ("1 rect, 2 polygon"). An unreadable or unset value is
     // treated like "polygon", not assumed to be "rect".
     let clip_boundary_type =
         get_field::<u16>(entity_ptr, "WIPEOUT", "clip_boundary_type").unwrap_or(0);
 
-    let pixel_points: Vec<Point2D> = if clip_boundary_type == 1 && clip_verts.len() == 2 {
-        let (a, b) = (clip_verts[0], clip_verts[1]);
+    let rect = |a: Point2D, b: Point2D| {
         vec![
             Point2D { x: a.x, y: a.y },
             Point2D { x: b.x, y: a.y },
             Point2D { x: b.x, y: b.y },
             Point2D { x: a.x, y: b.y },
         ]
+    };
+    let pixel_points: Vec<Point2D> = if clip_boundary_type == 1 && clip_verts.len() == 2 {
+        rect(clip_verts[0], clip_verts[1])
     } else if !clip_verts.is_empty() {
         clip_verts
     } else {
-        let size =
-            get_point2d(entity_ptr, "WIPEOUT", "image_size").unwrap_or(Point2D { x: 0.0, y: 0.0 });
-        vec![
-            Point2D { x: 0.0, y: 0.0 },
-            Point2D { x: size.x, y: 0.0 },
+        rect(
+            Point2D { x: -0.5, y: -0.5 },
             Point2D {
-                x: size.x,
-                y: size.y,
+                x: size.x - 0.5,
+                y: size.y - 0.5,
             },
-            Point2D { x: 0.0, y: size.y },
-        ]
+        )
     };
 
     pixel_points
         .into_iter()
-        .map(|p| Point2D {
-            x: pt0.x + p.x * uvec.x + p.y * vvec.x,
-            y: pt0.y + p.x * uvec.y + p.y * vvec.y,
+        .map(|p| {
+            let (u, v) = (p.x + 0.5, size.y - 0.5 - p.y);
+            Point2D {
+                x: pt0.x + u * uvec.x + v * vvec.x,
+                y: pt0.y + u * uvec.y + v * vvec.y,
+            }
         })
         .collect()
 }
