@@ -427,3 +427,64 @@ fn no_trim_keeps_the_outlier_inside_the_viewbox() {
         "--no-trim should keep the outlier inside the viewBox: {vb_untrimmed}"
     );
 }
+
+/// `--version` answers; an option the command does not know, a missing
+/// value and a second input are errors, not ignored.
+#[test]
+fn version_and_the_parsers_refusals() {
+    let run = |args: &[&str]| {
+        std::process::Command::new(EXE)
+            .args(args)
+            .output()
+            .expect("the binary runs")
+    };
+    let v = run(&["--version"]);
+    assert!(v.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&v.stdout).trim(),
+        format!("uncad {}", env!("CARGO_PKG_VERSION"))
+    );
+    for (args, needle) in [
+        (&["x.dwg", "--bogus"][..], "unknown option '--bogus'"),
+        (&["--bogus", "x.dwg"][..], "unknown option '--bogus'"),
+        (&["x.dwg", "y.dwg"][..], "unexpected argument 'y.dwg'"),
+        (&["x.dwg", "-o"][..], "-o needs a value"),
+    ] {
+        let out = run(args);
+        assert!(!out.status.success(), "{args:?} should fail");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(needle), "{args:?}: {err}");
+    }
+}
+
+/// `--include-hidden` draws what the layer rules leave out, so the SVG of a
+/// drawing with hidden entities grows.
+#[test]
+fn include_hidden_draws_more() {
+    let input = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uncad/tests/fixtures/hidden_layers_r2000.dxf"
+    );
+    let dir = std::env::temp_dir().join(format!("uncad-cli-hidden-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let render = |name: &str, extra: &[&str]| {
+        let path = dir.join(name);
+        let out = std::process::Command::new(EXE)
+            .arg(input)
+            .arg("-o")
+            .arg(&path)
+            .args(extra)
+            .output()
+            .expect("the binary runs");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::fs::read_to_string(&path).unwrap()
+    };
+    let plain = render("plain.svg", &[]);
+    let all = render("all.svg", &["--include-hidden"]);
+    assert!(all.len() > plain.len(), "{} vs {}", all.len(), plain.len());
+    let _ = std::fs::remove_dir_all(&dir);
+}

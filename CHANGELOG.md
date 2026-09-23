@@ -8,6 +8,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `uncad --version` / `-V` and `--include-hidden` (draw what the layer rules and the
+  invisible flag leave out). The command now refuses an option it does not know, a second
+  input and an option without its value, naming what was wrong, where it used to ignore
+  them.
 - `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
   `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
   MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and

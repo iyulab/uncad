@@ -23,6 +23,8 @@ JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
 
 SVG/PNG options:
+  --include-hidden            draw entities hidden by their layer or flag (off,
+                                frozen, non-plotting, DEFPOINTS, invisible)
   --space <model|paper|all>   which space to render (default: model)
                                 model = the drawing itself
                                 paper = sheet borders and title blocks
@@ -33,6 +35,10 @@ SVG/PNG options:
 PNG options:
   --scale <factor>            multiplies the SVG viewBox size (default: 1.0,
                                 e.g. 2.0 for twice the resolution)
+
+Other options:
+  -h, --help                  this text
+  -V, --version               print the version
 
 Examples:
   uncad drawing.dwg
@@ -48,10 +54,11 @@ struct Args {
     outlier_trim: bool,
     scale: String,
     pretty: bool,
+    include_hidden: bool,
     help: bool,
 }
 
-fn parse_args(argv: &[String]) -> Args {
+fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         input: None,
         output: None,
@@ -59,41 +66,61 @@ fn parse_args(argv: &[String]) -> Args {
         outlier_trim: true,
         scale: "1".to_string(),
         pretty: false,
+        include_hidden: false,
         help: false,
     };
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
-            "-o" | "--output" => {
+            "-o" | "--output" | "--space" | "--scale" => {
+                let flag = argv[i].as_str();
                 i += 1;
-                args.output = argv.get(i).cloned();
-            }
-            "--space" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.space = v.clone();
+                let value = argv
+                    .get(i)
+                    .cloned()
+                    .ok_or_else(|| format!("{flag} needs a value"))?;
+                match flag {
+                    "--space" => args.space = value,
+                    "--scale" => args.scale = value,
+                    _ => args.output = Some(value),
                 }
             }
             "--no-trim" => args.outlier_trim = false,
-            "--scale" => {
-                i += 1;
-                if let Some(v) = argv.get(i) {
-                    args.scale = v.clone();
-                }
-            }
             "--pretty" => args.pretty = true,
+            "--include-hidden" => args.include_hidden = true,
             "-h" | "--help" => args.help = true,
-            other if args.input.is_none() => args.input = Some(other.to_string()),
-            _ => {}
+            // Answered by `main` before any parsing.
+            "-V" | "--version" => {}
+            flag if flag.starts_with('-') && flag.len() > 1 => {
+                return Err(format!("unknown option '{flag}' (see --help)"));
+            }
+            positional => {
+                if let Some(first) = &args.input {
+                    return Err(format!(
+                        "unexpected argument '{positional}': the input is already '{first}'"
+                    ));
+                }
+                args.input = Some(positional.to_string());
+            }
         }
         i += 1;
     }
-    args
+    Ok(args)
 }
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
-    let args = parse_args(&argv);
+    if argv.iter().any(|a| a == "-V" || a == "--version") {
+        println!("uncad {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+    let args = match parse_args(&argv) {
+        Ok(args) => args,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     if args.help || args.input.is_none() {
         eprintln!("{USAGE}");
@@ -217,6 +244,7 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
         } else {
             Crop::Everything
         },
+        include_hidden: args.include_hidden,
         ..Default::default()
     })
 }
