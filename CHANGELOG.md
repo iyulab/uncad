@@ -69,6 +69,8 @@ Notable changes to this project are recorded here. The format follows
   `zero_suppression` (DIMZIN), `rounding` (DIMRND), `angular_unit_format` (DIMAUNIT),
   `angular_decimal_places` (DIMADEC) and `fraction_format` (DIMFRAC). What to use where a
   style states nothing is the consumer's decision.
+- An ordinate DIMENSION carries its `ordinate_axis` (DXF 70, bit 64): whether it measures
+  its feature's x or y distance from the datum.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
@@ -147,7 +149,10 @@ Notable changes to this project are recorded here. The format follows
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
-  not stated: the library keeps it under the field name `xline2end_pt`.
+  not stated: the library keeps it under the field name `xline2end_pt`. Read from a DXF,
+  the same dimension had its groups 10 and 16 (`definition_point` and `points.arc`)
+  exchanged: LibreDWG's DXF importer fills those two fields by group code, its DWG decoder
+  in stream order.
 - An MTEXT from a drawing older than R2000 reports a line spacing factor of `1` (the format
   has no such field there) instead of `0`, which is outside the factor's valid range.
 - A LEADER's `has_arrowhead` read from an R2010-or-later DWG is `None`. The vendored

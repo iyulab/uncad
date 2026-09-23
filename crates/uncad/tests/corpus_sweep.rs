@@ -255,25 +255,29 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
 }
 
 /// Which of this library's point fields is which DXF group cannot be read off
-/// the field names for a two-line angular dimension: `def_pt` holds group 16
-/// there, and `xline2end_pt` holds group 10. The mapping in the reader follows
-/// a measurement against the same drawing in both formats, so the measurement
-/// is pinned here -- if the library's field layout changes, this fails rather
-/// than the model quietly holding the wrong point.
+/// the field names for a two-line angular dimension: decoded from a DWG,
+/// `def_pt` holds group 16 there, and `xline2end_pt` holds group 10; the DXF
+/// importer fills the same two fields the other way round. The mapping in the
+/// reader follows a measurement against the same drawing in both formats, so
+/// the measurement is pinned here, for both readers -- if the library's field
+/// layout changes, this fails rather than the model quietly holding the wrong
+/// point.
 ///
 /// The second drawing is what settles group 10: in the first, groups 10 and
 /// 13 are the same point, so a reading of either looks like the other.
 #[test]
 fn a_two_line_angular_dimensions_groups_are_the_ones_the_dxf_twin_states() {
     // Two unrelated drawings, so the mapping is not one file's accident.
-    angular_groups_match_the_twin(
-        "example_2000.dwg",
-        (490.6216519543077, 4118.24274338716),
-        (490.6216519543077, 4118.24274338716),
-        (-276.8548009664508, 4701.847034571434),
-        (172.7442546208081, 3207.985617767696),
-        (3.542714605046057, 4128.871501442696),
-    );
+    for drawing in ["example_2000.dwg", "example_2000.dxf"] {
+        angular_groups_match_the_twin(
+            drawing,
+            (490.6216519543077, 4118.24274338716),
+            (490.6216519543077, 4118.24274338716),
+            (-276.8548009664508, 4701.847034571434),
+            (172.7442546208081, 3207.985617767696),
+            (3.542714605046057, 4128.871501442696),
+        );
+    }
     angular_groups_match_the_twin(
         "2000/TS1.dwg",
         (28.3894217039915, 46.63480213521191),

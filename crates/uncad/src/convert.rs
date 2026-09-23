@@ -23,8 +23,9 @@ use uncad_model::model::{
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
     InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
-    Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity, SolidEntity,
-    SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
+    OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity,
+    SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity,
+    WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, HorizontalJustification, Point2D, Point3D, VerticalJustification,
@@ -1415,7 +1416,7 @@ unsafe fn convert_entity(
             // field name than every other subtype does. The mapping is written out
             // per subtype rather than passing this backend's field names
             // through, so one model field never holds two different points.
-            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
+            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype, is_from_dxf(dwg));
             let point = |field: Option<&'static str>| {
                 field.and_then(|f| get_point3d(entity_ptr, dxfname, f))
             };
@@ -1437,10 +1438,13 @@ unsafe fn convert_entity(
                 text_override: dimension_text_override(
                     text.field(entity_ptr, dxfname, "user_text").as_deref(),
                 ),
-                // A two-line angular dimension keeps group 10 in the record's
-                // last point, which this library names `xline2end_pt` (its
-                // `def_pt` holds group 16 -- see `dimension_point_fields`).
-                definition_point: if kind == Some(DimensionKind::Angular2Line) {
+                // A two-line angular dimension decoded from a DWG keeps group
+                // 10 in the record's last point, which this library names
+                // `xline2end_pt` (its `def_pt` holds group 16); the DXF
+                // importer fills the two by group code instead -- see
+                // `dimension_point_fields`.
+                definition_point: if kind == Some(DimensionKind::Angular2Line) && !is_from_dxf(dwg)
+                {
                     get_point3d(entity_ptr, dxfname, "xline2end_pt")
                 } else {
                     get_point3d(entity_ptr, dxfname, "def_pt")
@@ -1478,7 +1482,8 @@ unsafe fn convert_entity(
                     c"DIMSTYLE",
                     |handle_ptr| text.handle_name(dwg, handle_ptr),
                 ),
-                ordinate_axis: None,
+                ordinate_axis: (kind == Some(DimensionKind::Ordinate))
+                    .then(|| ordinate_axis(dwg, entity_ptr, dxfname)),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
@@ -2228,14 +2233,44 @@ unsafe fn dxfname(obj: *mut libredwg_sys::Dwg_Object) -> String {
         .into_owned()
 }
 
+/// Which coordinate an ordinate dimension measures (DXF 70, bit 64: X when
+/// set). A DXF, and a drawing older than R13, state it in `flag`, the group
+/// 70 the file wrote. From R13 on a DWG states it as bit 1 of the
+/// stream-only `flag2` byte, and the decoder rebuilds `flag` from it wrongly
+/// -- it sets bit 128 and clears bit 64 (`dwg.spec`'s DIMENSION_ORDINATE) --
+/// so there `flag2` is read. The DXF importer, for its part, never fills
+/// `flag2`.
+fn ordinate_axis(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+) -> OrdinateAxis {
+    let x = if is_from_dxf(dwg) || is_pre_r13(dwg) {
+        get_field::<u8>(entity_ptr, dxfname, "flag").is_some_and(|f| f & 0x40 != 0)
+    } else {
+        get_field::<u8>(entity_ptr, dxfname, "flag2").is_some_and(|f| f & 1 != 0)
+    };
+    if x {
+        OrdinateAxis::X
+    } else {
+        OrdinateAxis::Y
+    }
+}
+
 /// Which of this backend's point fields carries DXF group 13, 14, 15 and 16,
 /// per dimension subtype. `None` is a group the subtype does not write.
 ///
 /// The library's own names are not a mapping: `xline1_pt` is group 13 for a
 /// linear dimension, while a two-line angular dimension calls its group 13
-/// `xline1start_pt` and its group 16 `xline2end_pt`.
+/// `xline1start_pt` and its group 16 `xline2end_pt` -- when the DXF importer
+/// filled the record, that is. The two readers disagree on a two-line
+/// angular dimension's last two points: the DWG decoder fills the record in
+/// stream order (the leading 2RD, `def_pt`, is the arc point, group 16, and
+/// `xline2end_pt` the last point, group 10), the DXF importer by group code
+/// (`def_pt` 10, `xline2end_pt` 16). `from_dxf` says which reader filled it.
 fn dimension_point_fields(
     fixedtype: libredwg_sys::Dwg_Object_Type,
+    from_dxf: bool,
 ) -> (
     Option<&'static str>,
     Option<&'static str>,
@@ -2253,17 +2288,19 @@ fn dimension_point_fields(
             Some("center_pt"),
             None,
         ),
-        // Measured against the same drawing in both formats: this
-        // library's `def_pt` holds group 16 here, and `xline2end_pt` holds
-        // group 10 (the dimension's definition point) rather than 16. The
-        // mapping follows the measurement, not the field names. (An earlier
-        // measurement read `xline2end_pt` as group 13's point; that drawing
-        // has groups 10 and 13 at the same place, so it could not tell.)
+        // Measured against the same drawing in both formats: decoded from
+        // the DWG, this library's `def_pt` holds group 16 here, and
+        // `xline2end_pt` holds group 10 (the dimension's definition point)
+        // rather than 16; read from the DXF, each holds the group its name
+        // says. The mapping follows the measurement, not the field names.
+        // (An earlier measurement read `xline2end_pt` as group 13's point;
+        // that drawing has groups 10 and 13 at the same place, so it could
+        // not tell.)
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => (
             Some("xline1start_pt"),
             Some("xline1end_pt"),
             Some("xline2start_pt"),
-            Some("def_pt"),
+            Some(if from_dxf { "xline2end_pt" } else { "def_pt" }),
         ),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {

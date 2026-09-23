@@ -675,3 +675,128 @@ fn a_dxf_entity_carries_the_true_colour_it_states_and_no_other() {
         ]
     );
 }
+
+// --------------------------------------------------- dimension points
+
+fn dimensions(db: &CadDatabase) -> Vec<&uncad::model::DimensionEntity> {
+    db.entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Dimension(d) => Some(d),
+            _ => None,
+        })
+        .collect()
+}
+
+fn p3(x: f64, y: f64) -> Option<uncad::model::Point3D> {
+    Some(uncad::model::Point3D { x, y, z: 0.0 })
+}
+
+/// Rounds a point to the fixture's own precision, so a hand-derived
+/// coordinate (8.660254 for 10 sin 60) compares with the stored one.
+fn rounded(p: Option<uncad::model::Point3D>) -> Option<(i64, i64)> {
+    p.map(|p| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64))
+}
+
+/// The two kinds whose points LibreDWG's DXF importer lays out differently
+/// from its DWG decoder, every value derived by hand in the fixture's
+/// README: a 2-line angular dimension between (0,0)-(10,0) and
+/// (0,0)-(5, 8.660254) with its arc point 30 degrees along a radius of 5,
+/// and an X- and a Y-type ordinate sharing the datum (100, 200) and the
+/// feature (130, 250). Each point lands in the field of the group the file
+/// wrote it in.
+#[test]
+fn the_angular_ordinate_fixture_reads_every_point_by_its_group() {
+    use uncad::model::{DimensionKind, OrdinateAxis};
+    let db = parse(ANGULAR_ORDINATE);
+    let dims = dimensions(&db);
+    assert_eq!(dims.len(), 3);
+
+    let angular = dims[0];
+    assert_eq!(angular.kind, Some(DimensionKind::Angular2Line));
+    assert_eq!(
+        rounded(angular.definition_point),
+        rounded(p3(5.0, 8.660254)),
+        "group 10"
+    );
+    assert_eq!(angular.points.extension1, p3(0.0, 0.0), "group 13");
+    assert_eq!(angular.points.extension2, p3(10.0, 0.0), "group 14");
+    assert_eq!(angular.points.radial, p3(0.0, 0.0), "group 15");
+    assert_eq!(
+        rounded(angular.points.arc),
+        rounded(p3(4.330127, 2.5)),
+        "group 16"
+    );
+    assert_eq!(angular.ordinate_axis, None);
+    // Group 42 is pi/3, in radians as the file states it.
+    let measured = angular.measurement.expect("group 42");
+    assert!(
+        (measured - std::f64::consts::FRAC_PI_3).abs() < 1e-12,
+        "{measured}"
+    );
+
+    for (d, axis, leader, value) in [
+        (dims[1], OrdinateAxis::X, (130.0, 270.0), 30.0),
+        (dims[2], OrdinateAxis::Y, (150.0, 250.0), 50.0),
+    ] {
+        assert_eq!(d.kind, Some(DimensionKind::Ordinate));
+        assert_eq!(d.ordinate_axis, Some(axis), "{:?}", d.common.source_handle);
+        assert_eq!(d.definition_point, p3(100.0, 200.0), "the datum, group 10");
+        assert_eq!(
+            d.points.extension1,
+            p3(130.0, 250.0),
+            "the feature, group 13"
+        );
+        assert_eq!(
+            d.points.extension2,
+            p3(leader.0, leader.1),
+            "the leader, group 14"
+        );
+        assert_eq!(d.measurement, Some(value));
+    }
+}
+
+/// The three dimension kinds no corpus DXF carries, each point in the field
+/// of the group the file wrote it in (the fixture's README).
+#[test]
+fn the_radial_fixture_reads_its_points_by_their_groups() {
+    use uncad::model::DimensionKind;
+    let db = parse(RADIAL);
+    let dims = dimensions(&db);
+    let kinds: Vec<Option<DimensionKind>> = dims.iter().map(|d| d.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            Some(DimensionKind::Radius),
+            Some(DimensionKind::Diameter),
+            Some(DimensionKind::Angular3Point)
+        ]
+    );
+    let (radius, diameter, angular) = (dims[0], dims[1], dims[2]);
+    assert_eq!(
+        radius.definition_point,
+        p3(0.0, 0.0),
+        "the centre, group 10"
+    );
+    assert_eq!(
+        radius.points.radial,
+        p3(3.0, 4.0),
+        "on the circle, group 15"
+    );
+    assert_eq!(radius.measurement, Some(5.0));
+    assert_eq!(diameter.definition_point, p3(20.0, 0.0), "group 10");
+    assert_eq!(diameter.points.radial, p3(20.0, 10.0), "group 15");
+    assert_eq!(diameter.measurement, Some(10.0));
+    assert_eq!(
+        rounded(angular.definition_point),
+        rounded(p3(44.330127, 2.5)),
+        "group 10"
+    );
+    assert_eq!(angular.points.extension1, p3(50.0, 0.0), "group 13");
+    assert_eq!(
+        rounded(angular.points.extension2),
+        rounded(p3(45.0, 8.660254)),
+        "group 14"
+    );
+    assert_eq!(angular.points.radial, p3(40.0, 0.0), "the centre, group 15");
+}

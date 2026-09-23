@@ -385,11 +385,20 @@ DXF reading no longer goes through this importer.
 
 **The field names of a two-line angular dimension are not the mapping.** Measured against
 the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
-groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` is
-group 10 -- the definition point every other subtype keeps in `def_pt`. The reader follows
-the measurement, and `tests/corpus_sweep.rs` pins all five points against the values the DXF
-twin writes for two drawings, so a change in the library's field layout fails the build
-instead of quietly putting the wrong point in the model. (The second drawing matters: in the
+groups 13, 14 and 15 as their names suggest; decoded from a DWG, `def_pt` is group 16 and
+`xline2end_pt` is group 10 -- the definition point every other subtype keeps in `def_pt` --
+while LibreDWG's DXF importer fills the two by group code, `def_pt` 10 and `xline2end_pt`
+16. The reader follows the measurement for each, and `tests/corpus_sweep.rs` pins all five
+points against the values the DXF twin writes for two drawings, and for the DXF itself, so
+a change in the library's field layout fails the build instead of quietly putting the wrong
+point in the model. Before the DXF half, every two-line angular dimension read from a DXF
+had its groups 10 and 16 exchanged.
+
+**An ordinate dimension's axis.** Bit 64 of group 70 says whether an ordinate dimension
+measures its feature's x (set) or y distance from the datum (`ordinate_axis`). A DXF, and a
+drawing older than R13, state it in the flag the model reads it from; from R13 on a DWG
+states it as bit 1 of a separate byte (`flag2`), from which the decoder rebuilds group 70
+wrongly (it sets bit 128 and clears bit 64), so that byte is read there instead. (The second drawing matters: in the
 first, groups 10 and 13 are the same point, and an earlier reading of it took `xline2end_pt`
 for group 13 and reported group 10 as not stated.)
 
