@@ -899,3 +899,61 @@ fn the_viewport_states_fixture_carries_each_state() {
         );
     }
 }
+
+// ------------------------------------------------ hidden layers, hatches
+
+/// One LINE per layer, in table order, then an invisible LINE (`60 = 1`) and
+/// a visible one on `VISIBLE`: the entity's own invisible flag is carried,
+/// and every line keeps the layer it names whatever that layer's state.
+#[test]
+fn the_hidden_layers_fixture_s_entities_keep_their_layers_and_their_flag() {
+    let db = parse(HIDDEN_LAYERS);
+    let lines: Vec<(Ref<String>, bool)> = db
+        .entities
+        .iter()
+        .map(|e| (e.common().layer.clone(), e.common().invisible))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            (resolved("0"), false),
+            (resolved("VISIBLE"), false),
+            (resolved("OFF"), false),
+            (resolved("FROZEN"), false),
+            (resolved("NOPLOT"), false),
+            (resolved("Defpoints"), false),
+            (resolved("LOCKED"), false),
+            (resolved("VISIBLE"), true),
+            (resolved("VISIBLE"), false),
+        ]
+    );
+}
+
+/// One pattern HATCH per space: the model one under the viewport (vertical
+/// lines 2 apart, `53 = 90`), the paper one beside it (horizontal lines 4
+/// apart), each owned by its own space's block.
+#[test]
+fn the_hatched_viewport_fixture_keeps_each_hatch_in_its_space() {
+    let db = parse(HATCHED_VIEWPORT);
+    let pattern = |block: &str| -> Vec<(f64, f64, f64)> {
+        db.tables.block_records[block]
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Hatch(h) => Some(
+                    h.pattern_lines
+                        .iter()
+                        .map(|l| (l.angle, l.offset.x, l.offset.y))
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    assert_eq!(
+        pattern("*Model_Space"),
+        [(std::f64::consts::FRAC_PI_2, -2.0, 0.0)]
+    );
+    assert_eq!(pattern("*Paper_Space"), [(0.0, 0.0, 4.0)]);
+}
