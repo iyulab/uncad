@@ -81,8 +81,11 @@ well as Windows.
 ## License
 
 **GPLv3-or-later**. LibreDWG (GPLv3+) is the only third-party component linked
-in, and its license carries over. Copyright and license details for third-party
-components are in [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
+in, and its license carries over. The vendored copy carries five local patches;
+`crates/libredwg-sys/NOTICE.md` is their modification notice, inside the crate
+so that it reaches the published tarball. Copyright and license details for
+third-party components are in
+[`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
 
 ## Repository layout
 
@@ -91,9 +94,10 @@ lib/libredwg/            LibreDWG upstream, as a git submodule. Not used by the 
                          it is the source vendor/ is regenerated from, and where the
                          real-file test fixtures (test/test-data/) come from
 crates/
-  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the unmodified
-                         subset of C sources actually compiled (for publishing to
-                         crates.io); shim/ holds the C accessors for opaque types, and
+  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the subset of C
+                         sources actually compiled (for publishing to crates.io), with
+                         five local patches marked "uncad local patch" and listed in
+                         NOTICE.md; shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
   uncad/                 the safe API: parse() -> uncad_model::CadDatabase
   uncad-cli/             the CLI binary (uncad)

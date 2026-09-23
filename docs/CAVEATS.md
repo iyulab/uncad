@@ -148,6 +148,12 @@ bytes with `$ACADVER` rewritten to `AC1018` (R2004) read as 14 -- an ATTDEF and 
 appear that the R2000 pass drops without a message. Nothing on this side can tell that
 they were dropped.
 
+Two DXF-only defects that *were* patched are recorded under "Local patches to the vendored
+LibreDWG" below: a polygon mesh made the reader refuse the whole file, and the importer
+compared an R2007+ DXF's table-record names in the wrong width. The per-entity
+degradation this section describes -- a type dropping out, or arriving as
+`Entity::Unknown` -- is what a DXF should cost; a whole-file refusal was not.
+
 ### DXF saved as R2007 or later is refused with an explicit error
 
 `parse()` returns `Err(ParseError::UnsupportedDxfVersion)` for a DXF whose `$ACADVER`
@@ -173,6 +179,12 @@ without its block, and MTEXT content garbled (the importer stores that one field
 drawing that looks read and is quietly missing that much is worse than an obviously empty
 one, and an obviously empty one is worse than an error. The fix belongs in LibreDWG's
 accessor, or in reading DXF without LibreDWG.
+
+The library's half of that fix is now in the vendored copy: a local patch to `dwg.c` (see
+"Local patches to the vendored LibreDWG" below) makes the importer decode a record's name
+before it compares it, so its own layer and block lookups no longer stop at the first
+character. This crate's half -- reading each of an R2007+ DXF's strings in the width the
+importer stored it in -- is not done yet, so the refusal stays.
 
 What to do: save the drawing as R2004 DXF or as DWG (any version). A test walks every DXF
 in the LibreDWG corpus and checks that exactly the R2007+ files are refused; a second one
@@ -617,6 +629,80 @@ on `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, 58 SAB solids). The
 returns only the text, so `parse()` never touches the `Dwg_Data` at all.
 `crates/uncad/tests/acis_sab.rs` guards this with the same file, checking that both walks
 extract the same wireframe for every solid.
+
+## Local patches to the vendored LibreDWG
+
+`crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
+`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches. Each is marked in the
+source with a dated `uncad local patch` comment saying why, and each is listed again in
+`crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
+consumer receives and this file is not in the tarball (GPLv3 §5(a)).
+**`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
+these patches is part of any submodule update.** None of them has been sent to LibreDWG
+yet.
+
+- **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
+  `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
+  for DXF and JSON input even when the record's name is stored as UTF-16 -- which it is for
+  an R2007+ DXF (see "DXF saved as R2007 or later is refused with an explicit error"
+  above). So "Tavolo 3" compared as "T", and every name the importer resolves while it
+  builds the drawing (the group 8 layer, the group 2 block name, the linetype, text
+  style, dimstyle, UCS, VPORT and APPID names) failed for any name longer than one
+  character. The three functions now share one helper, `uncad_record_name_utf8()`, whose
+  predicate `UNCAD_IS_TU_DWG()` is the one the storage actually follows, and the one the
+  shim's `uncad_tv_to_utf8` uses. The patch deliberately stops there: the strings
+  `in_dxf.c` stores through `dwg_add_u8_input()` (`DICTIONARY.texts`,
+  `LTYPE.dashes[].text`) really are 8-bit for DXF input, so `dwg_find_dictionary()` and
+  `dwg_find_dicthandle()` keep the original predicate. LibreDWG has the same gap; it is not
+  reported there yet.
+- **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
+  and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
+  caller passes the result straight to `strftime()` (`dec_macros.h`'s `FIELD_TIMEBLL` and
+  the `DECODER` block in `header_variables.spec`, which runs at any log level), and
+  Microsoft's UCRT `strftime` *validates* its `struct tm`: measured against
+  `ucrtbase.dll`, a `tm_year` outside [-1900, 8099], `tm_mon` outside [0, 11], `tm_mday`
+  outside [1, 31], `tm_hour` outside [0, 23], `tm_min` outside [0, 59] or `tm_sec` outside
+  [0, 60] calls the invalid-parameter handler, which fail-fasts the process with
+  0xC0000409. Windows reports that code as STATUS_STACK_BUFFER_OVERRUN even though nothing
+  overran, which is why it looked like a stack smash, and it happens below the FFI
+  boundary, where no Rust guard can catch it. The patch zeroes the `struct tm` and clamps
+  every field into those ranges. A real drawing's date already satisfies them, so no valid
+  file's parse changes; the only visible difference is that the debug string for a
+  TDINDWG/TDUSRTIMER *duration* longer than a day now caps its hour at 23 (a `LOG_TRACE`
+  line this crate never enables, and `strftime` cannot print a larger hour anyway).
+  `crates/uncad/tests/vendored_patches.rs` is the regression: one changed byte of the
+  corpus `2000/Helix.dwg` (offset 27644), which ends the process without the patch. That
+  is one abort fixed, not a guarantee: the decoder is ~100 000 lines of C over
+  attacker-controlled offsets and lengths, so a service that parses untrusted drawings
+  should still do it in a process it can afford to lose.
+- **`src/in_dxf.c` and `src/dynapi.c`** -- a polygon mesh's vertices carry the subclass
+  marker `AcDbPolygonMeshVertex`, which appeared nowhere in LibreDWG: the VERTEX_2D
+  upgrade chain in `in_dxf.c` knows `AcDb3dPolylineVertex`, `AcDbPolyFaceMeshVertex` and
+  `AcDbFaceRecord` only, and `dwg_name_subclasses[]` does not list it either. The object
+  stayed a VERTEX_2D, failed the "is this subclass allowed in this object" check and took
+  `goto invalid_dxf` -- `DWG_ERR_INVALIDDWG`, a *critical* error, so **the whole file was
+  refused**. One POLYLINE written by REVSURF, RULESURF, EDGESURF or `ezdxf.add_polymesh()`
+  cost every other entity in the DXF. The patch adds the missing spelling to the upgrade
+  chain (to VERTEX_MESH, which is where the neighbouring branch already sends a polygon
+  mesh's vertices) and to VERTEX_MESH's subclass list.
+  `crates/uncad/tests/vendored_patches.rs` is the regression: the corpus
+  `2000/entities-2d.dxf` with one 2 x 2 polygon mesh added reads with every one of its own
+  entities, where it was critical error 2048 without the patch.
+- **`src/common_entity_data.spec`** -- for an R2004+ entity whose ENC flag has both `0x80`
+  (an inline RGB follows) and `0x20` (a transparency follows), the spec read the two BLs
+  in the wrong order, so the colour landed in `alpha_raw` and the transparency in `rgb`.
+  LibreDWG's own standalone `bit_read_ENC` (`src/bits.c`) already reads rgb first; only
+  this spec, and the encoder that shares it, had them the other way round. Measured on
+  `test-data/2004/HatchG.dwg`, whose HATCH `29F` (flag `0xa0`) sits inside LWPOLYLINE
+  `28D` (flag `0x80`, one BL, unambiguous): with alpha first the HATCH read
+  `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
+  `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
+  flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
+  the two bits set there is a single BL and the order cannot matter. This crate does not
+  show the difference yet: it reports an entity's true colour only when the colour's
+  method says TRUECOLOR, and on that drawing neither entity's does, so both come out
+  without a true colour with the patch as without it. There is no regression test for it
+  here for that reason.
 
 ## No DWG/DXF writing
 

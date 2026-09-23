@@ -525,6 +525,38 @@ find_hv (BITCODE_H *entries, BITCODE_BS num_entries, BITCODE_RLL handle_value)
   return -1; // not found
 }
 
+/* --- uncad local patch, 2026-09-23 (NOTICE.md at the root of this crate,
+   "The two changes"; the full reasoning is in the project's docs/CAVEATS.md,
+   "Local patches to the vendored LibreDWG", which is not in the published
+   tarball) ---------------------------------------------------------------
+
+   Every caller of cvt_TIMEBLL() hands the struct tm straight to strftime()
+   (dec_macros.h's FIELD_TIMEBLL/FIELD_TIMERLL and the DECODER block in
+   header_variables.spec, which runs at any log level). Microsoft's UCRT
+   strftime() *validates* its struct tm: measured against ucrtbase.dll, a
+   tm_year outside [-1900, 8099], tm_mon outside [0, 11], tm_mday outside
+   [1, 31], tm_hour outside [0, 23], tm_min outside [0, 59] or tm_sec
+   outside [0, 60] trips the invalid-parameter handler, which fail-fasts the
+   whole process with 0xC0000409 -- reported as STATUS_STACK_BUFFER_OVERRUN
+   although nothing overran. That is below the FFI boundary, so no Rust
+   guard can catch it.
+
+   A TIMEBLL is two raw BLs off the bit stream (BITCODE_BL, unsigned 32-bit
+   days and milliseconds), so a corrupt or truncated DWG -- or any mutation
+   that shifts the header bit stream before TDUCREATE/TDUUPDATE -- reaches
+   here with a date the Julian-day arithmetic below turns into an
+   out-of-range tm_year/tm_mon/tm_hour. Upstream additionally leaves
+   tm_wday/tm_yday/tm_isdst at whatever the caller's stack held.
+
+   So: zero the struct first, and clamp every field into the range strftime
+   accepts before returning. A real drawing's date already satisfies every
+   bound, so no valid file's parse changes. The one visible difference is
+   the debug string for a >24h TDINDWG/TDUSRTIMER *duration*, whose hour is
+   now capped at 23 -- a LOG_TRACE line only (this crate never raises
+   loglevel), and strftime cannot print an hour above 23 anyway. */
+#define UNCAD_TM_CLAMP(v, lo, hi)                                             \
+  ((v) < (lo) ? (lo) : ((v) > (hi) ? (hi) : (v)))
+
 /* from my dwg11.c, 1995 - rurban */
 struct tm *
 cvt_TIMEBLL (struct tm *tm, BITCODE_TIMEBLL date)
@@ -534,6 +566,7 @@ cvt_TIMEBLL (struct tm *tm, BITCODE_TIMEBLL date)
 
 #define TRUNC(n) (long)floor (n)
 
+  memset (tm, 0, sizeof (struct tm)); /* uncad local patch */
   t = 0.864 * date.ms / 1000.0; /*t=1000000 = 1 day, means 86400 in seconds */
   if (date.days > 2299161)
     {
@@ -578,6 +611,16 @@ cvt_TIMEBLL (struct tm *tm, BITCODE_TIMEBLL date)
   ss = t - (tm->tm_min * 60.0);
   tm->tm_sec = (int)ss;
   // sprintf (s, "%02d.%02d.%4d  %02d:%02d:%05.2f", d, m, y, hh, mm, ss);
+  /* uncad local patch: keep the result inside strftime's accepted ranges */
+  tm->tm_sec = UNCAD_TM_CLAMP (tm->tm_sec, 0, 60);
+  tm->tm_min = UNCAD_TM_CLAMP (tm->tm_min, 0, 59);
+  tm->tm_hour = UNCAD_TM_CLAMP (tm->tm_hour, 0, 23);
+  tm->tm_mday = UNCAD_TM_CLAMP (tm->tm_mday, 1, 31);
+  tm->tm_mon = UNCAD_TM_CLAMP (tm->tm_mon, 0, 11);
+  tm->tm_year = UNCAD_TM_CLAMP (tm->tm_year, -1900, 8099);
+  tm->tm_wday = UNCAD_TM_CLAMP (tm->tm_wday, 0, 6);
+  tm->tm_yday = UNCAD_TM_CLAMP (tm->tm_yday, 0, 365);
+  tm->tm_isdst = 0;
   return tm;
 }
 

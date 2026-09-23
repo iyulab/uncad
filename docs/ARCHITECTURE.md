@@ -6,7 +6,8 @@
 lib/libredwg/            git submodule pointing at LibreDWG upstream
                          (github.com/LibreDWG/libredwg). Not used by the build -- it is
                          the source vendor/ is copied from, and the origin of the
-                         real-file test fixtures (test/test-data/). Left unmodified.
+                         real-file test fixtures (test/test-data/). Left unmodified:
+                         the local patches are in the vendored copy, not here.
 crates/
   libredwg-sys/          raw FFI: build.rs compiles vendor/libredwg/src/*.c (see "Build")
                          directly through the cc crate, no autotools, and generates the
@@ -19,7 +20,8 @@ crates/
                          than a path, and the header fields (version, codepage,
                          string width) and string conversions that decoding a
                          drawing's text needs.
-    vendor/libredwg/     the upstream C sources actually compiled (see "Build")
+    vendor/libredwg/     the upstream C sources actually compiled (see "Build"), five
+                         of them carrying a local patch (NOTICE.md)
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
@@ -50,10 +52,13 @@ hand-written stand-in for what autotools would generate.
 and no submodule at all. A `build.rs` that referenced `repo_root/lib/libredwg` would work
 only inside this workspace and fail for every published consumer -- a failure mode
 confirmed with `cargo publish --dry-run`. So `crates/libredwg-sys/vendor/libredwg/` holds
-a byte-for-byte copy of exactly the files this crate compiles: 24 `.c` files plus every
-header, `.spec`, `.inc` and codepage table they `#include`, 112 files in total
-(`git ls-files crates/libredwg-sys/vendor | wc -l`), unmodified (see
-`docs/THIRD_PARTY_NOTICES.md`) but a subset rather than the whole submodule. The
+a copy of exactly the files this crate compiles: 24 `.c` files plus every header,
+`.spec`, `.inc` and codepage table they `#include`, 112 files in total
+(`git ls-files crates/libredwg-sys/vendor | wc -l`), a subset rather than the whole
+submodule. Five of those files carry a local patch each, marked in the source with a
+dated `uncad local patch` comment and listed in `crates/libredwg-sys/NOTICE.md` (see
+`docs/CAVEATS.md`, "Local patches to the vendored LibreDWG"); everything else is
+byte for byte what the submodule holds. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
 tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
 `tests/documented_invocations.rs` in `uncad-cli`) read fixtures from
@@ -62,11 +67,13 @@ tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
 
 **Updating the submodule**: after moving the `lib/libredwg` pointer (e.g. with
 `git submodule update --remote`), run `scripts/sync-libredwg-vendor.sh` to regenerate the
-vendored copy -- it re-traces the real `#include` graph and rebuilds the file list. Then
-run `cargo build --workspace`: a newly required `.c` or header shows up immediately as a
-compile error. `build.rs` registers the whole `vendor/libredwg/` directory with
-`cargo:rerun-if-changed`, so an incremental build really does recompile the C sources and
-regenerate the bindings after a re-vendor -- no `cargo clean` needed.
+vendored copy -- it re-traces the real `#include` graph and rebuilds the file list. It
+deletes and recopies the whole directory, so the local patches are gone afterwards and
+have to be re-applied (or dropped, with `NOTICE.md` and `docs/CAVEATS.md` updated to
+match). Then run `cargo build --workspace`: a newly required `.c` or header shows up
+immediately as a compile error. `build.rs` registers the whole `vendor/libredwg/`
+directory with `cargo:rerun-if-changed`, so an incremental build really does recompile the
+C sources and regenerate the bindings after a re-vendor -- no `cargo clean` needed.
 
 `build.rs` also carries two drift detectors:
 
