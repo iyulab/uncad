@@ -67,7 +67,12 @@
           },
           "width_factor": 0.9
         }
-      ]
+      ],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "ATTRIB",
@@ -170,7 +175,12 @@
           },
           "width_factor": 0.9
         }
-      ]
+      ],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "ATTRIB",
@@ -289,7 +299,12 @@
                 },
                 "width_factor": 0.9
               }
-            ]
+            ],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "INSERT",
@@ -358,7 +373,12 @@
                 },
                 "width_factor": 0.9
               }
-            ]
+            ],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },

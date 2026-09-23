@@ -903,6 +903,7 @@ unsafe fn convert_entity(
                 scale,
                 rotation,
                 attribs,
+                extrusion: extrusion(entity_ptr, "INSERT"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTDEF => {

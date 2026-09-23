@@ -30,6 +30,8 @@ Notable changes to this project are recorded here. The format follows
   of their own coordinate system too.
 - A HATCH carries its `elevation` and `extrusion`: its boundary paths and pattern lines
   are points and directions of its own coordinate system.
+- An INSERT carries its `extrusion`: its insertion point and rotation are in its own
+  coordinate system, and a mirror copy's block is placed with the world x reversed.
 - A TEXT carries its `horizontal_alignment` and `vertical_alignment` (DXF 72, 73), its
   `alignment_point` (DXF 11, for an aligned text only) and its `width_factor` (DXF 41).
   An aligned text answers to its alignment point, not to its start point. An alignment

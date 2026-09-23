@@ -33,7 +33,12 @@
         "z": 1.0
       },
       "rotation": 0.0,
-      "attribs": []
+      "attribs": [],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     }
   ],
   "tables": {
@@ -80,7 +85,12 @@
               "z": 1.0
             },
             "rotation": 0.0,
-            "attribs": []
+            "attribs": [],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -124,7 +134,12 @@
               "z": 2.0
             },
             "rotation": 0.0,
-            "attribs": []
+            "attribs": [],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -164,7 +179,12 @@
               "z": 1.0
             },
             "rotation": 1.5707963267948966,
-            "attribs": []
+            "attribs": [],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },

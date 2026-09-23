@@ -524,7 +524,12 @@
           "alignment_point": null,
           "width_factor": 1.0
         }
-      ]
+      ],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "ATTRIB",
@@ -1601,7 +1606,12 @@
                 "alignment_point": null,
                 "width_factor": 1.0
               }
-            ]
+            ],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
