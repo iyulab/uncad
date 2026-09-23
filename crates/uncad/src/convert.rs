@@ -540,6 +540,11 @@ unsafe fn convert_entity(
                 common,
                 center,
                 radius,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
@@ -555,6 +560,18 @@ unsafe fn convert_entity(
                 text_height,
                 text,
                 rotation,
+                horizontal_justification: Default::default(),
+                vertical_justification: Default::default(),
+                alignment_point: None,
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                style_name: uncad_model::Ref::Absent,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {
@@ -565,6 +582,15 @@ unsafe fn convert_entity(
                 common,
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
+                bulges: Vec::new(),
+                widths: Vec::new(),
+                const_width: 0.0,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -578,6 +604,11 @@ unsafe fn convert_entity(
                 radius,
                 start_angle,
                 end_angle,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ELLIPSE => {
@@ -623,6 +654,12 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TRACE => {
@@ -638,6 +675,12 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {
@@ -677,6 +720,19 @@ unsafe fn convert_entity(
                 tag,
                 text,
                 rotation,
+                flags: Default::default(),
+                horizontal_justification: Default::default(),
+                vertical_justification: Default::default(),
+                alignment_point: None,
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                style_name: uncad_model::Ref::Absent,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_INSERT => {
@@ -728,6 +784,11 @@ unsafe fn convert_entity(
                 scale,
                 rotation,
                 attribs,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTDEF => {
@@ -745,6 +806,19 @@ unsafe fn convert_entity(
                 tag,
                 default_value,
                 rotation,
+                flags: Default::default(),
+                horizontal_justification: Default::default(),
+                vertical_justification: Default::default(),
+                alignment_point: None,
+                width_factor: 1.0,
+                oblique_angle: 0.0,
+                style_name: uncad_model::Ref::Absent,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VIEWPORT => {
@@ -756,6 +830,10 @@ unsafe fn convert_entity(
                 center,
                 width,
                 height,
+                view: None,
+                on: None,
+                viewport_id: None,
+                frozen_layers: Vec::new(),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DFACE => {
@@ -867,6 +945,10 @@ unsafe fn convert_entity(
                 rotation,
                 line_spacing_factor,
                 attachment,
+                rect_width: 0.0,
+                extents_width: None,
+                extents_height: None,
+                style_name: uncad_model::Ref::Absent,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
@@ -904,6 +986,15 @@ unsafe fn convert_entity(
                 common,
                 vertices,
                 closed: flag & POLYLINE_CLOSED_FLAG != 0,
+                bulges: Vec::new(),
+                widths: Vec::new(),
+                const_width: 0.0,
+                elevation: 0.0,
+                extrusion: uncad_model::Point3D {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE
@@ -992,6 +1083,7 @@ unsafe fn convert_entity(
                     c"DIMSTYLE",
                     |handle_ptr| text.handle_name(dwg, handle_ptr),
                 ),
+                ordinate_axis: None,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
@@ -1477,6 +1569,7 @@ fn convert_mline(
         vertices,
         closed: flags & MLINE_CLOSED_FLAG != 0,
         mlinestyle_name,
+        scale: None,
     }
 }
 

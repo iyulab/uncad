@@ -74,6 +74,7 @@ pub(crate) unsafe fn convert_tables(
         dim_styles,
         block_records,
         mlinestyles,
+        layouts: Default::default(),
     }
 }
 
@@ -100,6 +101,13 @@ fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimS
         tolerance_decimal_places: get_field::<i16>(object_ptr, "DIMSTYLE", "DIMTDEC")
             .map(i32::from),
         text_height: number("DIMTXT"),
+        arrow_size: None,
+        linear_unit_format: None,
+        zero_suppression: None,
+        rounding: None,
+        angular_unit_format: None,
+        angular_decimal_places: None,
+        fraction_format: None,
     })
 }
 
@@ -189,7 +197,16 @@ fn convert_layer(text: &TextDecoder, object_ptr: *mut c_void) -> Option<LayerRec
     let name = text.field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
     let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
-    Some(LayerRecord { name, color_index })
+    Some(LayerRecord {
+        name,
+        color_index,
+        off: false,
+        frozen: false,
+        locked: false,
+        plot: None,
+        lineweight: None,
+        linetype: uncad_model::Ref::Absent,
+    })
 }
 
 /// Recovers a usable ACI index from a LAYER's raw `Dwg_Color` when LibreDWG

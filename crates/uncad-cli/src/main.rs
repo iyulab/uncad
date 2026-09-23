@@ -4,7 +4,7 @@
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output.
 
-use iron_render_cad::{to_png, to_svg, Space, ToPngOptions, ToSvgOptions};
+use iron_render_cad::{to_png, to_svg, PngSize, Space, ToPngOptions, ToSvgOptions};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -157,7 +157,8 @@ fn run(args: &Args) -> Result<(), String> {
                 &db,
                 ToPngOptions {
                     svg: svg_options(args)?,
-                    scale: parse_scale(&args.scale)?,
+                    size: PngSize::Scale(parse_scale(&args.scale)?),
+                    ..ToPngOptions::default()
                 },
             )
             .map_err(|e| e.to_string())?;

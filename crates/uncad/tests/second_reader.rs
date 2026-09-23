@@ -333,7 +333,11 @@ fn ours_kind(entity: &uncad::Entity) -> &'static str {
         E::Wipeout(_) => "wipeout",
         E::Light(_) => "light",
         E::Attrib(_) | E::Attdef(_) => "attrib",
-        E::LwPolyline(_) | E::Polyline2D(_) | E::Polyline3D(_) | E::PolylinePFace(_) => "polyline",
+        E::LwPolyline(_)
+        | E::Polyline2D(_)
+        | E::Polyline3D(_)
+        | E::PolylinePFace(_)
+        | E::PolylineMesh(_) => "polyline",
         E::Unknown { .. } => "unknown",
     }
 }
