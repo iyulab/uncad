@@ -188,10 +188,11 @@ fn run(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// `uncad::parse()` reports a nonexistent path or a wrong extension as a bare
-/// LibreDWG error code, which is accurate but not something a user can act on
-/// without cross-referencing dwg.h. The obvious cases are checked here first so
-/// the message says what is actually wrong.
+/// `uncad::parse()` reports a path it cannot read as `ParseError::Io`, and a
+/// file that is not a drawing as a bare LibreDWG error code, which is accurate
+/// but not something a user can act on without cross-referencing dwg.h. The
+/// obvious cases are checked here first so the message says what is actually
+/// wrong.
 fn parse_input(input: &str) -> Result<CadDatabase, String> {
     match std::fs::metadata(input) {
         Ok(meta) if meta.is_dir() => {

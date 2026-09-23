@@ -15,7 +15,14 @@ Notable changes to this project are recorded here. The format follows
   `uncad_dwg_from_version`, `uncad_dwg_from_dxf`, `uncad_codepage_name`, and the
   code-page string conversions `uncad_tv_to_utf8`, `uncad_bytes_to_utf8`, their
   `uncad_entity_*` twins, `uncad_dwg_string_to_utf8` and `uncad_free_string`, with
-  bindings for `dwg_version_type` and `dwg_next_object`. `uncad` does not call them yet.
+  bindings for `dwg_version_type` and `dwg_next_object`. `uncad` reads every drawing
+  through the two memory readers; it does not call the rest yet.
+- `uncad::parse_bytes(bytes, Format)` parses a drawing already in memory, and
+  `uncad::Format` (`Dwg`, `Dxf`, with `Format::from_path`) says which it is. `parse()`
+  now reads the file itself and decodes it from memory, so a path LibreDWG could not
+  open -- any non-ASCII one on Windows, such as a Korean directory name, which failed
+  with critical error 4096 -- parses; a file that cannot be read is the new
+  `ParseError::Io`. `tests/read_paths.rs`.
 - Every crate carries the GPLv3 text as its own `LICENSE`; `cargo package` never
   reaches the repository root's, so of the 0.2.0 tarballs only `libredwg-sys` had the
   text (as LibreDWG's own `COPYING`) and `uncad-cli` had no licence file at all.
@@ -227,6 +234,8 @@ Notable changes to this project are recorded here. The format follows
   -- that is the point. `ParseError` is `#[non_exhaustive]`, so the new variant is not a
   breaking change to matches. Two tests pin it: a walk of the corpus that requires exactly
   the R2007+ files to be refused, and one drawing under two `$ACADVER` values.
+- `ParseError::InvalidPath` is gone: `parse()` no longer hands LibreDWG a C path, and a
+  file it cannot read is `ParseError::Io`. Breaking for code that names the variant.
 - No `std` hash collections anywhere in the workspace: `clippy.toml` disallows `HashMap`
   and `HashSet`, and the `iter_over_hash_type` lint is on. Both earlier ordering bugs went
   through `into_iter()`/`into_values()`, which no lint on `for` loops would have seen.

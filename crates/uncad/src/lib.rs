@@ -13,7 +13,6 @@ mod dynapi;
 mod table_convert;
 mod text;
 
-use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::path::Path;
 use std::sync::Mutex;
@@ -30,9 +29,10 @@ pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, T
 /// cycles overlapped. Sequential reuse across many calls is fine; concurrent
 /// calls are what this lock closes off.
 ///
-/// [`parse`] is the only entry point that touches the FFI boundary and it
-/// holds this lock for its whole duration, so callers never need to know
-/// `libredwg-sys` exists, let alone serialize around it themselves.
+/// [`parse_bytes`] (which [`parse`] calls) is the only entry point that
+/// touches the FFI boundary and it holds this lock for its whole duration, so
+/// callers never need to know `libredwg-sys` exists, let alone serialize
+/// around it themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Names for the non-critical `DWG_ERROR` bits, in bit order (dwg.h).
@@ -71,10 +71,12 @@ pub fn read_diagnostics_from_libredwg_bits(bits: i32) -> ReadDiagnostics {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ParseError {
-    /// `dwg_read_file`/`dxf_read_file` returned a critical LibreDWG error
-    /// code (>= DWG_ERR_CRITICAL, see dwg.h).
+    /// LibreDWG's decoder returned a critical error code (>= DWG_ERR_CRITICAL,
+    /// see dwg.h) for the bytes it was given.
     Critical(i32),
-    InvalidPath,
+    /// The file could not be read from disk ([`parse`] only; [`parse_bytes`]
+    /// never produces it).
+    Io(std::io::Error),
     /// The DXF declares `$ACADVER` R2007 or later (`AC1021` and up). LibreDWG's
     /// DXF importer reads these files without reporting an error but loses
     /// every layer and block name on the way, so this crate refuses them
@@ -88,7 +90,7 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseError::Critical(code) => write!(f, "LibreDWG critical read error (code {code})"),
-            ParseError::InvalidPath => write!(f, "path is not valid UTF-8 / contains a NUL byte"),
+            ParseError::Io(e) => write!(f, "cannot read the file: {e}"),
             ParseError::UnsupportedDxfVersion(v) => write!(
                 f,
                 "DXF version {v} (R2007 or later) is not supported: LibreDWG's DXF importer would return a silently incomplete drawing -- save it as R2004 DXF or as DWG"
@@ -96,7 +98,41 @@ impl std::fmt::Display for ParseError {
         }
     }
 }
-impl std::error::Error for ParseError {}
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseError::Io(e) => Some(e),
+            ParseError::Critical(_) | ParseError::UnsupportedDxfVersion(_) => None,
+        }
+    }
+}
+
+/// The on-disk format of a drawing. [`parse`] picks it from the file
+/// extension; [`parse_bytes`] takes it explicitly because bytes carry no
+/// name. A binary DXF is [`Format::Dxf`] too: the reader tells ASCII from
+/// binary by the bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Format {
+    Dwg,
+    Dxf,
+}
+
+impl Format {
+    /// `.dxf` (any case) is [`Format::Dxf`]; anything else is read as DWG,
+    /// which is what [`parse`] has always done.
+    pub fn from_path(path: impl AsRef<Path>) -> Format {
+        let is_dxf = path
+            .as_ref()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+        if is_dxf {
+            Format::Dxf
+        } else {
+            Format::Dwg
+        }
+    }
+}
 
 /// Groups an entity cannot be understood without, where this crate filled a
 /// value instead of finding one.
@@ -141,30 +177,37 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
 
 /// Parses a DWG or DXF file at `path` into a [`CadDatabase`] -- the same
 /// model either way, with the format inferred from the `.dwg`/`.dxf`
-/// extension.
+/// extension (see [`Format::from_path`]).
 ///
-/// How complete DXF reading is depends on the entity type: `dxf_read_file()`
-/// is LibreDWG's own function and its documentation describes DXF reading as
-/// working "for most objects" rather than being feature-complete the way DWG
-/// reading is. A DXF whose `$ACADVER` is R2007 or later is refused up front
-/// with [`ParseError::UnsupportedDxfVersion`] rather than handed to LibreDWG,
-/// because the importer would return it as a drawing with no entities and no
-/// error. See `docs/CAVEATS.md`.
+/// The file is read into memory here and decoded by [`parse_bytes`] rather
+/// than handed to LibreDWG as a path: LibreDWG opens paths with `fopen()`,
+/// which on Windows interprets the bytes in the process's ANSI code page and
+/// so cannot open a path with, say, a Korean directory name. `std::fs::read`
+/// has no such limit, and a file that cannot be read is [`ParseError::Io`].
+///
+/// How complete DXF reading is depends on the entity type: LibreDWG's own
+/// DXF reader is documented as working "for most objects" rather than being
+/// feature-complete the way DWG reading is. A DXF whose `$ACADVER` is R2007
+/// or later is refused up front with [`ParseError::UnsupportedDxfVersion`]
+/// rather than handed to LibreDWG, because the importer would return it as a
+/// drawing with no entities and no error. See `docs/CAVEATS.md`.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
-    let path_str = path.as_ref().to_str().ok_or(ParseError::InvalidPath)?;
-    let c_path = CString::new(path_str).map_err(|_| ParseError::InvalidPath)?;
-    let is_dxf = path
-        .as_ref()
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
+    let path = path.as_ref();
+    let format = Format::from_path(path);
+    let bytes = std::fs::read(path).map_err(ParseError::Io)?;
+    parse_bytes(&bytes, format)
+}
 
+/// Parses a drawing already held in memory. This is what [`parse`] calls
+/// after reading the file; it is public for callers that receive drawings
+/// over the network or from an archive and never have a path.
+pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseError> {
     // Decided from the file's own header, before LibreDWG sees it: the R2007+
     // failure is silent on the C side (error code 0, zero entities), so the
     // only place it can be turned into an error is here. No lock needed --
-    // this is plain file I/O.
-    if is_dxf {
-        if let Some(acadver) = dxf_acadver(path.as_ref()) {
+    // this is a scan of the bytes.
+    if format == Format::Dxf {
+        if let Some(acadver) = dxf_acadver(bytes) {
             if dxf_version_number(&acadver).is_some_and(|n| n >= DXF_VERSION_R2007) {
                 return Err(ParseError::UnsupportedDxfVersion(acadver));
             }
@@ -182,8 +225,8 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     // SAFETY: Dwg_Data is bound as an opaque, correctly-sized byte blob (see
-    // libredwg-sys's build.rs); dwg_read_file/dxf_read_file expect a
-    // zero-initialized instance -- an uninitialized one aborts with
+    // libredwg-sys's build.rs); the readers expect a zero-initialized
+    // instance -- an uninitialized one aborts with
     // STATUS_STACK_BUFFER_OVERRUN (garbage in dwg.opts feeding the runtime
     // loglevel global). Boxed so the C side fills it in place at a stable
     // heap address; it lives only until the two conversion walks below have
@@ -191,10 +234,16 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     let mut dwg: Box<libredwg_sys::Dwg_Data> =
         Box::new(unsafe { MaybeUninit::zeroed().assume_init() });
 
-    let error = if is_dxf {
-        unsafe { libredwg_sys::dxf_read_file(c_path.as_ptr(), dwg.as_mut()) }
-    } else {
-        unsafe { libredwg_sys::dwg_read_file(c_path.as_ptr(), dwg.as_mut()) }
+    // SAFETY: `bytes` is a live slice for the duration of the call and the
+    // shims only read it (they copy it into their own Bit_Chain); `dwg` is a
+    // valid zeroed Dwg_Data they fill in place.
+    let error = match format {
+        Format::Dwg => unsafe {
+            libredwg_sys::uncad_dwg_read_bytes(bytes.as_ptr(), bytes.len(), dwg.as_mut())
+        },
+        Format::Dxf => unsafe {
+            libredwg_sys::uncad_dxf_read_bytes(bytes.as_ptr(), bytes.len(), dwg.as_mut())
+        },
     };
     // Cast the constant, not `error`: the DWG_ERROR enum constants' width is
     // whatever bindgen inferred for the target (u32 on Linux, i32 on MSVC --
@@ -216,7 +265,7 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
     // Every string the two walks below read goes through this decoder: the
     // library returns a pre-R2007 string as the codepage bytes the file
     // holds, and what could not be decoded is reported, never dropped.
-    let text = unsafe { text::TextDecoder::new(dwg.as_mut(), is_dxf) };
+    let text = unsafe { text::TextDecoder::new(dwg.as_mut(), format == Format::Dxf) };
 
     // Two walks over the live C structure, neither of which mutates it.
     // Everything the returned value exposes is an owned Rust copy by the end.
@@ -254,20 +303,19 @@ fn dxf_version_number(acadver: &str) -> Option<u32> {
 }
 
 /// Reads `$ACADVER` out of an ASCII DXF's HEADER section, or `None` if the
-/// file has no such variable (pre-R10 files), is not readable, or is not laid
-/// out as (group code, value) line pairs. Binary DXF is not handled here and
-/// falls through to LibreDWG untouched.
+/// file has no such variable (pre-R10 files) or is not laid out as (group
+/// code, value) line pairs. Binary DXF is not handled here and falls through
+/// to LibreDWG untouched.
 ///
 /// The scan is bounded: `$ACADVER` is by convention the first header variable,
 /// and the HEADER section ends at the first `ENDSEC`, so a file that reaches
 /// either bound without it is treated as not declaring a version.
-fn dxf_acadver(path: &Path) -> Option<String> {
-    use std::io::{BufRead, BufReader};
-
+fn dxf_acadver(bytes: &[u8]) -> Option<String> {
     const MAX_PAIRS_SCANNED: usize = 4096;
 
-    let file = std::fs::File::open(path).ok()?;
-    let mut lines = BufReader::new(file).lines().map_while(Result::ok);
+    let mut lines = bytes
+        .split(|&b| b == b'\n')
+        .map(|line| String::from_utf8_lossy(line).into_owned());
     for _ in 0..MAX_PAIRS_SCANNED {
         let (code, value) = (lines.next()?, lines.next()?);
         match (code.trim(), value.trim()) {

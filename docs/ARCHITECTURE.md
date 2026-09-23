@@ -189,10 +189,11 @@ the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT, pure data
 this crate depends on by version and re-exports as `uncad::model` / `uncad::tables` /
 `uncad::json`. `CadDatabase` is a plain Rust value holding `entities` (what the model and
 paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_diagnostics`
-(the reader's non-fatal warnings). The `Dwg_Data` that LibreDWG filled in through
-`dwg_read_file`/`dxf_read_file` is walked twice inside `parse()` (`convert_entities`, then
-`convert_tables`), freed with `dwg_free` immediately afterwards, and never reaches the
-return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
+(the reader's non-fatal warnings). `parse()` reads the file into memory itself (LibreDWG's
+own readers `fopen()` a path, which on Windows cannot open a non-ASCII one), and the
+`Dwg_Data` that the shim's `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those
+bytes is walked twice inside `parse()` (`convert_entities`, then `convert_tables`), freed
+with `dwg_free` immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
 crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`) and,
 in the `iron-render-cad` crate, `to_svg(&db, ..)` and `to_png(&db, ..)`.
 
