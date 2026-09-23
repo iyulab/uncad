@@ -1176,16 +1176,18 @@ unsafe fn convert_entity(
                     extension1: point(p13),
                     extension2: point(p14),
                     radial: point(p15),
-                    arc: point(p16).or_else(|| {
-                        // An arc-length dimension's group 16 is its first
-                        // leader point, and it has one only when it says so.
-                        let has_leader = kind == Some(DimensionKind::ArcLength)
-                            && get_field::<u8>(entity_ptr, dxfname, "has_leader")
-                                .is_some_and(|v| v != 0);
-                        has_leader
-                            .then(|| get_point3d(entity_ptr, dxfname, "leader1_pt"))
+                    arc: if kind == Some(DimensionKind::ArcLength) && text.read_from_dxf() {
+                        // Read from DXF, a zeroed first leader point is also
+                        // what the importer leaves when the file omits group
+                        // 16, which it does when the dimension has no leader
+                        // (group 71): only a stated leader makes it a fact.
+                        get_field::<u8>(entity_ptr, dxfname, "has_leader")
+                            .is_some_and(|v| v != 0)
+                            .then(|| point(p16))
                             .flatten()
-                    }),
+                    } else {
+                        point(p16)
+                    },
                 },
                 // Group 50 is the measured angle only for a rotated linear
                 // dimension; the other subtypes do not write it, and the
@@ -1922,14 +1924,15 @@ fn dimension_point_fields(
             None,
             None,
         ),
-        // Group 16 here is the first leader point, which the format writes
-        // only when the dimension has a leader at all (group 71) -- the
-        // field is there either way, holding zeros when it does not.
+        // Group 16 here is the first leader point. A DWG record stores it
+        // whether or not the dimension has a leader (group 71), so it is
+        // carried either way -- what the file states; from DXF, see the
+        // caller.
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => (
             Some("xline1_pt"),
             Some("xline2_pt"),
             Some("center_pt"),
-            None,
+            Some("leader1_pt"),
         ),
         _ => (None, None, None, None),
     }

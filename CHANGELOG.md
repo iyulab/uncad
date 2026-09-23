@@ -93,6 +93,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- An arc-length dimension read from a DWG carries its group 16 (the first leader point)
+  whether or not it has a leader: the record always stores it, and the same drawing
+  saved as DXF states the same point. Read from DXF, a stated leader is still what
+  makes it a fact, since the importer leaves an omitted group zero.
+- An LWPOLYLINE whose record stores no extrusion carries the default (0, 0, 1), not a
+  zero vector.
 - A 2D or 3D POLYLINE from an R13 to R2000 drawing no longer loses its last vertex. The
   library's point accessors stop one record early in that range; the vertex records are
   now walked directly.

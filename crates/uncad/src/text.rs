@@ -123,6 +123,10 @@ pub struct TextDecoder {
     /// never holds UTF-8 in a codepage string, so there the codepage always
     /// applies.
     utf8_first: bool,
+    /// The drawing was read from DXF. Besides the text, it decides what a
+    /// zeroed field means: the DXF importer leaves a group the file omits
+    /// zero, where a DWG record stores the field whatever its value.
+    from_dxf: bool,
     warnings: RefCell<Vec<String>>,
 }
 
@@ -142,8 +146,14 @@ impl TextDecoder {
             codepage,
             wide,
             utf8_first: from_dxf,
+            from_dxf,
             warnings: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Whether the drawing was read from DXF rather than DWG.
+    pub(crate) fn read_from_dxf(&self) -> bool {
+        self.from_dxf
     }
 
     /// The warnings, in the order the strings were met, each once -- the
@@ -273,6 +283,7 @@ mod tests {
             codepage,
             wide,
             utf8_first,
+            from_dxf: utf8_first,
             warnings: RefCell::new(Vec::new()),
         }
     }
