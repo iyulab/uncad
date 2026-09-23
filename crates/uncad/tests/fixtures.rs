@@ -800,3 +800,96 @@ fn the_radial_fixture_reads_its_points_by_their_groups() {
     );
     assert_eq!(angular.points.radial, p3(40.0, 0.0), "the centre, group 15");
 }
+
+// ------------------------------------------------------------ viewports
+
+fn viewports(db: &CadDatabase) -> Vec<&uncad::model::ViewportEntity> {
+    db.entities
+        .iter()
+        .filter_map(|e| match e {
+            Entity::Viewport(v) => Some(v),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The twisted viewport's view, as its AcDbViewport groups state it: centre
+/// (50, 25) and height 60 in the view's own coordinates (so the 120-high
+/// frame shows the model at scale 2), looking down (0, 0, 1) at (0, 0, 0),
+/// turned 30 degrees, lens 50; on (68 = 1), number 2 (69), nothing frozen.
+#[test]
+fn the_twisted_viewport_carries_its_view_as_stated() {
+    use uncad::model::{Point2D, Point3D, ViewportView};
+    let db = parse(TWISTED_VIEWPORT);
+    let vp = viewports(&db)[0];
+    let view = vp.view.expect("an R2000 viewport carries its view");
+    assert_eq!(
+        view,
+        ViewportView {
+            center: Point2D { x: 50.0, y: 25.0 },
+            height: 60.0,
+            target: Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0
+            },
+            direction: UP,
+            twist: view.twist,
+            lens_length: 50.0,
+        }
+    );
+    assert!(
+        (view.twist - 30f64.to_radians()).abs() < 1e-12,
+        "{}",
+        view.twist
+    );
+    assert_eq!((vp.on, vp.viewport_id), (Some(true), Some(2)));
+    assert!(vp.frozen_layers.is_empty());
+}
+
+/// One viewport per state a sheet tells apart: on; on, on a frozen layer
+/// (the frame hidden, not the window); off (68 = 0, status bit 0x20000);
+/// not a plan view (VIEWDIR (1,1,1)). Numbers 2 to 5.
+#[test]
+fn the_viewport_states_fixture_carries_each_state() {
+    use uncad::model::Point3D;
+    let db = parse(VIEWPORT_STATES);
+    /// (handle, layer, on, number, view direction)
+    type State<'a> = (&'a str, Ref<String>, Option<bool>, Option<i32>, Point3D);
+    let states: Vec<State> = viewports(&db)
+        .iter()
+        .map(|v| {
+            let Ref::Resolved(h) = &v.common.source_handle else {
+                panic!("{v:?}");
+            };
+            (
+                h.as_str(),
+                v.common.layer.clone(),
+                v.on,
+                v.viewport_id,
+                v.view.expect("R2000").direction,
+            )
+        })
+        .collect();
+    let diagonal = Point3D {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    };
+    assert_eq!(
+        states,
+        [
+            ("2A", resolved("0"), Some(true), Some(2), UP),
+            ("2D", resolved("VPFROZEN"), Some(true), Some(3), UP),
+            ("2E", resolved("0"), Some(false), Some(4), UP),
+            ("2F", resolved("0"), Some(true), Some(5), diagonal),
+        ]
+    );
+    for vp in viewports(&db) {
+        let view = vp.view.expect("R2000");
+        assert_eq!(
+            (view.center.x, view.center.y, view.height),
+            (50.0, 25.0, 20.0)
+        );
+    }
+}

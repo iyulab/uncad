@@ -12,8 +12,8 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, is_from_dxf, is_pre_r13, is_r2010_or_later, is_r2013_or_later,
-    RawSegmentWidth, SplineControlPoint,
+    get_point3d_array, is_from_dxf, is_pre_r13, is_r2000_or_later, is_r2010_or_later,
+    is_r2013_or_later, RawSegmentWidth, SplineControlPoint,
 };
 use crate::text::TextDecoder;
 use std::ffi::CStr;
@@ -25,7 +25,7 @@ use uncad_model::model::{
     LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
     OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity,
     SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity,
-    WipeoutEntity,
+    ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, HorizontalJustification, Point2D, Point3D, VerticalJustification,
@@ -63,6 +63,9 @@ const Z_AXIS: Point3D = Point3D {
     y: 0.0,
     z: 1.0,
 };
+
+/// VIEWPORT's status-flag bit (DXF 90) that says the viewport is off.
+const VIEWPORT_OFF_FLAG: u32 = 0x20000;
 
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
@@ -724,6 +727,48 @@ fn text_placement(
     }
 }
 
+/// What a paper-space viewport shows of the model (DXF 12, 45, 17, 16, 51,
+/// 42). The record carries the view from R2000 on; an older viewport keeps
+/// it in extended data, which is not read, so there is none to report. A
+/// zero view direction is not a direction and reads as a plan view,
+/// (0, 0, 1); the twist arrives in radians from both readers.
+fn viewport_view(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Option<ViewportView> {
+    if !is_r2000_or_later(dwg) {
+        return None;
+    }
+    let number = |field: &str| get_field::<f64>(entity_ptr, "VIEWPORT", field);
+    Some(ViewportView {
+        center: get_point2d(entity_ptr, "VIEWPORT", "VIEWCTR")?,
+        height: number("VIEWSIZE")?,
+        target: get_point3d(entity_ptr, "VIEWPORT", "view_target")?,
+        direction: get_point3d(entity_ptr, "VIEWPORT", "VIEWDIR")
+            .filter(|d| d.x != 0.0 || d.y != 0.0 || d.z != 0.0)
+            .unwrap_or(Z_AXIS),
+        twist: number("VIEWTWIST")?,
+        lens_length: number("LENSLENGTH")?,
+    })
+}
+
+/// Whether a viewport is on. A DXF states it in group 68 (0 off; -1 or a
+/// positive number on); the binary format does not store that group --
+/// LibreDWG makes one up for a DWG, in block order -- and states "off" as
+/// bit 0x20000 of the status flags (DXF 90), which exist from R2000 on.
+fn viewport_on(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Option<bool> {
+    if is_from_dxf(dwg) {
+        get_field::<u16>(entity_ptr, "VIEWPORT", "on_off").map(|on| on != 0)
+    } else if is_r2000_or_later(dwg) {
+        get_field::<u32>(entity_ptr, "VIEWPORT", "status_flag").map(|f| f & VIEWPORT_OFF_FLAG == 0)
+    } else {
+        None
+    }
+}
+
 /// An ATTRIB's or ATTDEF's flags (DXF 70), one per bit as the reference
 /// names them: 1 invisible, 2 constant, 4 verify, 8 preset. An absent group
 /// is no flag set.
@@ -1185,10 +1230,29 @@ unsafe fn convert_entity(
                 center,
                 width,
                 height,
-                view: None,
-                on: None,
-                viewport_id: None,
-                frozen_layers: Vec::new(),
+                view: viewport_view(dwg, entity_ptr),
+                on: viewport_on(dwg, entity_ptr),
+                // DXF 69. The binary format stores no such number: LibreDWG
+                // makes one up for a DWG's viewports, in block order, so
+                // only a DXF's is the file's.
+                viewport_id: is_from_dxf(dwg)
+                    .then(|| get_field::<u16>(entity_ptr, "VIEWPORT", "id"))
+                    .flatten()
+                    .map(i32::from),
+                frozen_layers: get_array_field::<u32, *mut libredwg_sys::Dwg_Object_Ref>(
+                    entity_ptr,
+                    "VIEWPORT",
+                    "num_frozen_layers",
+                    "frozen_layers",
+                )
+                .into_iter()
+                .filter(|h| !h.is_null())
+                .map(|h| {
+                    reference(dwg, text, Some(h), c"LAYER", |handle_ptr| {
+                        text.handle_name(dwg, handle_ptr)
+                    })
+                })
+                .collect(),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DFACE => {
