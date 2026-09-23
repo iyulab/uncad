@@ -139,13 +139,17 @@ impl Drop for Fixture {
 /// says `Some(false)`.
 ///
 /// The style table carries a second, smaller one. A DIMSTYLE writes a
-/// variable only when it differs from the value the application starts from,
-/// and this library holds a style as a struct with no "the group was not
-/// written" -- so for a DXF it reports its own starting value where the file
-/// said nothing. The variables a case *does* state are compared exactly; the
-/// ones it leaves out are taken from what this reader said, because this
-/// reader cannot know them. Both differences have the same cause and the
-/// same end (see `docs/CAVEATS.md`).
+/// variable only when it differs from the value the application starts from.
+/// Where every template starts from the same value, the model says an
+/// unwritten variable is that value, and the importer reports exactly that.
+/// Where the templates differ (text height, arrow size, the two decimal
+/// places, zero suppression), the model says "not stated" -- but this
+/// library holds a style as a struct with no "the group was not written", so
+/// for a DXF it reports its own starting value there. The variables a case
+/// *does* state are compared exactly; those five, where a case leaves them
+/// out, are taken from what this reader said, because this reader cannot
+/// know them. Both differences have the same cause and the same end (see
+/// `docs/CAVEATS.md`).
 ///
 /// TODO: remove this, and `the_dxf_importer_still_drops_an_undeclared_name`
 /// below, once this crate's DXF path no longer goes through that importer.
@@ -155,21 +159,8 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
             continue;
         };
         for (want, got) in [
-            (&mut style.scale, read.scale),
-            (&mut style.length_factor, read.length_factor),
-            (&mut style.tolerance_upper, read.tolerance_upper),
-            (&mut style.tolerance_lower, read.tolerance_lower),
             (&mut style.text_height, read.text_height),
             (&mut style.arrow_size, read.arrow_size),
-            (&mut style.rounding, read.rounding),
-        ] {
-            if want.is_none() {
-                *want = got;
-            }
-        }
-        for (want, got) in [
-            (&mut style.tolerances, read.tolerances),
-            (&mut style.limits, read.limits),
         ] {
             if want.is_none() {
                 *want = got;
@@ -182,26 +173,10 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
                 read.tolerance_decimal_places,
             ),
             (&mut style.zero_suppression, read.zero_suppression),
-            (
-                &mut style.angular_decimal_places,
-                read.angular_decimal_places,
-            ),
         ] {
             if want.is_none() {
                 *want = got;
             }
-        }
-        if style.linear_unit_format.is_none() {
-            style.linear_unit_format = read.linear_unit_format;
-        }
-        if style.angular_unit_format.is_none() {
-            style.angular_unit_format = read.angular_unit_format;
-        }
-        if style.fraction_format.is_none() {
-            style.fraction_format = read.fraction_format;
-        }
-        if style.post.is_none() {
-            style.post = read.post.clone();
         }
     }
 

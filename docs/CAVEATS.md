@@ -448,8 +448,11 @@ the application starts from. This library holds a style as a struct with no "the
 write this group", so a variable the file omitted is indistinguishable here from one it wrote:
 the model gets `Some(value)` for all of them. For a DWG that is exactly right -- the binary
 format stores every variable -- and for a DXF this reader reports the value the library started
-from rather than "not stated". The other reader of DXF, which sees the groups themselves,
-reports the difference. Like the zero-measurement rule above, this one ends when this crate's
+from rather than "not stated". The model says an omitted variable *is* that starting value
+wherever every template starts from the same one, so there the two agree; they differ only on
+the five whose starting value depends on the template -- text height, arrow size, the two
+decimal places and zero suppression -- which the other reader of DXF, seeing the groups
+themselves, reports as "not stated". Like the zero-measurement rule above, this one ends when this crate's
 DXF reading no longer goes through this importer.
 
 **The field names of a two-line angular dimension are not the mapping.** Measured against

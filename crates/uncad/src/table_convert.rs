@@ -36,6 +36,10 @@ pub(crate) unsafe fn convert_tables(
     text: &TextDecoder,
 ) -> Tables {
     let num_objects = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    // SAFETY: the shim reads one header field of a live Dwg_Data.
+    #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
+    let r2000 = unsafe { libredwg_sys::uncad_dwg_from_version(dwg) }
+        >= libredwg_sys::DWG_VERSION_TYPE_R_2000b as i32;
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
@@ -70,7 +74,7 @@ pub(crate) unsafe fn convert_tables(
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMSTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(record) = convert_dim_style(text, object_ptr) {
+                if let Some(record) = convert_dim_style(text, object_ptr, r2000) {
                     dim_styles.insert(record.name.clone(), record);
                 }
             }
@@ -192,7 +196,15 @@ fn convert_layout(
 /// reader of this format, which sees the groups themselves, can. What to do
 /// with a husk of a style -- one that states next to nothing -- is a
 /// consumer's decision, like the displayed text itself.
-fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimStyleRecord> {
+///
+/// Three variables came with R2000 (`DIMLUNIT`, `DIMFRAC`, `DIMADEC`). An
+/// earlier drawing has no such variables, whatever the library's struct
+/// holds for them, so for it they are `None` (`r2000` false).
+fn convert_dim_style(
+    text: &TextDecoder,
+    object_ptr: *mut c_void,
+    r2000: bool,
+) -> Option<DimStyleRecord> {
     let name = text.field(object_ptr, "DIMSTYLE", "name")?;
     let number = |field: &str| get_field::<f64>(object_ptr, "DIMSTYLE", field);
     // The 16-bit variables (BITCODE_BS). Read signed: DIMADEC's -1 ("as
@@ -200,7 +212,12 @@ fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimS
     let small = |field: &str| get_field::<i16>(object_ptr, "DIMSTYLE", field).map(i32::from);
     Some(DimStyleRecord {
         name,
-        post: text.field(object_ptr, "DIMSTYLE", "DIMPOST"),
+        // Every DIMSTYLE record has the pattern; the library holds an empty
+        // one as no string at all.
+        post: Some(
+            text.field(object_ptr, "DIMSTYLE", "DIMPOST")
+                .unwrap_or_default(),
+        ),
         scale: number("DIMSCALE"),
         length_factor: number("DIMLFAC"),
         tolerances: get_field::<u8>(object_ptr, "DIMSTYLE", "DIMTOL").map(|v| v != 0),
@@ -212,7 +229,7 @@ fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimS
             .map(i32::from),
         text_height: number("DIMTXT"),
         arrow_size: number("DIMASZ"),
-        linear_unit_format: small("DIMLUNIT").and_then(|v| match v {
+        linear_unit_format: small("DIMLUNIT").filter(|_| r2000).and_then(|v| match v {
             1 => Some(LinearUnitFormat::Scientific),
             2 => Some(LinearUnitFormat::Decimal),
             3 => Some(LinearUnitFormat::Engineering),
@@ -231,8 +248,8 @@ fn convert_dim_style(text: &TextDecoder, object_ptr: *mut c_void) -> Option<DimS
             4 => Some(AngularUnitFormat::SurveyorsUnits),
             _ => None,
         }),
-        angular_decimal_places: small("DIMADEC"),
-        fraction_format: small("DIMFRAC").and_then(|v| match v {
+        angular_decimal_places: small("DIMADEC").filter(|_| r2000),
+        fraction_format: small("DIMFRAC").filter(|_| r2000).and_then(|v| match v {
             0 => Some(FractionFormat::Horizontal),
             1 => Some(FractionFormat::Diagonal),
             2 => Some(FractionFormat::NotStacked),

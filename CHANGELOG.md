@@ -189,6 +189,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A dimension style of a drawing from before R2000 no longer reports the linear unit
+  format, fraction format or angular decimal places: those variables came with R2000,
+  and the library's struct held a zero for them that the file never stated. An empty
+  `DIMPOST` read from a DXF is the empty pattern rather than "not stated".
 - A DWG layer whose color is stored as an index color carries that index. The library
   looks the stored value up as an RGB color, and for some indexes finds a different palette
   entry (ACI 104 came back as 176).
