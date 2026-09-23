@@ -306,10 +306,6 @@ impl TextDecoder {
     /// # Safety
     /// `ptr` must be null or the value of the `dxfname.field` string field
     /// of an object of the drawing this decoder was made for, still live.
-    #[allow(
-        dead_code,
-        reason = "the reader for embedded structs (LAYOUT's plot settings) is ported separately"
-    )]
     pub unsafe fn stored_field(
         &self,
         ptr: *const std::os::raw::c_char,
@@ -326,6 +322,31 @@ impl TextDecoder {
         // read in the width this drawing stores it in.
         let raw = unsafe { dynapi::read_stored(ptr, width) };
         Some(self.decode_raw(raw, || format!("{dxfname}.{field}")))
+    }
+
+    /// A text field of a struct embedded in an object (a LAYOUT's plot
+    /// settings), decoded like [`Self::field`]: the library's text accessor
+    /// cannot see through the embedded struct, so the pointer is read with
+    /// [`dynapi::get_sub_field`] and decoded by [`Self::stored_field`] in
+    /// the width this drawing stores it in.
+    pub fn sub_field(
+        &self,
+        object: *mut c_void,
+        dxfname: &str,
+        sub_field: &str,
+        sub_dxfname: &str,
+        field: &str,
+    ) -> Option<String> {
+        let ptr = dynapi::get_sub_field::<*const std::os::raw::c_char>(
+            object,
+            dxfname,
+            sub_field,
+            sub_dxfname,
+            field,
+        )?;
+        // SAFETY: the value of the `sub_dxfname.field` string field of the
+        // struct embedded in a live object of this drawing, read just now.
+        unsafe { self.stored_field(ptr, sub_dxfname, field) }
     }
 
     /// The name of whatever a handle reference points at, decoded -- see

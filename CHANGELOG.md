@@ -52,8 +52,57 @@ Notable changes to this project are recorded here. The format follows
   hidden visibility states are the common case (5,499 of the test corpus's entities).
 - An ELLIPSE carries its `extrusion` (DXF 210), the normal of its plane: a mirrored
   ellipse's parameters run the other way.
+- A layer's state is read: `off`, `frozen`, `locked`, `plot` (DXF 290), `lineweight`
+  (DXF 370, hundredths of a millimetre or -3 for the default) and the `linetype` it names.
+  A DXF's plot flag and lineweight are `None` where its importer cannot tell a stated 0
+  from an absent group, and a drawing older than R2000 states neither. See
+  `docs/CAVEATS.md`, "Layer state: what a DXF cannot say".
+- POLYLINE_MESH (a polygon mesh) is read, as `Entity::PolylineMesh`: the wireframe of its
+  M by N grid, closed in either direction where the file says so. It used to arrive as
+  `Entity::Unknown`. A polyface mesh whose vertices the DXF importer types `VERTEX_MESH`
+  (they name the block record as their owner, the shape ezdxf writes) finds its vertex
+  positions: `example_2000.dxf`'s and `example_r13.dxf`'s polyface had no edges where
+  their DWG twins have six.
+- The object coordinate system of CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB,
+  ATTDEF, INSERT, SOLID and TRACE is read: each carries its `extrusion` (DXF 210) and the
+  planar ones their `elevation`, with the coordinates as the file states them. A
+  mirrored entity used to be indistinguishable from an upright one. See
+  `docs/CAVEATS.md`, "Object coordinate systems".
+- LWPOLYLINE and POLYLINE_2D carry what runs between their vertices: `bulges` (with the
+  sign the file wrote), per-vertex `widths` and `const_width`, empty lists when every
+  segment is straight and every width the constant one. A DXF POLYLINE's default widths
+  (its groups 40/41) are the widths of the vertices that state none, so a DXF and its DWG
+  twin agree. See `docs/CAVEATS.md`, "Polyline bulges and widths are carried as stated".
+- TEXT, ATTRIB and ATTDEF carry how they are placed beyond their start point: the
+  horizontal and vertical justification (DXF 72, 73/74), the alignment point (DXF 11,
+  only for a justified text), the width factor (DXF 41), the oblique angle (DXF 51,
+  radians) and the text style they name (DXF 7). An MTEXT carries its reference width
+  (DXF 41), the extents its writer measured (DXF 42/43, `None` when not stated) and its
+  text style.
+- ATTRIB and ATTDEF carry their `flags` (DXF 70): invisible, constant, verify, preset. An
+  invisible attribute (a title block's hidden field, say) is no longer indistinguishable
+  from a shown one.
+- A DIMSTYLE carries the rest of what a dimension's displayed text depends on, each as an
+  `Option` like the others: `arrow_size` (DIMASZ), `linear_unit_format` (DIMLUNIT),
+  `zero_suppression` (DIMZIN), `rounding` (DIMRND), `angular_unit_format` (DIMAUNIT),
+  `angular_decimal_places` (DIMADEC) and `fraction_format` (DIMFRAC). What to use where a
+  style states nothing is the consumer's decision.
+- An MLINE carries its `scale` (DXF 40), the factor its style's offsets are drawn at: a
+  wall drawn 20 units thick in a style of unit offsets was drawn 1 unit thick.
+- The drawing's layouts are read into `Tables::layouts`: every LAYOUT object -- a tab, the
+  block it shows (`block_name`), its tab order and limits -- with the plot settings
+  embedded in it (paper name and size, margins, plot origin, paper unit, rotation and the
+  custom scale), read through LibreDWG's dynapi into the embedded `PLOTSETTINGS` struct.
+- A VIEWPORT carries what it shows of the model: its `view` (centre and height in the
+  view's own coordinates, target, direction, twist and lens length; `None` before R2000,
+  whose viewports keep it in extended data), whether it is `on`, its `viewport_id` (a
+  DXF's; the binary format stores none) and the layers frozen in it alone.
+- An ordinate DIMENSION carries its `ordinate_axis` (DXF 70, bit 64): whether it measures
+  its feature's x or y distance from the datum.
 ### Changed
 
+- A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
+  measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
   entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
   entity answers to it, `Absent` is a leader that names nothing. The `Option` it
@@ -112,10 +161,39 @@ Notable changes to this project are recorded here. The format follows
   without the patches. `build.rs` refuses to build when a patch's marker has gone missing,
   which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
   silence.
+  process from inside the C library (0xC0000409 on Windows, from `strftime`). An R2004+
+  entity carrying both a true colour and a transparency no longer has the two swapped in
+  the library's fields (`2004/HatchG.dwg`'s HATCH 29F: `0x1ae464`, not `0x0000e5`). One
+  more is not visible in this crate's output yet: the importer compares an R2007+ DXF's
+  table-record names decoded, so its layer and block lookups no longer stop at the first
+  character (such a DXF is still refused). When the patches landed, the JSON output of
+  the 208 corpus drawings was byte-identical with and without them; the colour-order one
+  shows since true colours are read as the file states them (below). `build.rs` refuses
+  to build when a patch's marker has gone missing, which a re-vendor through
+  `scripts/sync-libredwg-vendor.sh` would otherwise do in silence.
+- **Every vertex of a POLYLINE_2D/3D is read.** LibreDWG's point accessors end their walk
+  one vertex early on every file older than R2004, so the last vertex was dropped: a closed
+  square came back a triangle, a two-vertex arc a single point. The vertices now come from
+  the polyline's own subentity chain; all 22 POLYLINEs of the corpus DXFs and the
+  fixtures whose vertices can be counted in the file match that count (the accessors had
+  20 of them one short). A polyline's VERTEX records are no longer reported as entities of
+  their own either -- 62 `Unknown` VERTEX entities in seven pre-R13 DXFs. See
+  `docs/CAVEATS.md`, "Polyline vertices come from the polyline's own chain".
+- **An entity's true colour is the one the file states.** It was read only when the
+  colour's method said TRUECOLOR: an R2004+ DWG never sets the method (the RGB comes under
+  the colour's `0x80` flag), so no DWG entity reported its true colour, while the DXF
+  importer sets it for a plain group 62 with an RGB taken from its own palette, so a DXF
+  entity with only an ACI index reported an RGB the file never wrote. The flag is read
+  first, and a DXF RGB that is the one the library synthesises for the entity's index is
+  not a true colour. See `docs/CAVEATS.md`, "An entity's true colour is what the file
+  states".
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
-  not stated: the library keeps it under the field name `xline2end_pt`.
+  not stated: the library keeps it under the field name `xline2end_pt`. Read from a DXF,
+  the same dimension had its groups 10 and 16 (`definition_point` and `points.arc`)
+  exchanged: LibreDWG's DXF importer fills those two fields by group code, its DWG decoder
+  in stream order.
 - An MTEXT from a drawing older than R2000 reports a line spacing factor of `1` (the format
   has no such field there) instead of `0`, which is outside the factor's valid range.
 - A LEADER's `has_arrowhead` read from an R2010-or-later DWG is `None`. The vendored

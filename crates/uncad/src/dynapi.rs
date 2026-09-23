@@ -84,6 +84,18 @@ impl From<RawPoint2D> for Point2D {
     }
 }
 
+/// `Dwg_LWPOLYLINE_width`: one segment's width where it starts and where it
+/// ends, two doubles (dwg.h).
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RawSegmentWidth {
+    pub start: f64,
+    pub end: f64,
+}
+
+// SAFETY: `#[repr(C)]`, two `double`s, matching Dwg_LWPOLYLINE_width.
+unsafe impl DwgRaw for RawSegmentWidth {}
+
 /// [`get_field`] for a 3D point field, handed back as the model's type.
 pub fn get_point3d(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Point3D> {
     get_field::<RawPoint3D>(entity, dxfname, field).map(Point3D::from)
@@ -440,6 +452,35 @@ pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     unsafe { libredwg_sys::uncad_dwg_is_pre_r13(dwg) != 0 }
 }
 
+/// `true` when the drawing was read from a DXF rather than a DWG. The two
+/// readers leave some fields in different states -- the DXF importer
+/// applies the binary format's bit layout to a LAYER's group 70, and fills
+/// a two-line angular dimension's points by group code rather than in
+/// stream order -- so a field's meaning can depend on which of them read it.
+pub fn is_from_dxf(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: dwg is a live Dwg_Data (caller contract, same as the rest of
+    // this crate's conversion pass); the shim null-checks it again itself.
+    unsafe { libredwg_sys::uncad_dwg_from_dxf(dwg) != 0 }
+}
+
+/// `true` when the drawing is R2000 or later: the first version whose
+/// LAYER records carry a plot flag and a lineweight.
+pub fn is_r2000_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
+    if dwg.is_null() {
+        return false;
+    }
+    // SAFETY: as `is_from_dxf`.
+    let version = unsafe { libredwg_sys::uncad_dwg_version(dwg) };
+    // The enum constant's width is whatever bindgen inferred for the target
+    // (see convert.rs on DWG_OBJECT_TYPE); the shim returns a plain int.
+    #[allow(clippy::unnecessary_cast)]
+    let r2000 = libredwg_sys::DWG_VERSION_TYPE_R_2000 as i32;
+    version >= r2000
+}
+
 /// `true` when the drawing was read from an R2010-or-later DWG. The
 /// library's LEADER record layout loses its place in such a file after the
 /// annotation offset, so the fields it reads past that point -- the
@@ -610,6 +651,71 @@ pub fn get_header_text(
     }
     // SAFETY: as in get_text.
     Some(unsafe { take_text(text_ptr, is_new != 0, stored) })
+}
+
+/// Reads a field of a struct embedded in an object -- LAYOUT's
+/// `plotsettings` (a `Dwg_Object_PLOTSETTINGS`), say -- by adding the
+/// embedded struct's offset from the parent's dynapi table and reading the
+/// field through the embedded type's own table
+/// (`dwg_dynapi_subclass_value`, a plain copy of the field's bytes), with
+/// the same size check as [`get_field`].
+///
+/// `object` must be a live pointer to a `dxfname` object; `sub_field` is the
+/// parent's field holding the struct, `sub_dxfname` the struct's dynapi name
+/// (`"PLOTSETTINGS"`), `field` the field inside it.
+pub fn get_sub_field<T: DwgRaw>(
+    object: *mut c_void,
+    dxfname: &str,
+    sub_field: &str,
+    sub_dxfname: &str,
+    field: &str,
+) -> Option<T> {
+    if object.is_null() {
+        return None;
+    }
+    let c_dxfname = CString::new(dxfname).expect("dxfname has no interior NUL");
+    let c_sub_field = CString::new(sub_field).expect("field name has no interior NUL");
+    // SAFETY: pure name -> descriptor lookups, no write through any pointer.
+    let sub_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_dxfname.as_ptr(), c_sub_field.as_ptr()) };
+    if sub_desc.is_null() {
+        return None;
+    }
+    let offset = unsafe { (*sub_desc).offset } as usize;
+    let c_sub_dxfname = CString::new(sub_dxfname).expect("dxfname has no interior NUL");
+    let c_field = CString::new(field).expect("field name has no interior NUL");
+    let field_desc =
+        unsafe { libredwg_sys::dwg_dynapi_entity_field(c_sub_dxfname.as_ptr(), c_field.as_ptr()) };
+    if field_desc.is_null() {
+        return None;
+    }
+    if !field_write_size_matches::<T>(unsafe { &*field_desc }, sub_dxfname, field) {
+        return None;
+    }
+    // dwg_dynapi_subclass_value wants the "Dwg_Object_<NAME>" spelling (it
+    // strips the prefix and falls back to the entity table); the plain
+    // "PLOTSETTINGS" is refused.
+    let c_subclass =
+        CString::new(format!("Dwg_Object_{sub_dxfname}")).expect("dxfname has no interior NUL");
+    let mut out = MaybeUninit::<T>::uninit();
+    let mut fp: libredwg_sys::Dwg_DYNAPI_field = Default::default();
+    // SAFETY: `object` is a live `dxfname` object (caller contract), so
+    // `object + offset` is its embedded struct, and the size check above
+    // confirms dynapi writes exactly `size_of::<T>()` bytes into `out`.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_subclass_value(
+            object.cast::<u8>().add(offset).cast::<c_void>(),
+            c_subclass.as_ptr(),
+            c_field.as_ptr(),
+            out.as_mut_ptr().cast::<c_void>(),
+            &mut fp,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    // SAFETY: dynapi reported success and wrote size_of::<T>() bytes.
+    Some(unsafe { out.assume_init() })
 }
 
 /// Reads a `(count_field, array_field)` pair -- e.g. LWPOLYLINE's

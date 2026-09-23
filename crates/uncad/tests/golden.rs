@@ -20,7 +20,7 @@ use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 8] = [
+const CASES: [(&str, &[u8], &str); 14] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -61,6 +61,36 @@ const CASES: [(&str, &[u8], &str); 8] = [
         include_bytes!("golden/g10.dxf"),
         include_str!("golden/g10.expected.json"),
     ),
+    (
+        "g11",
+        include_bytes!("golden/g11.dxf"),
+        include_str!("golden/g11.expected.json"),
+    ),
+    (
+        "g12",
+        include_bytes!("golden/g12.dxf"),
+        include_str!("golden/g12.expected.json"),
+    ),
+    (
+        "g13",
+        include_bytes!("golden/g13.dxf"),
+        include_str!("golden/g13.expected.json"),
+    ),
+    (
+        "g14",
+        include_bytes!("golden/g14.dxf"),
+        include_str!("golden/g14.expected.json"),
+    ),
+    (
+        "g15",
+        include_bytes!("golden/g15.dxf"),
+        include_str!("golden/g15.expected.json"),
+    ),
+    (
+        "g16",
+        include_bytes!("golden/g16.dxf"),
+        include_str!("golden/g16.expected.json"),
+    ),
 ];
 
 /// Removes its file on drop, so a failing assertion leaves nothing behind.
@@ -96,6 +126,18 @@ impl Drop for Fixture {
 /// It is applied to the expectation rather than by weakening the
 /// comparison, so every other value in those cases stays pinned exactly.
 ///
+/// A text style takes a different turn through the same importer: a TEXT
+/// naming a style the file never declares (G13's `GOST`) is pointed at the
+/// STANDARD entry instead, the entry an absent group 7 means. The name the
+/// file wrote is lost the same way; what arrives is a resolved reference
+/// to a style the entity did not name.
+///
+/// A layer's plot flag goes the same way from the other side. The importer
+/// leaves an absent group 290 at 0, so a layer that states `290 = 0` (G14's
+/// NOPLOT) cannot be told from one that states nothing, and this reader
+/// reports both as "not stated" rather than guess: `None` where the spec
+/// says `Some(false)`.
+///
 /// The style table carries a second, smaller one. A DIMSTYLE writes a
 /// variable only when it differs from the value the application starts from,
 /// and this library holds a style as a struct with no "the group was not
@@ -118,6 +160,8 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
             (&mut style.tolerance_upper, read.tolerance_upper),
             (&mut style.tolerance_lower, read.tolerance_lower),
             (&mut style.text_height, read.text_height),
+            (&mut style.arrow_size, read.arrow_size),
+            (&mut style.rounding, read.rounding),
         ] {
             if want.is_none() {
                 *want = got;
@@ -137,17 +181,50 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
                 &mut style.tolerance_decimal_places,
                 read.tolerance_decimal_places,
             ),
+            (&mut style.zero_suppression, read.zero_suppression),
+            (
+                &mut style.angular_decimal_places,
+                read.angular_decimal_places,
+            ),
         ] {
             if want.is_none() {
                 *want = got;
             }
+        }
+        if style.linear_unit_format.is_none() {
+            style.linear_unit_format = read.linear_unit_format;
+        }
+        if style.angular_unit_format.is_none() {
+            style.angular_unit_format = read.angular_unit_format;
+        }
+        if style.fraction_format.is_none() {
+            style.fraction_format = read.fraction_format;
         }
         if style.post.is_none() {
             style.post = read.post.clone();
         }
     }
 
+    for layer in expected.tables.layers.values_mut() {
+        if layer.plot == Some(false) {
+            layer.plot = None;
+        }
+    }
+
     fn lower(entity: &mut Entity) {
+        let text_style = match entity {
+            Entity::Text(text) => Some(&mut text.style_name),
+            Entity::Attrib(attrib) => Some(&mut attrib.style_name),
+            Entity::Attdef(attdef) => Some(&mut attdef.style_name),
+            Entity::MText(mtext) => Some(&mut mtext.style_name),
+            _ => None,
+        };
+        if let Some(style) = text_style {
+            if matches!(style, Ref::Unresolved(_)) {
+                *style = Ref::Resolved("STANDARD".to_string());
+            }
+            return;
+        }
         let reference = match entity {
             Entity::Insert(insert) => &mut insert.block_name,
             Entity::Dimension(dimension) => &mut dimension.style_name,
@@ -205,7 +282,7 @@ fn assert_reads_back_exactly(name: &str, dxf: &[u8], expected_json: &str) {
 }
 
 /// The tripwire for the deviation above: it asserts the defect is still
-/// there, in both the places the golden cases put it. The day this reader
+/// there, in all the places the golden cases put it. The day this reader
 /// returns the name the file wrote, this test fails -- which is the signal
 /// to delete both it and `apply_known_deviations`.
 #[test]
@@ -241,6 +318,41 @@ fn the_dxf_importer_still_drops_an_undeclared_name() {
         undeclared,
         &Ref::Absent,
         "the importer kept the name of an undeclared style -- remove the known deviation"
+    );
+
+    let fixture = Fixture::write("golden-g14-deviation.dxf", include_bytes!("golden/g14.dxf"));
+    let db = uncad::parse(&fixture.0).expect("g14 should parse");
+    let expected: CadDatabase =
+        serde_json::from_str(include_str!("golden/g14.expected.json")).unwrap();
+    assert_eq!(expected.tables.layers["NOPLOT"].plot, Some(false));
+    assert_eq!(
+        db.tables.layers["NOPLOT"].plot, None,
+        "the importer told a stated 290 = 0 from an absent one -- remove the known deviation"
+    );
+
+    let fixture = Fixture::write("golden-g13-deviation.dxf", include_bytes!("golden/g13.dxf"));
+    let db = uncad::parse(&fixture.0).expect("g13 should parse");
+    let expected: CadDatabase =
+        serde_json::from_str(include_str!("golden/g13.expected.json")).unwrap();
+    let styles = |db: &CadDatabase| -> Vec<Ref<String>> {
+        db.entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Text(t) => Some(t.style_name.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let (read, stated) = (styles(&db), styles(&expected));
+    let undeclared = stated
+        .iter()
+        .position(|s| matches!(s, Ref::Unresolved(_)))
+        .expect("g13 has a text naming a style the file never declares");
+    assert_eq!(stated[undeclared], Ref::Unresolved("GOST".to_string()));
+    assert_eq!(
+        read[undeclared],
+        Ref::Resolved("STANDARD".to_string()),
+        "the importer kept the name of an undeclared text style -- remove the known deviation"
     );
 }
 

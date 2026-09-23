@@ -5,8 +5,8 @@
 `parse()`/`to_svg()` support: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT, SOLID,
 TRACE, RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
 VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
-LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
-LIGHT. Details worth knowing:
+LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, POLYLINE_MESH, TOLERANCE, ACAD_TABLE,
+WIPEOUT and LIGHT. Details worth knowing:
 
 - **DIMENSION** folds all 7 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
   ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including the
@@ -23,9 +23,13 @@ LIGHT. Details worth knowing:
   is filled the same way.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
   as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
-- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
-  an approximation, not a reading of the B-rep. A solid whose ACIS data cannot be read or
-  converted is reported as unsupported.
+- **3DSOLID**, **REGION**, **POLYLINE_PFACE** and **POLYLINE_MESH** render as isometric
+  wireframes, which is an approximation, not a reading of the B-rep. A solid whose ACIS
+  data cannot be read or converted is reported as unsupported. A polygon mesh is carried
+  as the lines of its M by N grid, in the order `Entity::PolylineMesh` documents; one
+  whose vertex count is not M times N (a smoothed surface stores its control points beside
+  the approximated ones) is carried with no edges and every edge its grid implies counted
+  in `skipped_edges` -- not read, rather than empty.
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
@@ -36,9 +40,9 @@ it through `unsupported_types` (sorted by name, so the report is the same on eve
 A listed type can end up there too when a particular entity gives the renderer nothing to
 draw, e.g. a DIMENSION without its cached-geometry block.
 
-Being off the list says nothing about whether the type has geometry. POLYLINE_MESH, IMAGE
-and HELIX, for instance, all have a shape and none of them is covered; that is simply work
-that has not been done. Do not read the list as "everything with a shape".
+Being off the list says nothing about whether the type has geometry. IMAGE and HELIX, for
+instance, both have a shape and neither is covered; that is simply work that has not been
+done. Do not read the list as "everything with a shape".
 
 **ACAD_PROXY_ENTITY is the one type that will stay unsupported.** It is the proxy
 representation of a custom entity from another program, so it has no fixed geometry to
@@ -91,13 +95,14 @@ against the object's actual dxfname and silently fails on a mismatch, so `"3DSOL
 cannot be hardcoded and `extract_wireframe()` takes the name as an argument. Rendering
 shares the isometric wireframe path.
 
-**POLYLINE_PFACE** ("polyface mesh") could not reuse a dedicated C function the way
-POLYLINE_3D does: LibreDWG's own `dwg_ent_polyline_pface_get_points` is marked
-`/* not implemented. use the dynapi instead */` in `dwg_api.h`. Instead the
-`VERTEX_PFACE` (vertex positions) and `VERTEX_PFACE_FACE` (up to 4 vertex indices per
-face) subentity chain is walked with `get_first_owned_subentity`, and each face's indices
-become wireframe edges -- rendered through the same isometric path as REGION, a polyface
-mesh being just as inherently 3D as an ACIS solid's wireframe.
+**POLYLINE_PFACE** ("polyface mesh") has no working accessor in LibreDWG: its own
+`dwg_ent_polyline_pface_get_points` is marked `/* not implemented. use the dynapi
+instead */` in `dwg_api.h`. Instead the `VERTEX_PFACE` (vertex positions) and
+`VERTEX_PFACE_FACE` (up to 4 vertex indices per face) subentities are read from the
+polyline's own chain -- the one POLYLINE_2D/3D vertices come from, see "Polyline vertices
+come from the polyline's own chain" -- and each face's indices become wireframe edges,
+carried like a REGION's: a polyface mesh is just as inherently 3D as an ACIS solid's
+wireframe.
 
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
 `text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
@@ -431,6 +436,12 @@ The rule is worth only what the DXF path costs. The binary format always stores 
 once this crate's DXF reading no longer goes through this importer the rule buys nothing and
 only loses genuine zeros: remove it then, together with the deviation in `tests/golden.rs`.
 
+**The measurement, when it is -1.** Writers leave `-1` in group 42 for a dimension they did
+not measure -- 58 of the dimensions of one AutoCAD-written sample drawing and 5 of another
+carry it -- and no length or angle is negative, so `-1` is "not stated" too. Every other
+value is carried as the file states it, radians for an angular dimension, even where it
+disagrees with the dimension's own points: whether to trust it is a consumer's judgement.
+
 **Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
 rather than carries, and the format writes a style variable only when it differs from the value
 the application starts from. This library holds a style as a struct with no "the file did not
@@ -443,17 +454,42 @@ DXF reading no longer goes through this importer.
 
 **The field names of a two-line angular dimension are not the mapping.** Measured against
 the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
-groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` is
-group 10 -- the definition point every other subtype keeps in `def_pt`. The reader follows
-the measurement, and `tests/corpus_sweep.rs` pins all five points against the values the DXF
-twin writes for two drawings, so a change in the library's field layout fails the build
-instead of quietly putting the wrong point in the model. (The second drawing matters: in the
+groups 13, 14 and 15 as their names suggest; decoded from a DWG, `def_pt` is group 16 and
+`xline2end_pt` is group 10 -- the definition point every other subtype keeps in `def_pt` --
+while LibreDWG's DXF importer fills the two by group code, `def_pt` 10 and `xline2end_pt`
+16. The reader follows the measurement for each, and `tests/corpus_sweep.rs` pins all five
+points against the values the DXF twin writes for two drawings, and for the DXF itself, so
+a change in the library's field layout fails the build instead of quietly putting the wrong
+point in the model. Before the DXF half, every two-line angular dimension read from a DXF
+had its groups 10 and 16 exchanged.
+
+**An ordinate dimension's axis.** Bit 64 of group 70 says whether an ordinate dimension
+measures its feature's x (set) or y distance from the datum (`ordinate_axis`). A DXF, and a
+drawing older than R13, state it in the flag the model reads it from; from R13 on a DWG
+states it as bit 1 of a separate byte (`flag2`), from which the decoder rebuilds group 70
+wrongly (it sets bit 128 and clears bit 64), so that byte is read there instead. (The second drawing matters: in the
 first, groups 10 and 13 are the same point, and an earlier reading of it took `xline2end_pt`
 for group 13 and reported group 10 as not stated.)
 
 An arc-length dimension is a separate entity in the format rather than a value of group 70 --
 the group says 5 on such a dimension, which would read as a three-point angular one. It is
 filed by the entity it is.
+
+## Object coordinate systems: coordinates as stated, with their normal
+
+CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB, ATTDEF, INSERT, SOLID and TRACE state
+their coordinates in an object coordinate system whose normal the entity carries (DXF 210,
+`extrusion`), at an elevation (DXF 30/38) for the planar ones. The model carries both as
+the file states them and moves nothing to the world: a mirrored circle stated at (10, 10)
+with the normal (0, 0, -1) is carried at (10, 10), where its world centre is (-10, 10),
+and a mirrored arc keeps its stated angles although it runs clockwise in the world. Taking
+the coordinates to the world (the DXF reference's arbitrary axis algorithm) is a
+consumer's step; `Affine2::from_insert` in the model does it for a block reference. The
+normal is not normalised either; only a zero vector, which is no direction, reads as the
+default (0, 0, 1). An LWPOLYLINE's normal is read only when its flag says one is stored
+(bit 1 in LibreDWG's layout), as the decoder itself does. Of the corpus and the nine local
+sample drawings, three samples carry such entities -- 240 SOLIDs, 95 LWPOLYLINEs and 66
+INSERTs, every one with the normal (0, 0, -1) that AutoCAD's MIRROR leaves behind.
 
 ## The polyline "closed" flag
 
@@ -466,16 +502,52 @@ corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported close
 constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
 carry the distinction.
 
-## Polyline bulges are not carried
+## Polyline vertices come from the polyline's own chain
+
+An old-style POLYLINE (2D, 3D, polyface, polygon mesh) owns its vertices as VERTEX
+records, closed by a SEQEND. They are read here by walking the polyline's own
+owned-subentity chain (`get_first_owned_subentity` / `get_next_owned_subentity`), not
+through LibreDWG's `dwg_object_polyline_{2,3}d_get_points`: for every file older than
+R2004 those walk `first_vertex .. last_vertex` with a loop whose condition ends *before*
+its body sees `last_vertex`, and returned one vertex short -- a closed square came back a
+triangle, a two-vertex arc a single point. Measured on the DXFs of the corpus
+(`example_2000`, `example_2004`, `example_r13`, `example_r14`, `2000/PolyLine2D`,
+`2000/PolyLine3D`, `r12/Leader`) and the `polyline_vertices_r2000.dxf` fixture: every one
+of the 22 POLYLINEs whose VERTEX records can be counted in the file now has exactly that
+many vertices, where the accessors had given 20 of them one too few; the DWG twins give
+the same vertices as their DXFs. Files older than R13 do not fill that chain, so there
+the vertices are the VERTEX records that follow the polyline in the object list, as in
+LibreDWG's own pre-R13 branch.
+
+The VERTEX records themselves are not entities of the block that holds the polyline. The
+R13..R2000 block walk here skips them, and so does the walk for every other version, whose
+list the DXF importer fills with every object between a BLOCK and its ENDBLK: seven
+pre-R13 DXFs in the corpus reported each polyline's vertices a second time, as 62
+`Unknown` entities.
+
+## Polyline bulges and widths are carried as stated -- except a HATCH boundary's
 
 A polyline vertex can carry a bulge: the segment to the next vertex is then an arc, not a
-straight line. The model has no field for it, so this crate reads the vertices and drops the
-bulges -- an arc segment arrives as its chord, with no error and no diagnostic. This applies
-to LWPOLYLINE, to 2D POLYLINE, and to the polyline boundaries of a HATCH. It is not rare: in
-the test corpus, 677 of the 4,955 LWPOLYLINE vertices another reader finds carry a non-zero
-bulge, as do 67 of the 122 HATCH polyline-boundary vertices. The library reads the bulges
-(`bulges[]` on LWPOLYLINE, `bulge` on each 2D vertex); carrying them is a change to the
-model, not to this reader.
+straight line. LWPOLYLINE and POLYLINE_2D carry their `bulges` (one per vertex, with the
+sign the file wrote -- a mirrored object coordinate system does not change it), their
+per-vertex `widths`, their `const_width` and their `elevation`. A polyline whose file
+states only zero bulges, or widths all equal to its constant width, carries the empty list,
+the same as one that states none. In the test corpus, 231 LWPOLYLINEs and 10 POLYLINE_2Ds
+(entities and block contents counted apiece) have a bulge.
+
+A POLYLINE_2D states no constant width of its own: its widths are its vertices'. A DXF,
+though, writes the polyline's default widths once, as the POLYLINE's groups 40/41, and
+leaves them out of every VERTEX that has them -- the DWG of `2000/PolyLine2D` stores 0.15 on
+each vertex of its `_ARCHTICK` tick where the DXF twin states it once -- and LibreDWG's
+importer reads an absent vertex width as 0. So a DXF vertex whose widths read as 0 takes
+the polyline's default widths. A DXF vertex that states 0 explicitly under a non-zero
+default cannot be told apart and reads as the default too.
+
+A HATCH's polyline boundary paths still arrive as their vertices alone: the model's
+`HatchBoundaryPath::Polyline` has no bulges, so an arc segment of a boundary arrives as its
+chord, with no error and no diagnostic. In the test corpus, 67 of the 122 HATCH
+polyline-boundary vertices another reader finds carry a non-zero bulge. The library reads
+them; carrying them is a change to the model, not to this reader.
 
 ## A fit-point spline's closed and periodic bits
 
@@ -533,7 +605,7 @@ confirmation, which put rotated text on its side without saying so.)
 
 ## There is no single ACI colour table
 
-`ACI_PALETTE` in `crates/uncad/src/color.rs` maps colour index 1-255 to RGB, and which RGB
+`ACI_PALETTE` in `uncad-model`'s `color.rs` maps colour index 1-255 to RGB, and which RGB
 values are "right" has no one answer. AutoCAD's *displayed* colours depend on the
 drawing-area background, so a table captured from a dark model space and one captured from
 a white sheet disagree with each other; a third-party reader may carry a table that matches
@@ -552,6 +624,27 @@ table cannot land silently.
 Two entries are not colours: index 0 is a placeholder and index 256 is the BYLAYER slot.
 Both are `0`, which is what lets `aci_to_hex` stay total over `0..=256` without a branch --
 and what makes the unresolved-layer case below come out black rather than panicking.
+
+## An entity's true colour is what the file states
+
+`common.true_color` is the 24-bit RGB an entity states (DXF 420), beside its ACI index.
+The two readers leave it in different shapes, and the colour's method byte alone tells
+neither apart. An R2004+ DWG entity states it under its colour's ENC flag `0x80` and
+never sets the method, so a test on the method dropped every true colour of every DWG.
+The DXF importer, for its part, answers a plain group 62 with the TRUECOLOR method and an
+RGB it *synthesises* from its own copy of the ACI palette, so an entity that states only
+an index looked as if it carried an RGB. `split_entity_color` in `convert.rs` reads the
+flag first (`0x80` an inline RGB, `0x40` a colour-book reference, which is not converted),
+and for a DXF compares the RGB with the one the library synthesises for the entity's
+index -- through the library itself (`dwg_rgb_palette_index`), because its table is not
+the display palette the model publishes (the two differ on 222 of 256 indices, see "There
+is no single ACI colour table"): an RGB that is the synthesised one is not a stated true
+colour. Two cases stay indistinguishable and read as no true colour, which draws the same
+either way: a stated 420 of pure black, and a stated 420 that repeats the library's RGB
+for the entity's own index. `tests/fixtures.rs` pins the four DXF spellings
+(`entity_truecolor_r2000.dxf`). Over the corpus, the DXF readings of `example_*` and
+`sample_*` no longer report a true colour for their entities of plain ACI 8 or 3, and the
+R2004+ DWGs `2004/HatchG` and `2013/gh44-error` now report the ones they state.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
@@ -588,6 +681,23 @@ cyan), but **never compared against an actual AutoCAD screen** -- unlike this pr
 other color bugs, this one was verified by plausibility rather than by reference. It also
 inherits `bit_downconvert_CMC`'s own limitation: a genuine arbitrary truecolor that
 happens not to match the palette is misread as a small ACI index.
+
+## Layer state: what a DXF cannot say
+
+A layer's `off`, `frozen` and `locked` are read from the fields LibreDWG's DWG decoder
+fills. Its DXF importer applies the binary format's bit layout to a LAYER's group 70
+instead (bit 2 becomes "off", 4 "frozen in new viewports", 8 "locked"), where a DXF means
+1 frozen, 2 frozen in new viewports and 4 locked, and says "off" with a negative colour --
+so for a DXF this crate reads the raw group 70 and the colour's sign. `tests/layer_state.rs`
+checks both readers against `hidden_layers_r2000.dxf` and the `example_2000` twins.
+
+Two more fields exist from R2000 on and are read only where the file can be heard: the
+plot flag (DXF 290) and the lineweight (DXF 370). An R2000-or-later DWG states both. The
+DXF importer leaves a 290 or a 370 the file left out at 0, so a stated "do not plot" and
+silence read the same, as do a stated 0.00 mm and silence: `plot` is `Some(true)` or
+`None` for a DXF, never `Some(false)`, and a lineweight code of 0 is `None`. A drawing
+older than R2000 has neither (`None`). The golden case G14 states `290 = 0` on one layer;
+`tests/golden.rs` pins the difference as a known deviation.
 
 ## Fixed: SPLINE control points read at the wrong stride
 
@@ -664,7 +774,9 @@ vector LibreDWG has already computed with the miter angle applied, so this is on
 multiply, no trigonometry. When the style cannot be found (empty handle, failed
 resolution) it is treated as a single `offset = 0.0`, which reproduces the old
 centerline rendering exactly through the same `mline_offset_points` function, with no
-separate branch.
+separate branch. The offsets are in the style's units: the MLINE's own `scale` (DXF 40,
+which the model carries as the file states it) is what turns them into drawing units --
+the corpus's MLINEs state 20 and 1.
 
 **bindgen**: `Dwg_MLINESTYLE_line` (`offset`/`color`/`lt_index`/`lt_ltype`) hits the same
 cascade through `parent: struct _dwg_object_MLINESTYLE *`, handled the same way (hand
@@ -766,11 +878,10 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
   `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
   flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
-  the two bits set there is a single BL and the order cannot matter. This crate does not
-  show the difference yet: it reports an entity's true colour only when the colour's
-  method says TRUECOLOR, and on that drawing neither entity's does, so both come out
-  without a true colour with the patch as without it. There is no regression test for it
-  here for that reason.
+  the two bits set there is a single BL and the order cannot matter.
+  `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
+  colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
+  true colour is what the file states" for how the colour is read).
 
 ## No DWG/DXF writing
 

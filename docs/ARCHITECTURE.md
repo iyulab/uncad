@@ -27,7 +27,8 @@ crates/
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
-                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE), with acis.rs
+                         table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
+                         LAYOUT with its plot settings), with acis.rs
                          for 3DSOLID wireframes and hatch_color.rs for the gradient
                          stop colors the model carries. The model and its JSON form
                          are the uncad-model crate's; SVG/PNG rendering is the
@@ -192,12 +193,14 @@ The model is not this crate's: `CadDatabase`, `Entity`, `Tables` and their JSON 
 the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT, pure data), which
 this crate depends on by version and re-exports as `uncad::model` / `uncad::tables` /
 `uncad::json`. `CadDatabase` is a plain Rust value holding `entities` (what the model and
-paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_diagnostics`
-(the reader's non-fatal warnings). `parse()` reads the file into memory itself (LibreDWG's
-own readers `fopen()` a path, which on Windows cannot open a non-ASCII one), and the
-`Dwg_Data` that the shim's `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those
-bytes is walked inside `parse()` (`convert_entities`, `convert_tables`, then the header
-read), freed with `dwg_free` immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
+paper spaces own), `tables` (LAYER, every BLOCK_RECORD, DIMSTYLE, MLINESTYLE, and the
+LAYOUTs with their plot settings) and `read_diagnostics` (the reader's non-fatal
+warnings). `parse()` reads the file into memory itself (LibreDWG's own readers `fopen()` a
+path, which on Windows cannot open a non-ASCII one), and the `Dwg_Data` that the shim's
+`uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those bytes is walked inside
+`parse()` (`convert_entities`, `convert_tables`, then the header read), freed with
+`dwg_free` immediately afterwards, and never reaches the return value. The hub of
+"DWG/DXF -> one model -> several outputs" is therefore the model
 crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`) and,
 in the `iron-render-cad` crate, `to_svg(&db, ..)` and `to_png(&db, ..)`.
 
@@ -208,10 +211,11 @@ is pinned to `dwg.h`'s) and converts them into the model's plain `Point2D`/`Poin
 read C memory by accident -- the compiler refuses it.
 
 The model is deliberately lossy: it keeps what consumers of the drawing's content need and
-nothing else -- no linetypes, lineweights, layer on/off state, text styles, object
-dictionaries or header variables (a consumer that needs the header variables gets them
-beside the model, as this crate's own `uncad::Header`, from `parse_with_header`). It
-cannot be used to write a DWG/DXF back out, and this
+nothing else. A layer carries its state (off, frozen, locked, plotted), its lineweight and
+the name of its linetype, but the linetype and text style definitions those names resolve
+in and object dictionaries are not carried, and neither are header variables (a consumer
+that needs them gets them beside the model, as this crate's own `uncad::Header`, from
+`parse_with_header`). It cannot be used to write a DWG/DXF back out, and this
 project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
 `CHANGELOG.md`).
 

@@ -226,18 +226,13 @@ fn main() {
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")
         .allowlist_function("get_next_owned_subentity")
-        .allowlist_function("dwg_object_polyline_2d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_2d_get_points")
-        .allowlist_function("dwg_object_polyline_3d_get_numpoints")
-        .allowlist_function("dwg_object_polyline_3d_get_points")
         // The next object in file order. Pre-R13 files fill neither a
         // POLYLINE's `first_vertex` nor its `vertex[]`, so its vertices are
         // reachable only by object order there -- which is what LibreDWG's own
         // pre-R13 branch walks.
         .allowlist_function("dwg_next_object")
         // Named explicitly because src/lib.rs's hand-written
-        // Dwg_MLINE_vertex refers to it, not only because the polyline
-        // accessors above return it.
+        // Dwg_MLINE_vertex refers to it.
         .allowlist_type("dwg_point_3d")
         .allowlist_function("uncad_object_entity_ptr")
         .allowlist_function("uncad_object_object_ptr")
@@ -274,6 +269,10 @@ fn main() {
         .allowlist_function("dwg_codepage_uc")
         .allowlist_function("dwg_codepage_uwc")
         .allowlist_function("dwg_codepage_dxfstr")
+        // The RGB the library's DXF importer synthesises for a plain ACI
+        // index (dxf_set_CMC_index): how an entity's stated true colour is
+        // told from one the importer made up.
+        .allowlist_function("dwg_rgb_palette_index")
         // The handle of the object a type-specific struct pointer belongs
         // to, for naming a string in a diagnostic.
         .allowlist_function("dwg_obj_generic_handlevalue")

@@ -1,0 +1,384 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+POLYLINE
+  5
+30
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDb2dPolyline
+ 66
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+1
+  0
+VERTEX
+  5
+31
+330
+30
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+0
+  0
+VERTEX
+  5
+32
+330
+30
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+100.0
+ 20
+0.0
+ 30
+0.0
+ 70
+0
+  0
+VERTEX
+  5
+33
+330
+30
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+100.0
+ 20
+100.0
+ 30
+0.0
+ 70
+0
+  0
+VERTEX
+  5
+34
+330
+30
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+0.0
+ 20
+100.0
+ 30
+0.0
+ 70
+0
+  0
+SEQEND
+  5
+3A
+330
+30
+  8
+0
+100
+AcDbEntity
+  0
+POLYLINE
+  5
+35
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDb2dPolyline
+ 66
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  0
+VERTEX
+  5
+36
+330
+35
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+0.0
+ 20
+1000.0
+ 30
+0.0
+ 42
+1.0
+ 70
+0
+  0
+VERTEX
+  5
+37
+330
+35
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb2dVertex
+ 10
+100.0
+ 20
+1000.0
+ 30
+0.0
+ 70
+0
+  0
+SEQEND
+  5
+38
+330
+35
+  8
+0
+100
+AcDbEntity
+  0
+POLYLINE
+  5
+39
+330
+1F
+  8
+0
+100
+AcDbEntity
+100
+AcDb3dPolyline
+ 66
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+8
+  0
+VERTEX
+  5
+3B
+330
+39
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb3dPolylineVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 70
+32
+  0
+VERTEX
+  5
+3C
+330
+39
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb3dPolylineVertex
+ 10
+10.0
+ 20
+0.0
+ 30
+0.0
+ 70
+32
+  0
+VERTEX
+  5
+3D
+330
+39
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb3dPolylineVertex
+ 10
+10.0
+ 20
+10.0
+ 30
+0.0
+ 70
+32
+  0
+VERTEX
+  5
+3E
+330
+39
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb3dPolylineVertex
+ 10
+0.0
+ 20
+10.0
+ 30
+5.0
+ 70
+32
+  0
+VERTEX
+  5
+3F
+330
+39
+  8
+0
+100
+AcDbEntity
+100
+AcDbVertex
+100
+AcDb3dPolylineVertex
+ 10
+0.0
+ 20
+0.0
+ 30
+5.0
+ 70
+32
+  0
+SEQEND
+  5
+40
+330
+39
+  8
+0
+100
+AcDbEntity
+  0
+ENDSEC
+  0
+EOF

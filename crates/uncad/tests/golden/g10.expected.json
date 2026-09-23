@@ -62,14 +62,28 @@
         "z": 1.0
       },
       "rotation": 0.0,
-      "attribs": []
+      "attribs": [],
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     }
   ],
   "tables": {
     "layers": {
       "0": {
         "name": "0",
-        "color_index": 7
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       }
     },
     "block_records": {
@@ -138,7 +152,12 @@
               "z": 1.0
             },
             "rotation": 0.0,
-            "attribs": []
+            "attribs": [],
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           }
         ]
       },
@@ -148,7 +167,8 @@
       }
     },
     "dim_styles": {},
-    "mlinestyles": {}
+    "mlinestyles": {},
+    "layouts": {}
   },
   "read_diagnostics": {
     "warnings": []
