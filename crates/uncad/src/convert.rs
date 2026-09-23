@@ -2499,6 +2499,83 @@ fn dimension_text_override(user_text: Option<&str>) -> TextOverride {
 mod tests {
     use super::*;
 
+    fn straight(x: f64) -> PolylineVertex {
+        PolylineVertex::straight(Point2D { x, y: 0.0 })
+    }
+
+    fn width(start: f64, end: f64) -> RawSegmentWidth {
+        RawSegmentWidth { start, end }
+    }
+
+    fn widths_of(vertices: &[PolylineVertex]) -> Vec<(f64, f64)> {
+        vertices
+            .iter()
+            .map(|v| (v.start_width, v.end_width))
+            .collect()
+    }
+
+    /// An LWPOLYLINE's width array pairs with its points one to one, the
+    /// way its bulge array does; the widths go on the vertices.
+    #[test]
+    fn an_lwpolyline_s_widths_go_on_its_vertices_one_to_one() {
+        let text = TextDecoder::for_tests();
+        let vertices = with_widths(
+            &text,
+            "LWPOLYLINE",
+            vec![straight(0.0), straight(1.0), straight(2.0)],
+            vec![width(0.0, 2.0), width(2.0, 2.0), width(1.0, 0.0)],
+            0.0,
+        );
+        assert_eq!(widths_of(&vertices), [(0.0, 2.0), (2.0, 2.0), (1.0, 0.0)]);
+        assert!(text.into_warnings().is_empty());
+    }
+
+    /// A file that states the constant width again on every vertex, at both
+    /// ends, is the same polyline as one that states it once: its vertices
+    /// have no width of their own.
+    #[test]
+    fn widths_that_all_repeat_the_constant_width_are_no_widths_of_the_vertices() {
+        let text = TextDecoder::for_tests();
+        let vertices = with_widths(
+            &text,
+            "LWPOLYLINE",
+            vec![straight(0.0), straight(1.0)],
+            vec![width(0.5, 0.5), width(0.5, 0.5)],
+            0.5,
+        );
+        assert_eq!(widths_of(&vertices), [(0.0, 0.0), (0.0, 0.0)]);
+        // One vertex that differs keeps them all.
+        let vertices = with_widths(
+            &text,
+            "LWPOLYLINE",
+            vec![straight(0.0), straight(1.0)],
+            vec![width(0.5, 0.5), width(0.5, 0.0)],
+            0.5,
+        );
+        assert_eq!(widths_of(&vertices), [(0.5, 0.5), (0.5, 0.0)]);
+        assert!(text.into_warnings().is_empty());
+    }
+
+    /// A width array of another length than the points' does not say which
+    /// width is whose: none is used, and the read says so -- the rule the
+    /// bulge array has (`POLYLINE_BULGE`).
+    #[test]
+    fn a_width_array_that_does_not_match_the_points_is_reported_and_not_used() {
+        let text = TextDecoder::for_tests();
+        let vertices = with_widths(
+            &text,
+            "LWPOLYLINE",
+            vec![straight(0.0), straight(1.0), straight(2.0)],
+            vec![width(1.0, 1.0), width(1.0, 1.0)],
+            0.0,
+        );
+        assert_eq!(widths_of(&vertices), [(0.0, 0.0); 3]);
+        assert_eq!(
+            text.into_warnings(),
+            ["POLYLINE_WIDTH: a LWPOLYLINE stores 2 widths for 3 vertices; its vertices are read with no width of their own"]
+        );
+    }
+
     const VOID: libredwg_sys::Dwg_Color_Method =
         libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID;
     const BYLAYER: libredwg_sys::Dwg_Color_Method =

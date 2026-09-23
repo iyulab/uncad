@@ -271,6 +271,17 @@ impl TextDecoder {
         }
     }
 
+    /// A decoder for no drawing, for the unit tests of the conversion
+    /// helpers that decode nothing but report through it.
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        TextDecoder {
+            codepage: 0,
+            storage: Storage::Narrow { utf8_first: false },
+            warnings: RefCell::new(Vec::new()),
+        }
+    }
+
     /// The width of a `dxfname.field` string the library hands out
     /// unconverted. For an R2007+ DWG that happens only when its accessor
     /// could not find the object the pointer belongs to (a struct embedded

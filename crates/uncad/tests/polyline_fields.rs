@@ -138,3 +138,34 @@ fn a_dxf_polyline_s_default_width_is_the_width_of_the_vertices_that_state_none()
         assert_eq!(tick.const_width, 0.0, "{extension}");
     }
 }
+
+/// The R2000 3D polyline of the corpus, in both of its formats: six
+/// vertices, the last one included. LibreDWG's point accessors stop one
+/// record short of `last_vertex` from R13 to R2000 and gave the DWG five.
+#[test]
+fn an_r2000_3d_polyline_keeps_its_last_vertex_in_both_formats() {
+    let vertices = |extension: &str| -> Vec<(f64, f64, f64)> {
+        let db = parse("2000/PolyLine3D", extension);
+        let polylines: Vec<Vec<(f64, f64, f64)>> = db
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::Polyline3D(p) => Some(p.vertices.iter().map(|v| (v.x, v.y, v.z)).collect()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(polylines.len(), 1, "{extension}");
+        polylines.into_iter().next().unwrap()
+    };
+    let dwg = vertices("dwg");
+    assert_eq!(dwg.len(), 6);
+    let dxf = vertices("dxf");
+    assert_eq!(dxf.len(), 6);
+    for (a, b) in dwg.iter().zip(&dxf) {
+        let near = |p: f64, q: f64| (p - q).abs() <= 1e-9 * p.abs().max(1.0);
+        assert!(
+            near(a.0, b.0) && near(a.1, b.1) && near(a.2, b.2),
+            "{a:?} vs {b:?}"
+        );
+    }
+}
