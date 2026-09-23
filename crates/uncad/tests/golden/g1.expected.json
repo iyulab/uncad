@@ -15,7 +15,8 @@
           "data": "OUTLINE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "vertices": [
         {
@@ -52,7 +53,8 @@
           "data": "HOLES"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "center": {
         "x": 20.0,
@@ -76,7 +78,8 @@
           "data": "HOLES"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "center": {
         "x": 180.0,
@@ -100,7 +103,8 @@
           "data": "HOLES"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "center": {
         "x": 20.0,
@@ -124,7 +128,8 @@
           "data": "HOLES"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "center": {
         "x": 180.0,
@@ -148,7 +153,8 @@
           "data": "DIMS"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "block_name": {
         "type": "RESOLVED",
@@ -204,7 +210,8 @@
           "data": "DIMS"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "block_name": {
         "type": "RESOLVED",
@@ -260,7 +267,8 @@
           "data": "DIMS"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "block_name": {
         "type": "RESOLVED",
@@ -316,7 +324,8 @@
           "data": "DIMS"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "block_name": {
         "type": "RESOLVED",
@@ -368,7 +377,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "block_name": {
         "type": "RESOLVED",
@@ -400,7 +410,8 @@
               "data": "TITLE"
             },
             "color_index": 256,
-            "true_color": null
+            "true_color": null,
+            "invisible": false
           },
           "start_point": {
             "x": 125.0,
@@ -425,7 +436,8 @@
               "data": "TITLE"
             },
             "color_index": 256,
-            "true_color": null
+            "true_color": null,
+            "invisible": false
           },
           "start_point": {
             "x": 125.0,
@@ -450,7 +462,8 @@
               "data": "TITLE"
             },
             "color_index": 256,
-            "true_color": null
+            "true_color": null,
+            "invisible": false
           },
           "start_point": {
             "x": 125.0,
@@ -478,7 +491,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 125.0,
@@ -504,7 +518,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 125.0,
@@ -530,7 +545,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 125.0,
@@ -584,7 +600,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 0.0,
@@ -612,7 +629,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 0.0,
@@ -640,7 +658,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 200.0,
@@ -668,7 +687,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 100.0,
@@ -698,7 +718,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": -15.0,
@@ -726,7 +747,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 0.0,
@@ -754,7 +776,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 0.0,
@@ -782,7 +805,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": -16.0,
@@ -812,7 +836,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 20.0,
@@ -840,7 +865,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 20.0,
@@ -868,7 +894,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 180.0,
@@ -896,7 +923,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 100.0,
@@ -926,7 +954,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 15.0,
@@ -954,7 +983,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 20.0,
@@ -984,7 +1014,8 @@
                 "data": "OUTLINE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "vertices": [
               {
@@ -1021,7 +1052,8 @@
                 "data": "HOLES"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "center": {
               "x": 20.0,
@@ -1045,7 +1077,8 @@
                 "data": "HOLES"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "center": {
               "x": 180.0,
@@ -1069,7 +1102,8 @@
                 "data": "HOLES"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "center": {
               "x": 20.0,
@@ -1093,7 +1127,8 @@
                 "data": "HOLES"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "center": {
               "x": 180.0,
@@ -1117,7 +1152,8 @@
                 "data": "DIMS"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1173,7 +1209,8 @@
                 "data": "DIMS"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1229,7 +1266,8 @@
                 "data": "DIMS"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1285,7 +1323,8 @@
                 "data": "DIMS"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1337,7 +1376,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1369,7 +1409,8 @@
                     "data": "TITLE"
                   },
                   "color_index": 256,
-                  "true_color": null
+                  "true_color": null,
+                  "invisible": false
                 },
                 "start_point": {
                   "x": 125.0,
@@ -1394,7 +1435,8 @@
                     "data": "TITLE"
                   },
                   "color_index": 256,
-                  "true_color": null
+                  "true_color": null,
+                  "invisible": false
                 },
                 "start_point": {
                   "x": 125.0,
@@ -1419,7 +1461,8 @@
                     "data": "TITLE"
                   },
                   "color_index": 256,
-                  "true_color": null
+                  "true_color": null,
+                  "invisible": false
                 },
                 "start_point": {
                   "x": 125.0,
@@ -1456,7 +1499,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "vertices": [
               {
@@ -1493,7 +1537,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 5.0,
@@ -1519,7 +1564,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 5.0,
@@ -1545,7 +1591,8 @@
                 "data": "0"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 5.0,

@@ -1187,3 +1187,60 @@ the two readers' agreement on splines moved; measured now:
 {report}"
     );
 }
+
+/// Whether an entity is marked invisible (DXF 60), for every entity both
+/// readers hold. A dynamic block keeps its hidden visibility states as
+/// invisible entities, so the flag is common -- and an entity drawn that
+/// the file hides is a wrong picture, not a missing detail.
+#[test]
+fn the_two_readers_agree_on_which_entities_are_invisible() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let (mut compared, mut invisible) = (0usize, 0usize);
+    let mut disagreements: Vec<String> = Vec::new();
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, bool> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e.common().invisible))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let common = entity.common();
+                if !seen.insert(common.id) {
+                    continue;
+                }
+                let Some(&t) = theirs.get(&common.id.value()) else {
+                    continue;
+                };
+                compared += 1;
+                invisible += usize::from(common.invisible);
+                if common.invisible != t {
+                    disagreements.push(format!(
+                        "{version}/{name} {:X}: ours {}, theirs {t}",
+                        common.id.value(),
+                        common.invisible
+                    ));
+                }
+            }
+        }
+    }
+    assert!(invisible > 0, "the corpus has invisible entities");
+    assert!(
+        disagreements.is_empty(),
+        "compared {compared}, invisible {invisible}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+    println!("compared {compared}, invisible {invisible}");
+}

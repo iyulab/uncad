@@ -45,6 +45,7 @@ fn the_three_states_serialize_distinguishably_and_round_trip() {
                 layer,
                 color_index: 256,
                 true_color: None,
+                invisible: false,
             },
             start_point: Point3D {
                 x: 0.0,

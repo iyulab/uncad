@@ -15,7 +15,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "vertices": [
         {
@@ -52,7 +53,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 102.0,
@@ -77,7 +79,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 130.0,
@@ -102,7 +105,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 102.0,
@@ -127,7 +131,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 130.0,
@@ -152,7 +157,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 102.0,
@@ -177,7 +183,8 @@
           "data": "TITLE"
         },
         "color_index": 256,
-        "true_color": null
+        "true_color": null,
+        "invisible": false
       },
       "start_point": {
         "x": 130.0,
@@ -218,7 +225,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "vertices": [
               {
@@ -255,7 +263,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 102.0,
@@ -280,7 +289,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 130.0,
@@ -305,7 +315,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 102.0,
@@ -330,7 +341,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 130.0,
@@ -355,7 +367,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 102.0,
@@ -380,7 +393,8 @@
                 "data": "TITLE"
               },
               "color_index": 256,
-              "true_color": null
+              "true_color": null,
+              "invisible": false
             },
             "start_point": {
               "x": 130.0,

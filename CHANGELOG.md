@@ -15,6 +15,8 @@ Notable changes to this project are recorded here. The format follows
 - An MTEXT carries its `attachment` point (DXF 71): which of the text block's nine
   points the insertion point is. Without it the insertion point does not say where the
   text goes.
+- Every entity carries `invisible` (DXF 60): the drawing hides it -- a dynamic block's
+  hidden visibility states are the common case (5,499 of the test corpus's entities).
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

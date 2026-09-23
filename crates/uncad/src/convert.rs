@@ -519,6 +519,8 @@ unsafe fn convert_entity(
         layer,
         color_index,
         true_color,
+        // Bit 1 of the common `invisible` word (DXF 60).
+        invisible: get_common_field::<u16>(entity_ptr, "invisible").is_some_and(|v| v & 1 != 0),
     };
 
     Some(match fixedtype {

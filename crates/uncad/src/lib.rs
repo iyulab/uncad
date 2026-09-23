@@ -305,6 +305,7 @@ mod missing_required_groups_tests {
                 layer: Ref::Resolved("0".to_string()),
                 color_index: 256,
                 true_color: None,
+                invisible: false,
             },
             start_point: Point2D::default(),
             text_height: 1.0,
