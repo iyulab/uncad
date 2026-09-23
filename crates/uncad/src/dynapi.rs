@@ -84,6 +84,18 @@ impl From<RawPoint2D> for Point2D {
     }
 }
 
+/// `Dwg_LWPOLYLINE_width`: one segment's width where it starts and where it
+/// ends, two doubles (dwg.h).
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct RawSegmentWidth {
+    pub start: f64,
+    pub end: f64,
+}
+
+// SAFETY: `#[repr(C)]`, two `double`s, matching Dwg_LWPOLYLINE_width.
+unsafe impl DwgRaw for RawSegmentWidth {}
+
 /// [`get_field`] for a 3D point field, handed back as the model's type.
 pub fn get_point3d(entity: *mut c_void, dxfname: &str, field: &str) -> Option<Point3D> {
     get_field::<RawPoint3D>(entity, dxfname, field).map(Point3D::from)

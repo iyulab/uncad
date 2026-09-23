@@ -12,7 +12,8 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, is_pre_r13, is_r2010_or_later, is_r2013_or_later, SplineControlPoint,
+    get_point3d_array, is_from_dxf, is_pre_r13, is_r2010_or_later, is_r2013_or_later,
+    RawSegmentWidth, SplineControlPoint,
 };
 use crate::text::TextDecoder;
 use std::ffi::CStr;
@@ -22,8 +23,8 @@ use uncad_model::model::{
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
     InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
-    Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
-    TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
+    Origin, PointEntity, PolylineEntity, RayEntity, Ref, SegmentWidth, Solid3DEntity, SolidEntity,
+    SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D};
 
@@ -630,6 +631,34 @@ fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
         .unwrap_or(Z_AXIS)
 }
 
+/// A polyline's bulges as the model carries them: as stated, one per vertex
+/// -- a negative bulge is an arc that turns clockwise in the OCS, and a
+/// mirrored OCS does not change that sign -- or none at all when every
+/// segment is straight, so that a file stating only zeros and one stating
+/// nothing are the same polyline.
+fn stated_bulges(bulges: Vec<f64>) -> Vec<f64> {
+    if bulges.iter().all(|b| *b == 0.0) {
+        Vec::new()
+    } else {
+        bulges
+    }
+}
+
+/// A polyline's per-vertex widths as the model carries them: as stated, or
+/// none at all when every segment is `const_width` wide at both ends -- the
+/// same polyline whether the file states that width for every vertex or
+/// states none.
+fn stated_widths(widths: Vec<SegmentWidth>, const_width: f64) -> Vec<SegmentWidth> {
+    if widths
+        .iter()
+        .all(|w| w.start == const_width && w.end == const_width)
+    {
+        Vec::new()
+    } else {
+        widths
+    }
+}
+
 /// Resolves a WIPEOUT's clip boundary to local 2D points -- see
 /// [`crate::model::WipeoutEntity`] for the risk this carries.
 ///
@@ -811,13 +840,36 @@ unsafe fn convert_entity(
             let vertices: Vec<Point2D> =
                 get_point2d_array::<u32>(entity_ptr, "LWPOLYLINE", "num_points", "points");
             let flag = get_field::<u16>(entity_ptr, "LWPOLYLINE", "flag").unwrap_or(0);
+            let const_width =
+                get_field::<f64>(entity_ptr, "LWPOLYLINE", "const_width").unwrap_or(0.0);
+            let bulges = stated_bulges(get_array_field::<u32, f64>(
+                entity_ptr,
+                "LWPOLYLINE",
+                "num_bulges",
+                "bulges",
+            ));
+            let widths = stated_widths(
+                get_array_field::<u32, RawSegmentWidth>(
+                    entity_ptr,
+                    "LWPOLYLINE",
+                    "num_widths",
+                    "widths",
+                )
+                .into_iter()
+                .map(|w| SegmentWidth {
+                    start: w.start,
+                    end: w.end,
+                })
+                .collect(),
+                const_width,
+            );
             Entity::LwPolyline(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
-                bulges: Vec::new(),
-                widths: Vec::new(),
-                const_width: 0.0,
+                bulges,
+                widths,
+                const_width,
                 elevation: get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0),
                 extrusion: if flag & LWPOLYLINE_EXTRUSION_FLAG != 0 {
                     extrusion(entity_ptr, "LWPOLYLINE")
@@ -1171,22 +1223,61 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
             // SAFETY: obj is a POLYLINE_2D per fixedtype; the vertices it
-            // owns are VERTEX_2D. A VERTEX_2D's stored point is 3D, but its z
-            // is the polyline's own elevation repeated.
-            let vertices: Vec<Point2D> =
-                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D) }
-                    .into_iter()
-                    .filter_map(|vertex| get_point3d(vertex, "VERTEX_2D", "point"))
-                    .map(|p| Point2D { x: p.x, y: p.y })
-                    .collect();
+            // owns are VERTEX_2D, each with its own bulge and widths. A
+            // VERTEX_2D's stored point is 3D, but its z is the polyline's
+            // own elevation repeated.
+            let owned =
+                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D) };
+            // A DXF states the polyline's default widths once (its own
+            // groups 40/41) and leaves them out of every VERTEX that has
+            // them, and the importer reads an absent vertex width as 0: so
+            // there a vertex that states no width has the default. A DWG
+            // stores every vertex's widths on the vertex (the DWG twin of
+            // 2000/PolyLine2D.dxf has 0.15 on each vertex where the DXF has
+            // it once, on the POLYLINE).
+            let default_width = if is_from_dxf(dwg) {
+                (
+                    get_field::<f64>(entity_ptr, "POLYLINE_2D", "start_width").unwrap_or(0.0),
+                    get_field::<f64>(entity_ptr, "POLYLINE_2D", "end_width").unwrap_or(0.0),
+                )
+            } else {
+                (0.0, 0.0)
+            };
+            let mut vertices = Vec::with_capacity(owned.len());
+            let mut bulges = Vec::with_capacity(owned.len());
+            let mut widths = Vec::with_capacity(owned.len());
+            for vertex in owned {
+                let Some(point) = get_point3d(vertex, "VERTEX_2D", "point") else {
+                    continue;
+                };
+                let value = |field: &str| get_field::<f64>(vertex, "VERTEX_2D", field);
+                vertices.push(Point2D {
+                    x: point.x,
+                    y: point.y,
+                });
+                bulges.push(value("bulge").unwrap_or(0.0));
+                let stated = (
+                    value("start_width").unwrap_or(0.0),
+                    value("end_width").unwrap_or(0.0),
+                );
+                let (start, end) = if stated == (0.0, 0.0) {
+                    default_width
+                } else {
+                    stated
+                };
+                widths.push(SegmentWidth { start, end });
+            }
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
+            // A POLYLINE_2D states no constant width: its widths are its
+            // vertices' own (see LwPolylineEntity::const_width).
+            let const_width = 0.0;
             Entity::Polyline2D(LwPolylineEntity {
                 common,
                 vertices,
                 closed: flag & POLYLINE_CLOSED_FLAG != 0,
-                bulges: Vec::new(),
-                widths: Vec::new(),
-                const_width: 0.0,
+                bulges: stated_bulges(bulges),
+                widths: stated_widths(widths, const_width),
+                const_width,
                 elevation: get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0),
                 extrusion: extrusion(entity_ptr, "POLYLINE_2D"),
             })

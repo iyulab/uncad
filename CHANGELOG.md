@@ -50,6 +50,11 @@ Notable changes to this project are recorded here. The format follows
   planar ones their `elevation`, with the coordinates as the file states them. A
   mirrored entity used to be indistinguishable from an upright one. See
   `docs/CAVEATS.md`, "Object coordinate systems".
+- LWPOLYLINE and POLYLINE_2D carry what runs between their vertices: `bulges` (with the
+  sign the file wrote), per-vertex `widths` and `const_width`, empty lists when every
+  segment is straight and every width the constant one. A DXF POLYLINE's default widths
+  (its groups 40/41) are the widths of the vertices that state none, so a DXF and its DWG
+  twin agree. See `docs/CAVEATS.md`, "Polyline bulges and widths are carried as stated".
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

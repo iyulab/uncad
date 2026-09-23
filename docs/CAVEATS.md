@@ -447,16 +447,29 @@ list the DXF importer fills with every object between a BLOCK and its ENDBLK: se
 pre-R13 DXFs in the corpus reported each polyline's vertices a second time, as 62
 `Unknown` entities.
 
-## Polyline bulges are not carried
+## Polyline bulges and widths are carried as stated -- except a HATCH boundary's
 
 A polyline vertex can carry a bulge: the segment to the next vertex is then an arc, not a
-straight line. The model has no field for it, so this crate reads the vertices and drops the
-bulges -- an arc segment arrives as its chord, with no error and no diagnostic. This applies
-to LWPOLYLINE, to 2D POLYLINE, and to the polyline boundaries of a HATCH. It is not rare: in
-the test corpus, 677 of the 4,955 LWPOLYLINE vertices another reader finds carry a non-zero
-bulge, as do 67 of the 122 HATCH polyline-boundary vertices. The library reads the bulges
-(`bulges[]` on LWPOLYLINE, `bulge` on each 2D vertex); carrying them is a change to the
-model, not to this reader.
+straight line. LWPOLYLINE and POLYLINE_2D carry their `bulges` (one per vertex, with the
+sign the file wrote -- a mirrored object coordinate system does not change it), their
+per-vertex `widths`, their `const_width` and their `elevation`. A polyline whose file
+states only zero bulges, or widths all equal to its constant width, carries the empty list,
+the same as one that states none. In the test corpus, 231 LWPOLYLINEs and 10 POLYLINE_2Ds
+(entities and block contents counted apiece) have a bulge.
+
+A POLYLINE_2D states no constant width of its own: its widths are its vertices'. A DXF,
+though, writes the polyline's default widths once, as the POLYLINE's groups 40/41, and
+leaves them out of every VERTEX that has them -- the DWG of `2000/PolyLine2D` stores 0.15 on
+each vertex of its `_ARCHTICK` tick where the DXF twin states it once -- and LibreDWG's
+importer reads an absent vertex width as 0. So a DXF vertex whose widths read as 0 takes
+the polyline's default widths. A DXF vertex that states 0 explicitly under a non-zero
+default cannot be told apart and reads as the default too.
+
+A HATCH's polyline boundary paths still arrive as their vertices alone: the model's
+`HatchBoundaryPath::Polyline` has no bulges, so an arc segment of a boundary arrives as its
+chord, with no error and no diagnostic. In the test corpus, 67 of the 122 HATCH
+polyline-boundary vertices another reader finds carry a non-zero bulge. The library reads
+them; carrying them is a change to the model, not to this reader.
 
 ## A fit-point spline's closed and periodic bits
 

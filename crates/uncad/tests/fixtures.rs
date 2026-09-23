@@ -530,3 +530,61 @@ fn mirrored_ocs_entities_keep_their_stated_coordinates_and_carry_their_normal() 
     }
     assert_eq!(seen, 4);
 }
+
+// ------------------------------------------------------------- bulges
+
+/// A bulge is carried as stated -- one per vertex, the sign the file wrote
+/// -- and a polyline whose segments are all straight carries none.
+#[test]
+fn polyline_bulges_are_carried_as_the_file_states_them() {
+    let bulged_polyline = |path: &str| -> Vec<(String, Vec<f64>, uncad::model::Point3D)> {
+        parse(path)
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                Entity::LwPolyline(p) | Entity::Polyline2D(p) => {
+                    Some((handle(e).to_string(), p.bulges.clone(), p.extrusion))
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    // The mirrored fixture: handle 20 states no bulge, handle 21 one of
+    // tan(22.5 degrees) after its second vertex -- a quarter circle.
+    assert_eq!(
+        bulged_polyline(MIRRORED),
+        [
+            ("20".to_string(), vec![], DOWN),
+            ("21".to_string(), vec![0.0, 0.41421356, 0.0, 0.0], UP),
+        ]
+    );
+    // The same outline in a mirrored OCS keeps the sign the file wrote:
+    // the arc turns counter-clockwise in its OCS, and clockwise in the
+    // world only once a consumer takes it there.
+    assert_eq!(
+        bulged_polyline(MIRRORED_BULGE),
+        [("20".to_string(), vec![0.0, 0.41421356, 0.0, 0.0], DOWN)]
+    );
+    // A POLYLINE_2D's bulges are its VERTEX records' (group 42): the
+    // semicircle's one bulge of 1.0, and the square's none.
+    assert_eq!(
+        bulged_polyline(POLYLINE_VERTICES),
+        [
+            ("30".to_string(), vec![], UP),
+            ("35".to_string(), vec![1.0, 0.0], UP),
+        ]
+    );
+    // The mirrored fixture's ARC is the same arc, stated as an ARC states
+    // it: 315 to 45 degrees in the mirrored OCS.
+    let arc = parse(MIRRORED_BULGE)
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            Entity::Arc(a) => Some(a.clone()),
+            _ => None,
+        })
+        .expect("the ARC");
+    assert_eq!(arc.extrusion, DOWN);
+    assert!((arc.start_angle - 315f64.to_radians()).abs() < 1e-9);
+    assert!((arc.end_angle - 45f64.to_radians()).abs() < 1e-9);
+}
