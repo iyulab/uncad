@@ -318,12 +318,18 @@ unsafe fn chained_insert_attribs(
 /// so a polyline arrived one vertex short -- a file's DXF twin writes the
 /// vertex they drop.
 ///
+/// The second value says whether the records ran to the polyline's SEQEND.
+/// Before R13 they may not: when the entity section continues elsewhere (a
+/// JUMP entity), the library's object stream can end at the JUMP, before the
+/// vertices that follow it in the file -- the polyline then has fewer
+/// vertices than the file gives it, and the caller says so.
+///
 /// # Safety
 /// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object of `dwg`.
 unsafe fn polyline_vertex_records(
     dwg: *mut libredwg_sys::Dwg_Data,
     obj: *mut libredwg_sys::Dwg_Object,
-) -> Vec<*mut libredwg_sys::Dwg_Object> {
+) -> (Vec<*mut libredwg_sys::Dwg_Object>, bool) {
     let mut records = Vec::new();
     if is_pre_r13(dwg) {
         let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
@@ -333,35 +339,53 @@ unsafe fn polyline_vertex_records(
             steps += 1;
             let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
                 as libredwg_sys::DWG_OBJECT_TYPE;
-            if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND {
-                break;
+            match fixedtype {
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND => return (records, true),
+                libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D
+                | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D => records.push(sub),
+                // Anything else is not this polyline's: its vertex run ended
+                // without its SEQEND.
+                _ => break,
             }
-            records.push(sub);
             sub = unsafe { libredwg_sys::dwg_next_object(sub) };
         }
+        (records, false)
     } else {
         let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
         while !sub.is_null() {
             records.push(sub);
             sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
         }
+        (records, true)
     }
-    records
 }
 
 /// The positions (and whatever else `read` takes) of a polyline's vertex
 /// records of type `vertex_type`, in order. A record of another type -- a
-/// polyface's face record, say -- is not a vertex and is skipped.
+/// polyface's face record, say -- is not a vertex and is skipped. When the
+/// records end before the polyline's SEQEND the read reports
+/// `POLYLINE_VERTICES`, since the polyline is then missing vertices the file
+/// gives it.
 ///
 /// # Safety
 /// As [`polyline_vertex_records`].
 unsafe fn polyline_vertices<T>(
     dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
     vertex_type: libredwg_sys::DWG_OBJECT_TYPE,
     mut read: impl FnMut(*mut std::ffi::c_void) -> Option<T>,
 ) -> Vec<T> {
-    unsafe { polyline_vertex_records(dwg, obj) }
+    let (records, complete) = unsafe { polyline_vertex_records(dwg, obj) };
+    if !complete {
+        let (id, _) = unsafe { entity_identity(obj) };
+        text.warn(format!(
+            "POLYLINE_VERTICES: the vertex records of the POLYLINE {:X} end before its SEQEND; it is read with the {} vertices that were found",
+            id.value(),
+            records.len()
+        ));
+    }
+    records
         .into_iter()
         .filter_map(|sub| {
             let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
@@ -944,6 +968,7 @@ unsafe fn convert_entity(
             let vertices: Vec<Point3D> = unsafe {
                 polyline_vertices(
                     dwg,
+                    text,
                     obj,
                     libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D,
                     |v| get_point3d(v, "VERTEX_3D", "point"),
@@ -966,6 +991,7 @@ unsafe fn convert_entity(
             let vertices: Vec<PolylineVertex> = unsafe {
                 polyline_vertices(
                     dwg,
+                    text,
                     obj,
                     libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D,
                     |v| {

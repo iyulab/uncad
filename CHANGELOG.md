@@ -19,6 +19,9 @@ Notable changes to this project are recorded here. The format follows
   hidden visibility states are the common case (5,499 of the test corpus's entities).
 - An ELLIPSE carries its `extrusion` (DXF 210), the normal of its plane: a mirrored
   ellipse's parameters run the other way.
+- `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
+  before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
+  found, and named. It used to arrive with no vertices and no signal.
 - `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value
   answers to. A title block's values were readable but not which field each one filled.
 - `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while

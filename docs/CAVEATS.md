@@ -412,9 +412,11 @@ object stream up to its SEQEND; from R13 to R2000 the polyline chains them from
 records itself, by version, rather than through the library's dedicated point accessors:
 from R13 to R2000 those stop one record short of `last_vertex`, so a polyline arrived without
 its last vertex. On the test corpus the walk's vertex count matches each drawing's DXF twin
-for every polyline except one closed 2D polyline in each of two pre-R11 drawings (`r9`,
-`r10`), for which the library yields no vertex record at all; that polyline is read with no
-vertices.
+for every polyline but one in each of two pre-R11 drawings (`r9`, `r10`). There the entity
+section continues elsewhere (a JUMP entity) right after the polyline, and the library's
+object stream ends at the JUMP, so none of the polyline's vertex records is reached. A
+pre-R13 polyline whose vertex records end before its SEQEND is read with the vertices that
+were found and reported as `POLYLINE_VERTICES`, naming the polyline.
 
 ## A fit-point spline's closed and periodic bits
 
