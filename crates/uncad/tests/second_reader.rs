@@ -1042,6 +1042,12 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
                             format!("{:?}", o.end_angle),
                             format!("{:?}", t.end_parameter),
                         ));
+                        let e = o.extrusion;
+                        fields.push((
+                            "extrusion",
+                            p3(e.x, e.y, e.z),
+                            p3(t.normal.x, t.normal.y, t.normal.z),
+                        ));
                     }
                     _ => {
                         disagreements.push(format!(

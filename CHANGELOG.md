@@ -17,6 +17,8 @@ Notable changes to this project are recorded here. The format follows
   text goes.
 - Every entity carries `invisible` (DXF 60): the drawing hides it -- a dynamic block's
   hidden visibility states are the common case (5,499 of the test corpus's entities).
+- An ELLIPSE carries its `extrusion` (DXF 210), the normal of its plane: a mirrored
+  ellipse's parameters run the other way.
 ### Changed
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an

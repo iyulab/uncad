@@ -586,6 +586,11 @@ unsafe fn convert_entity(
             let axis_ratio = get_field::<f64>(entity_ptr, "ELLIPSE", "axis_ratio")?;
             let start_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "start_angle")?;
             let end_angle = get_field::<f64>(entity_ptr, "ELLIPSE", "end_angle")?;
+            let extrusion = get_point3d(entity_ptr, "ELLIPSE", "extrusion").unwrap_or(Point3D {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            });
             Entity::Ellipse(EllipseEntity {
                 common,
                 center,
@@ -593,6 +598,7 @@ unsafe fn convert_entity(
                 axis_ratio,
                 start_angle,
                 end_angle,
+                extrusion,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POINT => {
