@@ -1,9 +1,19 @@
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "dwg.h"
 #include "dwg_api.h"
+/* Private LibreDWG headers (vendor/libredwg/src, on the include path in
+   build.rs): bits.h for Bit_Chain and IS_FROM_TU_DWG; decode.h for
+   dwg_decode; in_dxf.h for dwg_read_dxf/dwg_read_dxfb; logging.h for the
+   `loglevel` global the file-based readers set from dwg->opts. */
+#include "bits.h"
+#include "decode.h"
+#include "logging.h" /* must precede in_dxf.h (logging.h enforces it) */
+#include "in_dxf.h"
 #include "uncad_shim.h"
 
 void *
@@ -34,6 +44,186 @@ uncad_object_object_ptr (Dwg_Object *obj)
     return NULL;
   return (void *)o->tio.UNKNOWN_OBJ;
 }
+
+/* --- reading from memory ------------------------------------------------ */
+
+/* Copy of the file-static dwg_fixup_viewport_ids() in src/dwg.c, which
+   dwg_read_file() runs after a successful decode and which this shim's
+   memory-based reader must therefore run too: it gives every paper-space
+   VIEWPORT its on_off/id the way AutoCAD numbers them, with the layout's
+   own overall viewport (entmode 0) as id 0 / off. */
+static void
+fixup_viewport_ids (Dwg_Data *restrict dwg)
+{
+  BITCODE_BL i;
+  BITCODE_RS last_id = 0;
+  for (i = 0; i < dwg->num_objects; i++)
+    {
+      Dwg_Object *obj = &dwg->object[i];
+      if (obj->supertype == DWG_SUPERTYPE_ENTITY
+          && obj->fixedtype == DWG_TYPE_VIEWPORT)
+        {
+          Dwg_Entity_VIEWPORT *_obj = obj->tio.entity->tio.VIEWPORT;
+          if (obj->tio.entity->entmode == 0)
+            {
+              _obj->on_off = 0;
+              _obj->id = 0;
+              last_id = 0;
+            }
+          else
+            {
+              _obj->on_off = 1;
+              last_id++;
+              _obj->id = last_id;
+            }
+        }
+    }
+}
+
+int
+uncad_dwg_read_bytes (const unsigned char *buf, size_t len, Dwg_Data *dwg)
+{
+  Bit_Chain dat;
+  int error;
+  unsigned int opts;
+
+  if (!dwg)
+    return DWG_ERR_INVALIDDWG;
+  /* Same reset as dwg_read_file(): everything but the log-level bits. */
+  opts = dwg->opts & DWG_OPTS_LOGLEVEL;
+  loglevel = opts;
+  memset (dwg, 0, sizeof (Dwg_Data));
+  dwg->opts = opts;
+
+  if (!buf || len < 6)
+    return DWG_ERR_INVALIDDWG;
+
+  /* dat_read_file() leaves the chain NUL-terminated (size + 1 bytes); a
+     little extra zeroed slack costs nothing and protects the bit reader's
+     look-ahead on a truncated file. */
+  memset (&dat, 0, sizeof (Bit_Chain));
+  dat.chain = (unsigned char *)calloc (1, len + 16);
+  if (!dat.chain)
+    return DWG_ERR_OUTOFMEM;
+  memcpy (dat.chain, buf, len);
+  dat.size = len;
+  dat.opts = dwg->opts;
+
+  error = dwg_decode (&dat, dwg);
+  free (dat.chain);
+  if (error >= DWG_ERR_CRITICAL)
+    return error;
+
+  fixup_viewport_ids (dwg);
+  return error;
+}
+
+int
+uncad_dxf_read_bytes (const unsigned char *buf, size_t len, Dwg_Data *dwg)
+{
+  Bit_Chain dat;
+  int error;
+  unsigned int opts;
+  Dwg_Version_Type version;
+
+  if (!dwg)
+    return DWG_ERR_INVALIDDWG;
+  /* Same reset as dxf_read_file(): keep the log level and a caller-preset
+     target version. */
+  opts = dwg->opts & DWG_OPTS_LOGLEVEL;
+  loglevel = opts;
+  version = dwg->header.version;
+  memset (dwg, 0, sizeof (Dwg_Data));
+  dwg->opts = opts | DWG_OPTS_INDXF;
+  dwg->header.version = version;
+
+  /* "0\nSECTION\n2\nENTITIES\n0\nENDSEC\n" is the smallest DXF the reader
+     accepts; dxf_read_file() rejects anything shorter the same way. */
+  if (!buf || len < 31)
+    return DWG_ERR_IOERROR;
+
+  memset (&dat, 0, sizeof (Bit_Chain));
+  dat.chain = (unsigned char *)calloc (1, len + 2);
+  if (!dat.chain)
+    return DWG_ERR_OUTOFMEM;
+  memcpy (dat.chain, buf, len);
+  dat.size = len;
+  dat.from_version = dwg->header.from_version;
+  dat.version = dwg->header.version;
+  dat.opts = dwg->opts;
+
+  /* Terminate the buffer for the strtol()/sscanf() readers -- reproduced
+     verbatim from dxf_read_file(), including its quirk of writing the NUL
+     over the newline it just appended (the calloc'd slack keeps the result
+     NUL-terminated either way). */
+  if (dat.chain[len - 1] != '\n')
+    {
+      dat.chain[len] = '\n';
+      dat.size++;
+    }
+  dat.chain[len] = '\0';
+
+  /* Fail on DWG */
+  if (!memcmp (dat.chain, "AC10", 4) || !memcmp (dat.chain, "AC1.", 4)
+      || !memcmp (dat.chain, "AC2.10", 4) || !memcmp (dat.chain, "MC0.0", 4))
+    {
+      free (dat.chain);
+      return DWG_ERR_INVALIDDWG;
+    }
+  /* See if binary or ascii */
+  if (!memcmp (dat.chain, "AutoCAD Binary DXF",
+               sizeof ("AutoCAD Binary DXF") - 1))
+    {
+      dat.byte = 22;
+      error = dwg_read_dxfb (&dat, dwg);
+    }
+  else
+    error = dwg_read_dxf (&dat, dwg);
+
+  dwg->opts |= (DWG_OPTS_INDXF | opts);
+  free (dat.chain);
+  if (error >= DWG_ERR_CRITICAL)
+    return error;
+  return 0;
+}
+
+/* --- file header ---------------------------------------------------------- */
+
+int
+uncad_dwg_version (const Dwg_Data *dwg)
+{
+  return dwg ? (int)dwg->header.version : 0;
+}
+
+int
+uncad_dwg_from_version (const Dwg_Data *dwg)
+{
+  return dwg ? (int)dwg->header.from_version : 0;
+}
+
+int
+uncad_dwg_from_dxf (const Dwg_Data *dwg)
+{
+  return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
+}
+
+uint16_t
+uncad_dwg_numheader_vars (const Dwg_Data *dwg)
+{
+  return dwg ? (uint16_t)dwg->header.numheader_vars : 0;
+}
+
+int
+uncad_dwg_template_read (const Dwg_Data *dwg)
+{
+  /* template.spec reads `description` first, and bit_read_T16/TU16 allocate
+     it for every length, zero included: non-NULL exactly when the decoder
+     found and read the section. The DXF importer copies $MEASUREMENT into
+     the Template without it. */
+  return (dwg && dwg->Template.description) ? 1 : 0;
+}
+
+/* --- MULTILEADER ------------------------------------------------------------ */
 
 unsigned int
 uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
@@ -103,6 +293,8 @@ uncad_multileader_free_lines (uncad_multileader_line_t *lines, unsigned int num_
   free (lines);
 }
 
+/* --- 3DSOLID ---------------------------------------------------------------- */
+
 char *
 uncad_3dsolid_sab_to_sat_text (const void *entity, size_t *out_len)
 {
@@ -168,6 +360,8 @@ uncad_free_sat_text (char *text)
   free (text);
 }
 
+/* --- version bands, codepage and string width ---------------------------- */
+
 int
 uncad_dwg_is_pre_r13 (const Dwg_Data *dwg)
 {
@@ -220,12 +414,8 @@ uncad_dwg_codepage (const Dwg_Data *dwg)
 int
 uncad_dwg_is_wide_string (const Dwg_Data *dwg)
 {
-  if (!dwg)
-    return 0;
-  /* The same test as the library's IS_FROM_TU_DWG (bits.h, an internal
-   * header): read from an R2007+ DWG, and not through an importer
-   * (DWG_OPTS_IN -- DXF/JSON input), whose strings are stored as given. */
-  return (dwg->header.from_version >= R_2007 && !(dwg->opts & DWG_OPTS_IN))
-             ? 1
-             : 0;
+  /* The library's own IS_FROM_TU_DWG (bits.h, an internal header on this
+   * file's include path): read from an R2007+ DWG, and not through an
+   * importer (DWG_OPTS_IN -- DXF/JSON input). */
+  return (dwg && IS_FROM_TU_DWG (dwg)) ? 1 : 0;
 }

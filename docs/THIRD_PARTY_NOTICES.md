@@ -4,12 +4,12 @@ This project bundles or builds against the following third-party components.
 
 ## LibreDWG
 
-- **Source**: https://github.com/LibreDWG/libredwg (the real upstream project, tracked as a **git submodule** at `lib/libredwg`, plus an unmodified subset of it vendored directly into `crates/libredwg-sys/vendor/libredwg/` — see below)
+- **Source**: https://github.com/LibreDWG/libredwg (the real upstream project, tracked as a **git submodule** at `lib/libredwg`, plus a subset of it, carrying the five local patches described below, vendored directly into `crates/libredwg-sys/vendor/libredwg/`)
 - **Copyright**: Free Software Foundation, Inc.
 - **License**: GNU General Public License v3.0 or later (GPLv3+), original `COPYING` file included at `crates/libredwg-sys/vendor/libredwg/COPYING`
 - **Used for**: DWG and DXF parsing (core engine, compiled as a native static library, linked via Rust FFI — `crates/libredwg-sys`)
-- **Modified**: no — built directly from unmodified upstream sources (autotools' generated `config.h` is stood in for by this project's own `crates/libredwg-sys/vendor-config/config.h`, a separate file, not a patch to LibreDWG's own sources).
-- **Vendored subset**: `crates/libredwg-sys` is published to crates.io as a standalone, self-contained crate, and crates.io only packages files inside a crate's own directory (no git submodules for downstream consumers). So `crates/libredwg-sys/vendor/libredwg/` holds an unmodified, byte-for-byte copy of just the 112 upstream files this crate's `build.rs` actually compiles/includes (24 `.c` files plus every header/`.spec`/`.inc`/codepage table they `#include`, traced from the real include graph — not a hand-picked subset) — not the full `lib/libredwg` submodule (which also has tests, docs, examples, and program sources this crate never builds). See `docs/ARCHITECTURE.md`'s "Build" section and `scripts/sync-libredwg-vendor.sh` for how it's kept in sync with the submodule.
+- **Modified**: yes, in five files, each change dated 2026-09-23 and marked in the source with an `uncad local patch` comment naming what changed and why (GPLv3 §5(a)). The same notice travels inside the published crate as `crates/libredwg-sys/NOTICE.md`, because `docs/` is not part of that tarball. `src/dwg.c`: `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and `dwg_handle_name()` read a table record's name through a new `uncad_record_name_utf8()` helper, so an R2007+ DXF's UTF-16 record names are compared correctly. `src/common.c`: `cvt_TIMEBLL()` zeroes its `struct tm` and clamps every field into the ranges `strftime()` accepts, so a corrupt date cannot fail-fast the process. `src/in_dxf.c` and `src/dynapi.c`: a polygon mesh's vertex marker `AcDbPolygonMeshVertex` is known, so one polygon mesh no longer makes the DXF reader refuse the whole file. `src/common_entity_data.spec`: an R2004+ entity colour reads its RGB before its transparency, as LibreDWG's own `bit_read_ENC()` does, so an entity carrying both no longer has the two swapped. `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG", has the full reasoning. Everything else is upstream as written; autotools' generated `config.h` is stood in for by this project's own `crates/libredwg-sys/vendor-config/config.h`, a separate file, not a patch to LibreDWG's own sources.
+- **Vendored subset**: `crates/libredwg-sys` is published to crates.io as a standalone, self-contained crate, and crates.io only packages files inside a crate's own directory (no git submodules for downstream consumers). So `crates/libredwg-sys/vendor/libredwg/` holds a copy of just the 112 upstream files this crate's `build.rs` actually compiles/includes (24 `.c` files plus every header/`.spec`/`.inc`/codepage table they `#include`, traced from the real include graph — not a hand-picked subset), with the five patches above, rather than the full `lib/libredwg` submodule (which also has tests, docs, examples, and program sources this crate never builds). See `docs/ARCHITECTURE.md`'s "Build" section and `scripts/sync-libredwg-vendor.sh` for how it's kept in sync with the submodule.
 
 ## acadrust
 
@@ -20,6 +20,12 @@ This project bundles or builds against the following third-party components.
 - **Why it is named here**: MPL-2.0 § 3.2 asks anyone distributing an Executable Form built from Covered Software to tell recipients how to obtain the Source Code Form, and it asks that whether or not the Covered Software was modified. This entry is that notice. Its § 3.3 is why the rest of this workspace keeps its own terms.
 
 ---
+
+Each published crate carries the full GPLv3 text as a `LICENSE` file in its own directory
+(`crates/libredwg-sys/`, `crates/uncad/`, `crates/uncad-cli/`), byte-identical to the
+repository root's. They are copies rather than one shared file because `cargo package`
+never reaches outside a crate directory, and GPLv3 §4 asks for the licence to be conveyed
+with the source that is conveyed — a crates.io tarball is exactly that.
 
 This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party component bundled). See [`LICENSE`](../LICENSE).
 

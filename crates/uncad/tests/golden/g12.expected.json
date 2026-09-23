@@ -1,0 +1,593 @@
+{
+  "entities": [
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 260,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "104"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "OUTLINE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 40.0,
+            "y": 0.0
+          },
+          "bulge": 1.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 40.0,
+            "y": 10.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 0.0,
+            "y": 10.0
+          },
+          "bulge": 1.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": true,
+      "const_width": 0.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 261,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "105"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "OUTLINE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 0.0,
+            "y": 30.0
+          },
+          "bulge": 0.0,
+          "start_width": 2.0,
+          "end_width": 2.0
+        },
+        {
+          "point": {
+            "x": 30.0,
+            "y": 30.0
+          },
+          "bulge": 0.0,
+          "start_width": 4.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 40.0,
+            "y": 30.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": false,
+      "const_width": 0.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 262,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "106"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "OUTLINE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 0.0,
+            "y": 50.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 40.0,
+            "y": 50.0
+          },
+          "bulge": -0.41421356237309503,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 50.0,
+            "y": 60.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": false,
+      "const_width": 1.5,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 263,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "107"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "OUTLINE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 60.0,
+            "y": 20.0
+          },
+          "bulge": 1.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 70.0,
+            "y": 20.0
+          },
+          "bulge": 1.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": true,
+      "const_width": 2.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 264,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "108"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "OUTLINE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 0.0,
+            "y": 90.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 40.0,
+            "y": 90.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": false,
+      "const_width": 1.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      },
+      "OUTLINE": {
+        "name": "OUTLINE",
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      }
+    },
+    "block_records": {
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 260,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "104"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "OUTLINE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 40.0,
+                  "y": 0.0
+                },
+                "bulge": 1.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 40.0,
+                  "y": 10.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 0.0,
+                  "y": 10.0
+                },
+                "bulge": 1.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": true,
+            "const_width": 0.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "OUTLINE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 0.0,
+                  "y": 30.0
+                },
+                "bulge": 0.0,
+                "start_width": 2.0,
+                "end_width": 2.0
+              },
+              {
+                "point": {
+                  "x": 30.0,
+                  "y": 30.0
+                },
+                "bulge": 0.0,
+                "start_width": 4.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 40.0,
+                  "y": 30.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": false,
+            "const_width": 0.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "OUTLINE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 0.0,
+                  "y": 50.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 40.0,
+                  "y": 50.0
+                },
+                "bulge": -0.41421356237309503,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 50.0,
+                  "y": 60.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": false,
+            "const_width": 1.5,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 263,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "107"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "OUTLINE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 60.0,
+                  "y": 20.0
+                },
+                "bulge": 1.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 70.0,
+                  "y": 20.0
+                },
+                "bulge": 1.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": true,
+            "const_width": 2.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "OUTLINE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 0.0,
+                  "y": 90.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 40.0,
+                  "y": 90.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": false,
+            "const_width": 1.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ]
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": []
+      }
+    },
+    "dim_styles": {},
+    "mlinestyles": {},
+    "layouts": {}
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}

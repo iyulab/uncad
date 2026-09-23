@@ -333,7 +333,11 @@ fn ours_kind(entity: &uncad::Entity) -> &'static str {
         E::Wipeout(_) => "wipeout",
         E::Light(_) => "light",
         E::Attrib(_) | E::Attdef(_) => "attrib",
-        E::LwPolyline(_) | E::Polyline2D(_) | E::Polyline3D(_) | E::PolylinePFace(_) => "polyline",
+        E::LwPolyline(_)
+        | E::Polyline2D(_)
+        | E::Polyline3D(_)
+        | E::PolylinePFace(_)
+        | E::PolylineMesh(_) => "polyline",
         E::Unknown { .. } => "unknown",
     }
 }
@@ -716,7 +720,10 @@ fn the_two_readers_agree_on_every_line_circle_arc_and_text_field() {
                         fields.push(("text", format!("{:?}", o.text), format!("{:?}", t.value)));
                         fields.push((
                             "alignment",
-                            format!("{:?} {:?}", o.horizontal_alignment, o.vertical_alignment),
+                            format!(
+                                "{:?} {:?}",
+                                o.horizontal_justification, o.vertical_justification
+                            ),
                             format!("{:?} {:?}", t.horizontal_alignment, t.vertical_alignment),
                         ));
                         // The alignment point means something only for an
@@ -1670,7 +1677,7 @@ fn the_two_readers_agree_on_every_attribute_field() {
                                         "alignment",
                                         format!(
                                             "{:?} {:?}",
-                                            o.horizontal_alignment, o.vertical_alignment
+                                            o.horizontal_justification, o.vertical_justification
                                         ),
                                         format!(
                                             "{:?} {:?}",
@@ -1713,7 +1720,7 @@ fn the_two_readers_agree_on_every_attribute_field() {
                                         "alignment",
                                         format!(
                                             "{:?} {:?}",
-                                            o.horizontal_alignment, o.vertical_alignment
+                                            o.horizontal_justification, o.vertical_justification
                                         ),
                                         format!(
                                             "{:?} {:?}",

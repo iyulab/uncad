@@ -6,21 +6,29 @@
 lib/libredwg/            git submodule pointing at LibreDWG upstream
                          (github.com/LibreDWG/libredwg). Not used by the build -- it is
                          the source vendor/ is copied from, and the origin of the
-                         real-file test fixtures (test/test-data/). Left unmodified.
+                         real-file test fixtures (test/test-data/). Left unmodified:
+                         the local patches are in the vendored copy, not here.
 crates/
   libredwg-sys/          raw FFI: build.rs compiles vendor/libredwg/src/*.c (see "Build")
                          directly through the cc crate, no autotools, and generates the
                          bindings with bindgen.
     shim/                uncad_shim.c -- accessors that reach entity pointers behind
                          opaque types, a walker that flattens nested structs dynapi
-                         cannot reach (MULTILEADER leader lines), and a 3DSOLID SAB->SAT
-                         conversion that runs on a copy rather than the original.
-    vendor/libredwg/     the upstream C sources actually compiled (see "Build")
+                         cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
+                         conversion that runs on a copy rather than the original,
+                         readers that decode a DWG or DXF from a memory buffer rather
+                         than a path, and the file-header fields (version, codepage,
+                         string width, a pre-R13 header's length, whether the Template
+                         section was read) that decoding a drawing's text and header
+                         need. Strings themselves are decoded on the Rust side.
+    vendor/libredwg/     the upstream C sources actually compiled (see "Build"), five
+                         of them carrying a local patch (NOTICE.md)
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
-                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE), with acis.rs
+                         table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
+                         LAYOUT with its plot settings), with acis.rs
                          for 3DSOLID wireframes and hatch_color.rs for the gradient
                          stop colors the model carries. The model and its JSON form
                          are the uncad-model crate's; SVG/PNG rendering is the
@@ -31,7 +39,8 @@ crates/
     examples/            dump.rs / blocks.rs -- manual checks
   uncad-cli/             the CLI binary (uncad)
     tests/               documented_invocations.rs -- every call README and --help
-                         advertise
+                         advertise; release_invariants.rs -- the licence text and the
+                         vendored-patch notice every published crate has to carry
 ```
 
 ## Build: the `cc` crate instead of autotools, a vendored copy instead of the submodule
@@ -46,10 +55,13 @@ hand-written stand-in for what autotools would generate.
 and no submodule at all. A `build.rs` that referenced `repo_root/lib/libredwg` would work
 only inside this workspace and fail for every published consumer -- a failure mode
 confirmed with `cargo publish --dry-run`. So `crates/libredwg-sys/vendor/libredwg/` holds
-a byte-for-byte copy of exactly the files this crate compiles: 24 `.c` files plus every
-header, `.spec`, `.inc` and codepage table they `#include`, 112 files in total
-(`git ls-files crates/libredwg-sys/vendor | wc -l`), unmodified (see
-`docs/THIRD_PARTY_NOTICES.md`) but a subset rather than the whole submodule. The
+a copy of exactly the files this crate compiles: 24 `.c` files plus every header,
+`.spec`, `.inc` and codepage table they `#include`, 112 files in total
+(`git ls-files crates/libredwg-sys/vendor | wc -l`), a subset rather than the whole
+submodule. Five of those files carry a local patch each, marked in the source with a
+dated `uncad local patch` comment and listed in `crates/libredwg-sys/NOTICE.md` (see
+`docs/CAVEATS.md`, "Local patches to the vendored LibreDWG"); everything else is
+byte for byte what the submodule holds. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
 tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
 `tests/documented_invocations.rs` in `uncad-cli`) read fixtures from
@@ -58,17 +70,23 @@ tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
 
 **Updating the submodule**: after moving the `lib/libredwg` pointer (e.g. with
 `git submodule update --remote`), run `scripts/sync-libredwg-vendor.sh` to regenerate the
-vendored copy -- it re-traces the real `#include` graph and rebuilds the file list. Then
-run `cargo build --workspace`: a newly required `.c` or header shows up immediately as a
-compile error. `build.rs` registers the whole `vendor/libredwg/` directory with
-`cargo:rerun-if-changed`, so an incremental build really does recompile the C sources and
-regenerate the bindings after a re-vendor -- no `cargo clean` needed.
+vendored copy -- it re-traces the real `#include` graph and rebuilds the file list. It
+deletes and recopies the whole directory, so the local patches are gone afterwards and
+have to be re-applied (or dropped, with `NOTICE.md` and `docs/CAVEATS.md` updated to
+match). Then run `cargo build --workspace`: a newly required `.c` or header shows up
+immediately as a compile error. `build.rs` registers the whole `vendor/libredwg/`
+directory with `cargo:rerun-if-changed`, so an incremental build really does recompile the
+C sources and regenerate the bindings after a re-vendor -- no `cargo clean` needed.
 
-`build.rs` also carries two drift detectors:
+`build.rs` also carries three drift detectors:
 
 1. It compares the `.c` file count in `vendor/libredwg/src` against `LIBREDWG_SOURCES`.
    A mismatch means the vendored copy is damaged or out of step, and it `panic!`s.
-2. When the `lib/libredwg` submodule is checked out (local development and CI only, never
+2. It counts the `uncad local patch` markers in every file under `vendor/libredwg` and
+   compares them, file by file, against `LOCAL_PATCHES`. A re-vendor replaces a patched
+   file with upstream's without changing any file count, so this is what notices that the
+   local patches are gone; it `panic!`s, naming the files.
+3. When the `lib/libredwg` submodule is checked out (local development and CI only, never
    for a published-crate consumer), it cross-checks that submodule's `.c` file count
    against the vendored copy and emits a `cargo:warning` if they have diverged, without
    failing the build.
@@ -129,12 +147,15 @@ That suits the design rather than fighting it: entity fields were always going t
 through `dwg_dynapi_entity_value`/`dwg_dynapi_common_value`, LibreDWG's own
 reflection API keyed by string field name, with runtime type and range checks.
 `uncad::dynapi` wraps it in the generic helpers `get_field::<T>`, `get_common_field::<T>`,
-`get_text_bytes` and `get_array_field::<C, T>`, comparing the field size dynapi reports
-against the requested Rust type's size so a wrong type mapping fails loudly instead of
-quietly corrupting data. Text fields come back as bytes on purpose: for a pre-R2007
-drawing they are codepage bytes, not UTF-8, and `uncad::text::TextDecoder` (one per
-`parse()`) is the only place they become `String`s -- through LibreDWG's codepage tables,
-with what could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
+`get_header_field::<T>`, `get_text` and `get_array_field::<C, T>`, comparing the field size
+dynapi reports against the requested Rust type's size so a wrong type mapping fails loudly
+instead of quietly corrupting data. Text fields come back undecoded on purpose, as LibreDWG
+hands them out: a UTF-8 copy it converted (R2007+ DWG), or the stored string -- codepage
+bytes before R2007, and in an R2007+ DXF the UTF-16 its importer wrote or, for the few
+fields it copies byte for byte, the file's UTF-8. `uncad::text::TextDecoder` (one per
+`parse()`) says which width a stored string is read in and is the only place any of them
+become `String`s -- through LibreDWG's codepage tables where a codepage applies, with what
+could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
 
 **The same bindgen failure recurs for individual types.** Even with the whole `tio` union
 opaque, allowlisting a nested struct on its own (`Dwg_HATCH_Path`, `Dwg_HATCH_PathSeg`,
@@ -172,11 +193,14 @@ The model is not this crate's: `CadDatabase`, `Entity`, `Tables` and their JSON 
 the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT, pure data), which
 this crate depends on by version and re-exports as `uncad::model` / `uncad::tables` /
 `uncad::json`. `CadDatabase` is a plain Rust value holding `entities` (what the model and
-paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_diagnostics`
-(the reader's non-fatal warnings). The `Dwg_Data` that LibreDWG filled in through
-`dwg_read_file`/`dxf_read_file` is walked twice inside `parse()` (`convert_entities`, then
-`convert_tables`), freed with `dwg_free` immediately afterwards, and never reaches the
-return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
+paper spaces own), `tables` (LAYER, every BLOCK_RECORD, DIMSTYLE, MLINESTYLE, and the
+LAYOUTs with their plot settings) and `read_diagnostics` (the reader's non-fatal
+warnings). `parse()` reads the file into memory itself (LibreDWG's own readers `fopen()` a
+path, which on Windows cannot open a non-ASCII one), and the `Dwg_Data` that the shim's
+`uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those bytes is walked inside
+`parse()` (`convert_entities`, `convert_tables`, then the header read), freed with
+`dwg_free` immediately afterwards, and never reaches the return value. The hub of
+"DWG/DXF -> one model -> several outputs" is therefore the model
 crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`) and,
 in the `iron-render-cad` crate, `to_svg(&db, ..)` and `to_png(&db, ..)`.
 
@@ -187,8 +211,11 @@ is pinned to `dwg.h`'s) and converts them into the model's plain `Point2D`/`Poin
 read C memory by accident -- the compiler refuses it.
 
 The model is deliberately lossy: it keeps what consumers of the drawing's content need and
-nothing else -- no linetypes, lineweights, layer on/off state, text styles, object
-dictionaries or header variables. It cannot be used to write a DWG/DXF back out, and this
+nothing else. A layer carries its state (off, frozen, locked, plotted), its lineweight and
+the name of its linetype, but the linetype and text style definitions those names resolve
+in and object dictionaries are not carried, and neither are header variables (a consumer
+that needs them gets them beside the model, as this crate's own `uncad::Header`, from
+`parse_with_header`). It cannot be used to write a DWG/DXF back out, and this
 project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
 `CHANGELOG.md`).
 

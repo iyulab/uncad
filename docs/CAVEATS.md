@@ -5,8 +5,8 @@
 `parse()`/`to_svg()` support: LINE, CIRCLE, ARC, ELLIPSE, LWPOLYLINE, TEXT, POINT, SOLID,
 TRACE, RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
 VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
-LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT and
-LIGHT. Details worth knowing:
+LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, POLYLINE_MESH, TOLERANCE, ACAD_TABLE,
+WIPEOUT and LIGHT. Details worth knowing:
 
 - **DIMENSION** folds all 7 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
   ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including the
@@ -23,9 +23,13 @@ LIGHT. Details worth knowing:
   is filled the same way.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
   as LWPOLYLINE, the same way `Entity::XLine` reuses `RayEntity`.
-- **3DSOLID**, **REGION** and **POLYLINE_PFACE** render as isometric wireframes, which is
-  an approximation, not a reading of the B-rep. A solid whose ACIS data cannot be read or
-  converted is reported as unsupported.
+- **3DSOLID**, **REGION**, **POLYLINE_PFACE** and **POLYLINE_MESH** render as isometric
+  wireframes, which is an approximation, not a reading of the B-rep. A solid whose ACIS
+  data cannot be read or converted is reported as unsupported. A polygon mesh is carried
+  as the lines of its M by N grid, in the order `Entity::PolylineMesh` documents; one
+  whose vertex count is not M times N (a smoothed surface stores its control points beside
+  the approximated ones) is carried with no edges and every edge its grid implies counted
+  in `skipped_edges` -- not read, rather than empty.
 - **MULTILEADER, MLINE, REGION, POLYLINE_PFACE, TOLERANCE, ACAD_TABLE, WIPEOUT, LIGHT**
   are all **experimental** -- see the next section.
 
@@ -36,9 +40,9 @@ it through `unsupported_types` (sorted by name, so the report is the same on eve
 A listed type can end up there too when a particular entity gives the renderer nothing to
 draw, e.g. a DIMENSION without its cached-geometry block.
 
-Being off the list says nothing about whether the type has geometry. POLYLINE_MESH, IMAGE
-and HELIX, for instance, all have a shape and none of them is covered; that is simply work
-that has not been done. Do not read the list as "everything with a shape".
+Being off the list says nothing about whether the type has geometry. IMAGE and HELIX, for
+instance, both have a shape and neither is covered; that is simply work that has not been
+done. Do not read the list as "everything with a shape".
 
 **ACAD_PROXY_ENTITY is the one type that will stay unsupported.** It is the proxy
 representation of a custom entity from another program, so it has no fixed geometry to
@@ -91,13 +95,14 @@ against the object's actual dxfname and silently fails on a mismatch, so `"3DSOL
 cannot be hardcoded and `extract_wireframe()` takes the name as an argument. Rendering
 shares the isometric wireframe path.
 
-**POLYLINE_PFACE** ("polyface mesh") could not reuse a dedicated C function the way
-POLYLINE_3D does: LibreDWG's own `dwg_ent_polyline_pface_get_points` is marked
-`/* not implemented. use the dynapi instead */` in `dwg_api.h`. Instead the
-`VERTEX_PFACE` (vertex positions) and `VERTEX_PFACE_FACE` (up to 4 vertex indices per
-face) subentity chain is walked with `get_first_owned_subentity`, and each face's indices
-become wireframe edges -- rendered through the same isometric path as REGION, a polyface
-mesh being just as inherently 3D as an ACIS solid's wireframe.
+**POLYLINE_PFACE** ("polyface mesh") has no working accessor in LibreDWG: its own
+`dwg_ent_polyline_pface_get_points` is marked `/* not implemented. use the dynapi
+instead */` in `dwg_api.h`. Instead the `VERTEX_PFACE` (vertex positions) and
+`VERTEX_PFACE_FACE` (up to 4 vertex indices per face) subentities are read from the
+polyline's own chain -- the one POLYLINE_2D/3D vertices come from, see "Polyline vertices
+come from the polyline's own chain" -- and each face's indices become wireframe edges,
+carried like a REGION's: a polyface mesh is just as inherently 3D as an ACIS solid's
+wireframe.
 
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
 `text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
@@ -142,42 +147,90 @@ A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
 
-Which entities the importer keeps also depends on the declared version, not only on the
-content: the corpus R2000 file `2000/entities-2d.dxf` reads as 12 entities, and the same
-bytes with `$ACADVER` rewritten to `AC1018` (R2004) read as 14 -- an ATTDEF and an ATTRIB
-appear that the R2000 pass drops without a message. Nothing on this side can tell that
-they were dropped.
+The declared version, by contrast, does not change what is read: the corpus R2000 file
+`2000/entities-2d.dxf` gives the same model under every `$ACADVER` from `AC1015` to
+`AC1032` (`tests/dxf_pipeline.rs`), although from `AC1021` on the importer stores its
+strings as UTF-16. (It used to read 12 entities at R2000 and 14 at R2004; the two that
+went missing, an ATTDEF and an ATTRIB, are read since this crate walks the R13..R2000
+attribute chains itself -- see "Attributes".)
 
-### DXF saved as R2007 or later is refused with an explicit error
+Two DXF-only defects that *were* patched are recorded under "Local patches to the vendored
+LibreDWG" below: a polygon mesh made the reader refuse the whole file, and the importer
+compared an R2007+ DXF's table-record names in the wrong width. The per-entity
+degradation this section describes -- a type dropping out, or arriving as
+`Entity::Unknown` -- is what a DXF should cost; a whole-file refusal was not.
 
-`parse()` returns `Err(ParseError::UnsupportedDxfVersion)` for a DXF whose `$ACADVER`
-is `AC1021` (R2007) or later -- R2007, R2010, R2013 and R2018 files, which is what
-current CAD software writes by default. The decision is made from the file's own HEADER
-section before LibreDWG sees it. R2000/R2004 DXF (`AC1015`/`AC1018`) and older, DXF files
-without a `$ACADVER` (pre-R10), and every DWG version are unaffected. Binary DXF is not
-inspected and goes to LibreDWG as before.
+**DXF parse time grows faster than the file does.** Reading a DXF costs more than the
+square of its entity count inside LibreDWG's importer, so sizes that are unremarkable for
+a real drawing take minutes. Measured on DXFs of nothing but LINEs, each with its handle
+and subclass markers (release build, wall clock around `uncad <file>`, summary only, no
+rendering, one Windows machine):
 
-Why refuse rather than read: LibreDWG's DXF importer stores strings as UTF-16 for R2007+
-input, but its own text accessor treats imported data as 8-bit. Every name therefore comes
-back cut off after its first character -- `*Model_Space` arrives as `*` -- and this crate
-finds the entities by looking up the model- and paper-space block records by name. The
-entities are in memory (the block record that arrives as `*` has them); they are just
-never matched, and LibreDWG reports no error. Left alone, that surfaced as `Ok` with zero
-entities, indistinguishable from an empty drawing.
+| Entities | Bytes | Time |
+|---|---|---|
+| 25 000 | 2.3 MB | 2.8 s |
+| 50 000 | 4.6 MB | 16.4 s |
+| 100 000 | 9.2 MB | 72.0 s |
 
-Correcting the width on this side is not enough either. The importer resolves layer and
-block names through that same accessor while it builds the drawing, so those lookups have
-already failed by the time the data gets here: with the width corrected, the corpus files
-do yield their 72 entities, but 65 of them without a layer, every INSERT and DIMENSION
-without its block, and MTEXT content garbled (the importer stores that one field 8-bit). A
-drawing that looks read and is quietly missing that much is worse than an obviously empty
-one, and an obviously empty one is worse than an error. The fix belongs in LibreDWG's
-accessor, or in reading DXF without LibreDWG.
+The time is the importer's, not this crate's: the 0.2 CLI, whose conversion code is a
+different one, takes the same on the same files (3.0 s and 14.0 s for the first two). When
+the importer was instrumented on the 0.3 feature branch (commit `75b0461`), nearly all of
+it was inside `dxf_entities_read`, where LibreDWG re-resolves its whole object-reference
+vector every time `dwg_add_object` reallocates the object pool. There is nothing to fix on
+this side of the FFI boundary, and a DWG does not go through the importer at all. A caller
+that must accept large DXFs should bound the work itself (a size or entity-count limit
+before calling `parse`, and a timeout).
 
-What to do: save the drawing as R2004 DXF or as DWG (any version). A test walks every DXF
-in the LibreDWG corpus and checks that exactly the R2007+ files are refused; a second one
-feeds the same minimal drawing with two `$ACADVER` values and requires one refusal and one
-successful read.
+### DXF saved as R2007 or later is read, each string in the width it was stored in
+
+A DXF whose `$ACADVER` is `AC1021` (R2007) or later -- R2007, R2010, R2013 and R2018
+files, which is what current CAD software writes by default -- is read like any other.
+Until 0.3.0 such a file came back from LibreDWG as a drawing with no entities and no
+error, and this crate refused it with `ParseError::UnsupportedDxfVersion` instead. The
+cause was string width, in two places, and both are fixed:
+
+- **In this crate.** LibreDWG's DXF importer stores every string it sets through its
+  field setter as UTF-16 once the version is R2007 or later, exactly as for a DWG -- but
+  its text accessors convert UTF-16 back only for a DWG, and hand an R2007+ DXF's strings
+  out as if they were 8-bit, which stops at the first NUL byte: `*Model_Space` arrived as
+  `*`, and this crate, which finds the entities by looking the model- and paper-space
+  block records up by name, found none. `uncad::text::TextDecoder` now knows which kind
+  of drawing it is reading and reads each stored string in its width. The importer's
+  exceptions are read 8-bit: MTEXT's text (groups 1 and 3, copied byte for byte) and the
+  HEADER variables (parsed before the importer knows the version). Those are the file's
+  own bytes, UTF-8 in an R2007+ DXF, and are checked as UTF-8 and reported in
+  `read_diagnostics` when they are not; reading them as UTF-16 would look for a 16-bit
+  NUL past their allocation.
+- **In LibreDWG's importer.** It resolves layer and block names through the same 8-bit
+  reading while it builds the drawing, so those lookups had already failed by the time
+  the data got here: with this crate's half alone, `example_2018.dxf` yields its 72
+  entities with 65 of them on no layer and every INSERT without its block. A local patch
+  to the vendored `dwg.c` (see "Local patches to the vendored LibreDWG" below) makes the
+  importer decode a record's name before it compares it.
+
+Measured on the corpus: 27 of its 32 R2007+ DXFs read; 24 of those have the same drawing
+as a DWG beside them, and 22 of the 24 state the same entities on the same layers with
+the same INSERT blocks as their twin. The two that do not are recorded, not hidden:
+`2010/gh209_1.dxf`, whose entities LibreDWG's importer leaves without a layer handle
+(the model says `Absent`), and `2018/Leader.dxf`, whose DXF text itself puts one entity
+on a layer `0 @ 1` the DWG does not have. The other five (`2013/gh109_1`,
+`2018/Constraints`, `Dynblocks`, `LiveSection1`, `TS1`) fail inside LibreDWG's importer
+with critical error 2048, as a few older DXFs do. `tests/dxf_pipeline.rs` pins all of
+that, and also reads one drawing restamped `AC1015`, `AC1018`, `AC1021`, `AC1024`,
+`AC1027` and `AC1032` and requires the same model from every stamp;
+`tests/r2007_dxf_handles.rs` compares `example_2018.dxf` with its DWG twin and with its
+own text, and `tests/codepage.rs` covers the two widths.
+
+**The silent case is guarded.** Should an R2007+ DXF still come out with no entity in
+the model while LibreDWG itself placed entities in its model or paper space (the
+`entmode` the importer sets from each entity's owner handle, which no name
+lookup of this crate's is involved in), `parse()` returns
+`ParseError::UnsupportedDxfVersion` rather than an empty drawing: an obviously empty
+drawing is worse than an error, and one that looks read but is empty is worse still. No
+corpus file trips it; with this crate's half of the width fix disabled, exactly the 27
+readable files do. The guard is limited to R2007+ DXF on purpose: applied to every input
+it would also refuse two pre-R13 DWGs (`r11/ACEB10.dwg`, `r2.10/block.dwg`) that read
+today with an empty model space, which is a different question.
 
 ## Text before R2007 is decoded here, through the drawing's codepage
 
@@ -207,8 +260,28 @@ Asian one, and reports what it could not decode:
   and reported otherwise.
 
 The library's own converter for this (`bit_TV_to_utf8_codepage`) is not used: it writes a
-NUL for an unmapped character, which cuts the string short at that point, and in some
-cases returns its input aliased rather than copied.
+NUL for an unmapped character, which cuts the string short at that point, sizes its output
+at 1.5 times the input for a single-byte codepage and stops reading when that is full (a
+CP1251 `Стена` came back as `Стен`), and in some cases returns its input aliased rather
+than copied.
+
+**The DOS-era double-byte codepages are read by their bytes.** LibreDWG's tables treat
+every byte of a Big5 (24) or GB2312 (31) string as the first of a pair, ASCII included:
+`*Model_Space` paired up into `*M`, `od`, ..., so a drawing declaring either lost its model
+space and every entity, and `中国 AB` came back as four U+FFFD. Both are EUC-style
+encodings whose lead and trail bytes all have the high bit set, so only such a byte opens
+a pair here; a GB2312 pair is masked to the 7-bit ISO-2022 form the library's table is
+indexed by, since the file holds EUC-CN bytes; and CP932 (22, DOS Shift-JIS), which
+`dwg_codepage_isasian` leaves out, is read as the double-byte encoding it is rather than
+one byte at a time through a single-byte table. **ASCII is never looked up**, in any
+codepage: the CP932 and JOHAB tables map 0x5C to a yen and a won sign, but in a drawing it
+is the backslash of `\P` and `\U+XXXX`. `tests/codepage.rs` writes each case with bytes
+from Python's own encoders, with the Windows twins (936, 950, 932) of the same bytes as
+the control.
+
+**Escapes are text.** `\U+XXXX` and `\M+nXXXX` in a string are passed through as the file
+wrote them, whatever its version or format; expanding them is a consumer's decision, as
+the rest of MTEXT's inline codes are.
 
 **What is trusted, and what cannot be told:**
 
@@ -226,8 +299,13 @@ cases returns its input aliased rather than copied.
   reads as U+0223). Title-block strings of more than one or two syllables are never valid UTF-8 as a
   whole, and a DWG never holds UTF-8 in a codepage string, so the codepage always applies
   there.
-- R2007 and later: the library converts from UTF-16 itself and the codepage is moot; the
-  result is checked to be UTF-8 and reported if it is not.
+- R2007 and later: the codepage is moot. From a DWG the library converts its UTF-16
+  itself; from a DXF this crate reads the UTF-16 the importer stored, and the strings the
+  importer keeps 8-bit as the UTF-8 such a file is (see "DXF saved as R2007 or later is
+  read" above). Whatever is not valid UTF-16 or UTF-8 is reported.
+- A codepage LibreDWG has no table for -- `CP_UNDEFINED`, or a corrupt value in a DWG
+  header, which the library would index its tables with unchecked -- is not guessed at
+  (as `ANSI_1252`, say): its strings are read as UTF-8 and reported where they are not.
 
 The golden case G8 (a title block with Korean layer and block names, attribute values and
 defaults, and a text, written as CP949 with `$DWGCODEPAGE = ANSI_949`) reads back exactly,
@@ -242,8 +320,8 @@ the CLI prints them as a warning. Every example DWG in the LibreDWG corpus comes
 `UNHANDLEDCLASS` set, and `example_2018.dwg` with `UNHANDLEDCLASS | VALUEOUTOFBOUNDS`; the
 R2000 DXF from the same corpus comes back clean. Across the whole corpus (208 files: 141 DWG,
 67 DXF), 100 DWG read clean, 17 with `UNHANDLEDCLASS`, 31 with `VALUEOUTOFBOUNDS` (some with
-both); every DXF that LibreDWG read at all (31) read clean, 32 were refused as R2007+ and 4
-failed critically (3 `INVALIDDWG`, 1 `IOERROR`). What the bits mean for the result is
+both); every DXF that LibreDWG read at all (58) read clean, and 9 failed critically (8
+`INVALIDDWG`, 5 of them R2007+ files, and 1 `IOERROR`). What the bits mean for the result is
 LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
 were skipped, and nothing else in the model shows that they existed.
 
@@ -280,8 +358,10 @@ measured with hand-written files: an INSERT naming a block the BLOCKS section do
 reads as *absent* (the importer stores no handle), a defined one resolves, and a LINE on a
 layer no LAYER table declares is not readable at all (`IOERROR`) -- so an unresolved *layer*
 comes from DWG files with broken handles, not from anything one can write into a DXF by hand.
-The R2007+ DXF case that this crate now refuses was the large-scale version of "unresolved":
-65 of 72 entities with a layer handle that no longer matched its table row.
+The R2007+ DXF case was the large-scale version of "unresolved" before the importer's
+lookups were patched: 65 of `example_2018.dxf`'s 72 entities without a layer handle, where
+its DWG twin names four layers. One corpus R2007+ DXF, `2010/gh209_1.dxf`, still reads that
+way -- all of its entities are absent-layered, which is what LibreDWG's importer leaves.
 
 Rendering treats absent and unresolved alike (no layer color to look up, no block to draw);
 the model still says which it was.
@@ -356,6 +436,12 @@ The rule is worth only what the DXF path costs. The binary format always stores 
 once this crate's DXF reading no longer goes through this importer the rule buys nothing and
 only loses genuine zeros: remove it then, together with the deviation in `tests/golden.rs`.
 
+**The measurement, when it is -1.** Writers leave `-1` in group 42 for a dimension they did
+not measure -- 58 of the dimensions of one AutoCAD-written sample drawing and 5 of another
+carry it -- and no length or angle is negative, so `-1` is "not stated" too. Every other
+value is carried as the file states it, radians for an angular dimension, even where it
+disagrees with the dimension's own points: whether to trust it is a consumer's judgement.
+
 **Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
 rather than carries, and the format writes a style variable only when it differs from the value
 the application starts from. This library holds a style as a struct with no "the file did not
@@ -368,17 +454,48 @@ DXF reading no longer goes through this importer.
 
 **The field names of a two-line angular dimension are not the mapping.** Measured against
 the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
-groups 13, 14 and 15 as their names suggest, `def_pt` is group 16, and `xline2end_pt` is
-group 10 -- the definition point every other subtype keeps in `def_pt`. The reader follows
-the measurement, and `tests/corpus_sweep.rs` pins all five points against the values the DXF
-twin writes for two drawings, so a change in the library's field layout fails the build
-instead of quietly putting the wrong point in the model. (The second drawing matters: in the
+groups 13, 14 and 15 as their names suggest; decoded from a DWG, `def_pt` is group 16 and
+`xline2end_pt` is group 10 -- the definition point every other subtype keeps in `def_pt` --
+while LibreDWG's DXF importer fills the two by group code, `def_pt` 10 and `xline2end_pt`
+16. The reader follows the measurement for each, and `tests/corpus_sweep.rs` pins all five
+points against the values the DXF twin writes for two drawings, and for the DXF itself, so
+a change in the library's field layout fails the build instead of quietly putting the wrong
+point in the model. Before the DXF half, every two-line angular dimension read from a DXF
+had its groups 10 and 16 exchanged.
+
+**An ordinate dimension's axis.** Bit 64 of group 70 says whether an ordinate dimension
+measures its feature's x (set) or y distance from the datum (`ordinate_axis`). A DXF, and a
+drawing older than R13, state it in the flag the model reads it from; from R13 on a DWG
+states it as bit 1 of a separate byte (`flag2`), from which the decoder rebuilds group 70
+wrongly (it sets bit 128 and clears bit 64), so that byte is read there instead. (The second drawing matters: in the
 first, groups 10 and 13 are the same point, and an earlier reading of it took `xline2end_pt`
 for group 13 and reported group 10 as not stated.)
 
 An arc-length dimension is a separate entity in the format rather than a value of group 70 --
 the group says 5 on such a dimension, which would read as a three-point angular one. It is
 filed by the entity it is.
+
+## Object coordinate systems: coordinates as stated, with their normal
+
+CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB, ATTDEF, INSERT, SOLID and TRACE state
+their coordinates in an object coordinate system whose normal the entity carries (DXF 210,
+`extrusion`), at an elevation (DXF 30/38) for the planar ones. The model carries both as
+the file states them and moves nothing to the world: a mirrored circle stated at (10, 10)
+with the normal (0, 0, -1) is carried at (10, 10), where its world centre is (-10, 10),
+and a mirrored arc keeps its stated angles although it runs clockwise in the world. Taking
+the coordinates to the world (the DXF reference's arbitrary axis algorithm) is a
+consumer's step; `Affine2::from_insert` in the model does it for a block reference. The
+normal is not normalised either; only a zero vector, which is no direction, reads as the
+default (0, 0, 1). Of the corpus and the nine local sample drawings, three samples carry
+such entities -- 240 SOLIDs, 95 LWPOLYLINEs and 66 INSERTs, every one with the normal
+(0, 0, -1) that AutoCAD's MIRROR leaves behind.
+
+A zero vector is also what LibreDWG leaves in the field when the record stores no normal,
+which is the absent group: an LWPOLYLINE stores one only when its flag says so (bit 1 in
+the library's layout), and a pre-R13 entity only when its options say so. Taken as it
+stands, the field is (0, 0, 0) for every LWPOLYLINE of the corpus's DWGs (946, block
+contents counted apiece) and for every circle, arc, solid, trace and 2D polyline of its
+pre-R13 DWGs; the DXF importer fills in (0, 0, 1) itself.
 
 ## The polyline "closed" flag
 
@@ -404,6 +521,33 @@ is straight). They are read from three places:
   come from the same record (see the next section for how the records are found).
 - **A HATCH polyline boundary** stores the bulge beside each point.
 
+A bulge keeps the sign the file wrote: a mirrored object coordinate system does not change
+it. In the test corpus, 231 LWPOLYLINEs and 10 POLYLINE_2Ds (entities and block contents
+counted apiece) have a bulge.
+
+## Where a polyline's widths come from
+
+Each polyline vertex also carries the widths of the segment that leaves it, where it starts
+and where it ends (`start_width`, `end_width`; DXF 40 and 41), and an LWPOLYLINE the
+constant width of every segment (`const_width`, DXF 43) that applies when no vertex has a
+width of its own. They are read from the same places as the bulges:
+
+- **LWPOLYLINE** stores its widths as another separate array, on the same terms as its
+  bulges: empty when no vertex has a width, otherwise one pair per vertex. An array of any
+  other length is read as no widths, and the read reports `POLYLINE_WIDTH`. A file that
+  states the constant width again on every vertex, at both ends, draws the same polyline as
+  one that states it only once, and the two read the same: vertices with no width of their
+  own.
+- **2D POLYLINE** stores each vertex's widths on its `VERTEX_2D` record and states no
+  constant width (it carries `0`). A DXF, though, writes the polyline's default widths once,
+  as the POLYLINE's groups 40/41, and leaves them out of every VERTEX that has them -- the
+  DWG of `2000/PolyLine2D` stores 0.15 on each vertex of its `_ARCHTICK` tick where the DXF
+  twin states it once -- and LibreDWG's importer reads an absent vertex width as 0. So a DXF
+  vertex whose widths read as 0 takes the polyline's default widths. A DXF vertex that
+  states 0 explicitly under a non-zero default cannot be told apart and reads as the default
+  too.
+- **A HATCH polyline boundary** has no widths; its vertices carry `0`.
+
 ## How a 2D or 3D POLYLINE's vertices are found
 
 A heavy POLYLINE keeps its vertices as separate records. Before R13 they follow it in the
@@ -417,6 +561,17 @@ section continues elsewhere (a JUMP entity) right after the polyline, and the li
 object stream ends at the JUMP, so none of the polyline's vertex records is reached. A
 pre-R13 polyline whose vertex records end before its SEQEND is read with the vertices that
 were found and reported as `POLYLINE_VERTICES`, naming the polyline.
+
+A polyface and a polygon mesh keep their records the same way and are read through the
+same walk. The records are data from the file, so the walk is bounded: through the object
+stream by the number of objects, and through the polyline's own records by the same cap as
+every other owned-subentity walk here.
+
+The VERTEX records themselves are not entities of the block that holds the polyline. The
+R13..R2000 block walk here skips them, and so does the walk for every other version, whose
+list the DXF importer fills with every object between a BLOCK and its ENDBLK: seven
+pre-R13 DXFs in the corpus reported each polyline's vertices a second time, as 62
+`Unknown` entities.
 
 ## A fit-point spline's closed and periodic bits
 
@@ -474,7 +629,7 @@ confirmation, which put rotated text on its side without saying so.)
 
 ## There is no single ACI colour table
 
-`ACI_PALETTE` in `crates/uncad/src/color.rs` maps colour index 1-255 to RGB, and which RGB
+`ACI_PALETTE` in `uncad-model`'s `color.rs` maps colour index 1-255 to RGB, and which RGB
 values are "right" has no one answer. AutoCAD's *displayed* colours depend on the
 drawing-area background, so a table captured from a dark model space and one captured from
 a white sheet disagree with each other; a third-party reader may carry a table that matches
@@ -493,6 +648,27 @@ table cannot land silently.
 Two entries are not colours: index 0 is a placeholder and index 256 is the BYLAYER slot.
 Both are `0`, which is what lets `aci_to_hex` stay total over `0..=256` without a branch --
 and what makes the unresolved-layer case below come out black rather than panicking.
+
+## An entity's true colour is what the file states
+
+`common.true_color` is the 24-bit RGB an entity states (DXF 420), beside its ACI index.
+The two readers leave it in different shapes, and the colour's method byte alone tells
+neither apart. An R2004+ DWG entity states it under its colour's ENC flag `0x80` and
+never sets the method, so a test on the method dropped every true colour of every DWG.
+The DXF importer, for its part, answers a plain group 62 with the TRUECOLOR method and an
+RGB it *synthesises* from its own copy of the ACI palette, so an entity that states only
+an index looked as if it carried an RGB. `split_entity_color` in `convert.rs` reads the
+flag first (`0x80` an inline RGB, `0x40` a colour-book reference, which is not converted),
+and for a DXF compares the RGB with the one the library synthesises for the entity's
+index -- through the library itself (`dwg_rgb_palette_index`), because its table is not
+the display palette the model publishes (the two differ on 222 of 256 indices, see "There
+is no single ACI colour table"): an RGB that is the synthesised one is not a stated true
+colour. Two cases stay indistinguishable and read as no true colour, which draws the same
+either way: a stated 420 of pure black, and a stated 420 that repeats the library's RGB
+for the entity's own index. `tests/fixtures.rs` pins the four DXF spellings
+(`entity_truecolor_r2000.dxf`). Over the corpus, the DXF readings of `example_*` and
+`sample_*` no longer report a true colour for their entities of plain ACI 8 or 3, and the
+R2004+ DWGs `2004/HatchG` and `2013/gh44-error` now report the ones they state.
 
 ## Layer colors: `Dwg_Color.rgb` is untrustworthy, and `color_index` needs a fallback
 
@@ -537,6 +713,22 @@ values -- `0xC3000068` (ACI 104) is the RGB color (0, 0, 104), palette entry 176
 layer came back as 176 where the same drawing saved as DXF says 104 and a second DWG reader
 reads 104. The low byte is now taken for every method-`0xC3` layer; the other methods keep
 the library's index.
+## Layer state: what a DXF cannot say
+
+A layer's `off`, `frozen` and `locked` are read from the fields LibreDWG's DWG decoder
+fills. Its DXF importer applies the binary format's bit layout to a LAYER's group 70
+instead (bit 2 becomes "off", 4 "frozen in new viewports", 8 "locked"), where a DXF means
+1 frozen, 2 frozen in new viewports and 4 locked, and says "off" with a negative colour --
+so for a DXF this crate reads the raw group 70 and the colour's sign. `tests/layer_state.rs`
+checks both readers against `hidden_layers_r2000.dxf` and the `example_2000` twins.
+
+Two more fields exist from R2000 on and are read only where the file can be heard: the
+plot flag (DXF 290) and the lineweight (DXF 370). An R2000-or-later DWG states both. The
+DXF importer leaves a 290 or a 370 the file left out at 0, so a stated "do not plot" and
+silence read the same, as do a stated 0.00 mm and silence: `plot` is `Some(true)` or
+`None` for a DXF, never `Some(false)`, and a lineweight code of 0 is `None`. A drawing
+older than R2000 has neither (`None`). The golden case G14 states `290 = 0` on one layer;
+`tests/golden.rs` pins the difference as a known deviation.
 
 ## Fixed: SPLINE control points read at the wrong stride
 
@@ -613,7 +805,9 @@ vector LibreDWG has already computed with the miter angle applied, so this is on
 multiply, no trigonometry. When the style cannot be found (empty handle, failed
 resolution) it is treated as a single `offset = 0.0`, which reproduces the old
 centerline rendering exactly through the same `mline_offset_points` function, with no
-separate branch.
+separate branch. The offsets are in the style's units: the MLINE's own `scale` (DXF 40,
+which the model carries as the file states it) is what turns them into drawing units --
+the corpus's MLINEs state 20 and 1.
 
 **bindgen**: `Dwg_MLINESTYLE_line` (`offset`/`color`/`lt_index`/`lt_ltype`) hits the same
 cascade through `parent: struct _dwg_object_MLINESTYLE *`, handled the same way (hand
@@ -641,6 +835,84 @@ on `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, 58 SAB solids). The
 returns only the text, so `parse()` never touches the `Dwg_Data` at all.
 `crates/uncad/tests/acis_sab.rs` guards this with the same file, checking that both walks
 extract the same wireframe for every solid.
+
+## Local patches to the vendored LibreDWG
+
+`crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
+`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches. Each is marked in the
+source with a dated `uncad local patch` comment saying why, and each is listed again in
+`crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
+consumer receives and this file is not in the tarball (GPLv3 §5(a)).
+**`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
+these patches is part of any submodule update.** `build.rs` counts the markers per file
+against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
+a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
+`lib/libredwg` submodule the copy is taken from has none of them: compared file by file
+(line endings aside), the two trees differ in exactly these five files.
+
+- **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
+  `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
+  for DXF and JSON input even when the record's name is stored as UTF-16 -- which it is for
+  an R2007+ DXF (see "DXF saved as R2007 or later is read, each string in the width it was
+  stored in" above). So "Tavolo 3" compared as "T", and every name the importer resolves while it
+  builds the drawing (the group 8 layer, the group 2 block name, the linetype, text
+  style, dimstyle, UCS, VPORT and APPID names) failed for any name longer than one
+  character. The three functions now share one helper, `uncad_record_name_utf8()`, whose
+  predicate `UNCAD_IS_TU_DWG()` is the one the storage actually follows, and the one
+  `crates/uncad/src/text.rs` reads the strings by. The patch deliberately stops there: the strings
+  `in_dxf.c` stores through `dwg_add_u8_input()` (`DICTIONARY.texts`,
+  `LTYPE.dashes[].text`) really are 8-bit for DXF input, so `dwg_find_dictionary()` and
+  `dwg_find_dicthandle()` keep the original predicate. LibreDWG has the same gap; it is not
+  reported there yet. `crates/uncad/tests/r2007_dxf_handles.rs` is the regression: without
+  the patch its three tests fail, `example_2018.dxf` putting 65 of its 72 entities on no
+  layer, and so do `tests/dxf_pipeline.rs`'s two R2007+ twin tests.
+- **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
+  and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
+  caller passes the result straight to `strftime()` (`dec_macros.h`'s `FIELD_TIMEBLL` and
+  the `DECODER` block in `header_variables.spec`, which runs at any log level), and
+  Microsoft's UCRT `strftime` *validates* its `struct tm`: measured against
+  `ucrtbase.dll`, a `tm_year` outside [-1900, 8099], `tm_mon` outside [0, 11], `tm_mday`
+  outside [1, 31], `tm_hour` outside [0, 23], `tm_min` outside [0, 59] or `tm_sec` outside
+  [0, 60] calls the invalid-parameter handler, which fail-fasts the process with
+  0xC0000409. Windows reports that code as STATUS_STACK_BUFFER_OVERRUN even though nothing
+  overran, which is why it looked like a stack smash, and it happens below the FFI
+  boundary, where no Rust guard can catch it. The patch zeroes the `struct tm` and clamps
+  every field into those ranges. A real drawing's date already satisfies them, so no valid
+  file's parse changes; the only visible difference is that the debug string for a
+  TDINDWG/TDUSRTIMER *duration* longer than a day now caps its hour at 23 (a `LOG_TRACE`
+  line this crate never enables, and `strftime` cannot print a larger hour anyway).
+  `crates/uncad/tests/vendored_patches.rs` is the regression: one changed byte of the
+  corpus `2000/Helix.dwg` (offset 27644), which ends the process without the patch. That
+  is one abort fixed, not a guarantee: the decoder is ~100 000 lines of C over
+  attacker-controlled offsets and lengths, so a service that parses untrusted drawings
+  should still do it in a process it can afford to lose.
+- **`src/in_dxf.c` and `src/dynapi.c`** -- a polygon mesh's vertices carry the subclass
+  marker `AcDbPolygonMeshVertex`, which appeared nowhere in LibreDWG: the VERTEX_2D
+  upgrade chain in `in_dxf.c` knows `AcDb3dPolylineVertex`, `AcDbPolyFaceMeshVertex` and
+  `AcDbFaceRecord` only, and `dwg_name_subclasses[]` does not list it either. The object
+  stayed a VERTEX_2D, failed the "is this subclass allowed in this object" check and took
+  `goto invalid_dxf` -- `DWG_ERR_INVALIDDWG`, a *critical* error, so **the whole file was
+  refused**. One POLYLINE written by REVSURF, RULESURF, EDGESURF or `ezdxf.add_polymesh()`
+  cost every other entity in the DXF. The patch adds the missing spelling to the upgrade
+  chain (to VERTEX_MESH, which is where the neighbouring branch already sends a polygon
+  mesh's vertices) and to VERTEX_MESH's subclass list.
+  `crates/uncad/tests/vendored_patches.rs` is the regression: the corpus
+  `2000/entities-2d.dxf` with one 2 x 2 polygon mesh added reads with every one of its own
+  entities, where it was critical error 2048 without the patch.
+- **`src/common_entity_data.spec`** -- for an R2004+ entity whose ENC flag has both `0x80`
+  (an inline RGB follows) and `0x20` (a transparency follows), the spec read the two BLs
+  in the wrong order, so the colour landed in `alpha_raw` and the transparency in `rgb`.
+  LibreDWG's own standalone `bit_read_ENC` (`src/bits.c`) already reads rgb first; only
+  this spec, and the encoder that shares it, had them the other way round. Measured on
+  `test-data/2004/HatchG.dwg`, whose HATCH `29F` (flag `0xa0`) sits inside LWPOLYLINE
+  `28D` (flag `0x80`, one BL, unambiguous): with alpha first the HATCH read
+  `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
+  `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
+  flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
+  the two bits set there is a single BL and the order cannot matter.
+  `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
+  colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
+  true colour is what the file states" for how the colour is read).
 
 ## No DWG/DXF writing
 
@@ -721,8 +993,9 @@ exceptions, plus one weak-copyleft test-only dependency granted by name. Develop
 dependencies are license-checked as well (`include-dev`): nothing distributed contains
 them, but they are still dependencies this repository chose. The gate reads `Cargo.lock`
 too, so the same submodule caveat applies -- what
-watches the vendored C side is the source-file drift detector in
-`crates/libredwg-sys/build.rs`. The
+watches the vendored C side is the pair of drift detectors in
+`crates/libredwg-sys/build.rs`: the source-file count, and the count of local-patch
+markers per file. The
 bindgen-generated `bindings.rs` in `libredwg-sys` is regenerated on every build rather
 than written by hand, and the handful of harmless lints it raises (`useless_transmute`,
 `missing_safety_doc`, `ptr_offset_with_cast`, `unsafe_op_in_unsafe_fn`, `manual_div_ceil`) are allowed at

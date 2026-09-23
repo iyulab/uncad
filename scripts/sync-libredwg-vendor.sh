@@ -20,6 +20,12 @@
 # the whole vendor/libredwg directory with cargo:rerun-if-changed, so that
 # next build really does recompile from the refreshed copy (no `cargo
 # clean` needed).
+#
+# WARNING: the vendored copy carries local patches (grep it for
+# "uncad local patch"; they are listed in docs/CAVEATS.md under "Local
+# patches to the vendored LibreDWG"). This script deletes and recopies the
+# whole directory, so re-apply or re-check them after every run: build.rs
+# counts the markers per file and fails the build until they are back.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -96,3 +102,4 @@ cp "$REPO_ROOT/lib/libredwg/COPYING" "$VENDOR_DIR/COPYING"
 
 echo "Synced ${#VISITED[@]} files into $VENDOR_DIR"
 echo "Next: cargo build -p libredwg-sys, and if LIBREDWG_SOURCES in build.rs needs updating, update it now."
+echo "Also: re-apply the local patches listed in docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\" (grep for 'uncad local patch')."

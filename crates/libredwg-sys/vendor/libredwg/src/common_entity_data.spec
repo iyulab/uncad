@@ -430,6 +430,39 @@
         LOG_TRACE (" color.flag: 0x%x\n", _ent->color.flag);
 #endif
       flags = _ent->color.flag;
+      /* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
+         vendored LibreDWG") ------------------------------------------------
+
+         The rgb block below used to come *after* the alpha block, so an
+         entity whose flag has both 0x80 (an rgb follows) and 0x20 (a
+         transparency follows) had its two BLs swapped: the colour landed in
+         alpha_raw and the transparency in rgb. LibreDWG's own standalone
+         bit_read_ENC() (bits.c) already reads rgb first; only this spec (and
+         the encoder that shares it) had the two the other way round.
+
+         Measured on test-data/2004/HatchG.dwg, whose HATCH 29F (flag 0xa0)
+         sits inside LWPOLYLINE 28D (flag 0x80, one BL, unambiguous). With
+         alpha first the HATCH read alpha_raw = 0xc21ae464 -- byte for byte
+         the LWPOLYLINE's rgb -- and rgb = 0x020000e5, which has exactly the
+         alpha_type<<24 | alpha shape every flag-0x20 entity in the corpus
+         shows (0x0200003a, 0x02000056, ...). Reading rgb first gives the
+         HATCH its boundary's colour and leaves a well-formed transparency.
+         Only the 0xa0 combination changes: with one of the two bits set
+         there is a single BL and the order cannot matter. */
+      if (flags & 0x40)
+        {
+#ifndef IS_ENCODER
+          FIELD_HANDLE (color.handle, 0, 430); // DBCOLOR 1E9F74 => 1F05B9 lgtm[cpp/use-after-free] codeql[cpp/use-after-free]
+#endif
+        }
+      else if (flags & 0x80) // and not a reference
+        {
+          DXF {
+            VALUE_BL (_ent->color.rgb & 0x00ffffff, 420);
+          } else {
+            FIELD_BLx (color.rgb, 420); // ODA bug, documented as BS
+          }
+        }
       if (flags & 0x20)
         {
 #ifdef IS_ENCODER
@@ -452,20 +485,7 @@
             FIELD_RC (color.alpha, 0);
           }
         }
-      if (flags & 0x40)
-        {
-#ifndef IS_ENCODER
-          FIELD_HANDLE (color.handle, 0, 430); // DBCOLOR 1E9F74 => 1F05B9 lgtm[cpp/use-after-free] codeql[cpp/use-after-free]
-#endif
-        }
-      else if (flags & 0x80) // and not a reference
-        {
-          DXF {
-            VALUE_BL (_ent->color.rgb & 0x00ffffff, 420);
-          } else {
-            FIELD_BLx (color.rgb, 420); // ODA bug, documented as BS
-          }
-        }
+      /* --- end uncad local patch ---------------------------------------- */
       if ((flags & 0x41) == 0x41)
         {
           FIELD_TV (color.name, 430);

@@ -8,6 +8,39 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
+  `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
+  MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and
+  exposes the file-header facts decoding a drawing's text and header needs:
+  `uncad_dwg_version`, `uncad_dwg_from_version`, `uncad_dwg_from_dxf`,
+  `uncad_dwg_numheader_vars` (how long a pre-R13 header is) and `uncad_dwg_template_read`
+  (whether the section holding `$MEASUREMENT` was read), with a binding for
+  `dwg_version_type`. Strings are not converted in C: `uncad`'s
+  `TextDecoder` does that, and reports what it cannot.
+- `uncad::parse_bytes(bytes, Format)` parses a drawing already in memory, and
+  `uncad::Format` (`Dwg`, `Dxf`, with `Format::from_path`) says which it is. `parse()`
+  now reads the file itself and decodes it from memory, so a path LibreDWG could not
+  open -- any non-ASCII one on Windows, such as a Korean directory name, which failed
+  with critical error 4096 -- parses; a file that cannot be read is the new
+  `ParseError::Io`. `tests/read_paths.rs`.
+- `uncad::parse_with_header` / `uncad::parse_bytes_with_header` return the drawing's
+  `uncad::Header` beside the model: the format, `$ACADVER` and LibreDWG's release name,
+  the codepage strings were decoded with, `$INSUNITS` (`Header::units()` gives the unit
+  and its millimetre factor), `$MEASUREMENT`, `$LUNITS`/`$LUPREC`/`$AUNITS`/`$AUPREC`,
+  the model and paper extents and limits, the `$DIM*` variables a dimension falls back
+  on, `$LTSCALE`, `$TEXTSIZE` and `$CLAYER`. A variable the file does not state is
+  `None` -- for a DWG by its version's header layout, for an ASCII DXF by what its HEADER
+  section names -- never the zero or default LibreDWG's struct holds for it. The header
+  is this crate's type, not the model's, which carries no header variables by design;
+  `parse()` and `parse_bytes()` are unchanged and return the database alone.
+  `tests/header.rs`.
+- Every crate carries the GPLv3 text as its own `LICENSE`; `cargo package` never
+  reaches the repository root's, so of the 0.2.0 tarballs only `libredwg-sys` had the
+  text (as LibreDWG's own `COPYING`) and `uncad-cli` had no licence file at all.
+  `libredwg-sys` also carries `NOTICE.md`, the modification notice for its vendored
+  LibreDWG. `uncad-cli`'s `tests/release_invariants.rs` keeps both true.
+- `libredwg-sys`'s build names libclang, and the command that installs it, when bindgen
+  cannot find it, instead of bindgen's own message.
 - A SPLINE carries what defines its curve: `degree`, `knots`, `weights` (empty when
   the file gives none -- every weight is 1), and the `closed` / `periodic` bits as
   `Option<bool>`. A spline stored by its fit points has no periodic bit, and no
@@ -46,6 +79,57 @@ Notable changes to this project are recorded here. The format follows
 - `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
   before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
   found, and named. It used to arrive with no vertices and no signal.
+- A layer's state is read: `off`, `frozen`, `locked`, `plot` (DXF 290), `lineweight`
+  (DXF 370, hundredths of a millimetre or -3 for the default) and the `linetype` it names.
+  A DXF's plot flag and lineweight are `None` where its importer cannot tell a stated 0
+  from an absent group, and a drawing older than R2000 states neither. See
+  `docs/CAVEATS.md`, "Layer state: what a DXF cannot say".
+- POLYLINE_MESH (a polygon mesh) is read, as `Entity::PolylineMesh`: the wireframe of its
+  M by N grid, closed in either direction where the file says so. It used to arrive as
+  `Entity::Unknown`. A polyface mesh whose vertices the DXF importer types `VERTEX_MESH`
+  (they name the block record as their owner, the shape ezdxf writes) finds its vertex
+  positions: `example_2000.dxf`'s and `example_r13.dxf`'s polyface had no edges where
+  their DWG twins have six.
+- TEXT, ATTRIB and ATTDEF carry their `elevation` and `extrusion` too, and an INSERT its
+  `extrusion`, with the coordinates as the file states them: a mirrored block reference
+  used to be indistinguishable from an upright one. A normal the record does not store --
+  an LWPOLYLINE's unless its flag says so, a pre-R13 entity's unless its options do -- is
+  the default (0, 0, 1), not the zero vector the library leaves in the field. See
+  `docs/CAVEATS.md`, "Object coordinate systems".
+- A polyline vertex carries the widths of the segment that leaves it, `start_width` and
+  `end_width` (DXF 40/41), and an LWPOLYLINE its `const_width` (DXF 43), the width of
+  every segment when no vertex has one of its own. A file that states the constant width
+  again on every vertex reads as one that states it once. A DXF POLYLINE's default widths
+  (its groups 40/41) are the widths of the vertices that state none, so a DXF and its DWG
+  twin agree. An LWPOLYLINE width array that cannot be matched to the vertices is reported
+  as `POLYLINE_WIDTH` and read as no widths. See `docs/CAVEATS.md`, "Where a polyline's
+  widths come from".
+- TEXT, ATTRIB and ATTDEF carry how they are placed beyond their start point: the
+  horizontal and vertical justification (DXF 72, 73/74), the alignment point (DXF 11,
+  only for a justified text), the width factor (DXF 41), the oblique angle (DXF 51,
+  radians) and the text style they name (DXF 7). An MTEXT carries its reference width
+  (DXF 41), the extents its writer measured (DXF 42/43, `None` when not stated) and its
+  text style.
+- ATTRIB and ATTDEF carry their `flags` (DXF 70): invisible, constant, verify, preset. An
+  invisible attribute (a title block's hidden field, say) is no longer indistinguishable
+  from a shown one.
+- A DIMSTYLE carries the rest of what a dimension's displayed text depends on, each as an
+  `Option` like the others: `arrow_size` (DIMASZ), `linear_unit_format` (DIMLUNIT),
+  `zero_suppression` (DIMZIN), `rounding` (DIMRND), `angular_unit_format` (DIMAUNIT),
+  `angular_decimal_places` (DIMADEC) and `fraction_format` (DIMFRAC). What to use where a
+  style states nothing is the consumer's decision.
+- An MLINE carries its `scale` (DXF 40), the factor its style's offsets are drawn at: a
+  wall drawn 20 units thick in a style of unit offsets was drawn 1 unit thick.
+- The drawing's layouts are read into `Tables::layouts`: every LAYOUT object -- a tab, the
+  block it shows (`block_name`), its tab order and limits -- with the plot settings
+  embedded in it (paper name and size, margins, plot origin, paper unit, rotation and the
+  custom scale), read through LibreDWG's dynapi into the embedded `PLOTSETTINGS` struct.
+- A VIEWPORT carries what it shows of the model: its `view` (centre and height in the
+  view's own coordinates, target, direction, twist and lens length; `None` before R2000,
+  whose viewports keep it in extended data), whether it is `on`, its `viewport_id` (a
+  DXF's; the binary format stores none) and the layers frozen in it alone.
+- An ordinate DIMENSION carries its `ordinate_axis` (DXF 70, bit 64): whether it measures
+  its feature's x or y distance from the datum.
 - `AttribEntity::tag` and `AttdefEntity::tag` (DXF 2): the name an attribute value
   answers to. A title block's values were readable but not which field each one filled.
 - `CadDatabase::read_diagnostics`: the non-fatal problems LibreDWG reported while
@@ -70,14 +154,18 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
-- A polyline's vertices are `PolylineVertex { point, bulge }` -- LWPOLYLINE, 2D
-  POLYLINE and a HATCH's polyline boundaries. The bulge (DXF 42) is an arc segment's;
-  it was read and dropped, so an arc segment arrived as its chord. A bulge array that
-  cannot be matched to the vertices is reported as `POLYLINE_BULGE` and read as
-  straight.
+- A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
+  measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
+- A polyline's vertices are `PolylineVertex { point, bulge, start_width, end_width }` --
+  LWPOLYLINE, 2D POLYLINE and a HATCH's polyline boundaries. The bulge (DXF 42) is an arc
+  segment's; it was read and dropped, so an arc segment arrived as its chord. A bulge array
+  that cannot be matched to the vertices is reported as `POLYLINE_BULGE` and read as
+  straight. (The widths are under "Added".)
 - `libredwg-sys` no longer binds `dwg_object_polyline_2d_get_points`,
   `dwg_object_polyline_2d_get_numpoints`, `dwg_object_polyline_3d_get_points` or
-  `dwg_object_polyline_3d_get_numpoints` (see Fixed), and binds `dwg_next_object`.
+  `dwg_object_polyline_3d_get_numpoints` (see Fixed), and binds `dwg_next_object` and
+  `dwg_rgb_palette_index` (the RGB the DXF importer makes up for a colour index; see
+  Fixed, true colour).
 
 - A LEADER's `annotation_id` is a three-state `Ref<EntityId>`: `Resolved` names an
   entity of the drawing, `Unresolved` keeps the handle the file wrote (hex) when no
@@ -110,13 +198,44 @@ Notable changes to this project are recorded here. The format follows
   makes it a fact, since the importer leaves an omitted group zero.
 - An LWPOLYLINE whose record stores no extrusion carries the default (0, 0, 1), not a
   zero vector.
+- **The vendored LibreDWG carries five local patches**, each marked `uncad local patch`
+  in the source and listed in `crates/libredwg-sys/NOTICE.md` and `docs/CAVEATS.md`,
+  "Local patches to the vendored LibreDWG". A DXF holding a polygon mesh is read instead
+  of refused as a whole (critical error 2048: the importer did not know the mesh
+  vertices' `AcDbPolygonMeshVertex` marker). A corrupt header date no longer ends the
+  process from inside the C library (0xC0000409 on Windows, from `strftime`). The
+  importer compares an R2007+ DXF's table-record names decoded, so its layer and block
+  lookups no longer stop at the first character: without that patch `example_2018.dxf`
+  reads with 65 of its 72 entities on no layer (`tests/r2007_dxf_handles.rs`). An R2004+
+  entity carrying both a true colour and a transparency no longer has the two swapped in
+  the library's fields (`2004/HatchG.dwg`'s HATCH 29F: `0x1ae464`, not `0x0000e5`). When
+  the patches landed, the JSON output of the 208 corpus drawings was byte-identical with
+  and without them; the colour-order one shows since true colours are read as the file
+  states them (below), and the name-lookup one since R2007+ DXF is read. `build.rs`
+  refuses to build when a patch's marker has gone missing, which a re-vendor through
+  `scripts/sync-libredwg-vendor.sh` would otherwise do in silence.
 - A 2D or 3D POLYLINE from an R13 to R2000 drawing no longer loses its last vertex. The
   library's point accessors stop one record early in that range; the vertex records are
-  now walked directly.
+  now walked directly. A closed square came back a triangle, a two-vertex arc a single
+  point; all 22 POLYLINEs of the corpus DXFs and the fixtures whose vertices can be
+  counted in the file now have that count. A polyline's VERTEX records are no longer
+  reported as entities of their own either -- 62 `Unknown` VERTEX entities in seven
+  pre-R13 DXFs. See `docs/CAVEATS.md`, "How a 2D or 3D POLYLINE's vertices are found".
+- **An entity's true colour is the one the file states.** It was read only when the
+  colour's method said TRUECOLOR: an R2004+ DWG never sets the method (the RGB comes under
+  the colour's `0x80` flag), so no DWG entity reported its true colour, while the DXF
+  importer sets it for a plain group 62 with an RGB taken from its own palette, so a DXF
+  entity with only an ACI index reported an RGB the file never wrote. The flag is read
+  first, and a DXF RGB that is the one the library synthesises for the entity's index is
+  not a true colour. See `docs/CAVEATS.md`, "An entity's true colour is what the file
+  states".
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as
-  not stated: the library keeps it under the field name `xline2end_pt`.
+  not stated: the library keeps it under the field name `xline2end_pt`. Read from a DXF,
+  the same dimension had its groups 10 and 16 (`definition_point` and `points.arc`)
+  exchanged: LibreDWG's DXF importer fills those two fields by group code, its DWG decoder
+  in stream order.
 - An MTEXT from a drawing older than R2000 reports a line spacing factor of `1` (the format
   has no such field there) instead of `0`, which is outside the factor's valid range.
 - A LEADER's `has_arrowhead` read from an R2010-or-later DWG is `None`. The vendored
@@ -124,9 +243,9 @@ Notable changes to this project are recorded here. The format follows
   which those files still carry), so the value it returned for the flag was a bit of the
   offset's encoding -- "no arrowhead" whenever the offset's z was zero -- not the file's
   flag. Earlier versions are unaffected and still read the flag.
-- Two user-facing messages carried a run of spaces in mid-sentence: the refusal of an
-  R2007+ DXF (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag
-  diagnostic. Both now read as one sentence, pinned by tests.
+- Two user-facing messages carried a run of spaces in mid-sentence: the R2007+ DXF error
+  (`ParseError::UnsupportedDxfVersion`'s `Display`) and the missing-tag diagnostic. Both
+  now read as one sentence, pinned by tests.
 - **Text before R2007 is decoded through the drawing's codepage** (`header.codepage`, DXF
   `$DWGCODEPAGE`). LibreDWG returns such strings as the 8-bit bytes
   the file holds; they were read as UTF-8, so every non-ASCII character of a CP949 or CP1252
@@ -135,6 +254,14 @@ Notable changes to this project are recorded here. The format follows
   tables, and a byte the declared codepage has no character for is now U+FFFD *and* a
   `TEXT_ENCODING: ...` warning in `read_diagnostics` naming the entity and field. See
   `docs/CAVEATS.md`, "Text before R2007 is decoded here".
+- **The DOS-era double-byte codepages decode.** LibreDWG's tables pair every byte of a
+  Big5 or GB2312 string, ASCII included, so a drawing declaring either lost its
+  `*Model_Space` (read as `*M`, `od`, ...) and every entity, and `中国 AB` read as four
+  U+FFFD; CP932 (DOS Shift-JIS) was read one byte at a time. Only bytes >= 0x80 open a
+  pair now, a GB2312 pair is looked up in the 7-bit form the library's table is indexed
+  by, and CP932 is double-byte. ASCII is never looked up in any codepage's table, so a
+  0x5C stays the backslash of `\P` and `\U+XXXX` where CP932's and JOHAB's tables say yen
+  and won. `tests/codepage.rs`.
 - **Closed LWPOLYLINEs are closed.** The `closed` field read bit 1 of the entity's `flag`,
   which in the library's LWPOLYLINE layout means "has extrusion"; closed is bit 512. Not one
   of the corpus's 1,137 LWPOLYLINEs had ever been reported closed, so every closed outline
@@ -180,8 +307,8 @@ Notable changes to this project are recorded here. The format follows
   directories `cc` located. Bindings are also generated *before* the C compile, so a
   libclang problem fails in seconds rather than after the whole LibreDWG compile.
 - A DXF saved as R2007 or later used to read as an empty drawing without any error; it
-  is now refused (see "Changed"). `docs/CAVEATS.md` explains the cause (string width in
-  LibreDWG's DXF importer) and why reading it partially was rejected.
+  is now read (see "Changed"). `docs/CAVEATS.md` explains the cause (string width, both in
+  LibreDWG's DXF importer and in how this crate read what it stored).
 - `docs/CAVEATS.md` claimed every entity type with geometry was handled. It is not --
   several types that have a shape still arrive as `Unknown`. The section now states the
   supported list as the contract.
@@ -239,14 +366,20 @@ Notable changes to this project are recorded here. The format follows
   shape** of every entity (`common.layer`) and is the reason the next release is a 0.x
   minor. `Ref::name()` gives the resolved name or `""` for consumers that only need a
   lookup key.
-- A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is now refused with
-  `ParseError::UnsupportedDxfVersion` instead of being returned as a drawing with no
-  entities and no error. The decision is made from the file's HEADER section before
-  LibreDWG reads it; R2000/R2004 DXF, files without `$ACADVER`, binary DXF and every DWG
-  are unaffected. Callers that treated the empty result as success will now see an error
-  -- that is the point. `ParseError` is `#[non_exhaustive]`, so the new variant is not a
-  breaking change to matches. Two tests pin it: a walk of the corpus that requires exactly
-  the R2007+ files to be refused, and one drawing under two `$ACADVER` values.
+- **A DXF saved as R2007 or later (`$ACADVER` `AC1021` and up) is read**, instead of being
+  returned as a drawing with no entities and no error. LibreDWG's importer holds such a
+  file's strings in two widths -- UTF-16 for everything it sets through its field setter,
+  the file's own UTF-8 for MTEXT text and the HEADER variables -- and hands both out as if
+  they were 8-bit; `TextDecoder` now reads each in its width, and the vendored `dwg.c`
+  patch does the same for the importer's own layer and block lookups. Measured on the
+  corpus: 27 of the 32 R2007+ DXFs read (the other 5 fail inside LibreDWG with critical
+  error 2048), and 22 of the 24 with a DWG twin state the same layers and INSERT blocks
+  as it; `tests/dxf_pipeline.rs`, `tests/r2007_dxf_handles.rs` and `tests/codepage.rs`
+  pin it. `ParseError::UnsupportedDxfVersion` stays, for the case this used to be: an
+  R2007+ DXF whose entities LibreDWG placed in model or paper space and none of which
+  reached the model is an error, not an empty drawing (no corpus file is).
+- `ParseError::InvalidPath` is gone: `parse()` no longer hands LibreDWG a C path, and a
+  file it cannot read is `ParseError::Io`. Breaking for code that names the variant.
 - No `std` hash collections anywhere in the workspace: `clippy.toml` disallows `HashMap`
   and `HashSet`, and the `iter_over_hash_type` lint is on. Both earlier ordering bugs went
   through `into_iter()`/`into_values()`, which no lint on `for` loops would have seen.

@@ -57,15 +57,25 @@
           },
           "text_height": 3.5,
           "tag": "DWGNO",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
           "text": "BP-1042",
           "rotation": 0.0,
-          "horizontal_alignment": "RIGHT",
-          "vertical_alignment": "MIDDLE",
+          "horizontal_justification": "RIGHT",
+          "vertical_justification": "MIDDLE",
           "alignment_point": {
             "x": 45.0,
             "y": -43.25
           },
           "width_factor": 0.9,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "ABSENT"
+          },
           "elevation": 0.0,
           "extrusion": {
             "x": 0.0,
@@ -104,15 +114,25 @@
       },
       "text_height": 3.5,
       "tag": "DWGNO",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
       "text": "BP-1042",
       "rotation": 0.0,
-      "horizontal_alignment": "RIGHT",
-      "vertical_alignment": "MIDDLE",
+      "horizontal_justification": "RIGHT",
+      "vertical_justification": "MIDDLE",
       "alignment_point": {
         "x": 45.0,
         "y": -43.25
       },
       "width_factor": 0.9,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -177,15 +197,25 @@
           },
           "text_height": 3.5,
           "tag": "DWGNO",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
           "text": "BP-2077",
           "rotation": 0.0,
-          "horizontal_alignment": "RIGHT",
-          "vertical_alignment": "MIDDLE",
+          "horizontal_justification": "RIGHT",
+          "vertical_justification": "MIDDLE",
           "alignment_point": {
             "x": 165.0,
             "y": -43.25
           },
           "width_factor": 0.9,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "ABSENT"
+          },
           "elevation": 0.0,
           "extrusion": {
             "x": 0.0,
@@ -224,15 +254,25 @@
       },
       "text_height": 3.5,
       "tag": "DWGNO",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
       "text": "BP-2077",
       "rotation": 0.0,
-      "horizontal_alignment": "RIGHT",
-      "vertical_alignment": "MIDDLE",
+      "horizontal_justification": "RIGHT",
+      "vertical_justification": "MIDDLE",
       "alignment_point": {
         "x": 165.0,
         "y": -43.25
       },
       "width_factor": 0.9,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -245,11 +285,29 @@
     "layers": {
       "0": {
         "name": "0",
-        "color_index": 7
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       },
       "TITLE": {
         "name": "TITLE",
-        "color_index": 2
+        "color_index": 2,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       }
     },
     "block_records": {
@@ -313,15 +371,25 @@
                 },
                 "text_height": 3.5,
                 "tag": "DWGNO",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
                 "text": "BP-1042",
                 "rotation": 0.0,
-                "horizontal_alignment": "RIGHT",
-                "vertical_alignment": "MIDDLE",
+                "horizontal_justification": "RIGHT",
+                "vertical_justification": "MIDDLE",
                 "alignment_point": {
                   "x": 45.0,
                   "y": -43.25
                 },
                 "width_factor": 0.9,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "ABSENT"
+                },
                 "elevation": 0.0,
                 "extrusion": {
                   "x": 0.0,
@@ -393,15 +461,25 @@
                 },
                 "text_height": 3.5,
                 "tag": "DWGNO",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
                 "text": "BP-2077",
                 "rotation": 0.0,
-                "horizontal_alignment": "RIGHT",
-                "vertical_alignment": "MIDDLE",
+                "horizontal_justification": "RIGHT",
+                "vertical_justification": "MIDDLE",
                 "alignment_point": {
                   "x": 165.0,
                   "y": -43.25
                 },
                 "width_factor": 0.9,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "ABSENT"
+                },
                 "elevation": 0.0,
                 "extrusion": {
                   "x": 0.0,
@@ -449,31 +527,40 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 80.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 80.0,
                   "y": 20.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 0.0,
                   "y": 20.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               }
             ],
             "closed": true,
+            "const_width": 0.0,
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -505,12 +592,22 @@
             },
             "text_height": 3.5,
             "tag": "DWGNO",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "-",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -542,12 +639,22 @@
             },
             "text_height": 3.5,
             "tag": "REV",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "-",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -579,12 +686,22 @@
             },
             "text_height": 3.5,
             "tag": "MATERIAL",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "-",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -596,7 +713,8 @@
       }
     },
     "dim_styles": {},
-    "mlinestyles": {}
+    "mlinestyles": {},
+    "layouts": {}
   },
   "read_diagnostics": {
     "warnings": []

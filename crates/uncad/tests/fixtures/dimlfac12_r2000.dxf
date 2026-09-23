@@ -1,0 +1,222 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$INSUNITS
+ 70
+4
+  9
+$DIMLFAC
+ 40
+12.0
+  9
+$DIMDEC
+ 70
+2
+  9
+$DIMLUNIT
+ 70
+2
+  9
+$DIMSCALE
+ 40
+1.0
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+  6
+Continuous
+  0
+ENDTAB
+  0
+TABLE
+  2
+DIMSTYLE
+ 70
+1
+  0
+DIMSTYLE
+105
+30
+  2
+STANDARD
+ 70
+0
+144
+12.0
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+ 70
+2
+  0
+BLOCK_RECORD
+  5
+1F
+  2
+*Model_Space
+ 70
+0
+  0
+BLOCK_RECORD
+  5
+40
+  2
+*D1
+ 70
+0
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+41
+330
+40
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D1
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D1
+  0
+TEXT
+  5
+42
+330
+40
+  8
+0
+ 10
+5.0
+ 20
+6.0
+ 30
+0.0
+ 40
+0.18
+  1
+120
+  0
+ENDBLK
+  5
+43
+330
+40
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+LINE
+  8
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+10.0
+ 21
+0.0
+ 31
+0.0
+  0
+DIMENSION
+  8
+0
+100
+AcDbDimension
+  2
+*D1
+ 10
+10.0
+ 20
+5.0
+ 30
+0.0
+ 11
+5.0
+ 21
+6.0
+ 31
+0.0
+ 70
+32
+  1
+
+ 42
+10.0
+  3
+STANDARD
+100
+AcDbAlignedDimension
+ 13
+0.0
+ 23
+0.0
+ 33
+0.0
+ 14
+10.0
+ 24
+0.0
+ 34
+0.0
+ 50
+0.0
+100
+AcDbRotatedDimension
+  0
+ENDSEC
+  0
+EOF

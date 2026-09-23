@@ -37,6 +37,60 @@ void *uncad_object_entity_ptr(Dwg_Object *obj);
  */
 void *uncad_object_object_ptr(Dwg_Object *obj);
 
+/* --- reading from memory ------------------------------------------------
+ *
+ * dwg_read_file()/dxf_read_file() take a `const char *filename` and open it
+ * with fopen(). On Windows the MSVC C runtime interprets that byte string in
+ * the process's ANSI code page, so a UTF-8 path with non-ASCII characters
+ * (e.g. a Korean directory name) fails with DWG_ERR_IOERROR even though the
+ * file exists. Reading the bytes in Rust (std::fs::read handles Unicode
+ * paths on every platform) and decoding from memory sidesteps that, and is
+ * also what a server that already holds the file in memory wants.
+ *
+ * Both functions mirror the body of their file-based LibreDWG counterpart
+ * (src/dwg.c): `dwg` is cleared except for the log-level bits of its `opts`
+ * (and, for DXF, its `header.version`), the buffer is copied into a
+ * Bit_Chain LibreDWG owns for the duration of the decode, and the return
+ * value has the same meaning (0 or a DWG_ERROR bit set; >= DWG_ERR_CRITICAL
+ * means the decode failed). `buf` is only read, never retained.
+ */
+int uncad_dwg_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
+int uncad_dxf_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
+
+/* --- file header ----------------------------------------------------------
+ *
+ * Dwg_Data is opaque on the Rust side (see build.rs), and LibreDWG has no
+ * public accessor for these header fields, which together with the
+ * codepage (uncad_dwg_codepage, below) decide how the drawing's strings sit
+ * in memory and which header variables the file states: `version` is the
+ * version the drawing is held as, `from_version` the one it was read from,
+ * both Dwg_Version_Type enum values (dwg.h). Both return 0 for a NULL
+ * `dwg`.
+ */
+int uncad_dwg_version(const Dwg_Data *dwg);
+int uncad_dwg_from_version(const Dwg_Data *dwg);
+
+/* 1 when the data came from DXF text (LibreDWG's DWG_OPTS_INDXF flag on
+ * `dwg->opts`), 0 for a DWG or a NULL `dwg`. Some fields mean something
+ * else on that path (a LAYER's plot flag, for one), and an R2007+ DXF holds
+ * its strings differently from an R2007+ DWG (see uncad_dwg_is_wide_string).
+ */
+int uncad_dwg_from_dxf(const Dwg_Data *dwg);
+
+/* How many header variables a pre-R13 DWG's file header says its header
+ * section holds (`dwg->header.numheader_vars`: 74, 83, ... 205 across the
+ * releases), which decides where LibreDWG's pre-R13 header layout stops
+ * reading (header_variables_r11.spec). 0 for R13 and later, whose header
+ * layout is fixed per version, and for a NULL `dwg`. */
+uint16_t uncad_dwg_numheader_vars(const Dwg_Data *dwg);
+
+/* 1 when the decoder read a DWG's Template section -- the one that holds
+ * $MEASUREMENT, optional before R2007 and skipped without an error bit when
+ * it is missing -- 0 otherwise, for any DXF input and for a NULL `dwg`.
+ * Without this a $MEASUREMENT of 0 ("English") cannot be told from one the
+ * file never stated. */
+int uncad_dwg_template_read(const Dwg_Data *dwg);
+
 /* One leader-line's vertices from a MULTILEADER, flattened into a single
  * malloc'd (x,y,z) array -- see uncad_multileader_get_lines. */
 typedef struct uncad_multileader_line
@@ -168,10 +222,14 @@ uint16_t uncad_dwg_codepage(const Dwg_Data *dwg);
 
 /* 1 when the drawing's strings are wide (UTF-16, R2007 and later), which the
  * library converts to UTF-8 in its text accessors, 0 otherwise or when `dwg`
- * is NULL. The same test as the library's own IS_FROM_TU_DWG (an internal
+ * is NULL. This is the library's own IS_FROM_TU_DWG (src/bits.h, an internal
  * macro): `from_version` (the source's version) is R2007 or later and the
- * drawing did not come through an importer (DXF/JSON input keeps strings
- * as given).
+ * drawing did not come through an importer (DXF/JSON input). For a DWG, 0
+ * means the strings are the file's raw 8-bit code-page bytes. For a DXF it
+ * is 0 whatever the version, although an R2007+ DXF holds most of its T
+ * fields as UTF-16 in memory, which the accessors then hand out unconverted
+ * -- the Rust side (crates/uncad/src/text.rs) says which strings are which
+ * and reads each in its width.
  */
 int uncad_dwg_is_wide_string(const Dwg_Data *dwg);
 

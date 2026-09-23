@@ -4,7 +4,7 @@
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output.
 
-use iron_render_cad::{to_png, to_svg, Space, ToPngOptions, ToSvgOptions};
+use iron_render_cad::{to_png, to_svg, Crop, PngSize, Space, ToPngOptions, ToSvgOptions};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -157,7 +157,8 @@ fn run(args: &Args) -> Result<(), String> {
                 &db,
                 ToPngOptions {
                     svg: svg_options(args)?,
-                    scale: parse_scale(&args.scale)?,
+                    size: PngSize::Scale(parse_scale(&args.scale)?),
+                    ..ToPngOptions::default()
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -187,10 +188,11 @@ fn run(args: &Args) -> Result<(), String> {
     Ok(())
 }
 
-/// `uncad::parse()` reports a nonexistent path or a wrong extension as a bare
-/// LibreDWG error code, which is accurate but not something a user can act on
-/// without cross-referencing dwg.h. The obvious cases are checked here first so
-/// the message says what is actually wrong.
+/// `uncad::parse()` reports a path it cannot read as `ParseError::Io`, and a
+/// file that is not a drawing as a bare LibreDWG error code, which is accurate
+/// but not something a user can act on without cross-referencing dwg.h. The
+/// obvious cases are checked here first so the message says what is actually
+/// wrong.
 fn parse_input(input: &str) -> Result<CadDatabase, String> {
     match std::fs::metadata(input) {
         Ok(meta) if meta.is_dir() => {
@@ -210,7 +212,11 @@ fn write_output(path: &str, bytes: &[u8]) -> Result<(), String> {
 fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
     Ok(ToSvgOptions {
         space: parse_space(&args.space)?,
-        outlier_trim: args.outlier_trim,
+        crop: if args.outlier_trim {
+            Crop::Cluster
+        } else {
+            Crop::Everything
+        },
         ..Default::default()
     })
 }

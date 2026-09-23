@@ -1,0 +1,760 @@
+  0
+SECTION
+  2
+HEADER
+  9
+$ACADVER
+  1
+AC1015
+  9
+$HANDSEED
+  5
+113
+  0
+ENDSEC
+  0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LTYPE
+  5
+1
+100
+AcDbSymbolTable
+ 70
+1
+  0
+LTYPE
+  5
+2
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLinetypeTableRecord
+  2
+CONTINUOUS
+ 70
+0
+  3
+Solid line
+ 72
+65
+ 73
+0
+ 40
+0.0
+  0
+ENDTAB
+  0
+TABLE
+  2
+LAYER
+  5
+3
+100
+AcDbSymbolTable
+ 70
+2
+  0
+LAYER
+  5
+4
+330
+3
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+0
+ 70
+0
+ 62
+7
+  6
+CONTINUOUS
+  0
+LAYER
+  5
+5
+330
+3
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+TEXT
+ 70
+0
+ 62
+2
+  6
+CONTINUOUS
+  0
+ENDTAB
+  0
+TABLE
+  2
+STYLE
+  5
+6
+100
+AcDbSymbolTable
+ 70
+2
+  0
+STYLE
+  5
+7
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbTextStyleTableRecord
+  2
+STANDARD
+ 70
+0
+ 40
+0.0
+ 41
+1.0
+ 50
+0.0
+ 71
+0
+ 42
+2.5
+  3
+txt
+  4
+
+  0
+STYLE
+  5
+8
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbTextStyleTableRecord
+  2
+ROMANS
+ 70
+0
+ 40
+0.0
+ 41
+1.0
+ 50
+0.0
+ 71
+0
+ 42
+2.5
+  3
+txt
+  4
+
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+  5
+9
+100
+AcDbSymbolTable
+ 70
+3
+  0
+BLOCK_RECORD
+  5
+A
+330
+9
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*Model_Space
+  0
+BLOCK_RECORD
+  5
+B
+330
+9
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*Paper_Space
+  0
+BLOCK_RECORD
+  5
+C
+330
+9
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+TAG
+  0
+ENDTAB
+  0
+ENDSEC
+  0
+SECTION
+  2
+BLOCKS
+  0
+BLOCK
+  5
+100
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*Model_Space
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*Model_Space
+  1
+
+  0
+ENDBLK
+  5
+101
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+102
+330
+B
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*Paper_Space
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*Paper_Space
+  1
+
+  0
+ENDBLK
+  5
+103
+330
+B
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+104
+330
+C
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+TAG
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+TAG
+  1
+
+  0
+ATTDEF
+  5
+105
+330
+C
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+2.5
+  1
+-
+100
+AcDbAttributeDefinition
+  3
+Number
+  2
+NUMBER
+ 70
+0
+  0
+ATTDEF
+  5
+106
+330
+C
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.0
+ 20
+-4.0
+ 30
+0.0
+ 40
+2.5
+  1
+-
+100
+AcDbAttributeDefinition
+  3
+Note
+  2
+NOTE
+ 70
+0
+  0
+ENDBLK
+  5
+107
+330
+C
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+ENDSEC
+  0
+SECTION
+  2
+ENTITIES
+  0
+TEXT
+  5
+108
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 40
+2.5
+  1
+LEFT
+ 50
+0.0
+100
+AcDbText
+  0
+TEXT
+  5
+109
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+43.0
+ 20
+0.0
+ 30
+0.0
+ 40
+2.5
+  1
+CENTER
+ 50
+0.0
+  7
+ROMANS
+ 72
+1
+ 11
+50.0
+ 21
+0.0
+ 31
+0.0
+100
+AcDbText
+ 73
+0
+  0
+TEXT
+  5
+10A
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+88.0
+ 20
+-2.5
+ 30
+0.0
+ 40
+2.5
+  1
+RIGHT TOP
+ 50
+0.0
+ 72
+2
+ 11
+100.0
+ 21
+0.0
+ 31
+0.0
+100
+AcDbText
+ 73
+3
+  0
+TEXT
+  5
+10B
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+44.0
+ 20
+18.75
+ 30
+0.0
+ 40
+2.5
+  1
+MIDDLE
+ 50
+0.0
+ 41
+0.8
+  7
+ROMANS
+ 72
+4
+ 11
+50.0
+ 21
+20.0
+ 31
+0.0
+100
+AcDbText
+ 73
+0
+  0
+TEXT
+  5
+10C
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+0.0
+ 20
+40.0
+ 30
+0.0
+ 40
+2.5
+  1
+ALIGNED
+ 50
+0.0
+ 51
+15.0
+ 72
+3
+ 11
+60.0
+ 21
+40.0
+ 31
+0.0
+100
+AcDbText
+ 73
+0
+  0
+TEXT
+  5
+10D
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+0.0
+ 20
+60.0
+ 30
+0.0
+ 40
+2.5
+  1
+FIT
+ 50
+0.0
+ 41
+2.5
+ 72
+5
+ 11
+60.0
+ 21
+60.0
+ 31
+0.0
+100
+AcDbText
+ 73
+0
+  0
+TEXT
+  5
+10E
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+0.0
+ 20
+79.0
+ 30
+0.0
+ 40
+2.5
+  1
+LEFT BOTTOM
+ 50
+0.0
+  7
+GOST
+ 72
+0
+ 11
+0.0
+ 21
+80.0
+ 31
+0.0
+100
+AcDbText
+ 73
+1
+  0
+INSERT
+  5
+10F
+330
+A
+100
+AcDbEntity
+  8
+TEXT
+ 66
+1
+100
+AcDbBlockReference
+  2
+TAG
+ 10
+120.0
+ 20
+0.0
+ 30
+0.0
+ 41
+1.0
+ 42
+1.0
+ 43
+1.0
+ 50
+0.0
+  0
+ATTRIB
+  5
+110
+330
+10F
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+120.0
+ 20
+0.0
+ 30
+0.0
+ 40
+2.5
+  1
+D-101
+100
+AcDbAttribute
+  2
+NUMBER
+ 70
+0
+ 70
+0
+  0
+ATTRIB
+  5
+111
+330
+10F
+100
+AcDbEntity
+  8
+TEXT
+100
+AcDbText
+ 10
+120.0
+ 20
+-4.0
+ 30
+0.0
+ 40
+2.5
+  1
+FIRE RATED
+100
+AcDbAttribute
+  2
+NOTE
+ 70
+0
+ 70
+1
+  0
+SEQEND
+  5
+112
+330
+10F
+100
+AcDbEntity
+  8
+TEXT
+  0
+ENDSEC
+  0
+EOF

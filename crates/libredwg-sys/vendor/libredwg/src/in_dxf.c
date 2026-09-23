@@ -10524,6 +10524,32 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                           UPGRADE_ENTITY (VERTEX_2D, VERTEX_MESH)
                         }
                     }
+                  /* --- uncad local patch (see docs/CAVEATS.md, "Local
+                     patches to the vendored LibreDWG") ------------------
+
+                     A polygon mesh's vertices carry the subclass marker
+                     AcDbPolygonMeshVertex, which appeared nowhere in
+                     LibreDWG: the chain above knows AcDb3dPolylineVertex,
+                     AcDbPolyFaceMeshVertex and AcDbFaceRecord only. The
+                     object therefore stayed a VERTEX_2D, whose subclass list
+                     (dynapi.c) does not contain that name either, so the
+                     "Illegal subclass ... in object VERTEX_2D" check below
+                     took `goto invalid_dxf` -- DWG_ERR_INVALIDDWG, a
+                     *critical* error, which makes the whole file
+                     unreadable. One POLYLINE written by REVSURF, RULESURF,
+                     EDGESURF, ezdxf's add_polymesh() or any terrain tool
+                     cost every other entity in the DXF.
+
+                     VERTEX_MESH is what the else-branch above already
+                     upgrades a polygon mesh's vertices to, so this only
+                     adds the spelling AutoCAD actually writes. Its entry in
+                     dwg_name_subclasses[] (dynapi.c) gains the same name,
+                     so the subclass check passes afterwards. */
+                  else if (strEQc (subclass, "AcDbPolygonMeshVertex"))
+                    {
+                      UPGRADE_ENTITY (VERTEX_2D, VERTEX_MESH)
+                    }
+                  /* --- end uncad local patch ------------------------- */
                   else if (strEQc (subclass, "AcDbFaceRecord"))
                     {
                       UPGRADE_ENTITY (VERTEX_2D, VERTEX_PFACE_FACE)

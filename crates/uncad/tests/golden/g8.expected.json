@@ -24,31 +24,40 @@
             "x": 0.0,
             "y": 0.0
           },
-          "bulge": 0.0
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
           "point": {
             "x": 200.0,
             "y": 0.0
           },
-          "bulge": 0.0
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
           "point": {
             "x": 200.0,
             "y": 100.0
           },
-          "bulge": 0.0
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         },
         {
           "point": {
             "x": 0.0,
             "y": 100.0
           },
-          "bulge": 0.0
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
         }
       ],
       "closed": true,
+      "const_width": 0.0,
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -113,12 +122,22 @@
           },
           "text_height": 3.5,
           "tag": "DWGNO",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
           "text": "BP-1042",
           "rotation": 0.0,
-          "horizontal_alignment": "LEFT",
-          "vertical_alignment": "BASELINE",
+          "horizontal_justification": "LEFT",
+          "vertical_justification": "BASELINE",
           "alignment_point": null,
           "width_factor": 1.0,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "ABSENT"
+          },
           "elevation": 0.0,
           "extrusion": {
             "x": 0.0,
@@ -149,12 +168,22 @@
           },
           "text_height": 3.5,
           "tag": "MATERIAL",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
           "text": "SS400 일반구조용 압연강재",
           "rotation": 0.0,
-          "horizontal_alignment": "LEFT",
-          "vertical_alignment": "BASELINE",
+          "horizontal_justification": "LEFT",
+          "vertical_justification": "BASELINE",
           "alignment_point": null,
           "width_factor": 1.0,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "ABSENT"
+          },
           "elevation": 0.0,
           "extrusion": {
             "x": 0.0,
@@ -185,12 +214,22 @@
           },
           "text_height": 3.5,
           "tag": "DRAWN",
+          "flags": {
+            "invisible": false,
+            "constant": false,
+            "verify": false,
+            "preset": false
+          },
           "text": "홍길동",
           "rotation": 0.0,
-          "horizontal_alignment": "LEFT",
-          "vertical_alignment": "BASELINE",
+          "horizontal_justification": "LEFT",
+          "vertical_justification": "BASELINE",
           "alignment_point": null,
           "width_factor": 1.0,
+          "oblique_angle": 0.0,
+          "style_name": {
+            "type": "ABSENT"
+          },
           "elevation": 0.0,
           "extrusion": {
             "x": 0.0,
@@ -229,12 +268,22 @@
       },
       "text_height": 3.5,
       "tag": "DWGNO",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
       "text": "BP-1042",
       "rotation": 0.0,
-      "horizontal_alignment": "LEFT",
-      "vertical_alignment": "BASELINE",
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
       "alignment_point": null,
       "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -266,12 +315,22 @@
       },
       "text_height": 3.5,
       "tag": "MATERIAL",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
       "text": "SS400 일반구조용 압연강재",
       "rotation": 0.0,
-      "horizontal_alignment": "LEFT",
-      "vertical_alignment": "BASELINE",
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
       "alignment_point": null,
       "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -303,12 +362,22 @@
       },
       "text_height": 3.5,
       "tag": "DRAWN",
+      "flags": {
+        "invisible": false,
+        "constant": false,
+        "verify": false,
+        "preset": false
+      },
       "text": "홍길동",
       "rotation": 0.0,
-      "horizontal_alignment": "LEFT",
-      "vertical_alignment": "BASELINE",
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
       "alignment_point": null,
       "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -341,10 +410,14 @@
       "text_height": 3.5,
       "text": "축척 1:1",
       "rotation": 0.0,
-      "horizontal_alignment": "LEFT",
-      "vertical_alignment": "BASELINE",
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
       "alignment_point": null,
       "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
       "elevation": 0.0,
       "extrusion": {
         "x": 0.0,
@@ -357,15 +430,42 @@
     "layers": {
       "0": {
         "name": "0",
-        "color_index": 7
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       },
       "외형선": {
         "name": "외형선",
-        "color_index": 7
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       },
       "표제란": {
         "name": "표제란",
-        "color_index": 2
+        "color_index": 2,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
       }
     },
     "block_records": {
@@ -396,31 +496,40 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 200.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 200.0,
                   "y": 100.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 0.0,
                   "y": 100.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               }
             ],
             "closed": true,
+            "const_width": 0.0,
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -485,12 +594,22 @@
                 },
                 "text_height": 3.5,
                 "tag": "DWGNO",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
                 "text": "BP-1042",
                 "rotation": 0.0,
-                "horizontal_alignment": "LEFT",
-                "vertical_alignment": "BASELINE",
+                "horizontal_justification": "LEFT",
+                "vertical_justification": "BASELINE",
                 "alignment_point": null,
                 "width_factor": 1.0,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "ABSENT"
+                },
                 "elevation": 0.0,
                 "extrusion": {
                   "x": 0.0,
@@ -521,12 +640,22 @@
                 },
                 "text_height": 3.5,
                 "tag": "MATERIAL",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
                 "text": "SS400 일반구조용 압연강재",
                 "rotation": 0.0,
-                "horizontal_alignment": "LEFT",
-                "vertical_alignment": "BASELINE",
+                "horizontal_justification": "LEFT",
+                "vertical_justification": "BASELINE",
                 "alignment_point": null,
                 "width_factor": 1.0,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "ABSENT"
+                },
                 "elevation": 0.0,
                 "extrusion": {
                   "x": 0.0,
@@ -557,12 +686,22 @@
                 },
                 "text_height": 3.5,
                 "tag": "DRAWN",
+                "flags": {
+                  "invisible": false,
+                  "constant": false,
+                  "verify": false,
+                  "preset": false
+                },
                 "text": "홍길동",
                 "rotation": 0.0,
-                "horizontal_alignment": "LEFT",
-                "vertical_alignment": "BASELINE",
+                "horizontal_justification": "LEFT",
+                "vertical_justification": "BASELINE",
                 "alignment_point": null,
                 "width_factor": 1.0,
+                "oblique_angle": 0.0,
+                "style_name": {
+                  "type": "ABSENT"
+                },
                 "elevation": 0.0,
                 "extrusion": {
                   "x": 0.0,
@@ -602,10 +741,14 @@
             "text_height": 3.5,
             "text": "축척 1:1",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -646,31 +789,40 @@
                   "x": 0.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 80.0,
                   "y": 0.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 80.0,
                   "y": 20.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               },
               {
                 "point": {
                   "x": 0.0,
                   "y": 20.0
                 },
-                "bulge": 0.0
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
               }
             ],
             "closed": true,
+            "const_width": 0.0,
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -702,12 +854,22 @@
             },
             "text_height": 3.5,
             "tag": "DWGNO",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -739,12 +901,22 @@
             },
             "text_height": 3.5,
             "tag": "MATERIAL",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "SS400",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -776,12 +948,22 @@
             },
             "text_height": 3.5,
             "tag": "DRAWN",
+            "flags": {
+              "invisible": false,
+              "constant": false,
+              "verify": false,
+              "preset": false
+            },
             "default_value": "미정",
             "rotation": 0.0,
-            "horizontal_alignment": "LEFT",
-            "vertical_alignment": "BASELINE",
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
             "alignment_point": null,
             "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
             "elevation": 0.0,
             "extrusion": {
               "x": 0.0,
@@ -793,7 +975,8 @@
       }
     },
     "dim_styles": {},
-    "mlinestyles": {}
+    "mlinestyles": {},
+    "layouts": {}
   },
   "read_diagnostics": {
     "warnings": []

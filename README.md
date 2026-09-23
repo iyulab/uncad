@@ -19,6 +19,14 @@ cargo test --workspace
 let db = uncad::parse("drawing.dwg")?;   // same model for DWG and DXF (entities + tables)
 println!("{} entities", db.entities.len());
 
+// The header variables that give the numbers a meaning come beside the model:
+let (db, header) = uncad::parse_with_header("drawing.dxf")?;
+println!("units: {:?}", header.units());   // $INSUNITS; None when the file does not say
+
+// Bytes already in memory (from the network, an archive, ...):
+let bytes = std::fs::read("drawing.dwg")?;
+let db = uncad::parse_bytes(&bytes, uncad::Format::Dwg)?;
+
 let json = db.to_json(uncad::ToJsonOptions { pretty: true })?;   // the model, serialized as-is
 std::fs::write("drawing.json", json)?;
 
@@ -44,12 +52,13 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
 
 1. **DWG** — read through [LibreDWG](https://www.gnu.org/software/libredwg/)
    (GPLv3+), bound directly via Rust FFI (`bindgen`). All versions.
-2. **DXF** — read through the same LibreDWG engine, chosen by file extension.
-   **DXF saved as R2007 or later is refused** with `ParseError::UnsupportedDxfVersion`
-   rather than read incompletely — see `docs/CAVEATS.md`, "DXF reading". R2000/R2004
-   DXF and every DWG version are unaffected.
-   LibreDWG's own DXF importer is documented as working "for most objects", so
-   it is less complete than its DWG reading ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
+2. **DXF** — read through the same LibreDWG engine, chosen by file extension
+   (`parse`) or by the caller (`parse_bytes`). Every version, R2007 and later
+   included: such a file holds its strings in two widths in LibreDWG's memory,
+   and each is read in its own — see `docs/CAVEATS.md`, "DXF saved as R2007 or
+   later is read". LibreDWG's own DXF importer is documented as working "for most
+   objects", so it is less complete than its DWG reading, and slower than linear
+   in the entity count ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
 3. **Output** — the parsed model as JSON (`CadDatabase::to_json`, from
    `uncad-model`). SVG and PNG come from the
    [`iron-render-cad`](https://github.com/iyulab/iron-render-cad) crate (MIT), which
@@ -81,8 +90,11 @@ well as Windows.
 ## License
 
 **GPLv3-or-later**. LibreDWG (GPLv3+) is the only third-party component linked
-in, and its license carries over. Copyright and license details for third-party
-components are in [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
+in, and its license carries over. The vendored copy carries five local patches;
+`crates/libredwg-sys/NOTICE.md` is their modification notice, inside the crate
+so that it reaches the published tarball. Copyright and license details for
+third-party components are in
+[`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
 
 ## Repository layout
 
@@ -91,11 +103,13 @@ lib/libredwg/            LibreDWG upstream, as a git submodule. Not used by the 
                          it is the source vendor/ is regenerated from, and where the
                          real-file test fixtures (test/test-data/) come from
 crates/
-  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the unmodified
-                         subset of C sources actually compiled (for publishing to
-                         crates.io); shim/ holds the C accessors for opaque types, and
+  libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the subset of C
+                         sources actually compiled (for publishing to crates.io), with
+                         five local patches marked "uncad local patch" and listed in
+                         NOTICE.md; shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
-  uncad/                 the safe API: parse() -> uncad_model::CadDatabase
+  uncad/                 the safe API: parse() / parse_bytes() -> uncad_model::CadDatabase,
+                         and the drawing's Header beside it from parse_with_header()
   uncad-cli/             the CLI binary (uncad)
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
                          manual-check tools, and #[cfg(test)] blocks inside src/*.rs are

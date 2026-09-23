@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.sh text eol=lf
+# Hand-written DXF fixtures: keep their bytes (CRLF, and a code page
+# that is not UTF-8) exactly as the generator wrote them
+crates/uncad/tests/fixtures/*.dxf -text

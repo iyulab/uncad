@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Core LibreDWG sources actually needed for DWG/DXF *reading*, mirroring the
 // former WASM build's `emmake make -C src` scope (which itself excludes
@@ -42,6 +42,24 @@ const LIBREDWG_SOURCES: &[&str] = &[
     "reedsolomon.c",
 ];
 
+/// The comment every local change to the vendored LibreDWG carries.
+const LOCAL_PATCH_MARKER: &[u8] = b"uncad local patch";
+
+// The local patches the vendored copy carries, as (path under
+// vendor/libredwg, times LOCAL_PATCH_MARKER occurs in that file). NOTICE.md
+// lists the same five changes and docs/CAVEATS.md, "Local patches to the
+// vendored LibreDWG", says why each exists. scripts/sync-libredwg-vendor.sh
+// deletes and recopies the whole directory, so a re-vendor silently drops
+// every one of them; main() compares the tree against this table so that it
+// cannot.
+const LOCAL_PATCHES: &[(&str, usize)] = &[
+    ("src/common.c", 3),
+    ("src/common_entity_data.spec", 2),
+    ("src/dwg.c", 5),
+    ("src/dynapi.c", 1),
+    ("src/in_dxf.c", 2),
+];
+
 fn main() {
     // vendor-config/config.h hardcodes SIZEOF_SIZE_T to 8 with no platform
     // branch (unlike its neighboring SIZEOF_WCHAR_T, which does branch on
@@ -60,6 +78,12 @@ fn main() {
          SIZEOF_SIZE_T=8 (and other 64-bit assumptions) with no 32-bit branch, unvalidated \
          and unsafe to silently use on a {pointer_width}-bit target. See docs/CAVEATS.md."
     );
+
+    // The other prerequisite, and the one a crates.io consumer is actually
+    // likely to be missing. Checked before anything else so that its absence
+    // is reported by name, with the command that installs it, rather than as
+    // bindgen's own message further down.
+    check_libclang();
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
 
@@ -96,6 +120,28 @@ fn main() {
              (see docs/ARCHITECTURE.md).",
             actual_c_files.len(),
             LIBREDWG_SOURCES.len()
+        );
+    }
+
+    // Patch detector: the file count above does not change when a re-vendor
+    // replaces a patched file with upstream's, so the markers are counted too.
+    // A file that lost (or gained) a marker fails the build by name.
+    let vendor_root = libredwg_src
+        .parent()
+        .expect("vendor/libredwg/src always has a parent directory");
+    let found_patches = local_patch_markers(vendor_root);
+    let expected_patches: Vec<(String, usize)> = LOCAL_PATCHES
+        .iter()
+        .map(|&(path, count)| (path.to_string(), count))
+        .collect();
+    if found_patches != expected_patches {
+        panic!(
+            "vendor/libredwg carries these `uncad local patch` markers (file, count): \
+             {found_patches:?}, but build.rs expects {expected_patches:?}. \
+             scripts/sync-libredwg-vendor.sh deletes the local patches on every run: re-apply \
+             them (docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\"), or, if one \
+             was dropped or added on purpose, update LOCAL_PATCHES in build.rs, NOTICE.md and \
+             docs/CAVEATS.md together."
         );
     }
 
@@ -197,6 +243,18 @@ fn main() {
         .allowlist_function("uncad_dwg_is_r2013_or_later")
         .allowlist_function("uncad_dwg_codepage")
         .allowlist_function("uncad_dwg_is_wide_string")
+        // Reading from memory (Unicode paths on Windows, in-memory inputs)
+        // and the file-header accessors -- see shim/uncad_shim.h for why
+        // each exists.
+        .allowlist_function("uncad_dwg_read_bytes")
+        .allowlist_function("uncad_dxf_read_bytes")
+        .allowlist_function("uncad_dwg_version")
+        .allowlist_function("uncad_dwg_from_version")
+        .allowlist_function("uncad_dwg_from_dxf")
+        .allowlist_function("uncad_dwg_numheader_vars")
+        .allowlist_function("uncad_dwg_template_read")
+        // Version enum -> "r2004"-style name, for the parsed header.
+        .allowlist_function("dwg_version_type")
         // The codepage tables (src/codepages.h): what decodes a pre-R2007
         // string's bytes, since the library's text accessors return them
         // undecoded. Predicates plus the byte -> code point lookups.
@@ -206,6 +264,10 @@ fn main() {
         .allowlist_function("dwg_codepage_uc")
         .allowlist_function("dwg_codepage_uwc")
         .allowlist_function("dwg_codepage_dxfstr")
+        // The RGB the library's DXF importer synthesises for a plain ACI
+        // index (dxf_set_CMC_index): how an entity's stated true colour is
+        // told from one the importer made up.
+        .allowlist_function("dwg_rgb_palette_index")
         // The handle of the object a type-specific struct pointer belongs
         // to, for naming a string in a diagnostic.
         .allowlist_function("dwg_obj_generic_handlevalue")
@@ -346,6 +408,101 @@ fn main() {
             .parent()
             .expect("vendor/libredwg/src always has a parent directory")
             .display()
+    );
+}
+
+/// Every file under `root` that contains [`LOCAL_PATCH_MARKER`], as its
+/// `/`-separated path relative to `root` and the number of times the marker
+/// occurs in it, sorted by path.
+fn local_patch_markers(root: &Path) -> Vec<(String, usize)> {
+    fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, usize)>) {
+        let entries =
+            std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|e| panic!("cannot read an entry of {}: {e}", dir.display()))
+                .path();
+            if path.is_dir() {
+                walk(&path, root, out);
+                continue;
+            }
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            let count = bytes
+                .windows(LOCAL_PATCH_MARKER.len())
+                .filter(|window| *window == LOCAL_PATCH_MARKER)
+                .count();
+            if count > 0 {
+                let relative = path
+                    .strip_prefix(root)
+                    .expect("the walk stays under its root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.push((relative, count));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// Fails early, and by name, when libclang is missing.
+///
+/// bindgen needs libclang at build time. Without it the build dies inside
+/// `Builder::generate()` below, under a screenful of `cc` environment dump,
+/// with `Unable to find libclang: "couldn't find any valid shared libraries
+/// matching: ['clang.dll', 'libclang.dll'] ..."` -- which names neither this
+/// crate, nor LLVM, nor the command that fixes it. README.md's "Platform"
+/// section documents the prerequisite, and someone running
+/// `cargo install uncad-cli` never reads README.md. (bindgen runs before the
+/// C compile, so that failure already comes within seconds; what this adds is
+/// a message that says what to install.)
+///
+/// `bindgen::clang_version()` makes the same `ensure_libclang_is_loaded()`
+/// call `generate()` does, so it fails exactly where `generate()` would --
+/// by panicking rather than returning an error, which is why this probes it
+/// through `catch_unwind` instead of matching a `Result`. Cargo always
+/// builds build scripts with `panic = "unwind"` (a profile's `panic` setting
+/// does not reach them), so the unwind is caught rather than aborting.
+fn check_libclang() {
+    let previous_hook = std::panic::take_hook();
+    // Swallow bindgen's own message; the panic below replaces it.
+    std::panic::set_hook(Box::new(|_| {}));
+    let found = std::panic::catch_unwind(bindgen::clang_version).is_ok();
+    std::panic::set_hook(previous_hook);
+    if found {
+        return;
+    }
+
+    // A wrong LIBCLANG_PATH is its own failure mode, and bindgen's message
+    // reports it as an empty candidate list.
+    let stale_path = match std::env::var("LIBCLANG_PATH") {
+        Ok(path) => {
+            format!("LIBCLANG_PATH is set to '{path}', and no clang library was found there.\n")
+        }
+        Err(_) => String::new(),
+    };
+    panic!(
+        "
+libredwg-sys generates its FFI bindings with bindgen, which needs libclang,
+and no libclang could be found.
+{stale_path}
+Install LLVM/Clang, then build again:
+  Windows         winget install LLVM.LLVM  (or: choco install llvm)
+                  if it is still not found afterwards, set
+                  LIBCLANG_PATH to the directory holding libclang.dll
+                  (a default install puts it in LLVM/bin under
+                  Program Files)
+  Debian/Ubuntu   sudo apt install libclang-dev
+  Fedora/RHEL     sudo dnf install clang-devel
+  Alpine          apk add clang-dev
+  macOS           xcode-select --install, or: brew install llvm
+                  and set LIBCLANG_PATH=$(brew --prefix llvm)/lib
+
+LLVM is needed to build this crate, not to run what it builds.
+"
     );
 }
 
