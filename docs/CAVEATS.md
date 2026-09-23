@@ -936,6 +936,13 @@ dimension's stored value is trusted). Known limits:
   three local samples): every manifest count matched except the ATTDEF and
   ATTRIB records the attribute walk now reads. A full comparison over the
   corpus has not been run on this layout.
+- **Whole-corpus comparison (2026-09-23).** All 208 corpus files through both
+  exports at `--max-levels 1`: 199 read by both, none read by only one. Manifest
+  counts differ on few files: entities on 9, texts on 5, geometry on 18, frames
+  on 1, paper texts on 1, hidden on 1 (listed in
+  `target/corpus_cmp/results.json` when rerun with `target/port/corpus_cmp.py`).
+  The differences seen are the ATTDEF/ATTRIB records the attribute walk now
+  reads; the geometry ones have not been classified one by one.
 - **It is slower than the earlier implementation.** Release build, wall
   clock around `uncad export`, measured on 2026-09-23 (Windows 11, Ryzen 5
   6600H): `example_2000.dwg` 0.93 s against 0.80 s, `AutoCADSamples1.dwg`
