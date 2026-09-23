@@ -22,6 +22,8 @@ Notable changes to this project are recorded here. The format follows
 - A CIRCLE and an ARC carry their `extrusion` (DXF 210). Their center is written in
   their own coordinate system, whose Z axis that is: a mirror copy's (0, 0, -1) puts
   it at the world x reversed, and its angles run clockwise in the world.
+- An LWPOLYLINE and a 2D POLYLINE carry their `elevation` (the z of every vertex in
+  their own coordinate system) and `extrusion` (DXF 210), for the same reason.
 - `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
   before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
   found, and named. It used to arrive with no vertices and no signal.

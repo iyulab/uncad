@@ -671,6 +671,8 @@ unsafe fn convert_entity(
                 common,
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
+                elevation: get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "LWPOLYLINE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {
@@ -1017,6 +1019,8 @@ unsafe fn convert_entity(
                 common,
                 vertices,
                 closed: flag & POLYLINE_CLOSED_FLAG != 0,
+                elevation: get_field::<f64>(entity_ptr, "POLYLINE_2D", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "POLYLINE_2D"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ORDINATE

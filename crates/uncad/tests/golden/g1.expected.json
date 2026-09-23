@@ -48,7 +48,13 @@
           "bulge": 0.0
         }
       ],
-      "closed": true
+      "closed": true,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
     },
     {
       "type": "CIRCLE",
@@ -1079,7 +1085,13 @@
                 "bulge": 0.0
               }
             ],
-            "closed": true
+            "closed": true,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "CIRCLE",
@@ -1596,7 +1608,13 @@
                 "bulge": 0.0
               }
             ],
-            "closed": true
+            "closed": true,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
           },
           {
             "type": "ATTDEF",
