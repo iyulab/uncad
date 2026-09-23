@@ -728,6 +728,8 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
+                elevation: get_field::<f64>(entity_ptr, "SOLID", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "SOLID"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TRACE => {
@@ -743,6 +745,8 @@ unsafe fn convert_entity(
                 corner2,
                 corner3,
                 corner4,
+                elevation: get_field::<f64>(entity_ptr, "TRACE", "elevation").unwrap_or(0.0),
+                extrusion: extrusion(entity_ptr, "TRACE"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_RAY => {

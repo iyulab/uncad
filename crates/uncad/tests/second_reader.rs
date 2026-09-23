@@ -1468,3 +1468,100 @@ fn the_two_readers_agree_on_every_3dface_corner_and_hidden_edge() {
         disagreements.join("\n")
     );
 }
+
+/// The same SOLIDs and TRACEs, field by field: the four corners, the
+/// elevation they share and the extrusion. The other reader keeps the
+/// elevation as each corner's z and the extrusion as the normal.
+#[test]
+fn the_two_readers_agree_on_every_solid_and_trace_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let (mut compared, mut unmatched, mut raised) = (0usize, 0usize, 0usize);
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let (kind, o) = match entity {
+                    uncad::Entity::Solid(o) => ("solid", o),
+                    uncad::Entity::Trace(o) => ("trace", o),
+                    _ => continue,
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(acadrust::EntityType::Solid(t)) = theirs.get(&id.value()) else {
+                    unmatched += 1;
+                    continue;
+                };
+                compared += 1;
+                raised += usize::from(o.elevation != 0.0);
+                let xy = |x: f64, y: f64| format!("({x:?}, {y:?})");
+                let fields = [
+                    (
+                        "corners",
+                        [o.corner1, o.corner2, o.corner3, o.corner4]
+                            .iter()
+                            .map(|c| xy(c.x, c.y))
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        [
+                            t.first_corner,
+                            t.second_corner,
+                            t.third_corner,
+                            t.fourth_corner,
+                        ]
+                        .iter()
+                        .map(|c| xy(c.x, c.y))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    ),
+                    (
+                        "elevation",
+                        format!("{:?}", o.elevation),
+                        format!("{:?}", t.first_corner.z),
+                    ),
+                    (
+                        "extrusion",
+                        format!(
+                            "({:?}, {:?}, {:?})",
+                            o.extrusion.x, o.extrusion.y, o.extrusion.z
+                        ),
+                        format!("({:?}, {:?}, {:?})", t.normal.x, t.normal.y, t.normal.z),
+                    ),
+                ];
+                for (field, a, b) in fields {
+                    if a != b {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {a}, theirs {b}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!("compared {compared}, with an elevation {raised}, unmatched {unmatched}");
+    assert!(compared > 0, "nothing was read by both");
+    assert!(
+        unmatched == 0 && disagreements.is_empty(),
+        "compared {compared}, unmatched {unmatched}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}
