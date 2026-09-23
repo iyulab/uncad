@@ -152,8 +152,9 @@ fn the_dos_era_double_byte_code_pages_decode_their_cjk_pairs() {
     // '中文 AB'.encode('big5'), '日本 AB'.encode('shift_jis') (CP932). The
     // Windows twins 936/950/932 of the same bytes are the control group.
     // The last CP932 case keeps 0x5C a backslash (LibreDWG's table says
-    // yen), so the \U+ escape it opens and a \P stay what they are; an
-    // escape is text as far as the model is concerned, and is not expanded.
+    // yen), so the \P stays the MTEXT code it is and the \U+ escape is
+    // still read as one: the escape is how the file stored the character,
+    // and the model carries the character.
     let cases: [(&str, &[u8], &str); 7] = [
         ("GB2312", b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
         ("ANSI_936", b"\xD6\xD0\xB9\xFA AB", "中国 AB"),
@@ -161,7 +162,7 @@ fn the_dos_era_double_byte_code_pages_decode_their_cjk_pairs() {
         ("ANSI_950", b"\xA4\xA4\xA4\xE5 AB", "中文 AB"),
         ("CP932", b"\x93\xFA\x96\x7B AB", "日本 AB"),
         ("ANSI_932", b"\x93\xFA\x96\x7B AB", "日本 AB"),
-        ("CP932", b"\x93\xFA\\P\\U+00B1", "日\\P\\U+00B1"),
+        ("CP932", b"\x93\xFA\\P\\U+00B1", "日\\P\u{b1}"),
     ];
     for (codepage, bytes, expected) in cases {
         let (db, header) =
@@ -333,11 +334,12 @@ fn r2007_and_later_dxf_mtext_is_read_as_the_utf8_it_is_stored_as() {
 }
 
 #[test]
-fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_as_written() {
+fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_undone() {
     // An AC1021+ DXF is UTF-8 by definition. U+AC00 U+B098, two Hangul syllables, the
     // bytes EA B0 80 EB 82 98. TEXT goes through the importer's UTF-16
     // storage, MTEXT stays 8-bit: both must come back the same. The escaped
-    // spelling older writers use is text too, kept as written in both.
+    // spelling older writers use stores the same characters, and reads as
+    // them in both.
     let hangul: &[u8] = b"\xEA\xB0\x80\xEB\x82\x98 AB";
     let escaped: &[u8] = b"\\U+AC00\\U+B098 AB";
     let bytes = dxf_with_strings("AC1032", &[hangul, escaped], &[hangul, escaped]);
@@ -346,7 +348,7 @@ fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_as_written() 
     assert_eq!(header.version.as_deref(), Some("r2018"));
     let expected = vec![
         "\u{AC00}\u{B098} AB".to_string(),
-        "\\U+AC00\\U+B098 AB".to_string(),
+        "\u{AC00}\u{B098} AB".to_string(),
     ];
     assert_eq!(mtext_values(&db), expected);
     assert_eq!(text_values(&db), expected);

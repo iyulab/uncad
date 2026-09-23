@@ -29,8 +29,12 @@
 //! library's own codepage tables, and reports whatever it could not decode
 //! in `read_diagnostics` (`TEXT_ENCODING: ...`) rather than replacing it in
 //! silence: a string that is wrong is never presented as one that is right.
-//! Escape sequences in the text (`\U+XXXX`, `\M+nXXXX`) are text as far as
-//! the model is concerned and are passed through as written.
+//! Escape sequences in the text (`\U+XXXX`, `\M+nXXXX` -- how a drawing
+//! stores a character its codepage cannot hold, in any string) are storage,
+//! not text, and are undone here too, through
+//! [`uncad_model::text::decode_escapes`] (the model's principles, §6.1): a
+//! drawing saved with the character and one saved with its escape read the
+//! same. The text's own control codes (`%%d`, MTEXT's `\P`) stay as written.
 
 use std::cell::RefCell;
 use std::ffi::{c_void, CStr};
@@ -78,6 +82,25 @@ fn codepage_label(codepage: u16) -> String {
         Some(name) => format!("{name} ({codepage})"),
         None if codepage == 0xFF => format!("undefined ({codepage})"),
         None => format!("{codepage}"),
+    }
+}
+
+/// A `\M+` escape's two bytes, in the Windows codepage the escape names,
+/// through the library's tables.
+fn multibyte(windows: u16, bytes: [u8; 2]) -> Option<char> {
+    let codepage = match windows {
+        932 => 38,
+        936 => 39,
+        949 => 40,
+        950 => 41,
+        1361 => 42,
+        _ => return None,
+    };
+    let (text, unmapped) = decode_codepage(&bytes, codepage);
+    let mut chars = text.chars();
+    match (unmapped, chars.next(), chars.next()) {
+        (0, Some(c), None) => Some(c),
+        _ => None,
     }
 }
 
@@ -210,6 +233,9 @@ fn stored_8bit_in_dxf(dxfname: &str, field: &str) -> bool {
 pub struct TextDecoder {
     codepage: u16,
     storage: Storage,
+    /// Read from a DXF file, whose values are one line each and so write a
+    /// control character in caret notation (`^J`).
+    from_dxf: bool,
     warnings: RefCell<Vec<String>>,
 }
 
@@ -247,6 +273,7 @@ impl TextDecoder {
         TextDecoder {
             codepage,
             storage,
+            from_dxf,
             warnings: RefCell::new(Vec::new()),
         }
     }
@@ -278,6 +305,7 @@ impl TextDecoder {
         TextDecoder {
             codepage: 0,
             storage: Storage::Narrow { utf8_first: false },
+            from_dxf: false,
             warnings: RefCell::new(Vec::new()),
         }
     }
@@ -412,6 +440,22 @@ impl TextDecoder {
     /// Turns what the library handed out into a `String` by this drawing's
     /// rule; `what` names the string for a diagnostic.
     fn decode_raw(&self, raw: RawText, what: impl FnOnce() -> String) -> String {
+        let text = self.decode_stored(raw, what);
+        let text = match uncad_model::text::decode_escapes(&text, multibyte) {
+            std::borrow::Cow::Borrowed(_) => text,
+            std::borrow::Cow::Owned(undone) => undone,
+        };
+        if !self.from_dxf {
+            return text;
+        }
+        match uncad_model::text::decode_caret(&text) {
+            std::borrow::Cow::Borrowed(_) => text,
+            std::borrow::Cow::Owned(undone) => undone,
+        }
+    }
+
+    /// The stored string as characters, its escapes still in it.
+    fn decode_stored(&self, raw: RawText, what: impl FnOnce() -> String) -> String {
         match raw {
             RawText::Converted(bytes) => self.decode_utf8(&bytes, what),
             RawText::Wide(units) => match String::from_utf16(&units) {
@@ -507,6 +551,7 @@ mod tests {
         TextDecoder {
             codepage,
             storage,
+            from_dxf: false,
             warnings: RefCell::new(Vec::new()),
         }
     }

@@ -153,6 +153,5 @@ compared {"dimension": 134, "insert": 228, "mtext": 791} unmatched {}
 2000/TS1.dwg 1EA dimension block: ours *D6, theirs *D3
 2000/TS1.dwg 1FC dimension definition point: ours Some("(27.910021952156583, 40.312929871186036, 0.0)"), theirs Some("(27.089354494283207, 39.45160436483458, 0.0)")
 2000/TS1.dwg 1FC dimension block: ours *D7, theirs *D4
-2000/TS1.dwg 1F7 mtext text: ours "\\A1;\\U+22052.3794", theirs "\\A1;∅2.3794"
 2000/entities-2d.dwg 45 dimension block: ours *D3, theirs *D
 2000/entities-3d.dwg 45 dimension block: ours *D3, theirs *D

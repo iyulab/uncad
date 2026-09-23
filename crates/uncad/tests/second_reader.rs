@@ -944,8 +944,6 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
     //   twin's. For `*D…` the twin itself numbers them differently from the
     //   binary drawing -- anonymous names are not stable across a save --
     //   so those lines are recorded, not judged.
-    // - an MTEXT string holding a `\U+2205`-style escape: the file (and its
-    //   twin) holds the escape; the second reader decodes it.
     // - one dimension's definition point, where the twin agrees with this
     //   crate.
     //

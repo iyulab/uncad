@@ -279,9 +279,13 @@ is the backslash of `\P` and `\U+XXXX`. `tests/codepage.rs` writes each case wit
 from Python's own encoders, with the Windows twins (936, 950, 932) of the same bytes as
 the control.
 
-**Escapes are text.** `\U+XXXX` and `\M+nXXXX` in a string are passed through as the file
-wrote them, whatever its version or format; expanding them is a consumer's decision, as
-the rest of MTEXT's inline codes are.
+**Escapes are storage.** `\U+XXXX` and `\M+nXXXX` in a string are how a file stores a
+character its codepage cannot hold, whatever its version or format, and a DXF writes a
+control character in caret notation (`^J`). Each is turned back into the character, as the
+model's principles (§6.1) ask of a reader, so a drawing saved with the character and one
+saved with its escape read the same. An escape naming an ASCII character is left as written,
+and so is a `\M+` escape whose bytes the codepage's table has no character for. MTEXT's
+inline codes and `%%` codes are text, not storage, and stay as written.
 
 **What is trusted, and what cannot be told:**
 

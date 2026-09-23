@@ -189,6 +189,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A string's `\U+XXXX` and `\M+nXXXX` escapes -- how a drawing stores a character its
+  codepage cannot hold -- are now turned into the character, in every string, and a DXF's
+  caret notation (`^J`) into the control character: a drawing saved with the character and
+  one saved with its escape read the same. An escape naming an ASCII character is left as
+  written. MTEXT's inline codes and `%%` codes still stay as written.
 - A dimension style of a drawing from before R2000 no longer reports the linear unit
   format, fraction format or angular decimal places: those variables came with R2000,
   and the library's struct held a zero for them that the file never stated. An empty
