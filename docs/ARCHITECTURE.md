@@ -26,7 +26,8 @@ crates/
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
-                         table_convert.rs (LAYER/BLOCK_RECORD/MLINESTYLE), with acis.rs
+                         table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
+                         LAYOUT with its plot settings), with acis.rs
                          for 3DSOLID wireframes and hatch_color.rs for the gradient
                          stop colors the model carries. The model and its JSON form
                          are the uncad-model crate's; SVG/PNG rendering is the
@@ -188,7 +189,8 @@ The model is not this crate's: `CadDatabase`, `Entity`, `Tables` and their JSON 
 the [`uncad-model`](https://github.com/iyulab/uncad-model) crate (MIT, pure data), which
 this crate depends on by version and re-exports as `uncad::model` / `uncad::tables` /
 `uncad::json`. `CadDatabase` is a plain Rust value holding `entities` (what the model and
-paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_diagnostics`
+paper spaces own), `tables` (LAYER, every BLOCK_RECORD, DIMSTYLE, MLINESTYLE, and the
+LAYOUTs with their plot settings) and `read_diagnostics`
 (the reader's non-fatal warnings). The `Dwg_Data` that LibreDWG filled in through
 `dwg_read_file`/`dxf_read_file` is walked twice inside `parse()` (`convert_entities`, then
 `convert_tables`), freed with `dwg_free` immediately afterwards, and never reaches the
