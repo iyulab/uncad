@@ -41,6 +41,13 @@ const POLYLINE_CLOSED_FLAG: u16 = 1;
 /// whose spec said "closed" and whose outline came back as an open polyline.
 const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 
+/// The LWPOLYLINE `flag` bit that says the record stores an extrusion. The
+/// library reads the extrusion only when it is set and leaves the field zero
+/// otherwise -- a zero vector, which names no plane, where the format means
+/// the default one. A drawing's every LWPOLYLINE came back that way until a
+/// field-by-field comparison with the same drawing saved as DXF caught it.
+const LWPOLYLINE_EXTRUSION_FLAG: u16 = 1;
+
 /// `MLINE_FLAGS_CLOSED` (dwg.h).
 const MLINE_CLOSED_FLAG: u16 = 2;
 
@@ -732,7 +739,15 @@ unsafe fn convert_entity(
                 vertices,
                 closed: flag & LWPOLYLINE_CLOSED_FLAG != 0,
                 elevation: get_field::<f64>(entity_ptr, "LWPOLYLINE", "elevation").unwrap_or(0.0),
-                extrusion: extrusion(entity_ptr, "LWPOLYLINE"),
+                extrusion: if flag & LWPOLYLINE_EXTRUSION_FLAG != 0 {
+                    extrusion(entity_ptr, "LWPOLYLINE")
+                } else {
+                    Point3D {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 1.0,
+                    }
+                },
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC => {

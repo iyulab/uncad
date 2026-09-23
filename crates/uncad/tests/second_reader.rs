@@ -1037,6 +1037,16 @@ fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
                             }
                         }
                         fields.push(("closed", o.closed.to_string(), t.is_closed.to_string()));
+                        fields.push((
+                            "elevation",
+                            format!("{:?}", o.elevation),
+                            format!("{:?}", t.elevation),
+                        ));
+                        fields.push((
+                            "extrusion",
+                            p3(o.extrusion.x, o.extrusion.y, o.extrusion.z),
+                            p3(t.normal.x, t.normal.y, t.normal.z),
+                        ));
                         vertices += t.vertices.len();
                         let b = t.vertices.iter().filter(|v| v.bulge != 0.0).count();
                         bulged += b;
