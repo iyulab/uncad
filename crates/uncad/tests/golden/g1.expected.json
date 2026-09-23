@@ -734,7 +734,11 @@
             },
             "text_height": 2.5,
             "text": "200",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       },
@@ -852,7 +856,11 @@
             },
             "text_height": 2.5,
             "text": "100",
-            "rotation": 1.5707963267948966
+            "rotation": 1.5707963267948966,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       },
@@ -970,7 +978,11 @@
             },
             "text_height": 2.5,
             "text": "160",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       },
@@ -1030,7 +1042,11 @@
             },
             "text_height": 2.5,
             "text": "%%C10",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       },

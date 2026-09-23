@@ -9,7 +9,7 @@ AC1015
   9
 $HANDSEED
   5
-10E
+10F
   0
 ENDSEC
   0
@@ -508,6 +508,44 @@ AcDbPolyline
 0.0
 230
 -1.0
+  0
+TEXT
+  5
+10E
+330
+7
+100
+AcDbEntity
+  8
+TITLE
+100
+AcDbText
+ 10
+128.8
+ 20
+-68.75
+ 30
+0.0
+ 40
+3.5
+  1
+PLATE
+ 50
+0.0
+ 41
+0.8
+ 72
+1
+ 11
+140.0
+ 21
+-67.0
+ 31
+0.0
+100
+AcDbText
+ 73
+2
   0
 ENDSEC
   0

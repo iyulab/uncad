@@ -23,7 +23,8 @@ use uncad_model::model::{
     InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
     LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
     Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
-    TextEntity, TextOverride, ToleranceEntity, ViewportEntity, WipeoutEntity,
+    TextEntity, TextHorizontalAlignment, TextOverride, TextVerticalAlignment, ToleranceEntity,
+    ViewportEntity, WipeoutEntity,
 };
 use uncad_model::model::{Point2D, Point3D, PolylineVertex};
 
@@ -398,6 +399,42 @@ unsafe fn polyline_vertices<T>(
         .collect()
 }
 
+/// A TEXT's alignment from its record's two codes (DXF 72, 73). A value
+/// outside the format's range is reported and read as the default.
+fn text_alignment(
+    text: &TextDecoder,
+    horizontal: u16,
+    vertical: u16,
+) -> (TextHorizontalAlignment, TextVerticalAlignment) {
+    let h = match horizontal {
+        0 => TextHorizontalAlignment::Left,
+        1 => TextHorizontalAlignment::Center,
+        2 => TextHorizontalAlignment::Right,
+        3 => TextHorizontalAlignment::Aligned,
+        4 => TextHorizontalAlignment::Middle,
+        5 => TextHorizontalAlignment::Fit,
+        other => {
+            text.warn(format!(
+                "TEXT_ALIGNMENT: a TEXT states horizontal alignment {other} (group 72), outside 0 to 5; it is read as left"
+            ));
+            TextHorizontalAlignment::Left
+        }
+    };
+    let v = match vertical {
+        0 => TextVerticalAlignment::Baseline,
+        1 => TextVerticalAlignment::Bottom,
+        2 => TextVerticalAlignment::Middle,
+        3 => TextVerticalAlignment::Top,
+        other => {
+            text.warn(format!(
+                "TEXT_ALIGNMENT: a TEXT states vertical alignment {other} (group 73), outside 0 to 3; it is read as baseline"
+            ));
+            TextVerticalAlignment::Baseline
+        }
+    };
+    (h, v)
+}
+
 /// Pairs a polyline's vertex positions with the bulges its record stores as a
 /// separate array. The array is empty when every segment is straight, and
 /// otherwise has one entry per vertex; any other length does not say which
@@ -646,16 +683,34 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TEXT => {
             let start_point = get_point2d(entity_ptr, "TEXT", "ins_pt")?;
             let text_height = get_field::<f64>(entity_ptr, "TEXT", "height")?;
-            let text = text
+            let text_value = text
                 .field(entity_ptr, "TEXT", "text_value")
                 .unwrap_or_default();
             let rotation = get_field::<f64>(entity_ptr, "TEXT", "rotation").unwrap_or(0.0);
+            let (horizontal_alignment, vertical_alignment) = text_alignment(
+                text,
+                get_field::<u16>(entity_ptr, "TEXT", "horiz_alignment").unwrap_or(0),
+                get_field::<u16>(entity_ptr, "TEXT", "vert_alignment").unwrap_or(0),
+            );
+            // The record stores an alignment point only for a text aligned
+            // otherwise than the default, as the DXF form writes group 11.
+            let alignment_point = ((horizontal_alignment, vertical_alignment)
+                != (
+                    TextHorizontalAlignment::Left,
+                    TextVerticalAlignment::Baseline,
+                ))
+                .then(|| get_point2d(entity_ptr, "TEXT", "alignment_pt"))
+                .flatten();
             Entity::Text(TextEntity {
                 common,
                 start_point,
                 text_height,
-                text,
+                text: text_value,
                 rotation,
+                horizontal_alignment,
+                vertical_alignment,
+                alignment_point,
+                width_factor: get_field::<f64>(entity_ptr, "TEXT", "width_factor").unwrap_or(1.0),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LWPOLYLINE => {

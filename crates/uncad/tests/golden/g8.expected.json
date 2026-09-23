@@ -275,7 +275,11 @@
       },
       "text_height": 3.5,
       "text": "축척 1:1",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     }
   ],
   "tables": {
@@ -491,7 +495,11 @@
             },
             "text_height": 3.5,
             "text": "축척 1:1",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           }
         ]
       },

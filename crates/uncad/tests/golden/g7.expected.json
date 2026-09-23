@@ -80,7 +80,11 @@
       },
       "text_height": 3.5,
       "text": "DWG NO",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -106,7 +110,11 @@
       },
       "text_height": 3.5,
       "text": "BP-1042",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -132,7 +140,11 @@
       },
       "text_height": 3.5,
       "text": "REV",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -158,7 +170,11 @@
       },
       "text_height": 3.5,
       "text": "B",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -184,7 +200,11 @@
       },
       "text_height": 3.5,
       "text": "MATERIAL",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "TEXT",
@@ -210,7 +230,11 @@
       },
       "text_height": 3.5,
       "text": "SS400",
-      "rotation": 0.0
+      "rotation": 0.0,
+      "horizontal_alignment": "LEFT",
+      "vertical_alignment": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0
     },
     {
       "type": "CIRCLE",
@@ -322,6 +346,39 @@
         "y": 0.0,
         "z": -1.0
       }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 270,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10E"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false
+      },
+      "start_point": {
+        "x": 128.8,
+        "y": -68.75
+      },
+      "text_height": 3.5,
+      "text": "PLATE",
+      "rotation": 0.0,
+      "horizontal_alignment": "CENTER",
+      "vertical_alignment": "MIDDLE",
+      "alignment_point": {
+        "x": 140.0,
+        "y": -67.0
+      },
+      "width_factor": 0.8
     }
   ],
   "tables": {
@@ -419,7 +476,11 @@
             },
             "text_height": 3.5,
             "text": "DWG NO",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "TEXT",
@@ -445,7 +506,11 @@
             },
             "text_height": 3.5,
             "text": "BP-1042",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "TEXT",
@@ -471,7 +536,11 @@
             },
             "text_height": 3.5,
             "text": "REV",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "TEXT",
@@ -497,7 +566,11 @@
             },
             "text_height": 3.5,
             "text": "B",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "TEXT",
@@ -523,7 +596,11 @@
             },
             "text_height": 3.5,
             "text": "MATERIAL",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "TEXT",
@@ -549,7 +626,11 @@
             },
             "text_height": 3.5,
             "text": "SS400",
-            "rotation": 0.0
+            "rotation": 0.0,
+            "horizontal_alignment": "LEFT",
+            "vertical_alignment": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0
           },
           {
             "type": "CIRCLE",
@@ -661,6 +742,39 @@
               "y": 0.0,
               "z": -1.0
             }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 270,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false
+            },
+            "start_point": {
+              "x": 128.8,
+              "y": -68.75
+            },
+            "text_height": 3.5,
+            "text": "PLATE",
+            "rotation": 0.0,
+            "horizontal_alignment": "CENTER",
+            "vertical_alignment": "MIDDLE",
+            "alignment_point": {
+              "x": 140.0,
+              "y": -67.0
+            },
+            "width_factor": 0.8
           }
         ]
       },

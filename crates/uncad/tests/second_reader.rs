@@ -714,6 +714,30 @@ fn the_two_readers_agree_on_every_line_circle_arc_and_text_field() {
                             format!("{:?}", t.rotation),
                         ));
                         fields.push(("text", format!("{:?}", o.text), format!("{:?}", t.value)));
+                        fields.push((
+                            "alignment",
+                            format!("{:?} {:?}", o.horizontal_alignment, o.vertical_alignment),
+                            format!("{:?} {:?}", t.horizontal_alignment, t.vertical_alignment),
+                        ));
+                        // The alignment point means something only for an
+                        // aligned text; that is the only case either model
+                        // is compared on.
+                        let aligned =
+                            format!("{:?} {:?}", t.horizontal_alignment, t.vertical_alignment)
+                                != "Left Baseline";
+                        fields.push((
+                            "alignment point",
+                            format!("{:?}", o.alignment_point.map(|a| (a.x, a.y))),
+                            format!(
+                                "{:?}",
+                                t.alignment_point.filter(|_| aligned).map(|a| (a.x, a.y))
+                            ),
+                        ));
+                        fields.push((
+                            "width factor",
+                            format!("{:?}", o.width_factor),
+                            format!("{:?}", t.width_factor),
+                        ));
                     }
                     _ => {
                         disagreements.push(format!(
