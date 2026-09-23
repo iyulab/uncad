@@ -925,3 +925,147 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
         "\nthe two readers' agreement on these types moved; measured now:\n{report}"
     );
 }
+
+/// The same lightweight polylines and ellipses, field by field.
+///
+/// Matched by handle and compared exactly, like the other field comparisons.
+/// The second reader also carries each polyline vertex's bulge and widths,
+/// which the model does not; how many vertices carry a non-zero one is
+/// printed alongside, because a bulge is an arc segment and dropping it
+/// changes the drawing's geometry.
+#[test]
+fn the_two_readers_agree_on_every_lwpolyline_and_ellipse_field() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    fn p3(x: f64, y: f64, z: f64) -> String {
+        format!("({x:?}, {y:?}, {z:?})")
+    }
+
+    let mut disagreements: Vec<String> = Vec::new();
+    let mut compared: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut unmatched: BTreeMap<&str, usize> = BTreeMap::new();
+    let (mut vertices, mut bulged, mut widened) = (0usize, 0usize, 0usize);
+    let mut bulged_polylines = 0usize;
+    for version in VERSIONS {
+        for path in drawings_for(version) {
+            let Ok(ours) = uncad::parse(&path) else {
+                continue;
+            };
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let theirs: BTreeMap<u64, &acadrust::EntityType> = document
+                .entities()
+                .map(|e| (e.common().handle.value(), e))
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let kind = match entity {
+                    uncad::Entity::LwPolyline(_) => "lwpolyline",
+                    uncad::Entity::Ellipse(_) => "ellipse",
+                    _ => continue,
+                };
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(theirs) = theirs.get(&id.value()) else {
+                    *unmatched.entry(kind).or_default() += 1;
+                    continue;
+                };
+                *compared.entry(kind).or_default() += 1;
+                let mut fields: Vec<(&str, String, String)> = Vec::new();
+                use acadrust::EntityType as E;
+                match (entity, theirs) {
+                    (uncad::Entity::LwPolyline(o), E::LwPolyline(t)) => {
+                        let ov: Vec<String> = o
+                            .vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?})", v.x, v.y))
+                            .collect();
+                        let tv: Vec<String> = t
+                            .vertices
+                            .iter()
+                            .map(|v| format!("({:?}, {:?})", v.location.x, v.location.y))
+                            .collect();
+                        fields.push(("vertex count", ov.len().to_string(), tv.len().to_string()));
+                        for (i, (a, b)) in ov.iter().zip(&tv).enumerate() {
+                            if a != b {
+                                fields.push(("vertex", format!("[{i}] {a}"), format!("[{i}] {b}")));
+                            }
+                        }
+                        fields.push(("closed", o.closed.to_string(), t.is_closed.to_string()));
+                        vertices += t.vertices.len();
+                        let b = t.vertices.iter().filter(|v| v.bulge != 0.0).count();
+                        bulged += b;
+                        bulged_polylines += usize::from(b > 0);
+                        widened += t
+                            .vertices
+                            .iter()
+                            .filter(|v| v.start_width != 0.0 || v.end_width != 0.0)
+                            .count();
+                    }
+                    (uncad::Entity::Ellipse(o), E::Ellipse(t)) => {
+                        let (c, m) = (o.center, o.major_axis_endpoint);
+                        fields.push((
+                            "center",
+                            p3(c.x, c.y, c.z),
+                            p3(t.center.x, t.center.y, t.center.z),
+                        ));
+                        fields.push((
+                            "major axis",
+                            p3(m.x, m.y, m.z),
+                            p3(t.major_axis.x, t.major_axis.y, t.major_axis.z),
+                        ));
+                        fields.push((
+                            "axis ratio",
+                            format!("{:?}", o.axis_ratio),
+                            format!("{:?}", t.minor_axis_ratio),
+                        ));
+                        fields.push((
+                            "start",
+                            format!("{:?}", o.start_angle),
+                            format!("{:?}", t.start_parameter),
+                        ));
+                        fields.push((
+                            "end",
+                            format!("{:?}", o.end_angle),
+                            format!("{:?}", t.end_parameter),
+                        ));
+                    }
+                    _ => {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} kind: ours {kind}, theirs {}",
+                            id.value(),
+                            theirs_kind(theirs)
+                        ));
+                        continue;
+                    }
+                }
+                for (field, o, t) in fields {
+                    if o != t {
+                        disagreements.push(format!(
+                            "{version}/{name} {:X} {kind} {field}: ours {o}, theirs {t}",
+                            id.value()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    println!(
+        "compared {compared:?}; lwpolyline vertices {vertices}: bulge != 0 on {bulged} \
+         (in {bulged_polylines} polylines), width != 0 on {widened}"
+    );
+    assert!(!compared.is_empty(), "nothing was read by both");
+    assert!(
+        unmatched.is_empty() && disagreements.is_empty(),
+        "compared {compared:?}, unmatched {unmatched:?}, {} disagreements:\n{}",
+        disagreements.len(),
+        disagreements.join("\n")
+    );
+}

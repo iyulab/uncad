@@ -391,6 +391,17 @@ corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported close
 constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
 carry the distinction.
 
+## Polyline bulges are not carried
+
+A polyline vertex can carry a bulge: the segment to the next vertex is then an arc, not a
+straight line. The model has no field for it, so this crate reads the vertices and drops the
+bulges -- an arc segment arrives as its chord, with no error and no diagnostic. This applies
+to LWPOLYLINE, to 2D POLYLINE, and to the polyline boundaries of a HATCH. It is not rare: in
+the test corpus, 677 of the 4,955 LWPOLYLINE vertices another reader finds carry a non-zero
+bulge, as do 67 of the 122 HATCH polyline-boundary vertices. The library reads the bulges
+(`bulges[]` on LWPOLYLINE, `bulge` on each 2D vertex); carrying them is a change to the
+model, not to this reader.
+
 ## Attributes: the block chain and the INSERT chain are walked here, not by the library
 
 In R13..R2000 drawings the library links a block's entities as a `first_entity` ..
