@@ -1050,6 +1050,7 @@ unsafe fn convert_entity(
                 rotation,
                 line_spacing_factor,
                 attachment,
+                reference_width: get_field::<f64>(entity_ptr, "MTEXT", "rect_width").unwrap_or(0.0),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {

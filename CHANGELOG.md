@@ -33,6 +33,8 @@ Notable changes to this project are recorded here. The format follows
   An aligned text answers to its alignment point, not to its start point. An alignment
   value outside the format's range is reported as `TEXT_ALIGNMENT`. An ATTRIB and an
   ATTDEF carry the same four fields.
+- An MTEXT carries its `reference_width` (DXF 41): the width of the box the text wraps
+  in; `0` is no box.
 - `POLYLINE_VERTICES` in `read_diagnostics`: a pre-R13 POLYLINE whose vertex records end
   before its SEQEND (the object stream stops at a JUMP entity) is read with the vertices
   found, and named. It used to arrive with no vertices and no signal.
