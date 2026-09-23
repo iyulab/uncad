@@ -8,6 +8,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `uncad --version` / `-V` (both commands) and `--include-hidden` (draw what the layer
+  rules and the invisible flag leave out). The plain command now refuses an option it
+  does not know, a second input and an option without its value, naming what was wrong,
+  where it used to ignore them.
+
 - `uncad export <input> -o <dir>`: the CLI writes the LLM/VLM package through the new
   `uncad-export` crate (`--profile`, `--max-levels`, `--max-tiles`, `--no-sheets`,
   `--svg`); an option the subcommand does not know is an error.
