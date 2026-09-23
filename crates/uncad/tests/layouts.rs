@@ -89,11 +89,12 @@ fn autocad_layouts_carry_their_plot_settings_in_both_formats() {
             assert!(near_point(l.limits_max, point(273.05, 209.55)), "{path}");
         }
 
-        // The two layouts' overall viewports, in plan. The DWG says both are
-        // on and states no number (the binary format stores none); the DXF
-        // AutoCAD wrote states 68 = 0 and 69 = 0 for the one of the layout
-        // that is not current, and 68 = 1, 69 = 1 for the other -- what each
-        // file states.
+        // The two layouts' overall viewports, in plan. Both formats say both
+        // are on, in the status flags' off bit (DXF 90). The DWG states no
+        // number (the binary format stores none); the DXF AutoCAD wrote
+        // states 69 = 0 for the one of the layout that is not current and
+        // 69 = 1 for the other -- and 68 = 0 and 1, its stack of active
+        // viewports, where 0 is not "off".
         let mut viewports: Vec<(String, Option<bool>, Option<i32>)> = db
             .entities
             .iter()
@@ -117,7 +118,7 @@ fn autocad_layouts_carry_their_plot_settings_in_both_formats() {
             ]
         } else {
             [
-                ("84".to_string(), Some(false), Some(0)),
+                ("84".to_string(), Some(true), Some(0)),
                 ("88".to_string(), Some(true), Some(1)),
             ]
         };

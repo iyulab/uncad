@@ -856,18 +856,21 @@ fn viewport_view(
     })
 }
 
-/// Whether a viewport is on. A DXF states it in group 68 (0 off; -1 or a
-/// positive number on); the binary format does not store that group --
-/// LibreDWG makes one up for a DWG, in block order -- and states "off" as
-/// bit 0x20000 of the status flags (DXF 90), which exist from R2000 on.
+/// Whether a viewport is on. From R2000 on, both formats state it as bit
+/// 0x20000 of the status flags (DXF 90), set when it is off. A DXF also
+/// writes group 68, the viewport's place in the stack of active viewports,
+/// where 0 is also what a viewport of a layout that is not the current one
+/// is written with, on or not -- so 68 is read only for a DXF older than
+/// R2000, which has no status flags; the binary format does not store it
+/// (LibreDWG makes one up for a DWG, in block order).
 fn viewport_on(
     dwg: *mut libredwg_sys::Dwg_Data,
     entity_ptr: *mut std::ffi::c_void,
 ) -> Option<bool> {
-    if is_from_dxf(dwg) {
-        get_field::<u16>(entity_ptr, "VIEWPORT", "on_off").map(|on| on != 0)
-    } else if is_r2000_or_later(dwg) {
+    if is_r2000_or_later(dwg) {
         get_field::<u32>(entity_ptr, "VIEWPORT", "status_flag").map(|f| f & VIEWPORT_OFF_FLAG == 0)
+    } else if is_from_dxf(dwg) {
+        get_field::<u16>(entity_ptr, "VIEWPORT", "on_off").map(|on| on != 0)
     } else {
         None
     }
