@@ -936,6 +936,12 @@ dimension's stored value is trusted). Known limits:
   three local samples): every manifest count matched except the ATTDEF and
   ATTRIB records the attribute walk now reads. A full comparison over the
   corpus has not been run on this layout.
+- **It is slower than the earlier implementation.** Release build, wall
+  clock around `uncad export`, measured on 2026-09-23 (Windows 11, Ryzen 5
+  6600H): `example_2000.dwg` 0.93 s against 0.80 s, `AutoCADSamples1.dwg`
+  2.28 s against 1.61 s, `AutoCADSamples3.dwg` 2.46 s against 1.83 s,
+  `AutoCADSamples5.dwg` 4.73 s against 3.83 s. Where the extra time goes has
+  not been profiled.
 
 ## No DWG/DXF writing
 
