@@ -11,18 +11,32 @@ Notable changes to this project are recorded here. The format follows
 - `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
   `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
   MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and
-  exposes what decoding a drawing's text needs: `uncad_dwg_version`,
-  `uncad_dwg_from_version`, `uncad_dwg_from_dxf`, `uncad_codepage_name`, and the
+  exposes what decoding a drawing's text and header needs: `uncad_dwg_version`,
+  `uncad_dwg_from_version`, `uncad_dwg_from_dxf`, `uncad_dwg_numheader_vars` (how long a
+  pre-R13 header is), `uncad_dwg_template_read` (whether the section holding
+  `$MEASUREMENT` was read), `uncad_codepage_name`, and the
   code-page string conversions `uncad_tv_to_utf8`, `uncad_bytes_to_utf8`, their
   `uncad_entity_*` twins, `uncad_dwg_string_to_utf8` and `uncad_free_string`, with
   bindings for `dwg_version_type` and `dwg_next_object`. `uncad` reads every drawing
-  through the two memory readers; it does not call the rest yet.
+  through the two memory readers and its header through the file-header accessors; it
+  does not call the string conversions.
 - `uncad::parse_bytes(bytes, Format)` parses a drawing already in memory, and
   `uncad::Format` (`Dwg`, `Dxf`, with `Format::from_path`) says which it is. `parse()`
   now reads the file itself and decodes it from memory, so a path LibreDWG could not
   open -- any non-ASCII one on Windows, such as a Korean directory name, which failed
   with critical error 4096 -- parses; a file that cannot be read is the new
   `ParseError::Io`. `tests/read_paths.rs`.
+- `uncad::parse_with_header` / `uncad::parse_bytes_with_header` return the drawing's
+  `uncad::Header` beside the model: the format, `$ACADVER` and LibreDWG's release name,
+  the codepage strings were decoded with, `$INSUNITS` (`Header::units()` gives the unit
+  and its millimetre factor), `$MEASUREMENT`, `$LUNITS`/`$LUPREC`/`$AUNITS`/`$AUPREC`,
+  the model and paper extents and limits, the `$DIM*` variables a dimension falls back
+  on, `$LTSCALE`, `$TEXTSIZE` and `$CLAYER`. A variable the file does not state is
+  `None` -- for a DWG by its version's header layout, for an ASCII DXF by what its HEADER
+  section names -- never the zero or default LibreDWG's struct holds for it. The header
+  is this crate's type, not the model's, which carries no header variables by design;
+  `parse()` and `parse_bytes()` are unchanged and return the database alone.
+  `tests/header.rs`.
 - Every crate carries the GPLv3 text as its own `LICENSE`; `cargo package` never
   reaches the repository root's, so of the 0.2.0 tarballs only `libredwg-sys` had the
   text (as LibreDWG's own `COPYING`) and `uncad-cli` had no licence file at all.

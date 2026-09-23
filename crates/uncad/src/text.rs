@@ -33,19 +33,26 @@ fn has_codepage_tables(codepage: u16) -> bool {
     (1..=CP_LAST).contains(&codepage) && codepage != CP_UTF16
 }
 
-/// The `$DWGCODEPAGE`-style name of a codepage, for a diagnostic.
-fn codepage_name(codepage: u16) -> String {
-    // SAFETY: dwg_codepage_dxfstr returns a static string for every value,
-    // "undefined"/"" for the ones it does not know.
+/// LibreDWG's `$DWGCODEPAGE`-style name of a codepage (`ANSI_1252`), or
+/// `None` when it has none -- a value outside its table, `CP_UNDEFINED`.
+pub fn codepage_name(codepage: u16) -> Option<String> {
+    // SAFETY: dwg_codepage_dxfstr returns a static string or NULL for every
+    // value; it bounds-checks the number itself.
     let ptr = unsafe { libredwg_sys::dwg_codepage_dxfstr(codepage as libredwg_sys::Dwg_Codepage) };
     if ptr.is_null() {
-        return format!("{codepage}");
+        return None;
     }
     let name = unsafe { CStr::from_ptr(ptr) }.to_string_lossy();
-    if name.is_empty() {
-        format!("{codepage}")
-    } else {
-        format!("{name} ({codepage})")
+    (!name.is_empty() && name != "undefined").then(|| name.into_owned())
+}
+
+/// The name a diagnostic gives a codepage: `ANSI_1252 (30)`, or the bare
+/// number when the library has no name for it.
+fn codepage_label(codepage: u16) -> String {
+    match codepage_name(codepage) {
+        Some(name) => format!("{name} ({codepage})"),
+        None if codepage == 0xFF => format!("undefined ({codepage})"),
+        None => format!("{codepage}"),
     }
 }
 
@@ -146,6 +153,11 @@ impl TextDecoder {
         }
     }
 
+    /// The codepage 8-bit strings are decoded with (`header.codepage`).
+    pub fn codepage(&self) -> u16 {
+        self.codepage
+    }
+
     /// The warnings, in the order the strings were met, each once -- the
     /// entities of a block are converted twice (once for the entity list,
     /// once for the block record), and a warning is about a string, not
@@ -209,6 +221,13 @@ impl TextDecoder {
         }))
     }
 
+    /// A text header variable (`DIMPOST`, ...), decoded -- see
+    /// `dynapi::get_header_text_bytes`.
+    pub fn header_text(&self, dwg: *const libredwg_sys::Dwg_Data, name: &str) -> Option<String> {
+        let bytes = dynapi::get_header_text_bytes(dwg, name)?;
+        Some(self.decode(&bytes, || format!("header variable ${name}")))
+    }
+
     /// The decoding rule. `what` names the string for a diagnostic and is
     /// only evaluated when one is written.
     pub fn decode(&self, bytes: &[u8], what: impl FnOnce() -> String) -> String {
@@ -242,7 +261,7 @@ impl TextDecoder {
                         "TEXT_ENCODING: {}: codepage {} cannot be decoded and the bytes are \
                          not UTF-8; invalid sequences replaced with U+FFFD",
                         what(),
-                        codepage_name(self.codepage)
+                        codepage_label(self.codepage)
                     ));
                     String::from_utf8_lossy(bytes).into_owned()
                 }
@@ -254,7 +273,7 @@ impl TextDecoder {
                 "TEXT_ENCODING: {}: {unmapped} byte(s) have no character in codepage {}; \
                  replaced with U+FFFD",
                 what(),
-                codepage_name(self.codepage)
+                codepage_label(self.codepage)
             ));
         }
         text
@@ -358,6 +377,14 @@ mod tests {
         let warnings = d.into_warnings();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("undefined"), "{}", warnings[0]);
+    }
+
+    #[test]
+    fn codepage_names_are_the_librarys_and_unknown_ones_have_none() {
+        assert_eq!(codepage_name(ANSI_1252).as_deref(), Some("ANSI_1252"));
+        assert_eq!(codepage_name(ANSI_949).as_deref(), Some("ANSI_949"));
+        assert_eq!(codepage_name(100), None);
+        assert_eq!(codepage_name(0xFF), None);
     }
 
     #[test]

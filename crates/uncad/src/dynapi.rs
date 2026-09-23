@@ -470,6 +470,78 @@ pub fn get_text_bytes(entity: *mut c_void, dxfname: &str, field: &str) -> Option
     Some(owned)
 }
 
+/// Reads a plain-old-data header variable (`INSUNITS`, `EXTMIN`,
+/// `DIMSCALE`, ...) via `dwg_dynapi_header_value`, with the same up-front
+/// size check as [`get_field`] (through `dwg_dynapi_header_field`). Returns
+/// `None` for an unknown variable name or a `T` of the wrong size -- never
+/// for a variable the file did not state, which reads as whatever the
+/// reader left there (see `crate::header`).
+pub fn get_header_field<T: DwgRaw>(dwg: *const libredwg_sys::Dwg_Data, name: &str) -> Option<T> {
+    if dwg.is_null() {
+        return None;
+    }
+    let c_name = CString::new(name).expect("variable name has no interior NUL");
+    // SAFETY: pure name -> descriptor lookup, no write through any pointer.
+    let field_desc = unsafe { libredwg_sys::dwg_dynapi_header_field(c_name.as_ptr()) };
+    if field_desc.is_null() {
+        return None;
+    }
+    if !field_write_size_matches::<T>(unsafe { &*field_desc }, "<header>", name) {
+        return None;
+    }
+    let mut out = MaybeUninit::<T>::uninit();
+    let mut fp: libredwg_sys::Dwg_DYNAPI_field = Default::default();
+    // SAFETY: dwg is live (caller contract); out is sized for T and the size
+    // check above confirms dynapi writes exactly size_of::<T>() bytes.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_header_value(
+            dwg,
+            c_name.as_ptr(),
+            out.as_mut_ptr().cast::<c_void>(),
+            &mut fp,
+        )
+    };
+    if !ok {
+        return None;
+    }
+    // SAFETY: dynapi reported success and wrote size_of::<T>() bytes.
+    Some(unsafe { out.assume_init() })
+}
+
+/// Reads a text header variable (`DIMPOST`, ...) as the bytes LibreDWG holds
+/// for it, via `dwg_dynapi_header_utf8text` -- the same contract as
+/// [`get_text_bytes`]. Returns `None` for an unknown name or a null string.
+pub fn get_header_text_bytes(dwg: *const libredwg_sys::Dwg_Data, name: &str) -> Option<Vec<u8>> {
+    if dwg.is_null() {
+        return None;
+    }
+    let c_name = CString::new(name).expect("variable name has no interior NUL");
+    let mut text_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
+    let mut is_new: std::os::raw::c_int = 0;
+    // SAFETY: dwg is live (caller contract); text_ptr/is_new are valid
+    // out-params for the duration of the call.
+    let ok = unsafe {
+        libredwg_sys::dwg_dynapi_header_utf8text(
+            dwg,
+            c_name.as_ptr(),
+            &mut text_ptr,
+            &mut is_new,
+            std::ptr::null_mut(),
+        )
+    };
+    if !ok || text_ptr.is_null() {
+        return None;
+    }
+    // SAFETY: text_ptr is a valid, NUL-terminated C string per dynapi's
+    // contract (checked non-null above).
+    let owned = unsafe { CStr::from_ptr(text_ptr) }.to_bytes().to_vec();
+    if is_new != 0 {
+        // SAFETY: as in get_text_bytes -- a malloc'd copy that is ours.
+        unsafe { libc::free(text_ptr.cast()) };
+    }
+    Some(owned)
+}
+
 /// Reads a `(count_field, array_field)` pair -- e.g. LWPOLYLINE's
 /// `num_points`/`points` -- as an owned `Vec<T>`. The array field is a raw
 /// pointer into memory LibreDWG itself owns (freed by `dwg_free`, not by

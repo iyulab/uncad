@@ -19,6 +19,10 @@ cargo test --workspace
 let db = uncad::parse("drawing.dwg")?;   // same model for DWG and DXF (entities + tables)
 println!("{} entities", db.entities.len());
 
+// The header variables that give the numbers a meaning come beside the model:
+let (db, header) = uncad::parse_with_header("drawing.dxf")?;
+println!("units: {:?}", header.units());   // $INSUNITS; None when the file does not say
+
 // Bytes already in memory (from the network, an archive, ...):
 let bytes = std::fs::read("drawing.dwg")?;
 let db = uncad::parse_bytes(&bytes, uncad::Format::Dwg)?;
@@ -104,7 +108,8 @@ crates/
                          five local patches marked "uncad local patch" and listed in
                          NOTICE.md; shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
-  uncad/                 the safe API: parse() / parse_bytes() -> uncad_model::CadDatabase
+  uncad/                 the safe API: parse() / parse_bytes() -> uncad_model::CadDatabase,
+                         and the drawing's Header beside it from parse_with_header()
   uncad-cli/             the CLI binary (uncad)
 crates/*/tests/          integration tests against the public API. crates/*/examples/ are
                          manual-check tools, and #[cfg(test)] blocks inside src/*.rs are

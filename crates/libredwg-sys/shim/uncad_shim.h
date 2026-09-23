@@ -74,6 +74,20 @@ int uncad_dwg_from_version(const Dwg_Data *dwg);
  * else on that path (a LAYER's plot flag, for one). */
 int uncad_dwg_from_dxf(const Dwg_Data *dwg);
 
+/* How many header variables a pre-R13 DWG's file header says its header
+ * section holds (`dwg->header.numheader_vars`: 74, 83, ... 205 across the
+ * releases), which decides where LibreDWG's pre-R13 header layout stops
+ * reading (header_variables_r11.spec). 0 for R13 and later, whose header
+ * layout is fixed per version, and for a NULL `dwg`. */
+uint16_t uncad_dwg_numheader_vars(const Dwg_Data *dwg);
+
+/* 1 when the decoder read a DWG's Template section -- the one that holds
+ * $MEASUREMENT, optional before R2007 and skipped without an error bit when
+ * it is missing -- 0 otherwise, for any DXF input and for a NULL `dwg`.
+ * Without this a $MEASUREMENT of 0 ("English") cannot be told from one the
+ * file never stated. */
+int uncad_dwg_template_read(const Dwg_Data *dwg);
+
 /* The DXF name of a Dwg_Codepage value -- as uncad_dwg_codepage returns it
  * -- ("ANSI_1252", "ANSI_949", "UTF-8", ...) from LibreDWG's own table
  * (dwg_codepage_dxfstr in src/codepages.h, which is not a public header), or

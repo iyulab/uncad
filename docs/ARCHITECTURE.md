@@ -17,9 +17,10 @@ crates/
                          cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
                          conversion that runs on a copy rather than the original,
                          readers that decode a DWG or DXF from a memory buffer rather
-                         than a path, and the header fields (version, codepage,
-                         string width) and string conversions that decoding a
-                         drawing's text needs.
+                         than a path, the file-header fields (version, codepage,
+                         string width, a pre-R13 header's length, whether the Template
+                         section was read) that decoding a drawing's text and header
+                         need, and string conversions.
     vendor/libredwg/     the upstream C sources actually compiled (see "Build"), five
                          of them carrying a local patch (NOTICE.md)
     vendor-config/       config.h -- hand-written, standing in for autotools' output
@@ -145,7 +146,7 @@ That suits the design rather than fighting it: entity fields were always going t
 through `dwg_dynapi_entity_value`/`dwg_dynapi_common_value`, LibreDWG's own
 reflection API keyed by string field name, with runtime type and range checks.
 `uncad::dynapi` wraps it in the generic helpers `get_field::<T>`, `get_common_field::<T>`,
-`get_text_bytes` and `get_array_field::<C, T>`, comparing the field size dynapi reports
+`get_header_field::<T>`, `get_text_bytes` and `get_array_field::<C, T>`, comparing the field size dynapi reports
 against the requested Rust type's size so a wrong type mapping fails loudly instead of
 quietly corrupting data. Text fields come back as bytes on purpose: for a pre-R2007
 drawing they are codepage bytes, not UTF-8, and `uncad::text::TextDecoder` (one per
@@ -192,8 +193,8 @@ paper spaces own), `tables` (LAYER, every BLOCK_RECORD, MLINESTYLE) and `read_di
 (the reader's non-fatal warnings). `parse()` reads the file into memory itself (LibreDWG's
 own readers `fopen()` a path, which on Windows cannot open a non-ASCII one), and the
 `Dwg_Data` that the shim's `uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those
-bytes is walked twice inside `parse()` (`convert_entities`, then `convert_tables`), freed
-with `dwg_free` immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
+bytes is walked inside `parse()` (`convert_entities`, `convert_tables`, then the header
+read), freed with `dwg_free` immediately afterwards, and never reaches the return value. The hub of "DWG/DXF -> one model -> several outputs" is therefore the model
 crate's value, and the outputs are `CadDatabase::to_json()` (serde, in `uncad-model`) and,
 in the `iron-render-cad` crate, `to_svg(&db, ..)` and `to_png(&db, ..)`.
 
@@ -205,7 +206,9 @@ read C memory by accident -- the compiler refuses it.
 
 The model is deliberately lossy: it keeps what consumers of the drawing's content need and
 nothing else -- no linetypes, lineweights, layer on/off state, text styles, object
-dictionaries or header variables. It cannot be used to write a DWG/DXF back out, and this
+dictionaries or header variables (a consumer that needs the header variables gets them
+beside the model, as this crate's own `uncad::Header`, from `parse_with_header`). It
+cannot be used to write a DWG/DXF back out, and this
 project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
 `CHANGELOG.md`).
 

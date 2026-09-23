@@ -261,6 +261,8 @@ fn main() {
         .allowlist_function("uncad_dwg_version")
         .allowlist_function("uncad_dwg_from_version")
         .allowlist_function("uncad_dwg_from_dxf")
+        .allowlist_function("uncad_dwg_numheader_vars")
+        .allowlist_function("uncad_dwg_template_read")
         .allowlist_function("uncad_dwg_string_to_utf8")
         .allowlist_function("uncad_tv_to_utf8")
         .allowlist_function("uncad_entity_tv_to_utf8")

@@ -10,6 +10,7 @@
 mod acis;
 mod convert;
 mod dynapi;
+pub mod header;
 mod table_convert;
 mod text;
 
@@ -22,6 +23,8 @@ use std::sync::Mutex;
 pub use uncad_model::{json, model, tables};
 pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, ToJsonOptions};
 
+pub use header::{Header, Units};
+
 /// LibreDWG's C code has non-reentrant global state (the `loglevel` global
 /// read and written throughout `decode.c`/`bits.c`, and likely more).
 /// Calling into it concurrently reliably produced `STATUS_HEAP_CORRUPTION`
@@ -29,10 +32,10 @@ pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, T
 /// cycles overlapped. Sequential reuse across many calls is fine; concurrent
 /// calls are what this lock closes off.
 ///
-/// [`parse_bytes`] (which [`parse`] calls) is the only entry point that
-/// touches the FFI boundary and it holds this lock for its whole duration, so
-/// callers never need to know `libredwg-sys` exists, let alone serialize
-/// around it themselves.
+/// [`parse_bytes_with_header`] (which every other entry point calls) is the
+/// only one that touches the FFI boundary and it holds this lock for its
+/// whole duration, so callers never need to know `libredwg-sys` exists, let
+/// alone serialize around it themselves.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Names for the non-critical `DWG_ERROR` bits, in bit order (dwg.h).
@@ -111,7 +114,8 @@ impl std::error::Error for ParseError {
 /// extension; [`parse_bytes`] takes it explicitly because bytes carry no
 /// name. A binary DXF is [`Format::Dxf`] too: the reader tells ASCII from
 /// binary by the bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Format {
     Dwg,
     Dxf,
@@ -177,7 +181,8 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
 
 /// Parses a DWG or DXF file at `path` into a [`CadDatabase`] -- the same
 /// model either way, with the format inferred from the `.dwg`/`.dxf`
-/// extension (see [`Format::from_path`]).
+/// extension (see [`Format::from_path`]). [`parse_with_header`] returns the
+/// drawing's header variables beside it.
 ///
 /// The file is read into memory here and decoded by [`parse_bytes`] rather
 /// than handed to LibreDWG as a path: LibreDWG opens paths with `fopen()`,
@@ -192,25 +197,49 @@ fn missing_required_groups(entities: &[Entity]) -> Vec<String> {
 /// rather than handed to LibreDWG, because the importer would return it as a
 /// drawing with no entities and no error. See `docs/CAVEATS.md`.
 pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
+    parse_with_header(path).map(|(db, _)| db)
+}
+
+/// [`parse`], returning the drawing's [`Header`] -- version, codepage,
+/// units, extents, the dimension variables -- beside the database.
+///
+/// The header is a type of this crate rather than part of the model, which
+/// deliberately carries no header variables (see [`header`]); it is read in
+/// the same pass, under the same lock, from the same decoded drawing, so
+/// asking for it costs no second decode -- which a separate header read
+/// would, and a DXF decode is the expensive part.
+pub fn parse_with_header(path: impl AsRef<Path>) -> Result<(CadDatabase, Header), ParseError> {
     let path = path.as_ref();
     let format = Format::from_path(path);
     let bytes = std::fs::read(path).map_err(ParseError::Io)?;
-    parse_bytes(&bytes, format)
+    parse_bytes_with_header(&bytes, format)
 }
 
 /// Parses a drawing already held in memory. This is what [`parse`] calls
 /// after reading the file; it is public for callers that receive drawings
 /// over the network or from an archive and never have a path.
 pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseError> {
+    parse_bytes_with_header(bytes, format).map(|(db, _)| db)
+}
+
+/// [`parse_bytes`], returning the drawing's [`Header`] beside the database
+/// -- see [`parse_with_header`].
+pub fn parse_bytes_with_header(
+    bytes: &[u8],
+    format: Format,
+) -> Result<(CadDatabase, Header), ParseError> {
+    // A DXF's HEADER section, scanned from the bytes: which variables it
+    // states, and its $ACADVER. No lock needed -- this is plain text.
+    let scan = match format {
+        Format::Dwg => None,
+        Format::Dxf => header::scan_dxf_header(bytes),
+    };
     // Decided from the file's own header, before LibreDWG sees it: the R2007+
     // failure is silent on the C side (error code 0, zero entities), so the
-    // only place it can be turned into an error is here. No lock needed --
-    // this is a scan of the bytes.
-    if format == Format::Dxf {
-        if let Some(acadver) = dxf_acadver(bytes) {
-            if dxf_version_number(&acadver).is_some_and(|n| n >= DXF_VERSION_R2007) {
-                return Err(ParseError::UnsupportedDxfVersion(acadver));
-            }
+    // only place it can be turned into an error is here.
+    if let Some(acadver) = scan.as_ref().and_then(|scan| scan.acadver.as_ref()) {
+        if dxf_version_number(acadver).is_some_and(|n| n >= DXF_VERSION_R2007) {
+            return Err(ParseError::UnsupportedDxfVersion(acadver.clone()));
         }
     }
 
@@ -271,6 +300,20 @@ pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseErr
     // Everything the returned value exposes is an owned Rust copy by the end.
     let entities = unsafe { convert::convert_entities(dwg.as_mut(), &text) };
     let tables = unsafe { table_convert::convert_tables(dwg.as_mut(), &text) };
+    let (acadver, stated) = match (format, scan) {
+        (Format::Dwg, _) => (
+            header::dwg_magic(bytes),
+            // SAFETY: the shims read file-header fields of a live Dwg_Data.
+            header::Stated::Dwg {
+                version: unsafe { libredwg_sys::uncad_dwg_from_version(dwg.as_mut()) },
+                numheader_vars: unsafe { libredwg_sys::uncad_dwg_numheader_vars(dwg.as_mut()) },
+                template_read: unsafe { libredwg_sys::uncad_dwg_template_read(dwg.as_mut()) } != 0,
+            },
+        ),
+        (Format::Dxf, Some(scan)) => (scan.acadver, header::Stated::Dxf(scan.variables)),
+        (Format::Dxf, None) => (None, header::Stated::Unknown),
+    };
+    let header = unsafe { header::read_header(dwg.as_mut(), &text, format, acadver, &stated) };
     read_diagnostics.warnings.extend(text.into_warnings());
     read_diagnostics
         .warnings
@@ -282,11 +325,14 @@ pub fn parse_bytes(bytes: &[u8], format: Format) -> Result<CadDatabase, ParseErr
     // Drop, no C memory, Send + Sync by construction).
     unsafe { libredwg_sys::dwg_free(dwg.as_mut()) };
 
-    Ok(CadDatabase {
-        entities,
-        tables,
-        read_diagnostics,
-    })
+    Ok((
+        CadDatabase {
+            entities,
+            tables,
+            read_diagnostics,
+        },
+        header,
+    ))
 }
 
 /// `$ACADVER` value of the first DXF release LibreDWG's importer reads back
@@ -300,36 +346,6 @@ const DXF_VERSION_R2007: u32 = 1021;
 /// file: the decision falls back to LibreDWG, as it did before this check.
 fn dxf_version_number(acadver: &str) -> Option<u32> {
     acadver.strip_prefix("AC")?.parse().ok()
-}
-
-/// Reads `$ACADVER` out of an ASCII DXF's HEADER section, or `None` if the
-/// file has no such variable (pre-R10 files) or is not laid out as (group
-/// code, value) line pairs. Binary DXF is not handled here and falls through
-/// to LibreDWG untouched.
-///
-/// The scan is bounded: `$ACADVER` is by convention the first header variable,
-/// and the HEADER section ends at the first `ENDSEC`, so a file that reaches
-/// either bound without it is treated as not declaring a version.
-fn dxf_acadver(bytes: &[u8]) -> Option<String> {
-    const MAX_PAIRS_SCANNED: usize = 4096;
-
-    let mut lines = bytes
-        .split(|&b| b == b'\n')
-        .map(|line| String::from_utf8_lossy(line).into_owned());
-    for _ in 0..MAX_PAIRS_SCANNED {
-        let (code, value) = (lines.next()?, lines.next()?);
-        match (code.trim(), value.trim()) {
-            ("9", "$ACADVER") => {
-                let (code, value) = (lines.next()?, lines.next()?);
-                return (code.trim() == "1").then(|| value.trim().to_string());
-            }
-            // End of the HEADER section (or of a headerless file's first
-            // section): $ACADVER cannot appear after this point.
-            ("0", "ENDSEC") | ("0", "EOF") => return None,
-            _ => {}
-        }
-    }
-    None
 }
 
 #[cfg(test)]

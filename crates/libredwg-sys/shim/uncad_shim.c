@@ -209,6 +209,22 @@ uncad_dwg_from_dxf (const Dwg_Data *dwg)
   return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
 }
 
+uint16_t
+uncad_dwg_numheader_vars (const Dwg_Data *dwg)
+{
+  return dwg ? (uint16_t)dwg->header.numheader_vars : 0;
+}
+
+int
+uncad_dwg_template_read (const Dwg_Data *dwg)
+{
+  /* template.spec reads `description` first, and bit_read_T16/TU16 allocate
+     it for every length, zero included: non-NULL exactly when the decoder
+     found and read the section. The DXF importer copies $MEASUREMENT into
+     the Template without it. */
+  return (dwg && dwg->Template.description) ? 1 : 0;
+}
+
 char *
 uncad_dwg_string_to_utf8 (const Dwg_Data *dwg, const char *s)
 {
