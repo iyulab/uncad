@@ -12,7 +12,9 @@
 //! the map from an entity's own plane to the world; [`text`], the string a
 //! reader sees for a text the file stores with its codes; and
 //! [`dimension`], a dimension's value, whether its stored measurement can be
-//! believed, and its label.
+//! believed, and its label; and [`frame`], where the package's pictures
+//! stop -- the crop mode as the renderer's `Crop`, the padding, the snap to
+//! the model's patch lattice, and the detached groups that become frames.
 //!
 //! # Licence
 //!
@@ -21,5 +23,6 @@
 
 pub mod dimension;
 pub mod fonts;
+pub mod frame;
 pub mod geom;
 pub mod text;
