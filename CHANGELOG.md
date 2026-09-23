@@ -93,6 +93,14 @@ Notable changes to this project are recorded here. The format follows
   the patches. `build.rs` refuses to build when a patch's marker has gone missing,
   which a re-vendor through `scripts/sync-libredwg-vendor.sh` would otherwise do in
   silence.
+- **Every vertex of a POLYLINE_2D/3D is read.** LibreDWG's point accessors end their walk
+  one vertex early on every file older than R2004, so the last vertex was dropped: a closed
+  square came back a triangle, a two-vertex arc a single point. The vertices now come from
+  the polyline's own subentity chain; all 22 POLYLINEs of the corpus DXFs and the
+  fixtures whose vertices can be counted in the file match that count (the accessors had
+  20 of them one short). A polyline's VERTEX records are no longer reported as entities of
+  their own either -- 62 `Unknown` VERTEX entities in seven pre-R13 DXFs. See
+  `docs/CAVEATS.md`, "Polyline vertices come from the polyline's own chain".
 - `MTextEntity::rotation` is the direction of the text's X axis instead of a constant `0`,
   which reported rotated multi-line text as horizontal.
 - A two-line angular dimension's `definition_point` (DXF 10) is read instead of reported as

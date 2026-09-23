@@ -311,3 +311,72 @@ fn the_title_block_fixture_keeps_every_string_in_paper_space() {
     assert_eq!(texts("*Paper_Space"), ["GARDEN PAVILION"]);
     assert_eq!(texts("TITLEBLOCK"), ["SHEET 1 OF 2"]);
 }
+
+// --------------------------------------------------- polyline vertices
+
+/// Regression for the last vertex LibreDWG's own
+/// `dwg_object_polyline_{2,3}d_get_points` drop on every R13/R14/R2000 file.
+/// The vertices are the ones `make_fixtures.py` writes: a 100 by 100 closed
+/// square, a two-vertex polyline whose one bulge makes it a semicircle, and a
+/// five-point 3D polyline. Read through the library's accessors each came
+/// back one vertex short: the square a right triangle, the semicircle a
+/// single point, the 3D polyline ending at (0, 10, 5).
+#[test]
+fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
+    let db = parse(POLYLINE_VERTICES);
+    assert_eq!(
+        type_counts(&db),
+        expected(&[("POLYLINE_2D", 2), ("POLYLINE_3D", 1)])
+    );
+
+    let square = match &db.entities[0] {
+        Entity::Polyline2D(p) => p,
+        other => panic!("expected the square first, got {other:?}"),
+    };
+    assert_eq!(square.common.source_handle, resolved("30"));
+    assert!(square.closed);
+    assert_eq!(
+        square
+            .vertices
+            .iter()
+            .map(|v| (v.x, v.y))
+            .collect::<Vec<_>>(),
+        [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0), (0.0, 100.0)]
+    );
+
+    let arc = match &db.entities[1] {
+        Entity::Polyline2D(p) => p,
+        other => panic!("expected the arc polyline second, got {other:?}"),
+    };
+    assert_eq!(arc.common.source_handle, resolved("35"));
+    assert!(!arc.closed);
+    assert_eq!(
+        arc.vertices.iter().map(|v| (v.x, v.y)).collect::<Vec<_>>(),
+        [(0.0, 1000.0), (100.0, 1000.0)]
+    );
+
+    let p3d = match &db.entities[2] {
+        Entity::Polyline3D(p) => p,
+        other => panic!("expected the 3D polyline third, got {other:?}"),
+    };
+    assert_eq!(p3d.common.source_handle, resolved("39"));
+    assert!(
+        !p3d.closed,
+        "group 70 = 8 is a 3D polyline, not a closed one"
+    );
+    assert_eq!(
+        p3d.vertices
+            .iter()
+            .map(|v| (v.x, v.y, v.z))
+            .collect::<Vec<_>>(),
+        [
+            (0.0, 0.0, 0.0),
+            (10.0, 0.0, 0.0),
+            (10.0, 10.0, 0.0),
+            (0.0, 10.0, 5.0),
+            (0.0, 0.0, 5.0),
+        ]
+    );
+    // And no VERTEX record is an entity of the block that holds them.
+    assert_eq!(db.tables.block_records["*Model_Space"].entities.len(), 3);
+}

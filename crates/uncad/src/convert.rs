@@ -144,6 +144,16 @@ pub unsafe fn convert_entities(
 /// and by every block's own entry in [`crate::tables::Tables::block_records`],
 /// so the two stay in sync as entity types are added.
 ///
+/// A polyline's VERTEX records are skipped: they belong to the POLYLINE that
+/// owns them and are read from *its* chain (see [`polyline_subentities`]),
+/// not drawing content of the block. That is the contract LibreDWG
+/// documents for `get_next_owned_entity` ("Not subentities: ATTRIB,
+/// VERTEX") and what the R13..R2000 walk here implements -- but the
+/// library's walker for other versions hands back whatever its list holds,
+/// and the DXF importer fills that list with every object between a BLOCK
+/// and its ENDBLK. Each polyline's vertices came back as entities of their
+/// own: in a drawing older than R13, one `VERTEX_2D` "entity" per vertex.
+///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `block_obj` was obtained from;
 /// `block_obj` must be a valid, non-null `BLOCK_HEADER` object.
@@ -158,6 +168,12 @@ pub(crate) unsafe fn owned_entities(
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
+        let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(owned) }
+            as libredwg_sys::DWG_OBJECT_TYPE;
+        if is_polyline_vertex(fixedtype) {
+            owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
+            continue;
+        }
         if let Some(entity) = unsafe { convert_entity(dwg, text, owned, 0) } {
             entities.push(entity);
         }
@@ -199,15 +215,22 @@ unsafe fn referenced_object(
 /// so a chain walk has to step over them. ATTDEF is *not* one of these: an
 /// attribute definition is an ordinary block-owned entity.
 fn is_sub_entity(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> bool {
+    fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
+        || fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND
+        || is_polyline_vertex(fixedtype)
+}
+
+/// `true` for the five VERTEX kinds an old-style POLYLINE owns -- the list
+/// LibreDWG's own `get_next_owned_entity` skips ("Not subentities: ATTRIB,
+/// VERTEX", dwg.c).
+fn is_polyline_vertex(fixedtype: libredwg_sys::DWG_OBJECT_TYPE) -> bool {
     matches!(
         fixedtype,
-        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
-            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D
             | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D
             | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_MESH
             | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE
             | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_PFACE_FACE
-            | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_SEQEND
     )
 }
 
@@ -377,35 +400,79 @@ unsafe fn is_attrib(obj: *mut libredwg_sys::Dwg_Object) -> bool {
         == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ATTRIB
 }
 
-/// Copies the points LibreDWG's own `dwg_object_polyline_{2,3}d_get_points`
-/// returns into an owned `Vec`, then frees its buffer.
+/// Every subentity an old-style POLYLINE owns, in order.
 ///
-/// Those dedicated C functions are used rather than a generic owned-subentity
-/// walk because their traversal is version-dependent (pre-R2004 files chain
-/// `first_vertex..last_vertex` through the raw object list). A generic walk was
-/// tried and over-collected a vertex on a real file.
+/// Walks the owned-subentity chain (`get_first`/`get_next_owned_subentity`,
+/// dwg.c) rather than calling LibreDWG's own
+/// `dwg_object_polyline_{2,3}d_get_points`, because those are short by one on
+/// every R13/R14/R2000 file: for `version < R_2004` both the point and the
+/// count accessor walk `first_vertex .. last_vertex` as
+/// `do { ... } while ((vobj = dwg_next_object (vobj)) && vobj != vlast);`
+/// (dwg_api.c), whose condition ends the loop *before* the body sees
+/// `vlast`. They returned N-1 points, and the last vertex of every such
+/// polyline was dropped -- a closed square came back a triangle, a
+/// two-vertex arc a single point. `get_next_owned_subentity` stops *at*
+/// `last_vertex` and yields all N; from R2004 on it indexes the `vertex[]`
+/// array by `num_owned`, the same source the accessors use there.
+///
+/// Files older than R13 fill neither `first_vertex` nor `vertex[]`, so that
+/// chain is empty for them, and the fallback is the scan LibreDWG's own
+/// pre-R13 branch uses: forward through the object list, which is where such
+/// a polyline's vertices physically are, stopping at the first object that
+/// is not a VERTEX (the SEQEND, in a well-formed file).
+///
+/// Both walks are bounded against a chain damaged handles turned into a ring
+/// ([`MAX_OWNED_SUBENTITIES`]).
 ///
 /// # Safety
-/// `obj` must be a valid `POLYLINE_2D`/`POLYLINE_3D` object matching the
-/// accessors passed in, and `T` must have the same layout as the
-/// `dwg_point_2d`/`dwg_point_3d` they return.
-unsafe fn read_polyline_points<P, T: Copy>(
+/// `obj` must be a valid, non-null `POLYLINE_2D`/`POLYLINE_3D`/
+/// `POLYLINE_PFACE`/`POLYLINE_MESH` `Dwg_Object`.
+unsafe fn polyline_subentities(
     obj: *mut libredwg_sys::Dwg_Object,
-    get_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> *mut P,
-    get_num_points: unsafe extern "C" fn(*const libredwg_sys::Dwg_Object, *mut i32) -> u32,
-) -> Vec<T> {
-    let mut error = 0i32;
-    let points_ptr = unsafe { get_points(obj, &mut error) };
-    let num_points = unsafe { get_num_points(obj, &mut error) };
-    if points_ptr.is_null() || num_points == 0 {
-        return Vec::new();
+) -> Vec<*mut libredwg_sys::Dwg_Object> {
+    let mut subs = Vec::new();
+    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
+    while !sub.is_null() && subs.len() < MAX_OWNED_SUBENTITIES {
+        subs.push(sub);
+        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
     }
-    // SAFETY: on success the accessor calloc's exactly num_points entries of
-    // the layout T mirrors; copied out here before the buffer is freed.
-    let points =
-        unsafe { std::slice::from_raw_parts(points_ptr.cast::<T>(), num_points as usize) }.to_vec();
-    unsafe { libc::free(points_ptr.cast()) };
-    points
+    if !subs.is_empty() {
+        return subs;
+    }
+    let mut next = unsafe { libredwg_sys::dwg_next_object(obj) };
+    while !next.is_null() && subs.len() < MAX_OWNED_SUBENTITIES {
+        let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(next) }
+            as libredwg_sys::DWG_OBJECT_TYPE;
+        if !is_polyline_vertex(fixedtype) {
+            break;
+        }
+        subs.push(next);
+        next = unsafe { libredwg_sys::dwg_next_object(next) };
+    }
+    subs
+}
+
+/// The type-specific struct pointers of the vertices of `vertex_type` an
+/// old-style POLYLINE owns, in order -- what each vertex's fields are read
+/// through.
+///
+/// # Safety
+/// `obj` must be a valid, non-null POLYLINE `Dwg_Object` per
+/// [`polyline_subentities`].
+unsafe fn polyline_vertices(
+    obj: *mut libredwg_sys::Dwg_Object,
+    vertex_type: libredwg_sys::DWG_OBJECT_TYPE,
+) -> Vec<*mut std::ffi::c_void> {
+    unsafe { polyline_subentities(obj) }
+        .into_iter()
+        .filter(|&sub| {
+            (unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) }
+                as libredwg_sys::DWG_OBJECT_TYPE)
+                == vertex_type
+        })
+        .map(|sub| unsafe { libredwg_sys::uncad_object_entity_ptr(sub) })
+        .filter(|ptr| !ptr.is_null())
+        .collect()
 }
 
 /// Resolves a POLYLINE_PFACE's mesh into wireframe edges by walking its owned
@@ -425,11 +492,7 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
     let mut positions = Vec::new();
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
-    // Bounded against a chain damaged handles turned into a ring.
-    let mut walked = 0usize;
-    let mut sub = unsafe { libredwg_sys::get_first_owned_subentity(obj) };
-    while !sub.is_null() && walked < MAX_OWNED_SUBENTITIES {
-        walked += 1;
+    for sub in unsafe { polyline_subentities(obj) } {
         let sub_fixedtype =
             unsafe { libredwg_sys::dwg_object_get_fixedtype(sub) } as libredwg_sys::DWG_OBJECT_TYPE;
         let sub_entity_ptr = unsafe { libredwg_sys::uncad_object_entity_ptr(sub) };
@@ -446,7 +509,6 @@ unsafe fn polyline_pface_wireframe(obj: *mut libredwg_sys::Dwg_Object) -> Vec<[P
                 }
             }
         }
-        sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
     }
 
     let mut edges = Vec::new();
@@ -1025,15 +1087,13 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_3D => {
-            // SAFETY: obj is a POLYLINE_3D per fixedtype, and Point3D mirrors
-            // dwg_point_3d's layout.
-            let vertices: Vec<Point3D> = unsafe {
-                read_polyline_points(
-                    obj,
-                    libredwg_sys::dwg_object_polyline_3d_get_points,
-                    libredwg_sys::dwg_object_polyline_3d_get_numpoints,
-                )
-            };
+            // SAFETY: obj is a POLYLINE_3D per fixedtype; the vertices it
+            // owns are VERTEX_3D.
+            let vertices: Vec<Point3D> =
+                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_3D) }
+                    .into_iter()
+                    .filter_map(|vertex| get_point3d(vertex, "VERTEX_3D", "point"))
+                    .collect();
             // POLYLINE_3D.flag is BITCODE_RC (1 byte), unlike LWPOLYLINE's
             // BITCODE_BS (2 bytes) -- same closed-bit convention, different
             // underlying C width.
@@ -1045,15 +1105,15 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // SAFETY: obj is a POLYLINE_2D per fixedtype, and Point2D mirrors
-            // dwg_point_2d's layout.
-            let vertices: Vec<Point2D> = unsafe {
-                read_polyline_points(
-                    obj,
-                    libredwg_sys::dwg_object_polyline_2d_get_points,
-                    libredwg_sys::dwg_object_polyline_2d_get_numpoints,
-                )
-            };
+            // SAFETY: obj is a POLYLINE_2D per fixedtype; the vertices it
+            // owns are VERTEX_2D. A VERTEX_2D's stored point is 3D, but its z
+            // is the polyline's own elevation repeated.
+            let vertices: Vec<Point2D> =
+                unsafe { polyline_vertices(obj, libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_VERTEX_2D) }
+                    .into_iter()
+                    .filter_map(|vertex| get_point3d(vertex, "VERTEX_2D", "point"))
+                    .map(|p| Point2D { x: p.x, y: p.y })
+                    .collect();
             let flag = get_field::<u16>(entity_ptr, "POLYLINE_2D", "flag").unwrap_or(0);
             Entity::Polyline2D(LwPolylineEntity {
                 common,

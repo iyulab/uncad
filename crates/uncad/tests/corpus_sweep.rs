@@ -233,8 +233,12 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // 64,697 before the attribute-chain fix: 36 more entities (all ATTDEFs in
     // blocks with several of them, in the R2000 and R13/R14 files) are read
     // now that this crate walks the R13..R2000 block chain itself instead of
-    // through the library's walker, which skipped them.
-    assert_eq!(layers, 64_733);
+    // through the library's walker, which skipped them. 64,733 then, and 62
+    // fewer since a polyline's VERTEX records are no longer entities of the
+    // block that holds the polyline: seven pre-R13 DXFs (r2.6, r2.10, r9,
+    // r10, both r11 ones and r12's Leader) listed each polyline's vertices
+    // again as `Unknown` entities of their own.
+    assert_eq!(layers, 64_671);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
     // file, and the index fallback is measured, not assumed ---

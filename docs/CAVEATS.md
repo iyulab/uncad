@@ -91,13 +91,14 @@ against the object's actual dxfname and silently fails on a mismatch, so `"3DSOL
 cannot be hardcoded and `extract_wireframe()` takes the name as an argument. Rendering
 shares the isometric wireframe path.
 
-**POLYLINE_PFACE** ("polyface mesh") could not reuse a dedicated C function the way
-POLYLINE_3D does: LibreDWG's own `dwg_ent_polyline_pface_get_points` is marked
-`/* not implemented. use the dynapi instead */` in `dwg_api.h`. Instead the
-`VERTEX_PFACE` (vertex positions) and `VERTEX_PFACE_FACE` (up to 4 vertex indices per
-face) subentity chain is walked with `get_first_owned_subentity`, and each face's indices
-become wireframe edges -- rendered through the same isometric path as REGION, a polyface
-mesh being just as inherently 3D as an ACIS solid's wireframe.
+**POLYLINE_PFACE** ("polyface mesh") has no working accessor in LibreDWG: its own
+`dwg_ent_polyline_pface_get_points` is marked `/* not implemented. use the dynapi
+instead */` in `dwg_api.h`. Instead the `VERTEX_PFACE` (vertex positions) and
+`VERTEX_PFACE_FACE` (up to 4 vertex indices per face) subentities are read from the
+polyline's own chain -- the one POLYLINE_2D/3D vertices come from, see "Polyline vertices
+come from the polyline's own chain" -- and each face's indices become wireframe edges,
+carried like a REGION's: a polyface mesh is just as inherently 3D as an ACIS solid's
+wireframe.
 
 **TOLERANCE** renders exactly like ATTRIB/TEXT (position plus text), except that
 `text_value` still carries GD&T feature-control-frame codes (`%%v` and similar), which
@@ -402,6 +403,29 @@ synthetic drawing whose outline was declared closed came back open -- and a coun
 corpus showed that not one of its 1,137 LWPOLYLINEs had ever been reported closed. The two
 constants in `crates/uncad/src/convert.rs` (`POLYLINE_CLOSED_FLAG`, `LWPOLYLINE_CLOSED_FLAG`)
 carry the distinction.
+
+## Polyline vertices come from the polyline's own chain
+
+An old-style POLYLINE (2D, 3D, polyface, polygon mesh) owns its vertices as VERTEX
+records, closed by a SEQEND. They are read here by walking the polyline's own
+owned-subentity chain (`get_first_owned_subentity` / `get_next_owned_subentity`), not
+through LibreDWG's `dwg_object_polyline_{2,3}d_get_points`: for every file older than
+R2004 those walk `first_vertex .. last_vertex` with a loop whose condition ends *before*
+its body sees `last_vertex`, and returned one vertex short -- a closed square came back a
+triangle, a two-vertex arc a single point. Measured on the DXFs of the corpus
+(`example_2000`, `example_2004`, `example_r13`, `example_r14`, `2000/PolyLine2D`,
+`2000/PolyLine3D`, `r12/Leader`) and the `polyline_vertices_r2000.dxf` fixture: every one
+of the 22 POLYLINEs whose VERTEX records can be counted in the file now has exactly that
+many vertices, where the accessors had given 20 of them one too few; the DWG twins give
+the same vertices as their DXFs. Files older than R13 do not fill that chain, so there
+the vertices are the VERTEX records that follow the polyline in the object list, as in
+LibreDWG's own pre-R13 branch.
+
+The VERTEX records themselves are not entities of the block that holds the polyline. The
+R13..R2000 block walk here skips them, and so does the walk for every other version, whose
+list the DXF importer fills with every object between a BLOCK and its ENDBLK: seven
+pre-R13 DXFs in the corpus reported each polyline's vertices a second time, as 62
+`Unknown` entities.
 
 ## Polyline bulges are not carried
 
