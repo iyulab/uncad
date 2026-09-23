@@ -640,8 +640,9 @@ consumer receives and this file is not in the tarball (GPLv3 §5(a)).
 **`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
 these patches is part of any submodule update.** `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
-a re-vendor that drops a patch fails by name instead of compiling upstream's code. None of
-the patches has been sent to LibreDWG yet.
+a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
+`lib/libredwg` submodule the copy is taken from has none of them: compared file by file
+(line endings aside), the two trees differ in exactly these five files.
 
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
