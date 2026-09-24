@@ -589,3 +589,47 @@ fn include_hidden_draws_more() {
     assert!(all.len() > plain.len(), "{} vs {}", all.len(), plain.len());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `uncad export <input> -o <dir>` writes a finished package (its
+/// manifest is the last file written), refuses an option it does not know
+/// rather than ignoring it, and answers `--version` like the plain command.
+#[test]
+fn export_writes_a_package_and_refuses_unknown_options() {
+    let input = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/example_2000.dwg"
+    );
+    let dir = std::env::temp_dir().join(format!("uncad-cli-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = std::process::Command::new(EXE)
+        .args(["export", input, "-o"])
+        .arg(&dir)
+        .args(["--max-levels", "0"])
+        .output()
+        .expect("the binary runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(dir.join("manifest.json").is_file());
+    assert!(dir.join("overview.png").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let bad = std::process::Command::new(EXE)
+        .args(["export", input, "--bogus"])
+        .output()
+        .expect("the binary runs");
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("unknown option '--bogus'"));
+
+    let version = std::process::Command::new(EXE)
+        .args(["export", "--version"])
+        .output()
+        .expect("the binary runs");
+    assert!(version.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&version.stdout).trim(),
+        format!("uncad {}", env!("CARGO_PKG_VERSION"))
+    );
+}

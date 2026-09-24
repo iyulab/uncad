@@ -21,6 +21,7 @@ Usage:
   uncad <input> -o <output.json>    export the parsed model (entities + tables)
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
+  uncad export <input> -o <dir>     write the LLM/VLM package (images + JSON)
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -52,6 +53,13 @@ PNG options:
 Other options:
   -h, --help                  this text
   -V, --version               print the version
+
+Export options (uncad export):
+  --profile <name>            claude (default), claude-hires, openai-patch
+  --max-levels <n>            deepest tile level (default 5; 0 = overview only)
+  --max-tiles <n>             tile budget (default 400)
+  --no-sheets                 skip the paper-layout sheet images
+  --svg                       also write drawing.svg
 
 Examples:
   uncad drawing.dwg
@@ -140,9 +148,19 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    // Both commands answer `--version`, before either parses anything.
     if argv.iter().any(|a| a == "-V" || a == "--version") {
         println!("uncad {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
+    }
+    if argv.first().map(String::as_str) == Some("export") {
+        return match run_export(&argv[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
     }
     let args = match parse_args(&argv) {
         Ok(args) => args,
@@ -383,4 +401,97 @@ fn print_summary(input: &str, db: &CadDatabase) {
     for (type_name, count) in entries {
         println!("  {type_name}: {count}");
     }
+}
+
+/// `uncad export <input> -o <dir> [options]`: the LLM/VLM package through
+/// `iron-pack-cad`. An option this subcommand does not know is an error, not
+/// something silently ignored.
+fn run_export(argv: &[String]) -> Result<(), String> {
+    let mut input: Option<&str> = None;
+    let mut output: Option<&str> = None;
+    let mut options = iron_pack_cad::ExportOptions::default();
+    let mut i = 0;
+    let value = |i: usize, flag: &str| -> Result<&str, String> {
+        argv.get(i + 1)
+            .map(String::as_str)
+            .ok_or_else(|| format!("{flag} needs a value"))
+    };
+    let count = |v: &str, flag: &str| -> Result<usize, String> {
+        v.parse::<usize>()
+            .map_err(|_| format!("{flag} takes a whole number, not '{v}'"))
+    };
+    while i < argv.len() {
+        match argv[i].as_str() {
+            "-o" | "--output" => {
+                output = Some(value(i, "-o")?);
+                i += 1;
+            }
+            "--profile" => {
+                let name = value(i, "--profile")?;
+                options.profile = iron_pack_cad::Profile::by_name(name)
+                    .ok_or_else(|| format!("unknown profile '{name}'"))?;
+                i += 1;
+            }
+            "--max-levels" => {
+                options.max_levels = count(value(i, "--max-levels")?, "--max-levels")? as u32;
+                i += 1;
+            }
+            "--max-tiles" => {
+                options.max_tiles = count(value(i, "--max-tiles")?, "--max-tiles")?;
+                i += 1;
+            }
+            "--no-sheets" => options.sheets = false,
+            "--svg" => options.svg = true,
+            "-h" | "--help" => {
+                eprintln!("{USAGE}");
+                return Ok(());
+            }
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown option '{flag}' for uncad export"));
+            }
+            positional => {
+                if let Some(first) = input {
+                    return Err(format!(
+                        "unexpected argument '{positional}': the input is already '{first}'"
+                    ));
+                }
+                input = Some(positional);
+            }
+        }
+        i += 1;
+    }
+    let input = input.ok_or("uncad export needs an input drawing")?;
+    let output = output.ok_or("uncad export needs -o <dir>")?;
+    let input = Path::new(input);
+    let (db, header) = uncad::parse_with_header(input).map_err(|e| e.to_string())?;
+    let header = pack_header(&header)?;
+    if options.source_name.is_none() {
+        options.source_name = input.file_name().map(|n| n.to_string_lossy().into_owned());
+    }
+    let report = iron_pack_cad::export_package(&db, Some(&header), Path::new(output), &options)
+        .map_err(|e| e.to_string())?;
+    for warning in &report.warnings {
+        eprintln!("warning: {warning}");
+    }
+    println!(
+        "wrote: {} ({} files; overview {}x{} px; {} frames; {} sheets)",
+        report.dir.display(),
+        report.files.len(),
+        report.overview.px[0],
+        report.overview.px[1],
+        report.frames.len(),
+        report.sheets.len()
+    );
+    Ok(())
+}
+
+/// The header as `iron-pack-cad` takes it. Both crates name a header
+/// variable after its DXF `$VARIABLE` in lower case, so one JSON round trip
+/// carries every variable the package reads; a field only this reader has
+/// (the codepage number, `$MEASUREMENT`, ...) lands in the package's
+/// `Header::other` and is written back unchanged.
+fn pack_header(header: &uncad::Header) -> Result<iron_pack_cad::Header, String> {
+    serde_json::to_value(header)
+        .and_then(serde_json::from_value)
+        .map_err(|e| format!("the drawing's header does not carry over: {e}"))
 }

@@ -19,6 +19,15 @@ This project bundles or builds against the following third-party components.
 - **Modified**: no — consumed as published.
 - **Why it is named here**: MPL-2.0 § 3.2 asks anyone distributing an Executable Form built from Covered Software to tell recipients how to obtain the Source Code Form, and it asks that whether or not the Covered Software was modified. This entry is that notice. Its § 3.3 is why the rest of this workspace keeps its own terms.
 
+## Noto Sans KR (font subset, through `iron-pack-cad`)
+
+- **Source**: https://github.com/notofonts/noto-cjk (`Sans/SubsetOTF/KR/NotoSansKR-Regular.otf`, v2.004), subset and renamed by the [`iron-pack-cad`](https://crates.io/crates/iron-pack-cad) crate, which records the exact steps
+- **Copyright**: Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'
+- **License**: SIL Open Font License, Version 1.1 (OFL-1.1); the licence text travels inside the `iron-pack-cad` crate with the font
+- **Used for**: drawing and measuring text in the images `uncad export` writes, so they are the same on every machine
+- **Modified**: yes, by that crate (a subset, renamed as the OFL asks of a Modified Version); not further by this project
+- **Why it is named here**: a font is data, not a Rust dependency, so cargo-deny never sees it. `iron-pack-cad` states it in its licence expression (`MIT AND OFL-1.1`), `deny.toml` grants the OFL to that crate alone, and the `uncad-cli` binary embeds the font bytes.
+
 ---
 
 Each published crate carries the full GPLv3 text as a `LICENSE` file in its own directory
@@ -27,7 +36,7 @@ repository root's. They are copies rather than one shared file because `cargo pa
 never reaches outside a crate directory, and GPLv3 §4 asks for the licence to be conveyed
 with the source that is conveyed — a crates.io tarball is exactly that.
 
-This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party component bundled). See [`LICENSE`](../LICENSE).
+This project is distributed under **GPLv3-or-later**, matching LibreDWG's own license (the only third-party *code* bundled; the Noto Sans KR subset above is data under the SIL Open Font License 1.1, which permits bundling in GPL software). See [`LICENSE`](../LICENSE).
 
 DWF/DWFx support (previously provided by a vendored subset of
 [dwf-viewer](https://github.com/flyfish-dev/dwf-viewer), AGPL-3.0-only) was

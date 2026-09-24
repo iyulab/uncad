@@ -67,6 +67,13 @@ exceptions = [
     { crate = "libredwg-sys", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad", allow = ["GPL-3.0-or-later"] },
     { crate = "uncad-cli", allow = ["GPL-3.0-or-later"] },
+    # Not copyleft, but not code either: iron-pack-cad bundles a font (a
+    # Noto Sans KR subset) under the SIL Open Font License, so its expression
+    # is `MIT AND OFL-1.1`. cargo-deny sees only that expression, never the
+    # font file, so the OFL is granted here for this crate alone and named in
+    # `docs/THIRD_PARTY_NOTICES.md`; a font arriving through any other crate
+    # is still refused.
+    { crate = "iron-pack-cad", allow = ["MIT", "OFL-1.1"] },
     # Weak, file-scope copyleft, consumed unmodified and only by this
     # workspace's tests; where its source can be obtained is recorded in
     # `docs/THIRD_PARTY_NOTICES.md`. Granted to this crate by name: a second

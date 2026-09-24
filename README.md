@@ -47,6 +47,7 @@ cargo run -p uncad-cli -- drawing.dwg -o drawing.png --fit 4000  # the longer si
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim   # keep outlying coordinates
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document
+cargo run -p uncad-cli -- export drawing.dwg -o pkg/             # images + JSON an LLM or a vision model reads
 ```
 
 ## Scope
