@@ -47,17 +47,17 @@ const LOCAL_PATCH_MARKER: &[u8] = b"uncad local patch";
 
 // The local patches the vendored copy carries, as (path under
 // vendor/libredwg, times LOCAL_PATCH_MARKER occurs in that file). NOTICE.md
-// lists the same six changes and docs/CAVEATS.md, "Local patches to the
+// lists the same eight changes and docs/CAVEATS.md, "Local patches to the
 // vendored LibreDWG", says why each exists. scripts/sync-libredwg-vendor.sh
 // deletes and recopies the whole directory, so a re-vendor silently drops
 // every one of them; main() compares the tree against this table so that it
 // cannot.
 const LOCAL_PATCHES: &[(&str, usize)] = &[
     ("src/common.c", 3),
-    ("src/common_entity_data.spec", 2),
+    ("src/common_entity_data.spec", 3),
     ("src/dwg.c", 5),
     ("src/dynapi.c", 1),
-    ("src/in_dxf.c", 9),
+    ("src/in_dxf.c", 10),
 ];
 
 fn main() {
@@ -251,6 +251,7 @@ fn main() {
         .allowlist_function("uncad_dwg_version")
         .allowlist_function("uncad_dwg_from_version")
         .allowlist_function("uncad_dwg_from_dxf")
+        .allowlist_function("uncad_dwg_ltype_continuous")
         .allowlist_function("uncad_dwg_numheader_vars")
         .allowlist_function("uncad_dwg_template_read")
         // Version enum -> "r2004"-style name, for the parsed header.

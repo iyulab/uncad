@@ -376,8 +376,11 @@
     {
       FIELD_B (isbylayerlt, 0);
 #ifdef IS_DECODER
-      if (FIELD_VALUE (isbylayerlt))
-        FIELD_VALUE (ltype_flags) = FIELD_VALUE (isbylayerlt) ? 0 : 3;
+      /* uncad local patch (see docs/CAVEATS.md, "Local patches to the
+         vendored LibreDWG"): an R13/R14 entity that is not BYLAYER names its
+         linetype by handle (3). Upstream set the flags only when the bit
+         was set, so every other entity read as BYLAYER. */
+      FIELD_VALUE (ltype_flags) = FIELD_VALUE (isbylayerlt) ? 0 : 3;
 #endif
     }
   SINCE (R_2004a) //ODA bug

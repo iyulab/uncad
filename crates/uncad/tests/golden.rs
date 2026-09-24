@@ -16,11 +16,11 @@
 
 use std::fs;
 use std::path::PathBuf;
-use uncad::model::Ref;
+use uncad::model::{EntityLinetype, Ref};
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 15] = [
+const CASES: [(&str, &[u8], &str); 16] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -96,6 +96,11 @@ const CASES: [(&str, &[u8], &str); 15] = [
         include_bytes!("golden/g17.dxf"),
         include_str!("golden/g17.expected.json"),
     ),
+    (
+        "g18",
+        include_bytes!("golden/g18.dxf"),
+        include_str!("golden/g18.expected.json"),
+    ),
 ];
 
 /// Removes its file on drop, so a failing assertion leaves nothing behind.
@@ -125,9 +130,10 @@ impl Drop for Fixture {
 /// so nothing downstream of that importer can recover it. This reader
 /// reports those as absent.
 ///
-/// Two cases carry one: G10's INSERT names a block the file never defines,
-/// and G5's last dimension names a style it never declares. The same cause
-/// in two places, which is why the deviation is written once over both.
+/// Three cases carry one: G10's INSERT names a block the file never defines,
+/// G5's last dimension names a style it never declares, and G18's last line
+/// a linetype it never declares. The same cause in three places, which is
+/// why the deviation is written once over all of them.
 /// It is applied to the expectation rather than by weakening the
 /// comparison, so every other value in those cases stays pinned exactly.
 ///
@@ -192,6 +198,11 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
     }
 
     fn lower(entity: &mut Entity) {
+        if let EntityLinetype::Named(linetype @ Ref::Unresolved(_)) =
+            &mut entity.common_mut().linetype
+        {
+            *linetype = Ref::Absent;
+        }
         let text_style = match entity {
             Entity::Text(text) => Some(&mut text.style_name),
             Entity::Attrib(attrib) => Some(&mut attrib.style_name),
@@ -298,6 +309,14 @@ fn the_dxf_importer_still_drops_an_undeclared_name() {
         undeclared,
         &Ref::Absent,
         "the importer kept the name of an undeclared style -- remove the known deviation"
+    );
+
+    let fixture = Fixture::write("golden-g18-deviation.dxf", include_bytes!("golden/g18.dxf"));
+    let db = uncad::parse(&fixture.0).expect("g18 should parse");
+    assert_eq!(
+        db.entities[3].common().linetype,
+        EntityLinetype::Named(Ref::Absent),
+        "the importer kept the name of an undeclared linetype -- remove the known deviation"
     );
 
     let fixture = Fixture::write("golden-g14-deviation.dxf", include_bytes!("golden/g14.dxf"));

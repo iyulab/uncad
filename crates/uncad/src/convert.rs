@@ -15,6 +15,7 @@ use crate::dynapi::{
     get_point3d_array, is_from_dxf, is_pre_r13, is_r2000_or_later, is_r2010_or_later,
     is_r2013_or_later, RawSegmentWidth, SplineControlPoint,
 };
+use crate::table_convert::LINEWEIGHTS;
 use crate::text::TextDecoder;
 use std::ffi::CStr;
 use uncad_model::model::{
@@ -28,7 +29,7 @@ use uncad_model::model::{
     WipeoutEntity,
 };
 use uncad_model::model::{
-    AttributeFlags, HorizontalJustification, Point2D, Point3D, PolylineVertex,
+    AttributeFlags, EntityLinetype, HorizontalJustification, Point2D, Point3D, PolylineVertex,
     VerticalJustification,
 };
 
@@ -1053,6 +1054,10 @@ unsafe fn convert_entity(
         true_color,
         // Bit 1 of the common `invisible` word (DXF 60).
         invisible: get_common_field::<u16>(entity_ptr, "invisible").is_some_and(|v| v & 1 != 0),
+        linetype: entity_linetype(dwg, text, entity_ptr),
+        linetype_scale: get_common_field::<f64>(entity_ptr, "ltype_scale").unwrap_or(1.0),
+        lineweight: entity_lineweight(dwg, entity_ptr),
+        transparency: entity_transparency(dwg, entity_ptr),
     };
 
     Some(match fixedtype {
@@ -2231,6 +2236,74 @@ const COLOR_FLAG_COLOR_HANDLE: u16 = 0x40;
 
 /// Reads the common `color` (`Dwg_Color`) field and splits it into
 /// `(color_index, true_color)` per [`EntityCommon`].
+/// An entity's linetype from its common `ltype_flags` (R2000+; the decoder
+/// derives them for R13/R14 from the by-layer bit, 0 or 3): 0 BYLAYER, 1 BYBLOCK,
+/// 2 the CONTINUOUS linetype -- which the entity does not reference itself,
+/// so its name is the one the header's continuous handle resolves to -- and
+/// 3 the linetype the entity's own handle names.
+fn entity_linetype(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    entity_ptr: *mut std::ffi::c_void,
+) -> EntityLinetype {
+    let handle = match get_common_field::<u8>(entity_ptr, "ltype_flags") {
+        Some(0) | None => return EntityLinetype::ByLayer,
+        Some(1) => return EntityLinetype::ByBlock,
+        // SAFETY: the shim reads one header field of the live Dwg_Data.
+        Some(2) => Some(unsafe { libredwg_sys::uncad_dwg_ltype_continuous(dwg) }),
+        Some(_) => get_common_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "ltype"),
+    };
+    // The LTYPE table has records named BYLAYER and BYBLOCK, which R13 and
+    // R14 point at by handle where later releases use the flags.
+    match reference(dwg, text, handle, c"LTYPE", |handle_ptr| {
+        text.handle_name(dwg, handle_ptr)
+    }) {
+        Ref::Resolved(name) if name.eq_ignore_ascii_case("BYLAYER") => EntityLinetype::ByLayer,
+        Ref::Resolved(name) if name.eq_ignore_ascii_case("BYBLOCK") => EntityLinetype::ByBlock,
+        other => EntityLinetype::Named(other),
+    }
+}
+
+/// An entity's lineweight (DXF 370) from the library's `linewt` code: 0 to
+/// 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. `None`
+/// for a drawing older than R2000, which has no lineweights, and for the
+/// codes the format leaves unused.
+fn entity_lineweight(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Option<i16> {
+    if !since(dwg, libredwg_sys::DWG_VERSION_TYPE_R_2000b) {
+        return None;
+    }
+    match get_common_field::<u8>(entity_ptr, "linewt")? {
+        29 => Some(-1),
+        30 => Some(-2),
+        31 => Some(-3),
+        code => LINEWEIGHTS.get(usize::from(code)).copied(),
+    }
+}
+
+/// An entity's transparency (DXF 440) as stored -- the same 32-bit value in
+/// a DWG and a DXF -- or `None` for a drawing older than R2004, which has
+/// none.
+fn entity_transparency(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Option<u32> {
+    if !since(dwg, libredwg_sys::DWG_VERSION_TYPE_R_2004a) {
+        return None;
+    }
+    let color = get_common_field::<libredwg_sys::Dwg_Color>(entity_ptr, "color")?;
+    Some(color.alpha_raw)
+}
+
+/// Whether the drawing was read from `version` or later.
+#[allow(clippy::unnecessary_cast)] // the enum's width differs by target
+fn since(dwg: *mut libredwg_sys::Dwg_Data, version: libredwg_sys::DWG_VERSION_TYPE) -> bool {
+    // SAFETY: the shim reads one header field of a live Dwg_Data.
+    (unsafe { libredwg_sys::uncad_dwg_from_version(dwg) }) >= version as i32
+}
+
 fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
     let Some(color) = get_common_field::<libredwg_sys::Dwg_Color>(entity_ptr, "color") else {
         return (256, None); // no color field at all -- BYLAYER default

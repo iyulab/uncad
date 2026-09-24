@@ -207,6 +207,12 @@ uncad_dwg_from_dxf (const Dwg_Data *dwg)
   return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
 }
 
+Dwg_Object_Ref *
+uncad_dwg_ltype_continuous (const Dwg_Data *dwg)
+{
+  return dwg ? dwg->header_vars.LTYPE_CONTINUOUS : NULL;
+}
+
 uint16_t
 uncad_dwg_numheader_vars (const Dwg_Data *dwg)
 {

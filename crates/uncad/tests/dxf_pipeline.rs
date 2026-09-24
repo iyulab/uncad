@@ -390,6 +390,24 @@ fn the_same_drawing_reads_the_same_whatever_release_it_is_stamped() {
         let (db, header) = uncad::parse_with_header(stamped.path())
             .unwrap_or_else(|e| panic!("the {acadver} stamp must be read: {e}"));
         assert_eq!(header.acadver.as_deref(), Some(acadver));
-        assert_eq!(db, reference, "the {acadver} stamp read differently");
+        // The one thing the stamp itself decides: from R2004 a release has
+        // transparency, so an entity that states none is BYLAYER (0) there
+        // and unstated before it.
+        let mut expected = reference.clone();
+        if acadver >= "AC1018" {
+            fn bylayer(e: &mut uncad::Entity) {
+                e.common_mut().transparency = Some(0);
+                if let uncad::Entity::Insert(insert) = e {
+                    for a in &mut insert.attribs {
+                        a.common.transparency = Some(0);
+                    }
+                }
+            }
+            expected.entities.iter_mut().for_each(bylayer);
+            for block in expected.tables.block_records.values_mut() {
+                block.entities.iter_mut().for_each(bylayer);
+            }
+        }
+        assert_eq!(db, expected, "the {acadver} stamp read differently");
     }
 }

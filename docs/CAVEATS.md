@@ -373,12 +373,14 @@ the model still says which it was.
 **A known deviation, in DXF only.** The three states are about what the *file* points with,
 and a DXF entity points at a table entry by name -- an INSERT at its block (group 2), a
 dimension at its style (group 3) -- not by handle. So naming an entry the file never declares
-is a reference that exists and answers to nothing: unresolved, carrying that name. This crate
+is a reference that exists and answers to nothing: unresolved, carrying that name. (An entity's
+linetype, group 6, is the same kind of reference.) This crate
 reports those as *absent* instead, and cannot do better: the vendored library's DXF importer
 looks each name up in its table and, when the lookup fails, only warns -- the name it read is
 never stored on the entity, so nothing downstream of that importer can recover it.
-`tests/golden.rs` applies one documented deviation over both cases the golden set carries (an
-undefined block in G10, an undeclared style in G5), and a test asserts the deviation is still
+`tests/golden.rs` applies one documented deviation over the cases the golden set carries (an
+undefined block in G10, an undeclared style in G5, an undeclared linetype in G18), and a test
+asserts the deviation is still
 needed, so the day a name survives the read the suite says so. DWG files are unaffected: there
 a reference is a handle, and a handle that answers to nothing is already reported unresolved.
 
@@ -846,7 +848,7 @@ extract the same wireframe for every solid.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries six local patches, in five files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries eight local patches, in five files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -935,6 +937,28 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   hatches, one with a rational spline edge ending its path, one with a second path after
   it; without the patch, zero weights and a fit point and tangents where the file states
   none) are the regressions.
+- **`src/in_dxf.c`**, an entity's transparency (DXF 440) -- the value is the one a DWG
+  stores (`common_entity_data.spec`: the method in the high byte, the alpha in the low one),
+  but the importer took the alpha from the high byte, the method from the value shifted by 8,
+  and never set `alpha_raw`, the field a DWG's transparency is read from. Every
+  transparency a DXF stated read as BYLAYER. The patch stores the value in `alpha_raw` and
+  splits it the way the DWG decoder does. `tests/entity_style.rs` is the regression: a
+  stated `0x020000CC` reads as that, where it was 0 without the patch.
+- **`src/common_entity_data.spec`**, an R13/R14 entity's linetype -- those releases store
+  one bit, "BYLAYER", and otherwise a handle to the LTYPE record (which may be the BYBLOCK
+  record). The decoder derived the later releases' linetype flags from the bit only when
+  the bit was set, so an entity that was not BYLAYER kept flags 0 and read as BYLAYER too.
+  The patch sets the flags to "by handle" (3) when the bit is clear. Measured against the
+  corpus's DXF twins: 67 LINEs of `example_r13` that the DXF says are BYBLOCK, and its ARCs
+  and `r14/Leader`'s LEADER with a named linetype, all read BYLAYER without the patch.
+
+**An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
+an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some
+corpus drawings (R2013, R2018) store 28, which the format's table leaves reserved; their DXF
+twins, written by the same application, state no lineweight there, which the format reads as
+BYLAYER. That is one application's behaviour observed, not a stated rule, so this crate
+reports such an entity's lineweight as `None` -- "not stated in a way this reader can read"
+-- rather than BYLAYER.
 
 ## No DWG/DXF writing
 

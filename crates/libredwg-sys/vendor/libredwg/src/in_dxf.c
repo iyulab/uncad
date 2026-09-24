@@ -13147,10 +13147,18 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                       else if (pair->code == 440)
                         {
                           color.flag |= 0x20;
-                          color.alpha = (pair->value.l & 0xFF000000) >> 24;
-                          color.alpha_type = pair->value.u >> 8;
-                          if (color.alpha && !color.alpha_type)
-                            color.alpha_type = 3;
+                          /* --- uncad local patch (see docs/CAVEATS.md,
+                             "Local patches to the vendored LibreDWG"): the
+                             value is the one a DWG stores (common_entity_data
+                             .spec): the method in the high byte, the alpha in
+                             the low one. Upstream took the alpha from the high
+                             byte, the method from the value shifted by 8, and
+                             left alpha_raw at 0, so every transparency a DXF
+                             stated read as BYLAYER. --- end uncad local
+                             patch --- */
+                          color.alpha_raw = pair->value.u;
+                          color.alpha_type = pair->value.u >> 24;
+                          color.alpha = pair->value.u & 0xFF;
                           LOG_TRACE ("COMMON.%s.alpha = %08X [%s %d]\n",
                                      f->name, pair->value.u, "CMC",
                                      pair->code);

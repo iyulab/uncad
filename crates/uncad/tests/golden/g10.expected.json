@@ -16,7 +16,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 0.0,
@@ -45,7 +51,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "block_name": {
         "type": "UNRESOLVED",
@@ -106,7 +118,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 0.0,
@@ -135,7 +153,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "block_name": {
               "type": "UNRESOLVED",

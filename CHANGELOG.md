@@ -8,6 +8,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Every entity carries its linetype (BYLAYER, BYBLOCK or a named one), linetype scale,
+  lineweight and transparency, from DWG and DXF alike. A lineweight is `None` in a drawing
+  older than R2000 and a transparency in one older than R2004, which cannot state them. From
+  a DXF, a linetype the file never declares arrives absent rather than unresolved, as a block
+  or a style does (see `docs/CAVEATS.md`); a stated transparency is read through a local
+  patch to the vendored LibreDWG.
 - `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
   `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
   PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,

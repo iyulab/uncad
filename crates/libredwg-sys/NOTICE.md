@@ -54,6 +54,13 @@ only changes, and cite this list as "The two changes"; it is this one.
    spline edge has no fit data, the 97 after one is taken as the path's count
    of boundary objects, not as a fit-point count that made up a fit point and
    tangents of 0.
+7. **`vendor/libredwg/src/in_dxf.c`**, 2026-09-24 — an entity's transparency
+   (DXF 440) is stored in `alpha_raw` and split into method and alpha as the
+   DWG decoder splits it; upstream never set `alpha_raw` and read the two
+   bytes the wrong way round, so every stated transparency read as BYLAYER.
+8. **`vendor/libredwg/src/common_entity_data.spec`**, 2026-09-24 — an R13/R14
+   entity whose "BYLAYER" bit is clear gets linetype flags 3 (by handle);
+   upstream set the flags only when the bit was set, so it read as BYLAYER.
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or

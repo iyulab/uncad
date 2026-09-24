@@ -77,6 +77,13 @@ int uncad_dwg_from_version(const Dwg_Data *dwg);
  */
 int uncad_dwg_from_dxf(const Dwg_Data *dwg);
 
+/* The handle of the CONTINUOUS linetype the header names
+ * (`header_vars.LTYPE_CONTINUOUS`): what an entity whose linetype flags
+ * say "continuous" (2) uses, since such an entity carries no handle of its
+ * own. NULL when the header names none, or for a NULL `dwg`.
+ */
+Dwg_Object_Ref *uncad_dwg_ltype_continuous(const Dwg_Data *dwg);
+
 /* How many header variables a pre-R13 DWG's file header says its header
  * section holds (`dwg->header.numheader_vars`: 74, 83, ... 205 across the
  * releases), which decides where LibreDWG's pre-R13 header layout stops

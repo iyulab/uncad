@@ -16,7 +16,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "vertices": [
         {
@@ -81,7 +87,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 102.0,
@@ -121,7 +133,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 130.0,
@@ -161,7 +179,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 102.0,
@@ -201,7 +225,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 130.0,
@@ -241,7 +271,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 102.0,
@@ -281,7 +317,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 130.0,
@@ -321,7 +363,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "center": {
         "x": -170.0,
@@ -351,7 +399,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "center": {
         "x": -110.0,
@@ -383,7 +437,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "vertices": [
         {
@@ -439,7 +499,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": 128.8,
@@ -482,7 +548,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "block_name": {
         "type": "RESOLVED",
@@ -522,7 +594,13 @@
         },
         "color_index": 256,
         "true_color": null,
-        "invisible": false
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
       },
       "start_point": {
         "x": -170.0,
@@ -596,7 +674,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "vertices": [
               {
@@ -661,7 +745,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 102.0,
@@ -701,7 +791,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 130.0,
@@ -741,7 +837,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 102.0,
@@ -781,7 +883,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 130.0,
@@ -821,7 +929,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 102.0,
@@ -861,7 +975,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 130.0,
@@ -901,7 +1021,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "center": {
               "x": -170.0,
@@ -931,7 +1057,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "center": {
               "x": -110.0,
@@ -963,7 +1095,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "vertices": [
               {
@@ -1019,7 +1157,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 128.8,
@@ -1062,7 +1206,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "block_name": {
               "type": "RESOLVED",
@@ -1102,7 +1252,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": -170.0,
@@ -1151,7 +1307,13 @@
               },
               "color_index": 256,
               "true_color": null,
-              "invisible": false
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
             },
             "start_point": {
               "x": 0.0,
