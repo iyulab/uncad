@@ -21,6 +21,10 @@ Notable changes to this project are recorded here. The format follows
   boundary in the entity's local space as a WIPEOUT's is, and the image definition it names.
   The definitions (IMAGEDEF: file path, size, pixel size, units) are a new table keyed by
   handle. The clip-outside flag is `None` before R2010, which has no such flag.
+- SVG/PNG output draws an IMAGE as a dashed outline -- its clip boundary when clipping is
+  on, else the whole image -- instead of listing it as unsupported; the raster file is not
+  part of the drawing. `export` gives each image a geometry record with its frame, size in
+  pixels, clipping state and the file path its definition names.
 - A dimension style carries where an arc-length dimension's arc symbol goes
   (`DIMARCSYM`: before the text, above it, or not shown), from a DXF from R2000 on and
   a DWG from R2007 on -- the binary format stores the variable only from R2007.
