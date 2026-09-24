@@ -1429,6 +1429,16 @@ unsafe fn convert_entity(
             } else {
                 Vec::new()
             };
+            // The fit-point form stores both end tangents, the control-point
+            // form none. A tangent the curve was not given is stored as the
+            // zero vector -- which is no direction at all -- and the DXF of
+            // the same drawing leaves the group out: not stated.
+            let tangent = |field: &str| {
+                (!by_control_points)
+                    .then(|| get_point3d(entity_ptr, "SPLINE", field))
+                    .flatten()
+                    .filter(|v| (v.x, v.y, v.z) != (0.0, 0.0, 0.0))
+            };
             Entity::Spline(SplineEntity {
                 common,
                 degree,
@@ -1438,6 +1448,8 @@ unsafe fn convert_entity(
                 weights,
                 fit_points,
                 control_points: control.into_iter().map(Into::into).collect(),
+                start_tangent: tangent("beg_tan_vec"),
+                end_tangent: tangent("end_tan_vec"),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MTEXT => {

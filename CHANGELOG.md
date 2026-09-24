@@ -17,6 +17,8 @@ Notable changes to this project are recorded here. The format follows
 - A layout carries its PSLTSCALE and LIMCHECK flags, the extents stored for its space, and
   the VIEWPORT a sheet last had active (a model layout's is a table record, not an entity,
   and is absent).
+- A SPLINE defined by fit points carries the end tangents it states. The record stores an
+  unspecified tangent as the zero vector, which is no direction, and it reads as not stated.
 - `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
   `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
   PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,
