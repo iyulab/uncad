@@ -19,6 +19,8 @@ Notable changes to this project are recorded here. The format follows
   and is absent).
 - A SPLINE defined by fit points carries the end tangents it states. The record stores an
   unspecified tangent as the zero vector, which is no direction, and it reads as not stated.
+- A polyface mesh counts the edges it cannot draw -- an edge to a vertex index past the
+  mesh's vertices -- in `skipped_edges`, where it used to leave them out silently.
 - `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
   `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
   PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,

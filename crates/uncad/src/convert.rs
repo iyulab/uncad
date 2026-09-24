@@ -638,8 +638,10 @@ fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
 /// and such a polyface found no positions at all.
 ///
 /// Face records may be interleaved with vertex records, so indices are only
-/// resolved once the whole chain has been walked. Faces referencing an
-/// out-of-range or all-zero index list are skipped.
+/// resolved once the whole chain has been walked. A face with fewer than two
+/// corners has no edge; an edge to an index past the positions cannot be
+/// drawn and is counted in the second value, as the model's
+/// `skipped_edges` says.
 ///
 /// # Safety
 /// `obj` must be a valid, non-null `POLYLINE_PFACE` object of `dwg`.
@@ -647,7 +649,7 @@ unsafe fn polyline_pface_wireframe(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
     obj: *mut libredwg_sys::Dwg_Object,
-) -> Vec<[Point3D; 2]> {
+) -> (Vec<[Point3D; 2]>, usize) {
     let mut positions = Vec::new();
     let mut faces: Vec<[i16; 4]> = Vec::new();
 
@@ -676,6 +678,7 @@ unsafe fn polyline_pface_wireframe(
     }
 
     let mut edges = Vec::new();
+    let mut skipped = 0;
     for face in &faces {
         let idxs: Vec<usize> = face
             .iter()
@@ -689,12 +692,13 @@ unsafe fn polyline_pface_wireframe(
         }
         for w in 0..idxs.len() {
             let (a, b) = (idxs[w], idxs[(w + 1) % idxs.len()]);
-            if let (Some(&pa), Some(&pb)) = (positions.get(a), positions.get(b)) {
-                edges.push([pa, pb]);
+            match (positions.get(a), positions.get(b)) {
+                (Some(&pa), Some(&pb)) => edges.push([pa, pb]),
+                _ => skipped += 1,
             }
         }
     }
-    edges
+    (edges, skipped)
 }
 
 /// Resolves a POLYLINE_MESH ("polygon mesh") into the wireframe of its grid,
@@ -1789,12 +1793,12 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_PFACE => {
             // SAFETY: obj is a valid, non-null POLYLINE_PFACE object of dwg
             // (matching fixedtype); the helper only walks its vertex records.
-            let wireframe_edges = unsafe { polyline_pface_wireframe(dwg, text, obj) };
+            let (wireframe_edges, skipped_edges) =
+                unsafe { polyline_pface_wireframe(dwg, text, obj) };
             Entity::PolylinePFace(Solid3DEntity {
                 common,
                 wireframe_edges,
-                // A polyface mesh has no ACIS data to skip edges from.
-                skipped_edges: 0,
+                skipped_edges,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_MESH => {
