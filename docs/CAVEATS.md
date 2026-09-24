@@ -6,7 +6,8 @@
 TRACE, RAY, XLINE, INSERT (including recursive block-reference rendering), ATTRIB, ATTDEF,
 VIEWPORT, 3DFACE, SPLINE, MTEXT, POLYLINE_3D, POLYLINE_2D, DIMENSION, HATCH, 3DSOLID,
 LEADER, MULTILEADER, MLINE, REGION, POLYLINE_PFACE, POLYLINE_MESH, TOLERANCE, ACAD_TABLE,
-WIPEOUT and LIGHT. Details worth knowing:
+WIPEOUT, IMAGE (drawn as its outline -- the raster file is not part of the drawing) and
+LIGHT. Details worth knowing:
 
 - **DIMENSION** folds all 7 subtypes (ALIGNED, ANG2LN, ANG3PT, DIAMETER, LINEAR, ORDINATE,
   ARC_DIMENSION) into one type. They share the `DIMENSION_COMMON` layout, including the
@@ -117,7 +118,10 @@ points at is drawn through the same path as INSERT/DIMENSION -- reusing geometry
 already computed instead of reconstructing cell content. Structurally that makes it about
 as trustworthy as REGION. Note that dynapi's field-table key is `"TABLE"`, not the real
 DXF name `"ACAD_TABLE"` (the same class of name mismatch as REGION/3DSOLID -- see the
-`DWG_TYPE_TABLE` case in `convert.rs`).
+`DWG_TYPE_TABLE` case in `convert.rs`). **In a DWG, a table arrives as `UNKNOWN` and is
+not drawn**: the vendored LibreDWG decodes TABLE only in a debugging build (`src/classes.inc`
+lists it as a debugging class, noting that R2010+ tables need subclassing). Its cached
+block (`*T...`) is still in the block table. A table in a DXF is read.
 
 **WIPEOUT** is the one type here carrying risk *beyond* "not verified against a real
 file": its `pt0 + u*uvec + v*vvec` pixel-space-to-world transform comes from general
