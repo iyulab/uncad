@@ -21,11 +21,16 @@
 # next build really does recompile from the refreshed copy (no `cargo
 # clean` needed).
 #
-# WARNING: the vendored copy carries local patches (grep it for
-# "uncad local patch"; they are listed in docs/CAVEATS.md under "Local
-# patches to the vendored LibreDWG"). This script deletes and recopies the
-# whole directory, so re-apply or re-check them after every run: build.rs
-# counts the markers per file and fails the build until they are back.
+# The vendored copy carries local patches (each marked "uncad local patch";
+# docs/CAVEATS.md, "Local patches to the vendored LibreDWG"), kept as files in
+# crates/libredwg-sys/patches/. This script deletes and recopies the whole
+# directory and then re-applies them (scripts/libredwg-patches.sh apply); a
+# patch that no longer applies to the new upstream stops the script. build.rs
+# also counts the markers per file and fails the build until they are back.
+#
+# Files are copied from the submodule's object store (git show HEAD:<path>),
+# not its working tree, so the copy is upstream's bytes whatever line-ending
+# conversion that checkout uses.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -93,12 +98,15 @@ done
 rm -rf "$VENDOR_DIR"
 mkdir -p "$VENDOR_DIR"
 for f in "${!VISITED[@]}"; do
-    rel="${f#"$REPO_ROOT"/lib/libredwg/}"
+    # Normalized: an include can reach a file through `..`
+    # (src/../programs/my_stat.h), which a filesystem resolves and a git
+    # path does not.
+    rel="$(realpath -m --relative-to="$REPO_ROOT/lib/libredwg" "$f")"
     dest="$VENDOR_DIR/$rel"
     mkdir -p "$(dirname "$dest")"
-    cp "$f" "$dest"
+    git -C "$REPO_ROOT/lib/libredwg" show "HEAD:$rel" >"$dest"
 done
-cp "$REPO_ROOT/lib/libredwg/COPYING" "$VENDOR_DIR/COPYING"
+git -C "$REPO_ROOT/lib/libredwg" show "HEAD:COPYING" >"$VENDOR_DIR/COPYING"
 
 # Record which upstream commit this copy is, so a reader (and a check
 # that the submodule and the copy have not drifted apart) can tell.
@@ -112,5 +120,5 @@ cp "$REPO_ROOT/lib/libredwg/COPYING" "$VENDOR_DIR/COPYING"
 } > "$VENDOR_DIR/../UPSTREAM"
 
 echo "Synced ${#VISITED[@]} files into $VENDOR_DIR"
+"$REPO_ROOT/scripts/libredwg-patches.sh" apply
 echo "Next: cargo build -p libredwg-sys, and if LIBREDWG_SOURCES in build.rs needs updating, update it now."
-echo "Also: re-apply the local patches listed in docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\" (grep for 'uncad local patch')."

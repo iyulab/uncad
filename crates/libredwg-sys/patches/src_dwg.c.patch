@@ -1,0 +1,110 @@
+--- a/src/dwg.c
++++ b/src/dwg.c
+@@ -2333,6 +2333,74 @@
+   return NULL;
+ }
+ 
++/* --- uncad local patch, 2026-09-23 (NOTICE.md at the root of this crate,
++   "The two changes"; the full reasoning is in the project's docs/CAVEATS.md,
++   "Local patches to the vendored LibreDWG", which is not in the published
++   tarball) ---------------------------------------------------------------
++
++   LibreDWG stores a T (text) field as UTF-16 whenever the *writer* side of
++   dynapi decided to: dynapi_set_helper() widens as soon as
++   dwg->header.version >= R_2007, with no look at where the data came from.
++   The *reader* side (dwg_dynapi_entity_utf8text, dwg_dynapi_handle_name)
++   converts back only under IS_FROM_TU_DWG(), which additionally demands
++   !(dwg->opts & DWG_OPTS_IN) -- i.e. it is false for DXF and JSON input.
++   bits.h admits the gap in its own comment on IS_FROM_TU:
++   "only if from r2007+ DWG. not JSON, DXF (FIXME TABLE.name)".
++
++   So for an R2007+ DXF a table record's "name" came out as the raw UTF-16
++   buffer and was read as an 8-bit C string, which stops at the first NUL:
++   "Tavolo 3" compares as "T". Every name->handle lookup the DXF reader
++   makes (in_dxf.c resolves the group 8 layer, the group 2 block name, the
++   linetype, text style, dimstyle, UCS, VPORT and APPID names through
++   dwg_find_tablehandle and dwg_find_dicthandle_objname below) therefore
++   failed for any name longer than one character, leaving entity->layer and
++   INSERT->block_header NULL.
++
++   UNCAD_IS_TU_DWG() is the predicate that storage actually follows, and
++   matches the rule the uncad crate reads these strings by
++   (crates/uncad/src/text.rs). uncad_record_name_utf8() is the single place that
++   reads a record's "name" through dynapi and decodes it when needed.
++
++   Scope: *only* fields dynapi itself wrote. The strings in_dxf.c stores
++   through dwg_add_u8_input() -- DICTIONARY.texts, LTYPE.dashes[].text --
++   follow IS_FROM_TU_DWG and really are 8-bit for DXF input, so
++   dwg_find_dictionary() and dwg_find_dicthandle() below keep the original
++   predicate; widening it there would make bit_convert_TU/bit_eq_TU read
++   past an 8-bit allocation. The one table record in_dxf.c creates with
++   dwg_add_u8_input, the initial *Model_Space BLOCK_HEADER, is re-encoded to
++   TU by in_dxf.c itself as soon as $ACADVER turns out to be R2007+. */
++#define UNCAD_IS_TU_DWG(dwg)                                                  \
++  (IS_FROM_TU_DWG (dwg)                                                       \
++   || (((dwg)->opts & DWG_OPTS_IN) && (dwg)->header.version >= R_2007))
++
++/* dwg_dynapi_entity_utf8text (_o, objname, "name", ...) plus the decode
++   IS_FROM_TU_DWG misses. On success *isnew tells the caller whether the
++   returned buffer must be freed, exactly as dynapi's own does. */
++static bool
++uncad_record_name_utf8 (const Dwg_Data *restrict dwg, void *restrict _o,
++                        const char *restrict objname, char **restrict out,
++                        int *restrict isnew)
++{
++  Dwg_DYNAPI_field fp;
++  char *utf8;
++
++  *isnew = 0;
++  if (!dwg_dynapi_entity_utf8text (_o, objname, "name", out, isnew, &fp))
++    return false;
++  /* Already decoded by dynapi, a NULL name, or a fixed-length TF field
++     (which dynapi_set_helper never widens): nothing to do. */
++  if (*isnew || !*out || strEQc (fp.type, "TF") || !UNCAD_IS_TU_DWG (dwg))
++    return true;
++  utf8 = bit_convert_TU ((BITCODE_TU) (void *)*out);
++  if (utf8)
++    {
++      *out = utf8;
++      *isnew = 1;
++    }
++  return true;
++}
++/* --- end uncad local patch --------------------------------------------- */
++
+ // Searching for a named dictionary entry, name is utf8.
+ // Returning a hardpointer ref (5) to it, as stored in header_vars.
+ // Usually another dictionary.
+@@ -2466,8 +2534,8 @@
+           || !hobj->name)
+         continue;
+       _o = hobj->tio.object->tio.APPID;
+-      ok = dwg_dynapi_entity_utf8text (_o, hobj->name, "name", &hdlname,
+-                                       &isnew, NULL);
++      /* uncad local patch: was dwg_dynapi_entity_utf8text () */
++      ok = uncad_record_name_utf8 (dwg, _o, hobj->name, &hdlname, &isnew);
+       LOG_HANDLE (" %s.%s[%d] => %s.name: %s\n", obj->name, "entries", i,
+                   hobj->name, hdlname ? hdlname : "NULL");
+       if (ok && hdlname
+@@ -2782,8 +2850,8 @@
+       if (!hobj || !hobj->tio.object || !hobj->tio.object->tio.APPID)
+         continue;
+       _o = hobj->tio.object->tio.APPID;
+-      ok = dwg_dynapi_entity_utf8text (_o, hobj->name, "name", &hdlname,
+-                                       &isnew, NULL);
++      /* uncad local patch: was dwg_dynapi_entity_utf8text () */
++      ok = uncad_record_name_utf8 (dwg, _o, hobj->name, &hdlname, &isnew);
+       LOG_HANDLE (" %s.%s[%d] => %s.name: %s\n", obj->name, "entries", i,
+                   hobj->name, hdlname ? hdlname : "NULL");
+       if (ok && hdlname
+@@ -3004,8 +3072,8 @@
+               name = bo->name;
+             }
+         }
+-      ok = dwg_dynapi_entity_utf8text (_o, name, "name", &hdlname, &isnew,
+-                                       NULL);
++      /* uncad local patch: was dwg_dynapi_entity_utf8text () */
++      ok = uncad_record_name_utf8 (dwg, _o, name, &hdlname, &isnew);
+       LOG_HANDLE (" %s.%s[%d] => %s.name: %s\n", obj->name, "entries", i,
+                   hobj->name, hdlname ? hdlname : "NULL");
+       if (ok)

@@ -852,8 +852,13 @@ extract the same wireframe for every solid.
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
-**`scripts/sync-libredwg-vendor.sh` deletes and recopies that directory, so re-applying
-these patches is part of any submodule update.** `build.rs` counts the markers per file
+The patches are also kept as files, one unified diff per patched file, in
+`crates/libredwg-sys/patches/`. **`scripts/sync-libredwg-vendor.sh` deletes and recopies
+that directory and then re-applies them** (`scripts/libredwg-patches.sh apply`, with no
+fuzz: a hunk that no longer matches the new upstream stops the sync instead of landing
+nearby). A patch changed in the vendored copy itself is written back with
+`scripts/libredwg-patches.sh export`, and `scripts/libredwg-patches.sh check` fails while
+the files and the copy disagree. `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
 a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file

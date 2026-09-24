@@ -1,0 +1,127 @@
+--- a/src/in_dxf.c
++++ b/src/in_dxf.c
+@@ -3140,6 +3140,10 @@
+   int k = -1;
+   int l = -1;
+   int knots_left = 0; // spline knots pending; they precede rational weights
++  /* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
++     vendored LibreDWG"): how many of a rational spline edge's weights
++     (group 42) have been read. --- end uncad local patch --- */
++  int weights_read = 0;
+   int hdl_idx = -1;
+   bool next_330_boundary_handles = false;
+ 
+@@ -3339,6 +3343,7 @@
+           CHK_paths;
+           CHK_segs;
+           o->paths[j].segs[k].num_control_points = pair->value.l;
++          weights_read = 0; /* uncad local patch: see the 42 handler */
+           LOG_TRACE (
+               "HATCH.paths[%d].segs[%d].num_control_points = %ld [BL 96]\n", j,
+               k, pair->value.l);
+@@ -3739,10 +3744,48 @@
+           LOG_TRACE ("HATCH.paths[%d].polyline_paths[%d].bulge = %f [BD 42]\n",
+                      j, k, pair->value.d);
+         }
++      /* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
++         vendored LibreDWG") ----------------------------------------------
++
++         A rational spline edge states one weight per control point, in
++         group 42 after the control points (the DXF reference, and every
++         writer met so far). Nothing here read a 42 on an edge path, so the
++         weights stayed at the zeros they were allocated with. The 40 branch
++         above, which takes a 40 after the knots as a weight, is kept for
++         files that write them that way. */
++      else if (pair->code == 42 && !is_plpath && o->paths && j >= 0
++               && j < (int)o->num_paths && o->paths[j].segs && k >= 0
++               && k < (int)o->paths[j].num_segs_or_paths
++               && o->paths[j].segs[k].curve_type == 4
++               && o->paths[j].segs[k].is_rational)
++        {
++          if (o->paths[j].segs[k].control_points
++              && weights_read
++                     < (int)o->paths[j].segs[k].num_control_points)
++            {
++              o->paths[j].segs[k].control_points[weights_read].weight
++                  = pair->value.d;
++              LOG_TRACE ("HATCH.paths[%d].segs[%d].control_points[%d]."
++                         "weight = %f [BD 42]\n",
++                         j, k, weights_read, pair->value.d);
++              weights_read++;
++            }
++          else
++            LOG_WARN ("HATCH.paths[%d].segs[%d]: more weights than control "
++                      "points; ignored",
++                      j, k);
++        }
++      /* --- end uncad local patch ---------------------------------------- */
+       else if (pair->code == 97 && !is_plpath)
+         {
+           CHK_paths;
+-          if (k < 0 || o->paths[j].segs[k].curve_type != 4)
++          /* --- uncad local patch: fit data came with R2010. Before it a
++             spline edge has none, and the 97 after it is the path's own
++             count of boundary objects -- read as a fit-point count it made
++             up a fit point and tangents of 0 and dropped the path's
++             handles. --- end uncad local patch --- */
++          if (k < 0 || o->paths[j].segs[k].curve_type != 4
++              || dat->from_version < R_2010)
+             {
+               next_330_boundary_handles = true;
+               o->paths[j].num_boundary_handles = pair->value.l;
+@@ -10622,6 +10665,32 @@
+                           UPGRADE_ENTITY (VERTEX_2D, VERTEX_MESH)
+                         }
+                     }
++                  /* --- uncad local patch (see docs/CAVEATS.md, "Local
++                     patches to the vendored LibreDWG") ------------------
++
++                     A polygon mesh's vertices carry the subclass marker
++                     AcDbPolygonMeshVertex, which appeared nowhere in
++                     LibreDWG: the chain above knows AcDb3dPolylineVertex,
++                     AcDbPolyFaceMeshVertex and AcDbFaceRecord only. The
++                     object therefore stayed a VERTEX_2D, whose subclass list
++                     (dynapi.c) does not contain that name either, so the
++                     "Illegal subclass ... in object VERTEX_2D" check below
++                     took `goto invalid_dxf` -- DWG_ERR_INVALIDDWG, a
++                     *critical* error, which makes the whole file
++                     unreadable. One POLYLINE written by REVSURF, RULESURF,
++                     EDGESURF, ezdxf's add_polymesh() or any terrain tool
++                     cost every other entity in the DXF.
++
++                     VERTEX_MESH is what the else-branch above already
++                     upgrades a polygon mesh's vertices to, so this only
++                     adds the spelling AutoCAD actually writes. Its entry in
++                     dwg_name_subclasses[] (dynapi.c) gains the same name,
++                     so the subclass check passes afterwards. */
++                  else if (strEQc (subclass, "AcDbPolygonMeshVertex"))
++                    {
++                      UPGRADE_ENTITY (VERTEX_2D, VERTEX_MESH)
++                    }
++                  /* --- end uncad local patch ------------------------- */
+                   else if (strEQc (subclass, "AcDbFaceRecord"))
+                     {
+                       UPGRADE_ENTITY (VERTEX_2D, VERTEX_PFACE_FACE)
+@@ -13208,10 +13277,18 @@
+                       else if (pair->code == 440)
+                         {
+                           color.flag |= 0x20;
+-                          color.alpha = (pair->value.l & 0xFF000000) >> 24;
+-                          color.alpha_type = pair->value.u >> 8;
+-                          if (color.alpha && !color.alpha_type)
+-                            color.alpha_type = 3;
++                          /* --- uncad local patch (see docs/CAVEATS.md,
++                             "Local patches to the vendored LibreDWG"): the
++                             value is the one a DWG stores (common_entity_data
++                             .spec): the method in the high byte, the alpha in
++                             the low one. Upstream took the alpha from the high
++                             byte, the method from the value shifted by 8, and
++                             left alpha_raw at 0, so every transparency a DXF
++                             stated read as BYLAYER. --- end uncad local
++                             patch --- */
++                          color.alpha_raw = pair->value.u;
++                          color.alpha_type = pair->value.u >> 24;
++                          color.alpha = pair->value.u & 0xFF;
+                           LOG_TRACE ("COMMON.%s.alpha = %08X [%s %d]\n",
+                                      f->name, pair->value.u, "CMC",
+                                      pair->code);

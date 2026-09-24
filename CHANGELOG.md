@@ -16,6 +16,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- The local patches to the vendored LibreDWG are kept as files in
+  `crates/libredwg-sys/patches/`, and `scripts/sync-libredwg-vendor.sh` re-applies them
+  after a re-vendor (no fuzz); `scripts/libredwg-patches.sh` exports and checks them. The
+  sync copies from the submodule's object store, so the copy no longer depends on how that
+  checkout converts line endings.
 - IMAGE is read into its own entity rather than an unknown one: the frame as the file states
   it (insertion point, one-pixel vectors, size in pixels), the display settings, the clip
   boundary in the entity's local space as a WIPEOUT's is, and the image definition it names.

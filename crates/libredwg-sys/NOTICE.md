@@ -19,7 +19,8 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
   `uncad local patch` comment in the source saying what changed and why
   (GPLv3 §5(a)); `grep -rn "uncad local patch" vendor/libredwg/` finds every
   marker, and `build.rs` refuses to build when the markers per file differ
-  from the list it carries.
+  from the list it carries. The same changes are in `patches/`, one unified
+  diff per file against the upstream commit `vendor/UPSTREAM` names.
 
 ### The changes
 
