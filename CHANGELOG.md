@@ -19,6 +19,9 @@ Notable changes to this project are recorded here. The format follows
 - A dimension style carries where an arc-length dimension's arc symbol goes
   (`DIMARCSYM`: before the text, above it, or not shown), from a DXF from R2000 on and
   a DWG from R2007 on -- the binary format stores the variable only from R2007.
+- `export`: an arc-length dimension's record carries that style value as `arc_symbol`
+  (`null` when the style does not state it). The symbol is drawn geometry beside the
+  label, so `display` never contains it.
 - Every entity carries its linetype (BYLAYER, BYBLOCK or a named one), linetype scale,
   lineweight and transparency, from DWG and DXF alike. A lineweight is `None` in a drawing
   older than R2000 and a transparency in one older than R2004, which cannot state them. From
