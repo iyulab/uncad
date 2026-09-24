@@ -2024,6 +2024,7 @@ fn convert_hatch_edge(seg: &libredwg_sys::Dwg_HATCH_PathSeg) -> Option<HatchEdge
     Some(match seg.curve_type {
         HATCH_EDGE_LINE => HatchEdge::Line {
             start: p2(seg.first_endpoint),
+            end: p2(seg.second_endpoint),
         },
         HATCH_EDGE_ARC => HatchEdge::Arc {
             center: p2(seg.center),
