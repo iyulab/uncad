@@ -446,13 +446,6 @@ carry it -- and no length or angle is negative, so `-1` is "not stated" too. Eve
 value is carried as the file states it, radians for an angular dimension, even where it
 disagrees with the dimension's own points: whether to trust it is a consumer's judgement.
 
-**A HATCH spline edge's weights, read from a DXF.** The format writes a rational spline
-edge's weights in group 42, after its control points. The DXF importer takes them from group
-40 once the knots are read, so a DXF's weights arrive here as zeros; the edge's degree, knots,
-control points, fit points and end tangents read right, and a DWG's record carries the weights
-and reads right too (`tests/hatch_edges.rs` pins the DXF case). This ends, like the entries
-around it, when this crate's DXF reading no longer goes through this importer.
-
 **Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
 rather than carries, and the format writes a style variable only when it differs from the value
 the application starts from. This library holds a style as a struct with no "the file did not
@@ -853,7 +846,7 @@ extract the same wireframe for every solid.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries six local patches, in five files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -927,6 +920,21 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
   colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
   true colour is what the file states" for how the colour is read).
+- **`src/in_dxf.c`**, a HATCH spline edge -- two misreadings of the same edge. The
+  format writes a rational spline edge's weights in group 42, after its control points;
+  the importer had no handler for a 42 on an edge path (it takes a 40 after the knots as a
+  weight instead, which no writer met so far does), so every DXF weight arrived as 0. And
+  fit data (a 97 count, then fit points and end tangents) came with R2010: before it, the
+  97 after a spline edge is the path's own count of the objects its boundary was picked
+  from. The importer read it as a fit-point count whatever the version, so an associative
+  R2000 hatch whose path ends in a spline edge came back with a made-up fit point and end
+  tangents of (0, 0), and the path's handles were dropped. The patch reads 42 into the
+  control points' weights in order and takes the 97 as the path's before R2010.
+  `tests/hatch_edges.rs` (an R2010 edge: weights `[1, 0.5, 0.5, 1]`, zeros without the
+  patch) and the golden case G17 (`tests/golden.rs` -- an R2000 file: two associative
+  hatches, one with a rational spline edge ending its path, one with a second path after
+  it; without the patch, zero weights and a fit point and tangents where the file states
+  none) are the regressions.
 
 ## No DWG/DXF writing
 

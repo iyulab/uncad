@@ -132,13 +132,9 @@ fn a_hatch_edge_path_carries_what_the_file_states_of_each_edge() {
         control_points,
         &[p(0.0, 0.0), p(1.0, 2.0), p(3.0, 2.0), p(4.0, 0.0)]
     );
-    // The format writes a spline edge's weights in group 42 (the reference,
-    // and every writer this crate has met). The DXF importer this crate reads
-    // DXF through takes them from group 40 after the knots, so on this path
-    // they arrive as zeros; a DWG's record carries them and reads right.
-    // TODO: expect [1.0, 0.5, 0.5, 1.0] once this crate's DXF path no longer
-    // goes through that importer (see docs/CAVEATS.md).
-    assert_eq!(weights, &[0.0, 0.0, 0.0, 0.0]);
+    // Group 42, one per control point. Upstream's DXF importer read none of
+    // them; a local patch to the vendored copy does (docs/CAVEATS.md).
+    assert_eq!(weights, &[1.0, 0.5, 0.5, 1.0]);
     assert_eq!(fit_points, &[p(0.0, 0.0), p(4.0, 0.0)]);
     assert_eq!(*start_tangent, Some(p(1.0, 1.0)));
     assert_eq!(*end_tangent, Some(p(1.0, -1.0)));

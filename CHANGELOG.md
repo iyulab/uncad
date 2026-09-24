@@ -197,8 +197,12 @@ Notable changes to this project are recorded here. The format follows
 
 - A HATCH boundary edge carries what the file states of it: a straight edge its end point
   as well as its start, a spline edge its degree, rational and periodic flags, knots,
-  weights, fit points and end tangents beside its control points. From a DXF, a spline
-  edge's weights still arrive as zeros (see `docs/CAVEATS.md`).
+  weights, fit points and end tangents beside its control points.
+- From a DXF, a HATCH spline edge's weights are read (they arrived as zeros), and in a file
+  older than R2010 the count after a spline edge is taken as the path's boundary objects
+  rather than as fit points -- an associative hatch no longer gains a fit point and end
+  tangents of (0, 0). Both are local patches to the vendored LibreDWG (see
+  `docs/CAVEATS.md`).
 - A string's `\U+XXXX` and `\M+nXXXX` escapes -- how a drawing stores a character its
   codepage cannot hold -- are now turned into the character, in every string, and a DXF's
   caret notation (`^J`) into the control character: a drawing saved with the character and

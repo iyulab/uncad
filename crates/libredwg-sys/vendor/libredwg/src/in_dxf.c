@@ -3122,6 +3122,10 @@ add_HATCH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
   int k = -1;
   int l = -1;
   int knots_left = 0; // spline knots pending; they precede rational weights
+  /* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
+     vendored LibreDWG"): how many of a rational spline edge's weights
+     (group 42) have been read. --- end uncad local patch --- */
+  int weights_read = 0;
   int hdl_idx = -1;
   bool next_330_boundary_handles = false;
 
@@ -3321,6 +3325,7 @@ add_HATCH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           CHK_paths;
           CHK_segs;
           o->paths[j].segs[k].num_control_points = pair->value.l;
+          weights_read = 0; /* uncad local patch: see the 42 handler */
           LOG_TRACE (
               "HATCH.paths[%d].segs[%d].num_control_points = %ld [BL 96]\n", j,
               k, pair->value.l);
@@ -3721,10 +3726,48 @@ add_HATCH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           LOG_TRACE ("HATCH.paths[%d].polyline_paths[%d].bulge = %f [BD 42]\n",
                      j, k, pair->value.d);
         }
+      /* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
+         vendored LibreDWG") ----------------------------------------------
+
+         A rational spline edge states one weight per control point, in
+         group 42 after the control points (the DXF reference, and every
+         writer met so far). Nothing here read a 42 on an edge path, so the
+         weights stayed at the zeros they were allocated with. The 40 branch
+         above, which takes a 40 after the knots as a weight, is kept for
+         files that write them that way. */
+      else if (pair->code == 42 && !is_plpath && o->paths && j >= 0
+               && j < (int)o->num_paths && o->paths[j].segs && k >= 0
+               && k < (int)o->paths[j].num_segs_or_paths
+               && o->paths[j].segs[k].curve_type == 4
+               && o->paths[j].segs[k].is_rational)
+        {
+          if (o->paths[j].segs[k].control_points
+              && weights_read
+                     < (int)o->paths[j].segs[k].num_control_points)
+            {
+              o->paths[j].segs[k].control_points[weights_read].weight
+                  = pair->value.d;
+              LOG_TRACE ("HATCH.paths[%d].segs[%d].control_points[%d]."
+                         "weight = %f [BD 42]\n",
+                         j, k, weights_read, pair->value.d);
+              weights_read++;
+            }
+          else
+            LOG_WARN ("HATCH.paths[%d].segs[%d]: more weights than control "
+                      "points; ignored",
+                      j, k);
+        }
+      /* --- end uncad local patch ---------------------------------------- */
       else if (pair->code == 97 && !is_plpath)
         {
           CHK_paths;
-          if (k < 0 || o->paths[j].segs[k].curve_type != 4)
+          /* --- uncad local patch: fit data came with R2010. Before it a
+             spline edge has none, and the 97 after it is the path's own
+             count of boundary objects -- read as a fit-point count it made
+             up a fit point and tangents of 0 and dropped the path's
+             handles. --- end uncad local patch --- */
+          if (k < 0 || o->paths[j].segs[k].curve_type != 4
+              || dat->from_version < R_2010)
             {
               next_330_boundary_handles = true;
               o->paths[j].num_boundary_handles = pair->value.l;

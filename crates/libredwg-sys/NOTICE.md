@@ -21,7 +21,7 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
   marker, and `build.rs` refuses to build when the markers per file differ
   from the list it carries.
 
-### The five changes
+### The changes
 
 The markers in `dwg.c` and `common.c` were written when those two were the
 only changes, and cite this list as "The two changes"; it is this one.
@@ -48,6 +48,12 @@ only changes, and cite this list as "The two changes"; it is this one.
    entity colour reads its RGB before its transparency, the order LibreDWG's
    own `bit_read_ENC()` uses. With the two the other way round, an entity
    carrying both had its colour and its transparency swapped.
+6. **`vendor/libredwg/src/in_dxf.c`**, 2026-09-24 — a HATCH spline edge's
+   weights are read from group 42, where the format writes them; upstream
+   read no 42 on an edge path and left them at 0. And before R2010, where a
+   spline edge has no fit data, the 97 after one is taken as the path's count
+   of boundary objects, not as a fit-point count that made up a fit point and
+   tangents of 0.
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or
