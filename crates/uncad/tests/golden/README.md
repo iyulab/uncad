@@ -7,7 +7,7 @@ Copies of what the `uncad-model` repository's golden writer produces, one pair p
 | `<case>.dxf` | The synthetic drawing (R2000 ASCII DXF) written from that case's spec |
 | `<case>.expected.json` | The model that spec says a reader must produce from it |
 
-Cases here: `g1`, `g2`, `g5` to `g17`. `tests/golden.rs` parses
+Cases here: `g1`, `g2`, `g5` to `g18`. `tests/golden.rs` parses
 each DXF and requires the model to match exactly, apart from the known deviations it
 applies to the expectation (each with a test that fails the day it is no longer needed).
 
