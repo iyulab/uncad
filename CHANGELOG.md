@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- The vendored LibreDWG is updated to upstream commit `34f02f54` (2026-09-10). Among
+  its fixes, the code page a drawing's header states is now checked against the code
+  page tables before it indexes them: an out-of-range value read past the tables while
+  the drawing's strings were decoded. The local patches are re-applied unchanged, and
+  `crates/libredwg-sys/vendor/UPSTREAM` names the commit.
+
 ### Added
 
 - Every entity carries its linetype (BYLAYER, BYBLOCK or a named one), linetype scale,

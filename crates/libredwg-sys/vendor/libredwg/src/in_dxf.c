@@ -890,6 +890,24 @@ dxf_read_pair (Bit_Chain *dat)
       LOG_TRACE ("  dxf (%d, \"%s\")\n", (int)pair->code, pair->value.s.ptr);
       // dynapi_set_helper converts from utf-8 to unicode, not here.
       // we need to know the type of the target field, if TV or T
+      if (dat->from_version <= R_12 && pair->code == 2 && pair->value.s.ptr
+          && pair->value.s.ptr[0] == '$')
+        {
+          // AutoCAD R12 DXFs name the layout blocks $MODEL_SPACE and
+          // $PAPER_SPACE; every matcher downstream knows only the r13+
+          // spellings, so such drawings imported with an unfiled model
+          // space and every entity unreachable.
+          if (!strcasecmp (pair->value.s.ptr + 1, "MODEL_SPACE"))
+            {
+              free (pair->value.s.ptr);
+              pair->value.s.ptr = strdup ("*Model_Space");
+            }
+          else if (!strcasecmp (pair->value.s.ptr + 1, "PAPER_SPACE"))
+            {
+              free (pair->value.s.ptr);
+              pair->value.s.ptr = strdup ("*Paper_Space");
+            }
+        }
       break;
     case DWG_VT_BOOL:
       pair->value.i = dxf_read_rc (dat);
@@ -6863,6 +6881,79 @@ add_PERSUBENTMGR (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
 }
 
 static Dxf_Pair *
+add_ASSOCPERSSUBENTMANAGER (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
+                            Dxf_Pair *restrict pair)
+{
+  Dwg_Object_ASSOCPERSSUBENTMANAGER *o
+      = obj->tio.object->tio.ASSOCPERSSUBENTMANAGER;
+  Dwg_Data *dwg = obj->parent;
+
+  EXPECT_UINT_DXF ("class_version", 90, BL);
+  FIELD_BL (unknown_3, 90);
+  FIELD_BL (unknown_0, 90);
+  FIELD_BL (unknown_2, 90);
+
+  FIELD_BL (numassocsteps, 90);
+  FIELD_BL (numassocsubents, 90);
+  FIELD_BL (num_steps, 90);
+  free (o->steps);
+  o->steps = NULL;
+  if (o->num_steps > 0)
+    {
+      o->steps = (BITCODE_BL *)xcalloc (o->num_steps, sizeof (BITCODE_BL));
+      if (!o->steps)
+        {
+          o->num_steps = 0;
+          return pair;
+        }
+      for (unsigned i = 0; i < o->num_steps; i++)
+        {
+          pair = dxf_read_pair (dat);
+          if (!pair || pair->code != 90)
+            return pair;
+          o->steps[i] = pair->value.u;
+          LOG_TRACE ("%s.steps[%d] = %u [BL %d]\n", obj->name, i,
+                     pair->value.u, pair->code);
+          dxf_free_pair (pair);
+        }
+    }
+
+  FIELD_BL (num_subents, 90);
+  free (o->subents);
+  o->subents = NULL;
+  if (o->num_subents > 0)
+    {
+      o->subents = (BITCODE_BL *)xcalloc (o->num_subents, sizeof (BITCODE_BL));
+      if (!o->subents)
+        {
+          o->num_subents = 0;
+          return pair;
+        }
+      for (unsigned i = 0; i < o->num_subents; i++)
+        {
+          pair = dxf_read_pair (dat);
+          if (!pair || pair->code != 90)
+            return pair;
+          o->subents[i] = pair->value.u;
+          LOG_TRACE ("%s.subents[%d] = %u [BL %d]\n", obj->name, i,
+                     pair->value.u, pair->code);
+          dxf_free_pair (pair);
+        }
+    }
+
+  FIELD_BL (unknown_bl3, 90);
+
+  pair = dxf_read_pair (dat);
+  if (!pair || pair->code != 290)
+    return pair;
+  o->unknown_b4 = pair->value.i ? 1 : 0;
+  LOG_TRACE ("%s.unknown_b4 = %d [B %d]\n", obj->name, o->unknown_b4,
+             pair->code);
+  dxf_free_pair (pair);
+  return NULL;
+}
+
+static Dxf_Pair *
 add_ASSOCDEPENDENCY (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
 {
   Dwg_Object_ASSOCDEPENDENCY *o = obj->tio.object->tio.ASSOCDEPENDENCY;
@@ -8019,7 +8110,14 @@ add_SPLINE (Dwg_Entity_SPLINE *restrict o, Bit_Chain *restrict dat,
           return 0;
         }
       j = 0;
-      // o->scenario = 2;
+      if (!o->num_ctrl_pts && !o->num_knots)
+        {
+          // Only fit points (e.g. ezdxf output): this can only be stored
+          // as a scenario-2 (bezier) spline. Scenario 1 would encode zero
+          // knots and zero control points: an empty spline, silently lost.
+          o->scenario = 2;
+          LOG_TRACE ("=> SPLINE.scenario = 2 [BL 0] (fit points only)\n");
+        }
       o->flag |= 1024;
       LOG_TRACE ("SPLINE.num_fit_pts = %d [BS 74]\n", o->num_fit_pts);
       return 1; // found
@@ -10638,13 +10736,24 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                   goto invalid_dxf;
                 }
 
-              // with PERSUBENTMGR
+              // with PERSUBENTMGR or ASSOCPERSSUBENTMANAGER
               if (obj->fixedtype == DWG_TYPE_PERSUBENTMGR
                   && strEQc (subclass, "AcDbPersSubentManager"))
                 {
                   dxf_free_pair (pair);
                   pair = dxf_read_pair (dat);
                   pair = add_PERSUBENTMGR (obj, dat, pair); // NULL for success
+                  if (!pair)
+                    goto next_pair;
+                  else
+                    goto start_loop; /* failure */
+                }
+              else if (obj->fixedtype == DWG_TYPE_ASSOCPERSSUBENTMANAGER
+                       && strEQc (subclass, "AcDbAssocPersSubentManager"))
+                {
+                  dxf_free_pair (pair);
+                  pair = dxf_read_pair (dat);
+                  pair = add_ASSOCPERSSUBENTMANAGER (obj, dat, pair);
                   if (!pair)
                     goto next_pair;
                   else
@@ -11491,6 +11600,15 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
           else if (pair->code == 90 && obj->fixedtype == DWG_TYPE_PERSUBENTMGR)
             {
               pair = add_PERSUBENTMGR (obj, dat, pair); // NULL for success
+              if (!pair)
+                goto next_pair;
+              else
+                goto start_loop; /* failure */
+            }
+          else if (pair->code == 90
+                   && obj->fixedtype == DWG_TYPE_ASSOCPERSSUBENTMANAGER)
+            {
+              pair = add_ASSOCPERSSUBENTMANAGER (obj, dat, pair);
               if (!pair)
                 goto next_pair;
               else
@@ -13133,6 +13251,18 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                         {
                           color.rgb = pair->value.l;
                           color.method = pair->value.l >> 0x18;
+                          if (!color.method)
+                            {
+                              // a plain 420 RGB has an empty top byte; 0 is
+                              // an invalid CMC method the encoder discards,
+                              // losing the true color. It is method 0xc3.
+                              color.method = 0xc3;
+                              color.rgb |= 0xc3000000;
+                            }
+                          // the r2004+ entity color encoding writes the rgb
+                          // only when the 0x80 rgb-present flag is set, as
+                          // the 440 handler below already does for alpha
+                          color.flag |= 0x80;
                           if (pair->value.l == 257)
                             {
                               color.method = 0xc8;
@@ -13642,6 +13772,20 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                   LOG_TRACE ("%s.%s = %f (from DEG %f°) [%s %d]\n", name,
                              "dim_rotation", ang, pair->value.d, "BD", 50);
                 }
+              else if (obj->fixedtype == DWG_TYPE_MTEXT
+                       && pair->code == 50)
+                {
+                  // valid alternative to the group 11 direction vector:
+                  // rotation in degrees (AutoCAD and ezdxf both write it)
+                  Dwg_Entity_MTEXT *o = obj->tio.entity->tio.MTEXT;
+                  BITCODE_BD ang = deg2rad (pair->value.d);
+                  o->x_axis_dir.x = cos (ang);
+                  o->x_axis_dir.y = sin (ang);
+                  o->x_axis_dir.z = 0.0;
+                  LOG_TRACE ("MTEXT.x_axis_dir = (%f, %f, 0) (from DEG %f)"
+                             " [3BD 11 from 50]\n",
+                             o->x_axis_dir.x, o->x_axis_dir.y, pair->value.d);
+                }
               // accept wrong colors
               else if (is_dxf_class_importable (obj->name)
                        && (pair->code < 60 || pair->code > 68))
@@ -13710,6 +13854,31 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
       Dwg_Entity__3DFACE *o = obj->tio.entity->tio._3DFACE;
       o->has_no_flags = 1;
       LOG_TRACE ("_3DFACE.has_no_flags = 1 [B]\n");
+    }
+  else if (obj->fixedtype == DWG_TYPE_MTEXT)
+    {
+      // DXF omits the optional groups 72/73/44 when they hold their default
+      // (ezdxf and AutoCAD both do), and importing the missing group as 0
+      // gave such an MTEXT a line spacing factor of 0.0 — every line of the
+      // paragraph draws on top of the first one. 0 is not a valid value for
+      // any of the three (the factor's documented range is 0.25-4.0), so
+      // this can never override a real value.
+      Dwg_Entity_MTEXT *o = obj->tio.entity->tio.MTEXT;
+      if (!o->flow_dir)
+        {
+          o->flow_dir = 1;
+          LOG_TRACE ("MTEXT.flow_dir = 1 (default) [BS 72]\n");
+        }
+      if (!o->linespace_style)
+        {
+          o->linespace_style = 1;
+          LOG_TRACE ("MTEXT.linespace_style = 1 (default) [BS 73]\n");
+        }
+      if (o->linespace_factor == 0.0)
+        {
+          o->linespace_factor = 1.0;
+          LOG_TRACE ("MTEXT.linespace_factor = 1.0 (default) [BD 44]\n");
+        }
     }
   else if (is_textlike (obj))
     postprocess_TEXTlike (obj);
@@ -14852,8 +15021,12 @@ resolve_postponed_object_refs (Dwg_Data *restrict dwg)
         if (vars->DICTIONARY_##name)                                          \
           LOG_TRACE ("HEADER.DICTIONARY_" #name " = " FORMAT_REF "\n",        \
                      ARGS_REF (vars->DICTIONARY_##name));                     \
-        else if ((vars->DICTIONARY_##name                                     \
-                  = dwg_find_dictionary (dwg, "ACAD_" #name)))                \
+        /* the fallback prepends ACAD_; skip it when the name already      \
+           carries the prefix (ACAD_GROUP, ACAD_MLINESTYLE), else we'd     \
+           search for a doubled ACAD_ACAD_ prefix that can never exist */  \
+        else if (!memBEGINc (#name, "ACAD_")                                  \
+                 && (vars->DICTIONARY_##name                                  \
+                     = dwg_find_dictionary (dwg, "ACAD_" #name)))             \
           LOG_TRACE ("HEADER.DICTIONARY_" #name " = " FORMAT_REF "\n",        \
                      ARGS_REF (vars->DICTIONARY_##name));                     \
       } /* set owner to NOD 4.1.C */                                          \

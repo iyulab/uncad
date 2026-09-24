@@ -1393,6 +1393,12 @@ cquote (char *restrict dest, const size_t len, const char *restrict src)
       else
         *dest++ = c;
     }
+  // Terminate after the LAST BYTE WRITTEN. Callers strlen() this buffer, so
+  // a NUL only at its end makes every byte the quoting did not reach part of
+  // the string -- uninitialized heap, for a buffer sized 2x the input.
+  if (dest >= dend)
+    dest = d + len - 1;
+  *dest = '\0';
   d[len - 1] = '\0'; // add final delim, skipped above
   return d;
 }
@@ -1472,6 +1478,14 @@ static void
 dxf_write_chunked (Bit_Chain *restrict dat, const char *restrict str,
                    size_t len, const int dxf)
 {
+  // A value that quoted away to nothing still needs its group written.
+  // Emitting no code at all shifts every following tag in the file.
+  if (!len)
+    {
+      GROUP (dxf);
+      fputs ("\r\n", dat->fh);
+      return;
+    }
   while (len > 0)
     {
       size_t chunk = len > 250 ? 250 : len;
@@ -1609,10 +1623,15 @@ dxf_write_eed (Bit_Chain *restrict dat, const Dwg_Object_Object *restrict obj)
               VALUE_RD (data->u.eed_40.real, dxf);
               break;
             case 70:
-              VALUE_RS (data->u.eed_70.rs, dxf);
+              /* 1070 is a signed int16, and dxf_format() already says so
+                 ("%6i"). The field is unsigned, so without the cast every
+                 negative is zero-extended and printed as its unsigned
+                 complement: -6700 comes out as 58836. */
+              VALUE_RSd ((int16_t)data->u.eed_70.rs, dxf);
               break;
             case 71:
-              VALUE_RL (data->u.eed_71.rl, dxf);
+              /* likewise 1071, a signed int32 */
+              VALUE_RLd ((int32_t)data->u.eed_71.rl, dxf);
               break;
             default:
               VALUE_RC (0, dxf);
@@ -3337,7 +3356,10 @@ dxf_format (int code)
   if (1060 <= code && code <= 1070)
     return "%6i";
   if (code == 1071)
-    return "%9li";  // int32_t
+    /* "%i", not "%li": every caller hands this a 32-bit value (the EED
+       field and resbuf's i32), so "%li" read 64 bits of vararg for a
+       32-bit argument. */
+    return "%9i";
   if (code == 1002) // string => RC
     return "%6i";
   if (code == 1003) // RL layer

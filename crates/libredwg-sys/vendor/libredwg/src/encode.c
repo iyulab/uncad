@@ -7006,10 +7006,7 @@ dwg_encode_eed (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
   int did_raw = 0;
   int need_recalc = does_cross_unicode_datversion (dat);
 
-  bit_chain_init (&dat1, 1024);
-  dat1.from_version = dat->from_version;
-  dat1.version = dat->version;
-  dat1.opts = dat->opts;
+  bit_chain_init_dat (&dat1, 1024, dat);
 
   // Skip DICTIONARY AE3 AcDsRecords/AcDsSchemas 1070 . 2, wrong ACIS version
   if (dat->opts & DWG_OPTS_INDXF && dat->version < R_2007
@@ -7944,7 +7941,7 @@ in_postprocess_SEQEND (Dwg_Object *restrict obj, BITCODE_BL num_owned,
       // need to turn code 3 into absolute 4.
       if (owned[0])
         {
-          hdl = dwg_add_handleref (dwg, 4, owned[0]->handleref.value, NULL);
+          hdl = dwg_add_handleref (dwg, 4, owned[0]->absolute_ref, NULL);
           dwg_dynapi_entity_set_value (ow, owner->name, firstfield, &hdl, 0);
           LOG_TRACE ("%s[0].%s = " FORMAT_REF "[H 0]\n", owner->name,
                      firstfield, ARGS_REF (hdl));
@@ -7952,7 +7949,7 @@ in_postprocess_SEQEND (Dwg_Object *restrict obj, BITCODE_BL num_owned,
       if (owned[num_owned - 1])
         {
           hdl = dwg_add_handleref (
-              dwg, 4, owned[num_owned - 1]->handleref.value, NULL);
+              dwg, 4, owned[num_owned - 1]->absolute_ref, NULL);
           dwg_dynapi_entity_set_value (ow, owner->name, lastfield, &hdl, 0);
           LOG_TRACE ("%s[%u].%s = " FORMAT_REF "[H 0]\n", owner->name,
                      num_owned - 1, lastfield, ARGS_REF (hdl));
