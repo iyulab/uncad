@@ -15,7 +15,7 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
   real include graph. Autotools' generated `config.h` is stood in for by this
   crate's own `vendor-config/config.h`, a separate file rather than a patch to
   LibreDWG's sources.
-- **Modified**: **yes**, in five files. Each change carries an
+- **Modified**: **yes**, in six files. Each change carries an
   `uncad local patch` comment in the source saying what changed and why
   (GPLv3 §5(a)); `grep -rn "uncad local patch" vendor/libredwg/` finds every
   marker, and `build.rs` refuses to build when the markers per file differ
@@ -61,6 +61,10 @@ only changes, and cite this list as "The two changes"; it is this one.
 8. **`vendor/libredwg/src/common_entity_data.spec`**, 2026-09-24 — an R13/R14
    entity whose "BYLAYER" bit is clear gets linetype flags 3 (by handle);
    upstream set the flags only when the bit was set, so it read as BYLAYER.
+9. **`vendor/libredwg/src/dwg.spec`**, 2026-09-24 — an R2010+ ATTRIB no longer
+   reads the version byte only an ATTDEF stores; read past the record, it
+   ended the decode before the text style handle, so every such attribute
+   came back with no style.
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or

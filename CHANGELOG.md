@@ -24,6 +24,9 @@ Notable changes to this project are recorded here. The format follows
 - A MULTILEADER from a drawing older than R2010 keeps its leader lines. A line's own type is
   stored from R2010 on and read 0 before it, and lines of type 0 were dropped, so an older
   drawing's multi-leaders came back with none.
+- An R2010+ DWG attribute keeps its text style. The vendored decoder read a byte the ATTRIB
+  record does not have, and the bounds check on it ended the decode before the style
+  handle; a local patch removes that read.
 - `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
   `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
   PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,

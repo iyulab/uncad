@@ -848,7 +848,7 @@ extract the same wireframe for every solid.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries eight local patches, in five files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries nine local patches, in six files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -857,7 +857,7 @@ these patches is part of any submodule update.** `build.rs` counts the markers p
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
 a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file
-(line endings aside), the two trees differ in exactly these five files.
+(line endings aside), the two trees differ in exactly these six files.
 
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
@@ -951,6 +951,17 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   The patch sets the flags to "by handle" (3) when the bit is clear. Measured against the
   corpus's DXF twins: 67 LINEs of `example_r13` that the DXF says are BYBLOCK, and its ARCs
   and `r14/Leader`'s LEADER with a named linetype, all read BYLAYER without the patch.
+
+- **`src/dwg.spec`**, an R2010+ ATTRIB's text style -- an ATTDEF stores a second version
+  byte before its prompt, which the spec reads as `keep_duplicate_records`; the spec read
+  that byte for an ATTRIB too, which has no such field (the Open Design Specification lists
+  none), so it took a byte past the record's data. That byte failed the field's bounds check
+  often enough to end the decode with `VALUEOUTOFBOUNDS` before the style handle: every
+  R2010+ ATTRIB of the corpus -- 9, in `example_2010`, `example_2013`, `example_2018` and
+  `2010/gh209_1` -- came back with no text style, where the DXF twins name `Standard` and
+  `Hebtxt`. The patch drops that read for an ATTRIB; two corpus drawings no longer report
+  `VALUEOUTOFBOUNDS` at all. `tests/vendored_patches.rs` is the regression (`Absent`
+  without the patch).
 
 **An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
 an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some

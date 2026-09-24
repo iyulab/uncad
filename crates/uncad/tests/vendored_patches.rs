@@ -1,7 +1,7 @@
 //! What the local patches to the vendored LibreDWG change, pinned from the
 //! outside.
 //!
-//! `crates/libredwg-sys/vendor/libredwg/` carries five `uncad local patch`
+//! `crates/libredwg-sys/vendor/libredwg/` carries `uncad local patch`
 //! blocks (listed in `crates/libredwg-sys/NOTICE.md`, reasoned in
 //! `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG"). A re-vendor
 //! that drops one is caught by `build.rs`, which counts the markers; these
@@ -17,10 +17,15 @@
 //! (every name longer than one character missed its lookup). The
 //! `common_entity_data.spec` one, which puts an entity's true colour and its
 //! transparency back in their own fields, is pinned below on the entity it
-//! was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`).
+//! was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`). The HATCH
+//! spline edge, DXF transparency and R13/R14 linetype ones are pinned in
+//! `tests/hatch_edges.rs`, `tests/golden.rs` (G17), `tests/entity_style.rs`
+//! and the corpus twin comparison; the `dwg.spec` one, an R2010+ ATTRIB's
+//! text style, below.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use uncad::model::Ref;
 
 const HELIX: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -238,4 +243,35 @@ fn an_entity_with_a_transparency_keeps_its_true_colour() {
         Some(0x1a_e464),
         "the HATCH, RGB and transparency"
     );
+}
+
+/// An R2010+ ATTRIB's text style: the vendored spec no longer reads, for an
+/// ATTRIB, the version byte that only an ATTDEF stores, which ran past the
+/// record and stopped the decode before the style handle. The DXF twins
+/// name the styles these come back with.
+#[test]
+fn an_r2010_attrib_keeps_its_text_style() {
+    for (file, style) in [
+        ("example_2010.dwg", "Standard"),
+        ("example_2018.dwg", "Standard"),
+        ("2010/gh209_1.dwg", "Hebtxt"),
+    ] {
+        let path = format!(
+            "{}/../../lib/libredwg/test/test-data/{file}",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let db = uncad::parse(&path).unwrap_or_else(|e| panic!("{file}: {e}"));
+        let styles: Vec<&Ref<String>> = db
+            .entities
+            .iter()
+            .filter_map(|e| match e {
+                uncad::Entity::Attrib(a) => Some(&a.style_name),
+                _ => None,
+            })
+            .collect();
+        assert!(!styles.is_empty(), "{file}: attributes");
+        for s in styles {
+            assert_eq!(s, &Ref::Resolved(style.to_string()), "{file}");
+        }
+    }
 }
