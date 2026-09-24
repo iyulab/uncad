@@ -195,6 +195,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A HATCH boundary edge carries what the file states of it: a straight edge its end point
+  as well as its start, a spline edge its degree, rational and periodic flags, knots,
+  weights, fit points and end tangents beside its control points. From a DXF, a spline
+  edge's weights still arrive as zeros (see `docs/CAVEATS.md`).
 - A string's `\U+XXXX` and `\M+nXXXX` escapes -- how a drawing stores a character its
   codepage cannot hold -- are now turned into the character, in every string, and a DXF's
   caret notation (`^J`) into the control character: a drawing saved with the character and

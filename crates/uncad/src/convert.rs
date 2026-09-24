@@ -2044,12 +2044,32 @@ fn convert_hatch_edge(seg: &libredwg_sys::Dwg_HATCH_PathSeg) -> Option<HatchEdge
         HATCH_EDGE_SPLINE => {
             // SAFETY: num_control_points/control_points is the same matched
             // array-length convention as everywhere else in dwg.h.
-            let control_points =
-                unsafe { read_raw_array(seg.control_points, seg.num_control_points) }
-                    .into_iter()
-                    .map(|cp| p2(cp.point))
-                    .collect();
-            HatchEdge::Spline { control_points }
+            let points = unsafe { read_raw_array(seg.control_points, seg.num_control_points) };
+            let rational = seg.is_rational != 0;
+            // SAFETY: num_knots/knots and num_fitpts/fitpts, the same
+            // convention.
+            let knots = unsafe { read_raw_array(seg.knots, seg.num_knots) };
+            let fit_points: Vec<Point2D> = unsafe { read_raw_array(seg.fitpts, seg.num_fitpts) }
+                .into_iter()
+                .map(p2)
+                .collect();
+            // The tangents are stated with the fit points and only then.
+            let fitted = !fit_points.is_empty();
+            HatchEdge::Spline {
+                degree: seg.degree,
+                rational,
+                periodic: seg.is_periodic != 0,
+                knots,
+                control_points: points.iter().map(|cp| p2(cp.point)).collect(),
+                weights: if rational {
+                    points.iter().map(|cp| cp.weight).collect()
+                } else {
+                    Vec::new()
+                },
+                fit_points,
+                start_tangent: fitted.then(|| p2(seg.start_tangent)),
+                end_tangent: fitted.then(|| p2(seg.end_tangent)),
+            }
         }
         _ => return None,
     })

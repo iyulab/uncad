@@ -446,6 +446,13 @@ carry it -- and no length or angle is negative, so `-1` is "not stated" too. Eve
 value is carried as the file states it, radians for an angular dimension, even where it
 disagrees with the dimension's own points: whether to trust it is a consumer's judgement.
 
+**A HATCH spline edge's weights, read from a DXF.** The format writes a rational spline
+edge's weights in group 42, after its control points. The DXF importer takes them from group
+40 once the knots are read, so a DXF's weights arrive here as zeros; the edge's degree, knots,
+control points, fit points and end tangents read right, and a DWG's record carries the weights
+and reads right too (`tests/hatch_edges.rs` pins the DXF case). This ends, like the entries
+around it, when this crate's DXF reading no longer goes through this importer.
+
 **Every variable of a dimension style.** The DIMSTYLE table states what a dimension names
 rather than carries, and the format writes a style variable only when it differs from the value
 the application starts from. This library holds a style as a struct with no "the file did not
