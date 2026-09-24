@@ -100,6 +100,17 @@ for f in "${!VISITED[@]}"; do
 done
 cp "$REPO_ROOT/lib/libredwg/COPYING" "$VENDOR_DIR/COPYING"
 
+# Record which upstream commit this copy is, so a reader (and a check
+# that the submodule and the copy have not drifted apart) can tell.
+{
+    echo "# The upstream LibreDWG commit this vendored copy was taken from: the"
+    echo "# lib/libredwg submodule's commit at the last scripts/sync-libredwg-vendor.sh"
+    echo "# run. The files that differ from it carry an \"uncad local patch\" comment"
+    echo "# (docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\")."
+    echo "commit $(git -C "$REPO_ROOT/lib/libredwg" rev-parse HEAD)"
+    echo "date $(git -C "$REPO_ROOT/lib/libredwg" log -1 --format=%cI HEAD)"
+} > "$VENDOR_DIR/../UPSTREAM"
+
 echo "Synced ${#VISITED[@]} files into $VENDOR_DIR"
 echo "Next: cargo build -p libredwg-sys, and if LIBREDWG_SOURCES in build.rs needs updating, update it now."
 echo "Also: re-apply the local patches listed in docs/CAVEATS.md, \"Local patches to the vendored LibreDWG\" (grep for 'uncad local patch')."
