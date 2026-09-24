@@ -1912,7 +1912,8 @@
         "rounding": 0.0,
         "angular_unit_format": "DECIMAL_DEGREES",
         "angular_decimal_places": 0,
-        "fraction_format": "HORIZONTAL"
+        "fraction_format": "HORIZONTAL",
+        "arc_symbol": "ABOVE_TEXT"
       }
     },
     "mlinestyles": {},

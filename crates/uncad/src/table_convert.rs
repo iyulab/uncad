@@ -19,8 +19,8 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use uncad_model::model::{Point2D, Ref};
 use uncad_model::tables::{
-    AngularUnitFormat, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord, LayoutRecord,
-    LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings, Tables,
+    AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord,
+    LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings, Tables,
 };
 
 /// # Safety
@@ -40,6 +40,15 @@ pub(crate) unsafe fn convert_tables(
     #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
     let r2000 = unsafe { libredwg_sys::uncad_dwg_from_version(dwg) }
         >= libredwg_sys::DWG_VERSION_TYPE_R_2000b as i32;
+    // DIMARCSYM is a variable of an R2000 DXF, but a DWG stores it only
+    // from R2007 on.
+    #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
+    let has_arc_symbol = if is_from_dxf(dwg) {
+        r2000
+    } else {
+        (unsafe { libredwg_sys::uncad_dwg_from_version(dwg) })
+            >= libredwg_sys::DWG_VERSION_TYPE_R_2007a as i32
+    };
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
@@ -74,7 +83,7 @@ pub(crate) unsafe fn convert_tables(
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMSTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
-                if let Some(record) = convert_dim_style(text, object_ptr, r2000) {
+                if let Some(record) = convert_dim_style(text, object_ptr, r2000, has_arc_symbol) {
                     dim_styles.insert(record.name.clone(), record);
                 }
             }
@@ -216,11 +225,13 @@ fn convert_layout(
 ///
 /// Three variables came with R2000 (`DIMLUNIT`, `DIMFRAC`, `DIMADEC`). An
 /// earlier drawing has no such variables, whatever the library's struct
-/// holds for them, so for it they are `None` (`r2000` false).
+/// holds for them, so for it they are `None` (`r2000` false). DIMARCSYM
+/// likewise, where the file has no such variable (`has_arc_symbol`).
 fn convert_dim_style(
     text: &TextDecoder,
     object_ptr: *mut c_void,
     r2000: bool,
+    has_arc_symbol: bool,
 ) -> Option<DimStyleRecord> {
     let name = text.field(object_ptr, "DIMSTYLE", "name")?;
     let number = |field: &str| get_field::<f64>(object_ptr, "DIMSTYLE", field);
@@ -286,6 +297,9 @@ fn convert_dim_style(
                 _ => None,
             })
         },
+        arc_symbol: small("DIMARCSYM")
+            .filter(|_| has_arc_symbol)
+            .and_then(ArcSymbol::from_code),
     })
 }
 

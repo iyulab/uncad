@@ -1274,7 +1274,8 @@
         "rounding": 0.0,
         "angular_unit_format": "DECIMAL_DEGREES",
         "angular_decimal_places": 0,
-        "fraction_format": "DIAGONAL"
+        "fraction_format": "DIAGONAL",
+        "arc_symbol": "BEFORE_TEXT"
       },
       "ORD": {
         "name": "ORD",
@@ -1294,7 +1295,8 @@
         "rounding": 0.5,
         "angular_unit_format": "DEGREES_MINUTES_SECONDS",
         "angular_decimal_places": 1,
-        "fraction_format": "NOT_STACKED"
+        "fraction_format": "NOT_STACKED",
+        "arc_symbol": "SUPPRESSED"
       }
     },
     "mlinestyles": {},
