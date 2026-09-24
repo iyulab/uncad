@@ -210,6 +210,12 @@ fn convert_dim_style(
     // The 16-bit variables (BITCODE_BS). Read signed: DIMADEC's -1 ("as
     // DIMDEC") is a value the format uses.
     let small = |field: &str| get_field::<i16>(object_ptr, "DIMSTYLE", field).map(i32::from);
+    // Before R2000 one variable, DIMUNIT, said both formats.
+    let dimunit = if r2000 {
+        (None, None)
+    } else {
+        small("DIMUNIT").map_or((None, None), dimunit)
+    };
     Some(DimStyleRecord {
         name,
         // Every DIMSTYLE record has the pattern; the library holds an empty
@@ -229,15 +235,19 @@ fn convert_dim_style(
             .map(i32::from),
         text_height: number("DIMTXT"),
         arrow_size: number("DIMASZ"),
-        linear_unit_format: small("DIMLUNIT").filter(|_| r2000).and_then(|v| match v {
-            1 => Some(LinearUnitFormat::Scientific),
-            2 => Some(LinearUnitFormat::Decimal),
-            3 => Some(LinearUnitFormat::Engineering),
-            4 => Some(LinearUnitFormat::Architectural),
-            5 => Some(LinearUnitFormat::Fractional),
-            6 => Some(LinearUnitFormat::WindowsDesktop),
-            _ => None,
-        }),
+        linear_unit_format: if !r2000 {
+            dimunit.0
+        } else {
+            small("DIMLUNIT").and_then(|v| match v {
+                1 => Some(LinearUnitFormat::Scientific),
+                2 => Some(LinearUnitFormat::Decimal),
+                3 => Some(LinearUnitFormat::Engineering),
+                4 => Some(LinearUnitFormat::Architectural),
+                5 => Some(LinearUnitFormat::Fractional),
+                6 => Some(LinearUnitFormat::WindowsDesktop),
+                _ => None,
+            })
+        },
         zero_suppression: small("DIMZIN"),
         rounding: number("DIMRND"),
         angular_unit_format: small("DIMAUNIT").and_then(|v| match v {
@@ -249,13 +259,43 @@ fn convert_dim_style(
             _ => None,
         }),
         angular_decimal_places: small("DIMADEC").filter(|_| r2000),
-        fraction_format: small("DIMFRAC").filter(|_| r2000).and_then(|v| match v {
-            0 => Some(FractionFormat::Horizontal),
-            1 => Some(FractionFormat::Diagonal),
-            2 => Some(FractionFormat::NotStacked),
-            _ => None,
-        }),
+        fraction_format: if !r2000 {
+            dimunit.1
+        } else {
+            small("DIMFRAC").and_then(|v| match v {
+                0 => Some(FractionFormat::Horizontal),
+                1 => Some(FractionFormat::Diagonal),
+                2 => Some(FractionFormat::NotStacked),
+                _ => None,
+            })
+        },
     })
+}
+
+/// What a pre-R2000 dimension style's DIMUNIT (DXF 270) says: the linear
+/// unit format, and -- where the value says it -- the fraction format. 4
+/// and 5 are the architectural and fractional formats with stacked
+/// fractions, which the variable does not say how to stack; 6 and 7 are the
+/// same without stacking. R2000 split the variable into DIMLUNIT and
+/// DIMFRAC.
+fn dimunit(value: i32) -> (Option<LinearUnitFormat>, Option<FractionFormat>) {
+    match value {
+        1 => (Some(LinearUnitFormat::Scientific), None),
+        2 => (Some(LinearUnitFormat::Decimal), None),
+        3 => (Some(LinearUnitFormat::Engineering), None),
+        4 => (Some(LinearUnitFormat::Architectural), None),
+        5 => (Some(LinearUnitFormat::Fractional), None),
+        6 => (
+            Some(LinearUnitFormat::Architectural),
+            Some(FractionFormat::NotStacked),
+        ),
+        7 => (
+            Some(LinearUnitFormat::Fractional),
+            Some(FractionFormat::NotStacked),
+        ),
+        8 => (Some(LinearUnitFormat::WindowsDesktop), None),
+        _ => (None, None),
+    }
 }
 
 /// Resolves a block's real name.
