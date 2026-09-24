@@ -40,7 +40,8 @@ Notable changes to this project are recorded here. The format follows
 - `uncad export <input> -o <dir>` writes the drawing as a package an LLM or a vision
   model can read, through the `iron-pack-cad` crate (`--profile`, `--max-levels`,
   `--max-tiles`, `--no-sheets`, `--svg`); an option the subcommand does not know is an
-  error.
+  error, a bad input is reported the way the plain command reports it (the path, and
+  whether it is a DWG/DXF at all), and an unknown profile names the ones there are.
 - `libredwg-sys` reads a drawing from memory (`uncad_dwg_read_bytes`,
   `uncad_dxf_read_bytes`) -- LibreDWG's own file readers `fopen()` a byte string the
   MSVC runtime reads in the ANSI code page, so a non-ASCII path fails on Windows -- and

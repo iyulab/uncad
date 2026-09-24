@@ -623,6 +623,37 @@ fn export_writes_a_package_and_refuses_unknown_options() {
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("unknown option '--bogus'"));
 
+    // A bad input or profile is worded the way the plain command words it:
+    // the path, what to check, and the names a profile can take.
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new(EXE)
+            .args(args)
+            .output()
+            .expect("the binary runs");
+        assert!(!out.status.success(), "{args:?} should fail");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let missing = run(&["export", "no-such-drawing.dwg", "-o", "unused"]);
+    assert!(
+        missing.contains("cannot open input file 'no-such-drawing.dwg'"),
+        "{missing}"
+    );
+    let not_a_drawing = run(&[
+        "export",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
+        "-o",
+        "unused",
+    ]);
+    assert!(
+        not_a_drawing.contains("is it a valid DWG/DXF file?"),
+        "{not_a_drawing}"
+    );
+    let profile = run(&["export", input, "--profile", "gemini", "-o", "unused"]);
+    assert!(
+        profile.contains("unknown profile 'gemini' (one of: claude, claude-hires, openai-patch)"),
+        "{profile}"
+    );
+
     let version = std::process::Command::new(EXE)
         .args(["export", "--version"])
         .output()

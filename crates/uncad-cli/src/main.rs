@@ -192,7 +192,7 @@ fn main() -> ExitCode {
 /// `error:` prefix.
 fn run(args: &Args) -> Result<(), String> {
     let input = args.input.as_deref().expect("checked by the caller");
-    let db = parse_input(input)?;
+    let (db, _) = parse_input(input)?;
     if !db.read_diagnostics.is_clean() {
         eprintln!(
             "warning: LibreDWG read '{input}' with non-fatal problems ({}); \
@@ -259,8 +259,9 @@ fn run(args: &Args) -> Result<(), String> {
 /// file that is not a drawing as a bare LibreDWG error code, which is accurate
 /// but not something a user can act on without cross-referencing dwg.h. The
 /// obvious cases are checked here first so the message says what is actually
-/// wrong.
-fn parse_input(input: &str) -> Result<CadDatabase, String> {
+/// wrong. Both commands read their input through here, so they word a bad
+/// input the same way.
+fn parse_input(input: &str) -> Result<(CadDatabase, uncad::Header), String> {
     match std::fs::metadata(input) {
         Ok(meta) if meta.is_dir() => {
             return Err(format!("input path is a directory, not a file: '{input}'"))
@@ -268,7 +269,7 @@ fn parse_input(input: &str) -> Result<CadDatabase, String> {
         Err(e) => return Err(format!("cannot open input file '{input}': {e}")),
         Ok(_) => {}
     }
-    uncad::parse(input)
+    uncad::parse_with_header(input)
         .map_err(|e| format!("could not parse '{input}' ({e}) -- is it a valid DWG/DXF file?"))
 }
 
@@ -428,8 +429,11 @@ fn run_export(argv: &[String]) -> Result<(), String> {
             }
             "--profile" => {
                 let name = value(i, "--profile")?;
-                options.profile = iron_pack_cad::Profile::by_name(name)
-                    .ok_or_else(|| format!("unknown profile '{name}'"))?;
+                options.profile = iron_pack_cad::Profile::by_name(name).ok_or_else(|| {
+                    let names: Vec<&str> =
+                        iron_pack_cad::Profile::ALL.iter().map(|p| p.name).collect();
+                    format!("unknown profile '{name}' (one of: {})", names.join(", "))
+                })?;
                 i += 1;
             }
             "--max-levels" => {
@@ -462,8 +466,8 @@ fn run_export(argv: &[String]) -> Result<(), String> {
     }
     let input = input.ok_or("uncad export needs an input drawing")?;
     let output = output.ok_or("uncad export needs -o <dir>")?;
+    let (db, header) = parse_input(input)?;
     let input = Path::new(input);
-    let (db, header) = uncad::parse_with_header(input).map_err(|e| e.to_string())?;
     let header = pack_header(&header)?;
     if options.source_name.is_none() {
         options.source_name = input.file_name().map(|n| n.to_string_lossy().into_owned());
