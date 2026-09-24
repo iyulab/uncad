@@ -332,6 +332,7 @@ fn ours_kind(entity: &uncad::Entity) -> &'static str {
         E::AcadTable(_) => "table",
         E::Wipeout(_) => "wipeout",
         E::Light(_) => "light",
+        E::Image(_) => "image",
         E::Attrib(_) | E::Attdef(_) => "attrib",
         E::LwPolyline(_)
         | E::Polyline2D(_)
@@ -379,6 +380,7 @@ fn theirs_kind(entity: &acadrust::EntityType) -> &'static str {
         E::Table(_) => "table",
         E::Wipeout(_) => "wipeout",
         E::Light(_) => "light",
+        E::RasterImage(_) => "image",
         E::AttributeEntity(_) | E::AttributeDefinition(_) => "attrib",
         E::Block(_) | E::BlockEnd(_) => "block",
         E::Seqend(_) => "seqend",

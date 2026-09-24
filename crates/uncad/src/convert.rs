@@ -22,11 +22,11 @@ use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
     DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
     Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
-    InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType, LineEntity,
-    LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity,
-    OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity,
-    SplineEntity, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, ViewportView,
-    WipeoutEntity,
+    ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType,
+    LineEntity, LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity,
+    MultiLeaderEntity, OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref,
+    Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity,
+    ViewportEntity, ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, EntityLinetype, HorizontalJustification, Point2D, Point3D, PolylineVertex,
@@ -947,8 +947,22 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     });
     let size =
         get_point2d(entity_ptr, "WIPEOUT", "image_size").unwrap_or(Point2D { x: 1.0, y: 1.0 });
+    clip_boundary(entity_ptr, "WIPEOUT", pt0, uvec, vvec, size)
+}
+
+/// The clip boundary of a raster entity -- an IMAGE, or the WIPEOUT that
+/// shares its layout (`dxfname` says which struct to read) -- put through
+/// the entity's frame, as [`wipeout_boundary`] describes.
+fn clip_boundary(
+    entity_ptr: *mut std::ffi::c_void,
+    dxfname: &str,
+    pt0: Point3D,
+    uvec: Point3D,
+    vvec: Point3D,
+    size: Point2D,
+) -> Vec<Point2D> {
     let mut clip_verts: Vec<Point2D> =
-        get_point2d_array::<u32>(entity_ptr, "WIPEOUT", "num_clip_verts", "clip_verts");
+        get_point2d_array::<u32>(entity_ptr, dxfname, "num_clip_verts", "clip_verts");
     // A polygon stored closed repeats its first vertex at the end; the loop
     // is closed either way, and the repeat is not a vertex.
     if clip_verts.len() > 2 && clip_verts.first() == clip_verts.last() {
@@ -957,7 +971,7 @@ fn wipeout_boundary(entity_ptr: *mut std::ffi::c_void) -> Vec<Point2D> {
     // BITCODE_BS ("1 rect, 2 polygon"). An unreadable or unset value is
     // treated like "polygon", not assumed to be "rect".
     let clip_boundary_type =
-        get_field::<u16>(entity_ptr, "WIPEOUT", "clip_boundary_type").unwrap_or(0);
+        get_field::<u16>(entity_ptr, dxfname, "clip_boundary_type").unwrap_or(0);
 
     let rect = |a: Point2D, b: Point2D| {
         vec![
@@ -1853,6 +1867,48 @@ unsafe fn convert_entity(
             let boundary = wipeout_boundary(entity_ptr);
             Entity::Wipeout(WipeoutEntity { common, boundary })
         }
+        libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_IMAGE => {
+            let point = |field: &str| get_point3d(entity_ptr, "IMAGE", field).unwrap_or_default();
+            let (insertion_point, u_vector, v_vector) =
+                (point("pt0"), point("uvec"), point("vvec"));
+            let size_pixels = get_point2d(entity_ptr, "IMAGE", "image_size").unwrap_or_default();
+            let byte = |field: &str| get_field::<u8>(entity_ptr, "IMAGE", field);
+            Entity::Image(ImageEntity {
+                common,
+                insertion_point,
+                u_vector,
+                v_vector,
+                size_pixels,
+                definition: reference(
+                    dwg,
+                    text,
+                    get_field::<*mut libredwg_sys::Dwg_Object_Ref>(entity_ptr, "IMAGE", "imagedef"),
+                    c"IMAGEDEF",
+                    // SAFETY: the handle belongs to the live Dwg_Data this
+                    // pass walks, the contract `reference` calls under.
+                    |handle_ptr| unsafe { image_definition_handle(dwg, handle_ptr) },
+                ),
+                display_flags: get_field::<u16>(entity_ptr, "IMAGE", "display_props"),
+                clipping: byte("clipping").map(|v| v != 0),
+                brightness: byte("brightness"),
+                contrast: byte("contrast"),
+                fade: byte("fade"),
+                // The flag exists from R2010 on; before it, the struct holds
+                // a zero the file never stated.
+                clip_outside: since(dwg, libredwg_sys::DWG_VERSION_TYPE_R_2010b)
+                    .then(|| byte("clip_mode"))
+                    .flatten()
+                    .map(|v| v != 0),
+                boundary: clip_boundary(
+                    entity_ptr,
+                    "IMAGE",
+                    insertion_point,
+                    u_vector,
+                    v_vector,
+                    size_pixels,
+                ),
+            })
+        }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LIGHT => {
             let position = get_point3d(entity_ptr, "LIGHT", "position")?;
             let target = get_point3d(entity_ptr, "LIGHT", "target").unwrap_or(position);
@@ -2401,7 +2457,9 @@ fn split_entity_color(
 ///
 /// # Safety
 /// `obj` must be a valid, non-null `Dwg_Object`.
-unsafe fn entity_identity(obj: *mut libredwg_sys::Dwg_Object) -> (EntityId, Ref<String>) {
+pub(crate) unsafe fn entity_identity(
+    obj: *mut libredwg_sys::Dwg_Object,
+) -> (EntityId, Ref<String>) {
     let mut error = 0i32;
     let handle_ptr = unsafe { libredwg_sys::dwg_object_get_handle(obj, &mut error) };
     let value = if handle_ptr.is_null() || error != 0 {
@@ -2417,6 +2475,32 @@ unsafe fn entity_identity(obj: *mut libredwg_sys::Dwg_Object) -> (EntityId, Ref<
         EntityId::new(HANDLELESS_ID_BASE | u64::from(index)),
         Ref::Absent,
     )
+}
+
+/// The handle (upper-case hex) of the IMAGEDEF `handle_ptr` points at --
+/// the key [`uncad_model::Tables::image_definitions`] holds it under -- or
+/// `None` when it points at nothing, or at an object of another type.
+///
+/// # Safety
+/// `handle_ptr` must be a non-null `Dwg_Object_Ref` of the live `dwg`.
+unsafe fn image_definition_handle(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    handle_ptr: *mut libredwg_sys::Dwg_Object_Ref,
+) -> Option<String> {
+    let object = unsafe { referenced_object(dwg, handle_ptr) };
+    if object.is_null() {
+        return None;
+    }
+    // Cast needed for cross-platform bindgen enum-width consistency.
+    let fixedtype =
+        unsafe { libredwg_sys::dwg_object_get_fixedtype(object) } as libredwg_sys::DWG_OBJECT_TYPE;
+    if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_IMAGEDEF {
+        return None;
+    }
+    match unsafe { entity_identity(object) }.1 {
+        Ref::Resolved(handle) => Some(handle),
+        _ => None,
+    }
 }
 
 /// Where the IDs of handle-less entities live: above every possible handle

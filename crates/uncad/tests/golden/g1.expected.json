@@ -2370,7 +2370,8 @@
     },
     "dim_styles": {},
     "mlinestyles": {},
-    "layouts": {}
+    "layouts": {},
+    "image_definitions": {}
   },
   "read_diagnostics": {
     "warnings": []

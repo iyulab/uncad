@@ -9,7 +9,7 @@
 //! drawing older than R2000 that no application with layouts saved -- has
 //! no layouts.
 
-use crate::convert::{entity_reference, owned_entities, reference};
+use crate::convert::{entity_identity, entity_reference, owned_entities, reference};
 use crate::dynapi::{
     get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_from_dxf,
     is_r2000_or_later, RawPoint2D,
@@ -19,8 +19,9 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use uncad_model::model::{Point2D, Ref};
 use uncad_model::tables::{
-    AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord,
-    LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings, Tables,
+    AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, FractionFormat, ImageDefinition,
+    LayerRecord, LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings,
+    ResolutionUnit, Tables,
 };
 
 /// # Safety
@@ -54,6 +55,7 @@ pub(crate) unsafe fn convert_tables(
     let mut mlinestyles = BTreeMap::new();
     let mut dim_styles = BTreeMap::new();
     let mut layouts = BTreeMap::new();
+    let mut image_definitions = BTreeMap::new();
 
     for i in 0..num_objects {
         let obj = unsafe { libredwg_sys::dwg_get_object(dwg, i) };
@@ -94,6 +96,15 @@ pub(crate) unsafe fn convert_tables(
                     layouts.insert(record.name.clone(), record);
                 }
             }
+        } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_IMAGEDEF {
+            let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
+            // An IMAGE points at the object by handle; one without a handle
+            // is one nothing can point at.
+            if let (false, Ref::Resolved(handle)) =
+                (object_ptr.is_null(), unsafe { entity_identity(obj) }.1)
+            {
+                image_definitions.insert(handle, convert_image_definition(text, object_ptr));
+            }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLINESTYLE {
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
@@ -110,6 +121,21 @@ pub(crate) unsafe fn convert_tables(
         block_records,
         mlinestyles,
         layouts,
+        image_definitions,
+    }
+}
+
+/// Reads an IMAGEDEF object: the file an IMAGE shows, as the drawing
+/// records it.
+fn convert_image_definition(text: &TextDecoder, object_ptr: *mut c_void) -> ImageDefinition {
+    let point = |field: &str| get_point2d(object_ptr, "IMAGEDEF", field).unwrap_or_default();
+    ImageDefinition {
+        file_path: text.field(object_ptr, "IMAGEDEF", "file_path"),
+        size_pixels: point("image_size"),
+        pixel_size: point("pixel_size"),
+        loaded: get_field::<u8>(object_ptr, "IMAGEDEF", "is_loaded").map(|v| v != 0),
+        resolution_unit: get_field::<u8>(object_ptr, "IMAGEDEF", "resunits")
+            .and_then(|v| ResolutionUnit::from_code(i32::from(v))),
     }
 }
 

@@ -16,6 +16,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- IMAGE is read into its own entity rather than an unknown one: the frame as the file states
+  it (insertion point, one-pixel vectors, size in pixels), the display settings, the clip
+  boundary in the entity's local space as a WIPEOUT's is, and the image definition it names.
+  The definitions (IMAGEDEF: file path, size, pixel size, units) are a new table keyed by
+  handle. The clip-outside flag is `None` before R2010, which has no such flag.
 - A dimension style carries where an arc-length dimension's arc symbol goes
   (`DIMARCSYM`: before the text, above it, or not shown), from a DXF from R2000 on and
   a DWG from R2007 on -- the binary format stores the variable only from R2007.
