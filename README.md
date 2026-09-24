@@ -43,6 +43,7 @@ cargo run -p uncad-cli -- drawing.dwg -o drawing.json --pretty   # export the pa
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg             # render to SVG (model space)
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png             # render to PNG (via SVG)
 cargo run -p uncad-cli -- drawing.dwg -o drawing.png --scale 2   # rasterize at twice the size
+cargo run -p uncad-cli -- drawing.dwg -o drawing.png --fit 4000  # the longer side 4000 px
 cargo run -p uncad-cli -- drawing.dwg -o drawing.svg --no-trim   # keep outlying coordinates
 cargo run -p uncad-cli -- drawing.dwg -o sheet.svg --space paper # sheet borders / title blocks
 cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space in one document

@@ -8,6 +8,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
+  `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
+  PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,
+  since the pixels are allocated before drawing) is refused with a message naming these
+  options; the refusal itself came with the renderer, and without them a large drawing
+  that used to render at `--scale 1` had no way through but `--scale`.
 - `uncad --version` / `-V` and `--include-hidden` (draw what the layer rules and the
   invisible flag leave out). The command now refuses an option it does not know, a second
   input and an option without its value, naming what was wrong, where it used to ignore

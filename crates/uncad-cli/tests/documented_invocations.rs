@@ -303,12 +303,113 @@ fn reports_a_missing_input_without_a_raw_library_code() {
 }
 
 #[test]
+fn fit_sets_the_longer_side() {
+    let png = TempFile::new("fit.png");
+    let out = run(&[CORPUS_DXF, "-o", png.arg(), "--fit", "300"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let (w, h) = png_size(&png.bytes());
+    assert_eq!(w.max(h), 300, "{w}x{h}");
+}
+
+#[test]
+fn an_image_past_the_limit_is_refused_with_the_options_that_fix_it() {
+    let png = TempFile::new("limit.png");
+    let out = run(&[
+        CORPUS_DXF,
+        "-o",
+        png.arg(),
+        "--fit",
+        "300",
+        "--max-edge",
+        "100",
+    ]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for flag in ["--fit", "--scale", "--max-edge"] {
+        assert!(stderr.contains(flag), "should name {flag}: {stderr}");
+    }
+    assert!(!png.path().exists(), "nothing is written");
+    // Raised, the same request goes through.
+    let out = run(&[
+        CORPUS_DXF,
+        "-o",
+        png.arg(),
+        "--fit",
+        "300",
+        "--max-edge",
+        "300",
+    ]);
+    assert!(out.status.success());
+}
+
+#[test]
+fn background_and_stroke_change_the_raster() {
+    let plain = TempFile::new("plain.png");
+    let clear = TempFile::new("clear.png");
+    let thick = TempFile::new("thick.png");
+    assert!(run(&[CORPUS_DXF, "-o", plain.arg()]).status.success());
+    assert!(
+        run(&[CORPUS_DXF, "-o", clear.arg(), "--background", "transparent"])
+            .status
+            .success()
+    );
+    assert!(run(&[CORPUS_DXF, "-o", thick.arg(), "--stroke", "5"])
+        .status
+        .success());
+    assert_ne!(plain.bytes(), clear.bytes(), "--background had no effect");
+    assert_ne!(plain.bytes(), thick.bytes(), "--stroke had no effect");
+}
+
+#[test]
+fn padding_widens_the_picture() {
+    let plain = TempFile::new("plain.svg");
+    let padded = TempFile::new("padded.svg");
+    assert!(run(&[CORPUS_DXF, "-o", plain.arg()]).status.success());
+    assert!(run(&[CORPUS_DXF, "-o", padded.arg(), "--padding", "50"])
+        .status
+        .success());
+    assert_ne!(plain.bytes(), padded.bytes(), "--padding had no effect");
+}
+
+#[test]
+fn rejects_scale_and_fit_together_and_bad_values() {
+    for args in [
+        &["--scale", "2", "--fit", "300"][..],
+        &["--fit", "0"],
+        &["--max-edge", "-1"],
+        &["--stroke", "0"],
+        &["--background", "black"],
+        &["--padding", "-1"],
+    ] {
+        let png = TempFile::new("bad.png");
+        let mut all = vec![CORPUS_DXF, "-o", png.arg()];
+        all.extend_from_slice(args);
+        let out = run(&all);
+        assert!(!out.status.success(), "{args:?} should be refused");
+    }
+}
+
+#[test]
 fn help_exits_successfully_and_lists_the_options() {
     let out = run(&["--help"]);
     assert!(out.status.success(), "--help should exit 0");
 
     let text = String::from_utf8_lossy(&out.stderr);
-    for flag in ["--space", "--scale", "--no-trim", "--pretty"] {
+    for flag in [
+        "--space",
+        "--scale",
+        "--no-trim",
+        "--pretty",
+        "--padding",
+        "--fit",
+        "--max-edge",
+        "--stroke",
+        "--background",
+    ] {
         assert!(text.contains(flag), "usage should document {flag}: {text}");
     }
 }

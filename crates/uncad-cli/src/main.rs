@@ -4,7 +4,10 @@
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output.
 
-use iron_render_cad::{to_png, to_svg, Crop, PngSize, Space, ToPngOptions, ToSvgOptions};
+use iron_render_cad::{
+    to_png, to_svg, Background, Crop, PngError, PngSize, Space, ToPngOptions, ToSvgOptions,
+    DEFAULT_MAX_EDGE,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
@@ -31,10 +34,20 @@ SVG/PNG options:
                                 all   = everything, in one document
   --no-trim                   keep outlying coordinates in the viewBox instead
                                 of trimming to the drawing's main cluster
+  --padding <units>           margin around the drawing, in drawing units
 
 PNG options:
-  --scale <factor>            multiplies the SVG viewBox size (default: 1.0,
-                                e.g. 2.0 for twice the resolution)
+  --scale <factor>            pixels per drawing unit (default: 1.0, e.g. 2.0
+                                for twice the resolution)
+  --fit <px>                  make the longer side this many pixels instead,
+                                whatever the drawing's units (not with --scale)
+  --max-edge <px>             refuse an image with a side longer than this
+                                (default: 8192 -- the pixels are allocated
+                                before drawing, so the bound keeps a drawing
+                                from asking for gigabytes)
+  --stroke <px>               every line this many pixels wide
+  --background <white|transparent>
+                              what the drawing does not cover (default: white)
 
 Other options:
   -h, --help                  this text
@@ -45,14 +58,20 @@ Examples:
   uncad drawing.dwg -o drawing.json --pretty
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
-  uncad drawing.dwg -o drawing.png --scale 2";
+  uncad drawing.dwg -o drawing.png --scale 2
+  uncad drawing.dwg -o drawing.png --fit 4000";
 
 struct Args {
     input: Option<String>,
     output: Option<String>,
     space: String,
     outlier_trim: bool,
-    scale: String,
+    scale: Option<String>,
+    fit: Option<String>,
+    max_edge: Option<String>,
+    stroke: Option<String>,
+    background: String,
+    padding: Option<String>,
     pretty: bool,
     include_hidden: bool,
     help: bool,
@@ -64,7 +83,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         output: None,
         space: "model".to_string(),
         outlier_trim: true,
-        scale: "1".to_string(),
+        scale: None,
+        fit: None,
+        max_edge: None,
+        stroke: None,
+        background: "white".to_string(),
+        padding: None,
         pretty: false,
         include_hidden: false,
         help: false,
@@ -72,7 +96,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
-            "-o" | "--output" | "--space" | "--scale" => {
+            "-o" | "--output" | "--space" | "--scale" | "--fit" | "--max-edge" | "--stroke"
+            | "--background" | "--padding" => {
                 let flag = argv[i].as_str();
                 i += 1;
                 let value = argv
@@ -81,7 +106,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     .ok_or_else(|| format!("{flag} needs a value"))?;
                 match flag {
                     "--space" => args.space = value,
-                    "--scale" => args.scale = value,
+                    "--scale" => args.scale = Some(value),
+                    "--fit" => args.fit = Some(value),
+                    "--max-edge" => args.max_edge = Some(value),
+                    "--stroke" => args.stroke = Some(value),
+                    "--background" => args.background = value,
+                    "--padding" => args.padding = Some(value),
                     _ => args.output = Some(value),
                 }
             }
@@ -180,15 +210,7 @@ fn run(args: &Args) -> Result<(), String> {
             (result.unsupported_types, result.empty_blocks)
         }
         "png" => {
-            let result = to_png(
-                &db,
-                ToPngOptions {
-                    svg: svg_options(args)?,
-                    size: PngSize::Scale(parse_scale(&args.scale)?),
-                    ..ToPngOptions::default()
-                },
-            )
-            .map_err(|e| e.to_string())?;
+            let result = to_png(&db, png_options(args)?).map_err(png_error)?;
             write_output(output, &result.png)?;
             (result.unsupported_types, result.empty_blocks)
         }
@@ -237,7 +259,7 @@ fn write_output(path: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
-    Ok(ToSvgOptions {
+    let mut options = ToSvgOptions {
         space: parse_space(&args.space)?,
         crop: if args.outlier_trim {
             Crop::Cluster
@@ -246,7 +268,85 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
         },
         include_hidden: args.include_hidden,
         ..Default::default()
+    };
+    if let Some(padding) = &args.padding {
+        options.padding = match padding.parse::<f64>() {
+            Ok(p) if p >= 0.0 && p.is_finite() => p,
+            _ => {
+                return Err(format!(
+                    "--padding must be a finite number, 0 or more (got '{padding}')"
+                ))
+            }
+        };
+    }
+    Ok(options)
+}
+
+fn png_options(args: &Args) -> Result<ToPngOptions, String> {
+    let size = match (&args.scale, &args.fit) {
+        (Some(_), Some(_)) => return Err("--scale and --fit both set the size; give one".into()),
+        (_, Some(fit)) => PngSize::FitLongEdge(parse_pixels(fit, "--fit")?),
+        (Some(scale), None) => PngSize::Scale(parse_scale(scale)?),
+        (None, None) => PngSize::Scale(1.0),
+    };
+    let max_edge = match &args.max_edge {
+        Some(v) => parse_pixels(v, "--max-edge")?,
+        None => DEFAULT_MAX_EDGE,
+    };
+    let stroke_px = match &args.stroke {
+        Some(v) => match v.parse::<f64>() {
+            Ok(px) if px > 0.0 && px.is_finite() => Some(px),
+            _ => {
+                return Err(format!(
+                    "--stroke must be a finite number greater than 0 (got '{v}')"
+                ))
+            }
+        },
+        None => None,
+    };
+    let background = match args.background.as_str() {
+        "white" => Background::White,
+        "transparent" => Background::Transparent,
+        other => {
+            return Err(format!(
+                "unsupported --background value '{other}' (one of white, transparent)"
+            ))
+        }
+    };
+    Ok(ToPngOptions {
+        svg: svg_options(args)?,
+        size,
+        stroke_px,
+        max_edge,
+        background,
+        ..ToPngOptions::default()
     })
+}
+
+/// The renderer's own message names its option (`max_edge`); here it says
+/// what to type.
+fn png_error(e: PngError) -> String {
+    match e {
+        PngError::TooLarge {
+            width,
+            height,
+            max_edge,
+        } => format!(
+            "the image would be {width}x{height} px, more than the {max_edge} px limit on a \
+             side: ask for a smaller one with --fit <px> or --scale <factor>, or raise the \
+             limit with --max-edge <px>"
+        ),
+        other => other.to_string(),
+    }
+}
+
+fn parse_pixels(value: &str, flag: &str) -> Result<u32, String> {
+    match value.parse::<u32>() {
+        Ok(px) if px > 0 => Ok(px),
+        _ => Err(format!(
+            "{flag} must be a whole number of pixels, 1 or more (got '{value}')"
+        )),
+    }
 }
 
 fn parse_space(value: &str) -> Result<Space, String> {

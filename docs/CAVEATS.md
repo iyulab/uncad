@@ -968,9 +968,10 @@ broad per-entity-type rendering accuracy. From the same corpus:
 with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic on
 garbage input), `tests/acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
 `entities` and in `tables.block_records`), and `uncad-cli`'s
-`tests/documented_invocations.rs` (16: every call the README documents, run against the
-real binary; `--scale`/`--space`/`--no-trim`/`--pretty` are each checked for actually
-changing the result, with `--no-trim` using a five-line DXF the test writes from group
+`tests/documented_invocations.rs` (every call the README documents, run against the
+real binary; `--scale`/`--fit`/`--space`/`--no-trim`/`--pretty`/`--padding`/`--stroke`/
+`--background` are each checked for actually changing the result, `--max-edge` for
+refusing and then allowing the same request, with `--no-trim` using a five-line DXF the test writes from group
 codes itself). All of them assert properties rather than pinned expected values. The 6
 `json.rs` unit tests build one instance of every `Entity` variant and check that the JSON
 `type` tag matches `type_name()`, that HATCH path and edge tags are right, that a round
