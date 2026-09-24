@@ -107,8 +107,9 @@ typedef struct uncad_multileader_line
 } uncad_multileader_line_t;
 
 /* Flattens a MULTILEADER entity's ctx.leaders[].lines[] (every leader node
- * can own several lines/splines) into one array of polylines, skipping
- * type==0 ("invisible leader") lines. `entity` is the MULTILEADER's
+ * can own several lines/splines) into one array of polylines -- every line
+ * that has a point, whatever its `type` (stored from R2010 only; how a line
+ * is drawn is not whether the file states it). `entity` is the MULTILEADER's
  * type-specific struct pointer, i.e. what uncad_object_entity_ptr returned
  * for this object (Dwg_Entity_MULTILEADER*, passed as void* for the same
  * reason uncad_object_entity_ptr itself returns void*).
@@ -126,7 +127,7 @@ typedef struct uncad_multileader_line
  *
  * Returns the number of lines and mallocs *out_lines to that length (each
  * line's own ->points also malloc'd separately); 0 with *out_lines
- * unset/NULL if entity is NULL or has no visible leader lines (not an
+ * unset/NULL if entity is NULL or has no leader line with a point (not an
  * error -- MULTILEADER's leader-line data is legitimately absent for some
  * block/text-only content variants). Free with
  * uncad_multileader_free_lines.

@@ -240,8 +240,11 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
   Dwg_Entity_MULTILEADER *mleader = (Dwg_Entity_MULTILEADER *)entity;
   Dwg_MLEADER_AnnotContext *ctx = &mleader->ctx;
 
-  /* First pass: count visible (type != 0) lines with at least one point,
-   * across every leader node, so out_lines can be sized exactly. */
+  /* First pass: count the lines with at least one point, across every
+   * leader node, so out_lines can be sized exactly. A line's `type` is not
+   * a filter: it is stored from R2010 only (earlier it reads 0, which would
+   * drop every line of an older drawing), and "invisible" describes how the
+   * line is drawn, not whether the file states it. */
   unsigned int total_lines = 0;
   for (BITCODE_BL i = 0; i < ctx->num_leaders; i++)
     {
@@ -249,7 +252,7 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
       for (BITCODE_BL j = 0; j < node->num_lines; j++)
         {
           Dwg_LEADER_Line *line = &node->lines[j];
-          if (line->type != 0 && line->num_points > 0 && line->points)
+          if (line->num_points > 0 && line->points)
             total_lines++;
         }
     }
@@ -268,7 +271,7 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
       for (BITCODE_BL j = 0; j < node->num_lines; j++)
         {
           Dwg_LEADER_Line *line = &node->lines[j];
-          if (line->type == 0 || line->num_points == 0 || !line->points)
+          if (line->num_points == 0 || !line->points)
             continue;
           double *pts = malloc (sizeof (double) * 3 * line->num_points);
           if (!pts)
