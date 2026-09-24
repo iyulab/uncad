@@ -14,6 +14,9 @@ Notable changes to this project are recorded here. The format follows
   a DXF, a linetype the file never declares arrives absent rather than unresolved, as a block
   or a style does (see `docs/CAVEATS.md`); a stated transparency is read through a local
   patch to the vendored LibreDWG.
+- A layout carries its PSLTSCALE and LIMCHECK flags, the extents stored for its space, and
+  the VIEWPORT a sheet last had active (a model layout's is a table record, not an entity,
+  and is absent).
 - `uncad -o x.png` takes `--fit <px>` (the longer side, whatever the drawing's units),
   `--max-edge <px>`, `--stroke <px>` and `--background <white|transparent>`, and SVG and
   PNG take `--padding <units>`. A PNG larger than the limit on a side (8192 px by default,

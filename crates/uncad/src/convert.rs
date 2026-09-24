@@ -2422,7 +2422,7 @@ const HANDLELESS_ID_BASE: u64 = 1 << 63;
 /// the library never resolved -- the two rungs [`reference`] uses), in hex.
 /// That is a different fact from "the file names nothing", which is
 /// [`Ref::Absent`].
-fn entity_reference(
+pub(crate) fn entity_reference(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle_ptr: Option<*mut libredwg_sys::Dwg_Object_Ref>,
 ) -> Ref<EntityId> {

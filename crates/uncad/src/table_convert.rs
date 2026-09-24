@@ -9,15 +9,15 @@
 //! drawing older than R2000 that no application with layouts saved -- has
 //! no layouts.
 
-use crate::convert::{owned_entities, reference};
+use crate::convert::{entity_reference, owned_entities, reference};
 use crate::dynapi::{
-    get_array_field, get_field, get_point2d, get_sub_field, is_from_dxf, is_r2000_or_later,
-    RawPoint2D,
+    get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_from_dxf,
+    is_r2000_or_later, RawPoint2D,
 };
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use uncad_model::model::Point2D;
+use uncad_model::model::{Point2D, Ref};
 use uncad_model::tables::{
     AngularUnitFormat, BlockRecord, DimStyleRecord, FractionFormat, LayerRecord, LayoutRecord,
     LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings, Tables,
@@ -176,7 +176,24 @@ fn convert_layout(
         scale_numerator: plot("paper_units"),
         scale_denominator: plot("drawing_units"),
     };
+    let flags = get_field::<u16>(object_ptr, "LAYOUT", "layout_flags").unwrap_or(0);
+    // A model layout's last active viewport is a VPORT table record, not an
+    // entity: absent. A sheet's is its VIEWPORT.
+    let model = matches!(&block_name, Ref::Resolved(b) if b.eq_ignore_ascii_case("*Model_Space"));
+    let active_viewport = if model {
+        Ref::Absent
+    } else {
+        entity_reference(
+            dwg,
+            get_field::<*mut libredwg_sys::Dwg_Object_Ref>(object_ptr, "LAYOUT", "active_viewport"),
+        )
+    };
     Some(LayoutRecord {
+        paper_space_linetype_scaling: flags & 1 != 0,
+        limits_check: flags & 2 != 0,
+        extents_min: get_point3d(object_ptr, "LAYOUT", "EXTMIN"),
+        extents_max: get_point3d(object_ptr, "LAYOUT", "EXTMAX"),
+        active_viewport,
         name,
         tab_order: get_field::<u16>(object_ptr, "LAYOUT", "tab_order").map_or(0, i32::from),
         block_name,

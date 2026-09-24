@@ -1234,6 +1234,22 @@
           "rotation": "COUNTERCLOCKWISE90",
           "scale_numerator": 1.0,
           "scale_denominator": 1.0
+        },
+        "paper_space_linetype_scaling": true,
+        "limits_check": true,
+        "extents_min": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "extents_max": {
+          "x": 420.0,
+          "y": 297.0,
+          "z": 0.0
+        },
+        "active_viewport": {
+          "type": "RESOLVED",
+          "data": 272
         }
       },
       "Layout2": {
@@ -1267,6 +1283,21 @@
           "rotation": "CLOCKWISE90",
           "scale_numerator": 1.0,
           "scale_denominator": 1.0
+        },
+        "paper_space_linetype_scaling": false,
+        "limits_check": false,
+        "extents_min": {
+          "x": 1e+20,
+          "y": 1e+20,
+          "z": 0.0
+        },
+        "extents_max": {
+          "x": -1e+20,
+          "y": -1e+20,
+          "z": 0.0
+        },
+        "active_viewport": {
+          "type": "ABSENT"
         }
       },
       "Model": {
@@ -1300,6 +1331,21 @@
           "rotation": "UNROTATED",
           "scale_numerator": 1.0,
           "scale_denominator": 1.0
+        },
+        "paper_space_linetype_scaling": true,
+        "limits_check": false,
+        "extents_min": {
+          "x": -5.0,
+          "y": -5.0,
+          "z": 0.0
+        },
+        "extents_max": {
+          "x": 405.0,
+          "y": 290.0,
+          "z": 0.0
+        },
+        "active_viewport": {
+          "type": "ABSENT"
         }
       }
     }
