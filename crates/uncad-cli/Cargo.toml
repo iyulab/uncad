@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
-description = "CLI for uncad (CAD file summary, JSON export of the parsed model, SVG/PNG rendering)."
+description = "CLI for uncad (CAD file summary, JSON export of the parsed model, SVG/PNG rendering, read-only verbs as JSON and as MCP tools)."
 keywords = ["cad", "dwg", "dxf", "cli", "svg"]
 categories = ["command-line-utilities", "graphics"]
 
@@ -26,5 +26,15 @@ iron-render-cad = "0.1.0"
 # a path: the crate reads no files and knows no parser, so this CLI hands
 # it the parsed drawing and its header.
 iron-pack-cad = "0.1.0"
-# Carries the header from uncad's type to iron-pack-cad's (see main.rs).
-serde_json = "1.0.151"
+# The verbs (`summarize`, `hit-test`, `diff`), answered with these crates'
+# own result structures. Version dependencies, never paths.
+iron-scout-cad = "0.1.0"
+iron-diff-cad = "0.1.0"
+# Carries the header from uncad's type to iron-pack-cad's (see main.rs), and
+# writes the verbs' answers.
+serde = "1.0.229"
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+# `uncad mcp`: the verbs as MCP tools over stdio, on a single-threaded
+# runtime (see mcp.rs).
+rmcp = { version = "3.4.1", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["rt"] }

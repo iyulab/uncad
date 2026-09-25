@@ -50,6 +50,27 @@ cargo run -p uncad-cli -- drawing.dwg -o all.svg --space all     # every space i
 cargo run -p uncad-cli -- export drawing.dwg -o pkg/             # images + JSON an LLM or a vision model reads
 ```
 
+Questions about a drawing, each answered as one line of JSON -- the result
+structure of [`iron-scout-cad`](https://github.com/iyulab/iron-scout-cad) or
+[`iron-diff-cad`](https://github.com/iyulab/iron-diff-cad), serialized as it is:
+
+```bash
+uncad summarize drawing.dwg                                   # what the drawing contains
+uncad hit-test drawing.dwg --x 120 --y 45 --tolerance 0.5     # the entities at a point
+uncad diff rev-a.dwg rev-b.dwg                                # exact numeric difference (by reference ID)
+uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01
+```
+
+`uncad mcp` serves the same three verbs as [Model Context
+Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
+call. A tool's answer is byte for byte what the command prints; a warning the
+command writes to stderr is a further content block. Each call reads its files
+again -- the server keeps no state -- and calls run one at a time.
+
+```json
+{ "mcpServers": { "uncad": { "command": "uncad", "args": ["mcp"] } } }
+```
+
 ## Scope
 
 1. **DWG** — read through [LibreDWG](https://www.gnu.org/software/libredwg/)

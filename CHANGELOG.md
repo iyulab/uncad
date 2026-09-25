@@ -16,6 +16,14 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `uncad summarize`, `uncad hit-test` and `uncad diff` answer one question each about a
+  drawing as one line of JSON: the result structure of `iron-scout-cad` (`summarize`,
+  `hit_test`) or `iron-diff-cad` (`diff`), serialized as it is. `hit-test` has no default
+  tolerance; `diff` writes the tolerance and matching mode it used into its answer.
+- `uncad mcp` serves the same verbs as Model Context Protocol tools over stdio, from the
+  same verb table: a tool's first content block is byte for byte what the command prints,
+  and each further block is a warning the command writes to stderr. The server keeps no
+  state between calls and runs them one at a time.
 - The local patches to the vendored LibreDWG are kept as files in
   `crates/libredwg-sys/patches/`, and `scripts/sync-libredwg-vendor.sh` re-applies them
   after a re-vendor (no fuzz); `scripts/libredwg-patches.sh` exports and checks them. The

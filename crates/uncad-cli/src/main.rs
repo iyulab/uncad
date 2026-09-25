@@ -2,7 +2,12 @@
 //!
 //! Reading only -- with no `-o` it prints a summary, and the `-o` targets are
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
-//! DWG/DXF output.
+//! DWG/DXF output. The verbs (`summarize`, `hit-test`, `diff`) answer one
+//! question each as JSON, from the table in `verbs.rs`, which `uncad mcp`
+//! also serves as MCP tools.
+
+mod mcp;
+mod verbs;
 
 use iron_render_cad::{
     to_png, to_svg, Background, Crop, PngError, PngSize, Space, ToPngOptions, ToSvgOptions,
@@ -22,6 +27,14 @@ Usage:
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
   uncad export <input> -o <dir>     write the LLM/VLM package (images + JSON)
+  uncad summarize <input>           what the drawing contains, as JSON
+  uncad hit-test <input> --x <n> --y <n> --tolerance <n>
+                                    the entities at a point, as JSON
+  uncad diff <before> <after> [--matching <reference|geometry>]
+             [--length-tolerance <n>] [--angle-tolerance <n>]
+                                    the numeric difference, as JSON
+  uncad mcp                         serve the three verbs above as MCP tools
+                                      over stdio
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -153,6 +166,22 @@ fn main() -> ExitCode {
         println!("uncad {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
+    if argv.first().map(String::as_str) == Some("mcp") {
+        if argv.len() > 1 {
+            eprintln!("error: uncad mcp takes no arguments");
+            return ExitCode::FAILURE;
+        }
+        return match mcp::serve() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(message) => {
+                eprintln!("error: {message}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if let Some(verb) = argv.first().and_then(|name| verbs::find(name)) {
+        return run_verb(verb, &argv[1..]);
+    }
     if argv.first().map(String::as_str) == Some("export") {
         return match run_export(&argv[1..]) {
             Ok(()) => ExitCode::SUCCESS,
@@ -194,11 +223,7 @@ fn run(args: &Args) -> Result<(), String> {
     let input = args.input.as_deref().expect("checked by the caller");
     let (db, _) = parse_input(input)?;
     if !db.read_diagnostics.is_clean() {
-        eprintln!(
-            "warning: LibreDWG read '{input}' with non-fatal problems ({}); \
-             objects it could not decode are missing from the result",
-            db.read_diagnostics.warnings.join(", ")
-        );
+        eprintln!("warning: {}", read_warning(input, &db));
     }
 
     let Some(output) = args.output.as_deref() else {
@@ -253,6 +278,38 @@ fn run(args: &Args) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// The reader's non-fatal problems with `input`, worded once for every
+/// command.
+fn read_warning(input: &str, db: &CadDatabase) -> String {
+    format!(
+        "LibreDWG read '{input}' with non-fatal problems ({}); objects it could not decode \
+         are missing from the result",
+        db.read_diagnostics.warnings.join(", ")
+    )
+}
+
+/// `uncad <verb> ...`: the answer on stdout as one line of JSON, warnings on
+/// stderr -- the same answer `uncad mcp` gives for the same arguments.
+fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
+    if argv.iter().any(|a| a == "-h" || a == "--help") {
+        eprintln!("{}\n\n{}", verb.usage(), verb.description);
+        return ExitCode::SUCCESS;
+    }
+    match verb.parse_cli(argv).and_then(|args| verb.call(&args)) {
+        Ok(answer) => {
+            println!("{}", answer.json);
+            for warning in &answer.warnings {
+                eprintln!("warning: {warning}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// `uncad::parse()` reports a path it cannot read as `ParseError::Io`, and a
