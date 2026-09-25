@@ -33,9 +33,9 @@ Notable changes to this project are recorded here. The format follows
   the field changes within tolerance, those one drawing does not state, or both, and counts
   them in the answer's `omitted` (`iron-diff-cad`'s projection). By default nothing is left
   out.
-- The verbs read model JSON (what `-o <file.json>` and `set` write) as a drawing, so edits
-  chain. A command that needs the drawing itself (`export`, rendering) refuses model JSON
-  with a message saying so.
+- Every command but `export` reads model JSON (what `-o <file.json>` and `set` write) as a
+  drawing, so edits chain and an edited state renders to SVG or PNG like any drawing.
+  `export`, which reads the drawing's header, refuses model JSON with a message saying so.
 - The local patches to the vendored LibreDWG are kept as files in
   `crates/libredwg-sys/patches/`, and `scripts/sync-libredwg-vendor.sh` re-applies them
   after a re-vendor (no fuzz); `scripts/libredwg-patches.sh` exports and checks them. The

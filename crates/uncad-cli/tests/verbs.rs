@@ -496,6 +496,27 @@ fn a_verb_reads_model_json_as_the_drawing_it_was_written_from() {
 }
 
 #[test]
+fn model_json_renders_as_the_drawing_it_was_written_from() {
+    let dir = scratch("render");
+    let model = dir.join("model.json");
+    assert!(run(&[CORPUS_DWG, "-o", arg(&model)]).status.success());
+    let (from_drawing, from_json) = (dir.join("drawing.svg"), dir.join("json.svg"));
+    assert!(run(&[CORPUS_DWG, "-o", arg(&from_drawing)])
+        .status
+        .success());
+    let out = run(&[arg(&model), "-o", arg(&from_json)]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&from_json).unwrap(),
+        std::fs::read(&from_drawing).unwrap()
+    );
+}
+
+#[test]
 fn a_diff_can_leave_out_what_the_caller_does_not_need_and_says_how_much() {
     let (cli, projected) = answer(&[
         "diff",

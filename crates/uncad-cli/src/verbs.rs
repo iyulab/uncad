@@ -490,7 +490,7 @@ pub fn is_model_json(path: &str) -> bool {
 /// Reads a drawing -- a DWG or DXF file, or model JSON -- with the reader's
 /// non-fatal problems as warnings. Model JSON carries the problems of the
 /// read that produced it, and they are reported the same way.
-fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, String> {
+pub fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, String> {
     let db = if is_model_json(input) {
         let text = std::fs::read_to_string(input)
             .map_err(|e| format!("cannot open input file '{input}': {e}"))?;

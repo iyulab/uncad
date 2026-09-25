@@ -42,8 +42,9 @@ Usage:
   uncad mcp                         serve the four verbs above as MCP tools
                                       over stdio
 
-  The four verbs read model JSON (.json) as a drawing too -- what
-  `-o <output.json>` and `set` write -- so edits chain.
+  Every command but export reads model JSON (.json) as a drawing too --
+  what `-o <output.json>` and `set` write -- so edits chain, and the last
+  state renders like any drawing.
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -230,9 +231,12 @@ fn main() -> ExitCode {
 /// `error:` prefix.
 fn run(args: &Args) -> Result<(), String> {
     let input = args.input.as_deref().expect("checked by the caller");
-    let (db, _) = parse_input(input)?;
-    if !db.read_diagnostics.is_clean() {
-        eprintln!("warning: {}", read_warning(input, &db));
+    // A drawing or model JSON: rendering and the summary need the model
+    // alone, not the header only a drawing carries.
+    let mut warnings = Vec::new();
+    let db = verbs::read(input, &mut warnings)?;
+    for warning in warnings {
+        eprintln!("warning: {warning}");
     }
 
     let Some(output) = args.output.as_deref() else {
@@ -330,8 +334,8 @@ fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
 fn parse_input(input: &str) -> Result<(CadDatabase, uncad::Header), String> {
     if verbs::is_model_json(input) {
         return Err(format!(
-            "'{input}' is model JSON; this command needs the drawing itself (.dwg or .dxf) -- \
-             the verbs summarize, hit-test, diff and set read model JSON"
+            "'{input}' is model JSON; export needs the drawing itself (.dwg or .dxf), whose \
+             header it reads -- every other command reads model JSON"
         ));
     }
     match std::fs::metadata(input) {
