@@ -699,7 +699,7 @@ measured as a constant `0xFFFFFF` placeholder, unrelated to the layer's real col
 22 real files. The principle still holds: BYLAYER resolution goes through `color_index`
 only, and `rgb` is never trusted. The
 `bylayer_resolves_through_layer_colorindex_not_layer_rgb` regression test in
-`crates/uncad/src/color.rs` guards that.
+the renderer's colour module (`iron-render-cad`) guards that.
 
 Since the submodule moved to a newer upstream, `rgb` is no longer always `0xFFFFFF` --
 and rendering 9 real files to PNG showed every one of them coming out entirely black
@@ -767,7 +767,7 @@ showed it, which is why it went unnoticed for a while.
 The same bug explains a second, seemingly unrelated symptom: coordinates serializing as
 absurdly long strings of leading zeros (a pointer bit-pattern read as `f64` often lands in
 the subnormal range, and Rust's `f64` `Display` never switches to scientific notation).
-The `clean()` helper in `svg.rs` still guards that at the formatting level, but the real
+The `clean()` helper in the renderer's SVG formatting (`iron-render-cad`) still guards that at the formatting level, but the real
 cause was the layout here.
 
 `get_array_field`'s debug assertion cannot catch this class of bug: it compares the size
@@ -1005,54 +1005,59 @@ C build still includes `USE_WRITE` and the encoder sources -- see `docs/ARCHITEC
 See `docs/ARCHITECTURE.md`. The `uncad` crate is safe to call from multiple threads; using
 `libredwg-sys` directly means serializing the calls yourself.
 
-## File-based regression tests are few (broad real-file coverage is still missing)
+## File-based regression tests: what is verified, and what is not
 
 This section is the single list of what is actually verified. `samples/README.md` only
 explains why that directory is gitignored and links here. `docs/ARCHITECTURE.md`'s "Test
-layout" covers where a new test belongs.
+layout" covers where a new test belongs. The test count changes with every change;
+`cargo test --workspace -- --list` gives the current one.
 
-`cargo test --workspace` runs 86 tests. 64 of them are `uncad` unit tests: `color.rs` 11
-(ACI/BYLAYER resolution and the gradient helper `tint_toward_white`), `acis.rs` 6 (SAT
-record parsing, pointer resolution, wireframe extraction), `convert.rs` 6 (HATCH gradient
-color resolution, stop ordering, `gradient_name` classification), `json.rs` 6, `svg*.rs`
-28 (outlier-trim clustering, HATCH edge approximation, MTEXT formatting stripping,
-stroke-width substitution, transform composition, HATCH pattern fill, MLINE offsets,
-TEXT/ATTRIB rotation transforms, non-finite coordinate defense, block-reference recursion
-blowup), `tables.rs` 3 (the LAYER TRUECOLOR 256-sentinel fallback), and `png.rs` 4 (SVG ->
-PNG size, scaling, errors, plus the `circle.dwg` pipeline). Most are pure-function tests
-verifiable with synthetic data, which makes them genuinely useful regression guards:
-whether `dominant_cluster_box` picks the right cluster out of a synthetic set of boxes, or
-whether `parse_sat_records` really stops at the `End-of-ACIS-data` marker, is decidable
-without a DWG file at all.
+**Unit tests** sit next to the code they check, in `crates/uncad/src/` (`acis.rs`: SAT
+record parsing and wireframe extraction; `convert.rs`: HATCH gradient colors and other
+conversion helpers; `header.rs`, `table_convert.rs`, `text.rs`: header variables, table
+records and string decoding). Most are pure functions checked on synthetic data. Rendering
+and colour resolution are not this crate's: their tests live in `iron-render-cad`.
 
-**Real-file tests**: `png.rs`'s `to_png_renders_a_real_dwg_to_a_valid_png` runs the full
-`parse()` -> `to_svg()` -> `to_png()` pipeline against one real DWG
-(`lib/libredwg/test/test-data/2000/circle.dwg`, committed as part of the git submodule,
-unlike `samples/`; the build uses the vendored copy, so the submodule is a test-only
-precondition) and checks that a valid PNG comes out. That is a smoke test on one file, not
-broad per-entity-type rendering accuracy. From the same corpus:
-`tests/dxf_pipeline.rs` (5: DXF parse/render, a JSON round trip through
-`serde_json::from_str` and `PartialEq`, two parses agreeing and producing identical JSON
-with `CadDatabase` being `Send + Sync + Clone`, and an error rather than a panic on
-garbage input), `tests/acis_sab.rs` (1: a SAB-solid file yielding the same wireframe in
-`entities` and in `tables.block_records`), and `uncad-cli`'s
-`tests/documented_invocations.rs` (every call the README documents, run against the
-real binary; `--scale`/`--fit`/`--space`/`--no-trim`/`--pretty`/`--padding`/`--stroke`/
-`--background` are each checked for actually changing the result, `--max-edge` for
-refusing and then allowing the same request, with `--no-trim` using a five-line DXF the test writes from group
-codes itself). All of them assert properties rather than pinned expected values. The 6
-`json.rs` unit tests build one instance of every `Entity` variant and check that the JSON
-`type` tag matches `type_name()`, that HATCH path and edge tags are right, that a round
-trip holds, that non-finite floats become `null` and do not come back, and that a wrong or
-missing `type` tag is an error rather than a panic.
+**Oracles that are not this crate's own output:**
 
-**Still missing**: broad end-to-end verification of `parse()`/`to_svg()`/`to_json()`
-against real DWG/DXF files -- entity-count parity across many files, byte-level rendering
-comparison and so on -- is not automated. `samples/` is entirely gitignored (a deliberate
-choice, so anyone can drop any file in without license clearance), so CI has nothing
-committed to read. See `samples/README.md`. Restoring that coverage means committing files
-with a clear license and verifying expected values against an independent reference rather
-than against this project's own output.
+- `tests/golden.rs` -- the golden cases, synthetic drawings whose spec is the oracle. The
+  DXF and the expected model are written by the model crate's golden writer and copied
+  here byte for byte (`tests/golden/README.md`).
+- `tests/second_reader.rs` -- a second, independent DWG reader, compared field by field on
+  the corpus. The agreed counts and the explained differences are pinned in
+  `tests/second-reader-*.txt`.
+- `tests/fixtures.rs` -- hand-authored DXF fixtures in `tests/fixtures/`, each written to
+  isolate one behaviour (code pages, dimension scale factors, block layers, true colours).
+- `tests/vendored_patches.rs` -- what each local patch to the vendored LibreDWG changes,
+  pinned from the files that exercise it.
+
+**Real-file tests** read the LibreDWG test corpus (`lib/libredwg/test/test-data/`, part of
+the git submodule; the build uses the vendored copy, so the submodule is a test-only
+precondition). They assert properties of what is read -- a field is stated, a reference
+resolves, a count matches the other reader -- rather than this crate's own earlier output:
+attributes, block base points, code pages, dimensions, entity styles, extrusions, hatch
+edges, the header, layer colours and states, layouts, multileaders, polyface meshes,
+polyline fields and closure, R2007+ DXF handles, reference fields, spline definitions,
+text placement and wipeouts each have a file under `crates/uncad/tests/`.
+`tests/corpus_sweep.rs` walks the whole corpus once and tallies every signal this crate
+reports, and `tests/diagnostics.rs` covers the places a read could come back empty without
+saying so.
+
+**Invariants**: `tests/determinism.rs` (the same input gives the same bytes),
+`tests/read_paths.rs` (reading a path and reading bytes agree), `tests/corrupt_dwg.rs` and
+`tests/dxf_pipeline.rs` (garbage input is an error, not a panic; a JSON round trip holds).
+
+**The CLI**: `crates/uncad-cli/tests/documented_invocations.rs` runs every call the README
+and `--help` advertise against the real binary, and checks that each option actually
+changes the result. `tests/verbs.rs` covers `summarize`, `hit-test`, `diff`, `set` and
+`uncad mcp`, including that a tool call answers with the same bytes as the command line.
+`tests/release_invariants.rs` checks what has to hold before a publish.
+
+**Still missing**: the corpus is the library's own test data, not a sample of drawings in
+use. Coverage across many real-world files, and rendering checked against an independent
+reference, are not automated. `samples/` is entirely gitignored (a deliberate choice, so
+anyone can drop any file in without license clearance), so CI has nothing from it to read.
+See `samples/README.md`.
 
 ## Clippy
 

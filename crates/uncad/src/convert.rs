@@ -2212,11 +2212,7 @@ fn convert_hatch_gradient(
         // shift_value (0.0-1.0) orders the stops; `colors` is not guaranteed
         // to already be sorted by it.
         let mut sorted: Vec<&libredwg_sys::Dwg_HATCH_Color> = colors.iter().collect();
-        sorted.sort_by(|a, b| {
-            a.shift_value
-                .partial_cmp(&b.shift_value)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        sorted.sort_by(|a, b| a.shift_value.total_cmp(&b.shift_value));
         (
             hatch_stop_color(sorted[0]),
             Some(hatch_stop_color(sorted[sorted.len() - 1])),

@@ -128,9 +128,9 @@ intended consumers are libraries and binaries (CLI, server, desktop app).
 `winget install LLVM.LLVM`, Ubuntu: `apt install libclang-dev`). The LibreDWG C
 sources are vendored into `crates/libredwg-sys/vendor/libredwg/`, so **building
 does not need the `lib/libredwg` submodule**. Running `cargo test --workspace`
-does: the real-file tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs`
-in `uncad`, and `tests/documented_invocations.rs` in `uncad-cli`) read fixtures
-from that submodule's `test/test-data/`. Clone with
+does: the real-file tests under `crates/uncad/tests/` and `uncad-cli`'s
+`tests/documented_invocations.rs` read fixtures from that submodule's
+`test/test-data/`. Clone with
 `git clone --recurse-submodules`, or run `git submodule update --init` in an
 existing clone. Builds and tests pass on Linux (`x86_64-unknown-linux-gnu`) as
 well as Windows.

@@ -21,16 +21,16 @@ crates/
                          string width, a pre-R13 header's length, whether the Template
                          section was read) that decoding a drawing's text and header
                          need. Strings themselves are decoded on the Rust side.
-    vendor/libredwg/     the upstream C sources actually compiled (see "Build"), five
-                         of them carrying a local patch (NOTICE.md)
+    vendor/libredwg/     the upstream C sources actually compiled (see "Build"); the
+                         ones carrying a local patch are listed in NOTICE.md
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
   uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
                          convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
                          table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
                          LAYOUT with its plot settings), with acis.rs
-                         for 3DSOLID wireframes and hatch_color.rs for the gradient
-                         stop colors the model carries. The model and its JSON form
+                         for 3DSOLID wireframes; header.rs and text.rs decode the
+                         header variables and strings. The model and its JSON form
                          are the uncad-model crate's; SVG/PNG rendering is the
                          iron-render-cad crate's (uncad-cli and this crate's tests use
                          it). Read-only: there is no DWG/DXF write path.
@@ -58,12 +58,12 @@ confirmed with `cargo publish --dry-run`. So `crates/libredwg-sys/vendor/libredw
 a copy of exactly the files this crate compiles: 24 `.c` files plus every header,
 `.spec`, `.inc` and codepage table they `#include`, 112 files in total
 (`git ls-files crates/libredwg-sys/vendor | wc -l`), a subset rather than the whole
-submodule. Five of those files carry a local patch each, marked in the source with a
+submodule. The files that carry a local patch are marked in the source with a
 dated `uncad local patch` comment and listed in `crates/libredwg-sys/NOTICE.md` (see
 `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG"); everything else is
 byte for byte what the submodule holds. The
 submodule itself stays: it is the diff target when upstream moves, and the real-file
-tests (`png.rs`, `tests/dxf_pipeline.rs`, `tests/acis_sab.rs` in `uncad`,
+tests (under `crates/uncad/tests/`, and
 `tests/documented_invocations.rs` in `uncad-cli`) read fixtures from
 `lib/libredwg/test/test-data/`. In short, the submodule is a precondition of
 `cargo test`, not of `cargo build`.
@@ -133,7 +133,7 @@ with no way to regenerate correct expectations for a different file, it was dele
 with its fixtures. See `samples/README.md`.
 
 What is actually covered today -- test counts, per-file breakdown, and what is still not
-automated -- is in `docs/CAVEATS.md`, "File-based regression tests". This section only
+automated -- is in `docs/CAVEATS.md`, "File-based regression tests: what is verified, and what is not". This section only
 covers where things go.
 
 ## FFI boundary: opaque types plus dynapi reflection

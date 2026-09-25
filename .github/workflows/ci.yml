@@ -13,7 +13,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -43,7 +43,7 @@ jobs:
     steps:
       # No submodules: `cargo check` runs no tests, and the build compiles the
       # vendored LibreDWG copy.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: Swatinem/rust-cache@v2
 
@@ -68,7 +68,7 @@ jobs:
     steps:
       # No submodules: the audit reads Cargo.lock, and the vendored C library
       # is not part of the Rust dependency graph.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Prebuilt binary -- avoids compiling cargo-audit on every run.
       - name: Install cargo-audit
@@ -86,7 +86,7 @@ jobs:
       # No submodules, for the same reason as the audit job above: this reads
       # Cargo.lock, and the vendored C library is not a Rust dependency. See
       # deny.toml for what that leaves uncovered.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Prebuilt binary -- avoids compiling cargo-deny on every run.
       - name: Install cargo-deny
@@ -103,7 +103,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
