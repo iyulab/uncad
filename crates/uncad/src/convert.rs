@@ -1434,15 +1434,25 @@ unsafe fn convert_entity(
                     .map(|f| f & 4 != 0)
             });
             let periodic = bit("periodic");
-            let knots = if by_control_points {
-                get_array_field::<u32, f64>(entity_ptr, "SPLINE", "num_knots", "knots")
-            } else {
+            // The curve's definition -- its knots, and its weights when it
+            // has them -- goes with its control points, whichever form the
+            // record is flagged as. A DWG record of the fit-point form stores
+            // none of them; a DXF of that form writes the control points and
+            // knots its program computed, and they define the curve all the
+            // same.
+            let knots = if control.is_empty() {
                 Vec::new()
+            } else {
+                get_array_field::<u32, f64>(entity_ptr, "SPLINE", "num_knots", "knots")
             };
-            // Weights are stored only when the `weighted` bit is set; the
-            // library leaves `w` at 0 otherwise, which is not a weight. No
-            // weights means every weight is 1.
-            let weights = if bit("weighted") == Some(true) {
+            // Weights are stated when the record says it is weighted, or --
+            // read from a DXF -- when a group 41 gave one: the importer fills
+            // `w` from 41 but sets the weighted bit from another bit of group
+            // 70. The library leaves `w` at 0 where no weight was given,
+            // which is not a weight. No weights means every weight is 1.
+            let weighted = get_field::<u8>(entity_ptr, "SPLINE", "weighted") == Some(1);
+            let weights = if !control.is_empty() && (weighted || control.iter().any(|p| p.w != 0.0))
+            {
                 control.iter().map(|p| p.w).collect()
             } else {
                 Vec::new()

@@ -597,6 +597,14 @@ form, so the field is read only for R2013-or-later files. In the test corpus eve
 R2013-or-later fit-point spline is open, so reading bit 4 is checked against the format
 description and a second reader; no closed example has been observed.
 
+A DXF of the fit-point form usually writes, beside the fit points, the control points and
+knots its program computed (and, for a rational curve, their weights in group 41). The
+importer keeps them but flags the record as the fit-point form, and sets its `weighted`
+bit from another bit of group 70 than the one that marks a rational curve. So this crate
+reads the knots whenever the record holds control points, and the weights when the record
+is flagged weighted or the importer filled a weight in -- it leaves `w` at 0 where none
+was given, which is not a weight.
+
 ## Attributes: the block chain and the INSERT chain are walked here, not by the library
 
 In R13..R2000 drawings the library links a block's entities as a `first_entity` ..

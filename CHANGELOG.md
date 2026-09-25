@@ -267,6 +267,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- From a DXF, a fit-point SPLINE whose file also writes the control points and knots
+  computed for it keeps its knots, and its weights when group 41 gives them. The knots
+  were dropped while the control points were kept, so the spline arrived with a
+  definition that did not add up -- drawn as its control polygon -- and a rational one
+  lost its weights.
 - A HATCH boundary edge carries what the file states of it: a straight edge its end point
   as well as its start, a spline edge its degree, rational and periodic flags, knots,
   weights, fit points and end tangents beside its control points.
