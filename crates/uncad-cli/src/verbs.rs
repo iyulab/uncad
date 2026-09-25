@@ -247,6 +247,14 @@ pub const VERBS: &[Verb] = &[
                 description: "Where to write the picture: a .svg or .png path that does not \
                     exist yet.",
             },
+            Param {
+                name: "fit",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "For a PNG: make the longer side this many pixels. Without it a \
+                    drawing unit is a pixel, which a large drawing exceeds.",
+            },
             MATCHING,
             LENGTH_TOLERANCE,
             ANGLE_TOLERANCE,
@@ -676,7 +684,21 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         iron_render_cad::OverlayOptions::default(),
     );
     if png {
-        let bytes = iron_render_cad::svg_to_png(&overlay.svg, 1.0).map_err(|e| e.to_string())?;
+        // Pixels per drawing unit: the longer side at `fit` pixels, or one.
+        let scale = match args.get("fit").and_then(Value::as_u64) {
+            Some(fit) => {
+                let longer = overlay.view_box.width().max(overlay.view_box.height());
+                if !(longer.is_finite() && longer > 0.0) || fit == 0 {
+                    return Err(format!(
+                        "cannot fit a picture of size {longer} into {fit} px"
+                    ));
+                }
+                fit as f64 / longer
+            }
+            None => 1.0,
+        };
+        let bytes = iron_render_cad::svg_to_png(&overlay.svg, scale as f32)
+            .map_err(|e| format!("{e} -- ask for a smaller picture with --fit <px> (MCP: fit)"))?;
         create_new(&output, &bytes)?;
     } else {
         create_new(&output, overlay.svg.as_bytes())?;

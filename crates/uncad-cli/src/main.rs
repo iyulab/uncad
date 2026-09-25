@@ -39,7 +39,7 @@ Usage:
                                     set one field of one entity, write the
                                       result as model JSON (never over an
                                       existing file), answer with the diff
-  uncad redline <before> <after> -o <out.svg|out.png>
+  uncad redline <before> <after> -o <out.svg|out.png> [--fit <px>]
                 [--matching ...] [--length-tolerance <n>]
                 [--angle-tolerance <n>] [--omit <within,unstated>]
                                     draw the difference on top of <before>:

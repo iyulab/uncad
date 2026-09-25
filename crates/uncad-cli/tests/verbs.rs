@@ -645,11 +645,27 @@ fn redline_writes_nothing_it_should_not() {
     assert!(String::from_utf8_lossy(&out.stderr).contains(".svg nor .png"));
     assert!(!wrong.exists());
 
-    // A drawing against itself: nothing to mark, and still a picture.
+    // A drawing against itself: nothing to mark, and still a picture --
+    // at the size asked for.
     let png = dir.join("same.png");
-    let (_, report) = answer(&["redline", CORPUS_DWG, CORPUS_DWG, "-o", arg(&png)]);
+    let (_, report) = answer(&[
+        "redline",
+        CORPUS_DWG,
+        CORPUS_DWG,
+        "-o",
+        arg(&png),
+        "--fit",
+        "300",
+    ]);
     assert!(report["marked"].as_array().unwrap().is_empty(), "{report}");
-    assert!(std::fs::read(&png).unwrap().starts_with(b"\x89PNG"));
+    let bytes = std::fs::read(&png).unwrap();
+    assert!(bytes.starts_with(b"\x89PNG"));
+    let side = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+    assert_eq!(
+        side(16).max(side(20)),
+        300,
+        "the longer side is --fit pixels"
+    );
 }
 
 #[test]
