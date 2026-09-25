@@ -46,6 +46,9 @@ pub enum Kind {
     NonNegative,
     /// One of the listed words.
     Choice(&'static [&'static str]),
+    /// Some of the listed words, each once. The command line takes them
+    /// comma-separated.
+    Choices(&'static [&'static str]),
 }
 
 pub struct Param {
@@ -171,6 +174,7 @@ pub const VERBS: &[Verb] = &[
                 positional: false,
                 description: "Tolerance for angles, in radians (default: 1e-9).",
             },
+            OMIT,
         ],
         writes: false,
         run: diff,
@@ -223,6 +227,7 @@ pub const VERBS: &[Verb] = &[
                 description: "Where to write the edited drawing: a .json path that does not \
                     exist yet.",
             },
+            OMIT,
         ],
         writes: true,
         run: set,
@@ -230,6 +235,19 @@ pub const VERBS: &[Verb] = &[
 ];
 
 const DRAWING: &str = "The drawing (.dwg, .dxf, or model JSON .json).";
+
+/// The projection a change-set answer may ask for.
+const OMIT: Param = Param {
+    name: "omit",
+    kind: Kind::Choices(&["within", "unstated"]),
+    required: false,
+    positional: false,
+    description: "Field changes to leave out of the answer: `within` (numeric fields that moved \
+        within tolerance), `unstated` (fields one drawing does not state -- a newer format \
+        states what an older one had no place for). A modified entity left with no field is \
+        left out too. The answer counts what was left out in `omitted`. Default: nothing is \
+        left out.",
+};
 
 /// The verb named `name`, in either spelling (`hit_test` or `hit-test`).
 pub fn find(name: &str) -> Option<&'static Verb> {
@@ -270,6 +288,17 @@ impl Verb {
                 Kind::Number => value.as_f64().is_some_and(f64::is_finite),
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
                 Kind::Choice(words) => value.as_str().is_some_and(|s| words.contains(&s)),
+                Kind::Choices(words) => value.as_array().is_some_and(|items| {
+                    items
+                        .iter()
+                        .all(|i| i.as_str().is_some_and(|s| words.contains(&s)))
+                        && items
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<std::collections::BTreeSet<_>>()
+                            .len()
+                            == items.len()
+                }),
             };
             if !fits {
                 return Err(format!(
@@ -307,6 +336,14 @@ impl Verb {
                 Kind::Choice(words) => {
                     schema.insert("type".into(), "string".into());
                     schema.insert("enum".into(), (*words).into());
+                }
+                Kind::Choices(words) => {
+                    let mut item = Map::new();
+                    item.insert("type".into(), "string".into());
+                    item.insert("enum".into(), (*words).into());
+                    schema.insert("type".into(), "array".into());
+                    schema.insert("items".into(), item.into());
+                    schema.insert("uniqueItems".into(), true.into());
                 }
             }
             schema.insert("description".into(), param.description.into());
@@ -360,6 +397,11 @@ impl Verb {
                     Kind::Json => serde_json::from_str(raw).map_err(|e| {
                         format!("{word} must be JSON -- a string in quotes (got '{raw}': {e})")
                     })?,
+                    Kind::Choices(_) => Value::Array(
+                        raw.split(',')
+                            .map(|w| Value::String(w.trim().to_string()))
+                            .collect(),
+                    ),
                     Kind::Path | Kind::Text | Kind::Choice(_) => Value::String(raw.clone()),
                 };
                 args.insert(param.name.into(), value);
@@ -409,6 +451,7 @@ impl Kind {
             Kind::Number => "a finite number".into(),
             Kind::NonNegative => "a finite number, 0 or more".into(),
             Kind::Choice(words) => format!("one of {}", words.join(", ")),
+            Kind::Choices(words) => format!("a list of distinct words from {}", words.join(", ")),
         }
     }
 
@@ -419,6 +462,7 @@ impl Kind {
             Kind::Text => "text".into(),
             Kind::Json => "json".into(),
             Kind::Choice(words) => words.join("|"),
+            Kind::Choices(words) => format!("{}[,...]", words.join("|")),
         }
     }
 }
@@ -473,6 +517,21 @@ fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, String> 
     Ok(db)
 }
 
+/// `changes` projected as the `omit` argument asks, or as it is.
+fn projected(
+    changes: iron_diff_cad::ChangeSet,
+    args: &Map<String, Value>,
+) -> iron_diff_cad::ChangeSet {
+    let Some(words) = args.get("omit").and_then(Value::as_array) else {
+        return changes;
+    };
+    let has = |w: &str| words.iter().any(|v| v == w);
+    changes.without(iron_diff_cad::Omit {
+        within: has("within"),
+        unstated: has("unstated"),
+    })
+}
+
 fn answer(result: &impl serde::Serialize, warnings: Vec<String>) -> Result<Answer, String> {
     let json = serde_json::to_string(result).map_err(|e| e.to_string())?;
     Ok(Answer { json, warnings })
@@ -512,7 +571,10 @@ fn diff(args: &Map<String, Value>) -> Result<Answer, String> {
     if let Some(angle) = number(args, "angle_tolerance") {
         options.tolerance.angle = angle;
     }
-    answer(&iron_diff_cad::diff(&before, &after, options), warnings)
+    answer(
+        &projected(iron_diff_cad::diff(&before, &after, options), args),
+        warnings,
+    )
 }
 
 fn set(args: &Map<String, Value>) -> Result<Answer, String> {
@@ -554,7 +616,10 @@ fn set(args: &Map<String, Value>) -> Result<Answer, String> {
     std::io::Write::write_all(&mut file, json.as_bytes())
         .map_err(|e| format!("cannot write '{output}': {e}"))?;
     answer(
-        &iron_diff_cad::diff(&before, &after, iron_diff_cad::DiffOptions::default()),
+        &projected(
+            iron_diff_cad::diff(&before, &after, iron_diff_cad::DiffOptions::default()),
+            args,
+        ),
         warnings,
     )
 }

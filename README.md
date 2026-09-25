@@ -62,7 +62,14 @@ uncad summarize drawing.dwg                                   # what the drawing
 uncad hit-test drawing.dwg --x 120 --y 45 --tolerance 0.5     # the entities at a point
 uncad diff rev-a.dwg rev-b.dwg                                # exact numeric difference (by reference ID)
 uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01
+uncad diff rev-a.dwg rev-b.dwg --omit within,unstated         # only what changed beyond tolerance
 ```
+
+A change set lists every field that differs, including those that moved within
+tolerance and those one drawing does not state (a drawing saved again in a newer
+format states values the older format had no place for). `--omit` leaves either
+out -- for an agent reading the answer into a limited context -- and the answer
+counts what it left out in `omitted`, so nothing left out reads as unchanged.
 
 One verb edits: `set` changes one field of one entity and writes the result as a
 new model JSON file -- never over an existing file, never into its input -- and

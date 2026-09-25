@@ -494,3 +494,45 @@ fn a_verb_reads_model_json_as_the_drawing_it_was_written_from() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("model JSON"));
 }
+
+#[test]
+fn a_diff_can_leave_out_what_the_caller_does_not_need_and_says_how_much() {
+    let (cli, projected) = answer(&[
+        "diff",
+        CORPUS_DWG,
+        CORPUS_DXF,
+        "--matching",
+        "geometry",
+        "--omit",
+        "within,unstated",
+    ]);
+    let omitted = &projected["omitted"];
+    assert!(omitted["within_fields"].is_u64(), "{projected}");
+    assert!(omitted["unstated_fields"].is_u64(), "{projected}");
+    assert!(omitted["entities"].is_u64(), "{projected}");
+    let (_, full) = answer(&["diff", CORPUS_DWG, CORPUS_DXF, "--matching", "geometry"]);
+    assert!(
+        full.get("omitted").is_none(),
+        "nothing is left out by default"
+    );
+
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "diff",
+        json!({"before": CORPUS_DWG, "after": CORPUS_DXF, "matching": "geometry",
+               "omit": ["within", "unstated"]}),
+    );
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+
+    for bad in [
+        json!(["within", "within"]),
+        json!(["nearby"]),
+        json!("within"),
+    ] {
+        let result = mcp.call(
+            "diff",
+            json!({"before": CORPUS_DWG, "after": CORPUS_DXF, "omit": bad}),
+        );
+        assert_eq!(result["isError"], true, "{result}");
+    }
+}

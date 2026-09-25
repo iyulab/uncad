@@ -33,6 +33,7 @@ Usage:
                                     the entities at a point, as JSON
   uncad diff <before> <after> [--matching <reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
+             [--omit <within,unstated>]
                                     the numeric difference, as JSON
   uncad set <input> --id <n> --path <field> --value <json> -o <new.json>
                                     set one field of one entity, write the

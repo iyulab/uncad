@@ -29,6 +29,10 @@ Notable changes to this project are recorded here. The format follows
   never writes over an existing file, so its input is never changed; an edit the drawing
   does not allow is refused with its reason, and nothing is written. The MCP tool of the
   same name is marked as writing, not destructive and not idempotent.
+- `uncad diff` and `uncad set` take `--omit within,unstated` (MCP: `omit`), which leaves out
+  the field changes within tolerance, those one drawing does not state, or both, and counts
+  them in the answer's `omitted` (`iron-diff-cad`'s projection). By default nothing is left
+  out.
 - The verbs read model JSON (what `-o <file.json>` and `set` write) as a drawing, so edits
   chain. A command that needs the drawing itself (`export`, rendering) refuses model JSON
   with a message saying so.
