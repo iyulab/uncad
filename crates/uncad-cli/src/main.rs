@@ -40,6 +40,7 @@ Usage:
                                       result as model JSON (never over an
                                       existing file), answer with the diff
   uncad redline <before> <after> -o <out.svg|out.png> [--fit <px>]
+                [--frame <drawing|changes>]
                 [--matching ...] [--length-tolerance <n>]
                 [--angle-tolerance <n>] [--omit <within,unstated>]
                                     draw the difference on top of <before>:

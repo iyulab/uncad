@@ -96,6 +96,7 @@ it marked and what it could not show, and why:
 ```bash
 uncad redline part.dwg step2.json -o proposal.svg
 uncad redline part.dwg step2.json -o proposal.png --fit 2000 --omit within  # 2000 px, beyond tolerance only
+uncad redline plan.dwg step2.json -o detail.png --fit 1200 --frame changes  # just the changes, and around them
 ```
 
 `uncad mcp` serves the same five verbs as [Model Context

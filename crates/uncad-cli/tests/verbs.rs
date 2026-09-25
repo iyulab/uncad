@@ -708,3 +708,39 @@ fn redline_as_a_tool_answers_and_draws_as_the_command_line_does() {
         std::fs::read(&by_tool).unwrap()
     );
 }
+
+#[test]
+fn redline_can_frame_the_changes() {
+    let dir = scratch("redline-frame");
+    let id = circle_id(&dir);
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        "1",
+        "-o",
+        arg(&edited),
+    ]);
+    let (whole, framed) = (dir.join("whole.svg"), dir.join("framed.svg"));
+    let (_, w) = answer(&["redline", CORPUS_DWG, arg(&edited), "-o", arg(&whole)]);
+    let (_, f) = answer(&[
+        "redline",
+        CORPUS_DWG,
+        arg(&edited),
+        "-o",
+        arg(&framed),
+        "--frame",
+        "changes",
+    ]);
+    let width = |v: &Value| {
+        v["view_box"]["max_x"].as_f64().unwrap() - v["view_box"]["min_x"].as_f64().unwrap()
+    };
+    assert!(width(&f) <= width(&w), "{f} {w}");
+    // The same change is marked either way.
+    assert_eq!(f["marked"], w["marked"]);
+}

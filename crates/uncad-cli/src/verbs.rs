@@ -255,6 +255,15 @@ pub const VERBS: &[Verb] = &[
                 description: "For a PNG: make the longer side this many pixels. Without it a \
                     drawing unit is a pixel, which a large drawing exceeds.",
             },
+            Param {
+                name: "frame",
+                kind: Kind::Choice(&["drawing", "changes"]),
+                required: false,
+                positional: false,
+                description: "What the picture shows: the whole drawing (default), or the \
+                    changes with some of the drawing around them -- in a large drawing a small \
+                    change is otherwise a few pixels of the picture.",
+            },
             MATCHING,
             LENGTH_TOLERANCE,
             ANGLE_TOLERANCE,
@@ -677,12 +686,11 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
     let before = read(&path(args, "before"), &mut warnings)?;
     let after = read(&path(args, "after"), &mut warnings)?;
     let changes = compare(&before, &after, args);
-    let overlay = iron_render_cad::overlay_to_svg(
-        &before,
-        &after,
-        &changes,
-        iron_render_cad::OverlayOptions::default(),
-    );
+    let mut options = iron_render_cad::OverlayOptions::default();
+    if args.get("frame").and_then(Value::as_str) == Some("changes") {
+        options.frame = iron_render_cad::OverlayFrame::Changes;
+    }
+    let overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
     if png {
         // Pixels per drawing unit: the longer side at `fit` pixels, or one.
         let scale = match args.get("fit").and_then(Value::as_u64) {
