@@ -17,9 +17,10 @@ LIGHT. Details worth knowing:
   `Dwg_HATCH_DefLine` and tiling an SVG `<pattern>` (see "HATCH pattern fill" below);
   solid fills are painted as a translucent color; gradient fills are approximated with
   SVG's `linearGradient`/`radialGradient` (unverified, see "HATCH gradient fill").
-- **LEADER** draws only the polyline through its vertices plus an optional arrowhead at
-  the first one. Spline paths and text-box size are not in the model, because nothing
-  renders them.
+- **LEADER** carries its vertices, whether its path runs straight or as a spline through
+  them (group 72), and whether it has an arrowhead at the first one. A spline path's
+  curve is not in the file -- only the vertices it passes through -- and the text box's
+  size is not in the model.
 - **TRACE** reuses `SolidEntity` (the two have the same four corners, in the same order) and
   is filled the same way.
 - **POLYLINE_2D** reuses `LwPolylineEntity` and renders through exactly the same code path
