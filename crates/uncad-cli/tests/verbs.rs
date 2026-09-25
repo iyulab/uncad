@@ -1,5 +1,5 @@
-//! The verbs (`summarize`, `hit-test`, `diff`, `set`) and `uncad mcp`, which
-//! serves the same verbs as MCP tools.
+//! The verbs (`summarize`, `hit-test`, `diff`, `set`, `redline`) and
+//! `uncad mcp`, which serves the same verbs as MCP tools.
 //!
 //! The property that matters most is that the two front ends give the same
 //! answer: a tool result's first content block must be byte for byte what
@@ -241,14 +241,19 @@ impl Drop for Mcp {
 }
 
 #[test]
-fn mcp_lists_the_verbs_and_only_set_writes() {
+fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
     let mut mcp = Mcp::start();
     let list = mcp.request("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["summarize", "hit_test", "diff", "set"]);
+    assert_eq!(names, ["summarize", "hit_test", "diff", "set", "redline"]);
     for tool in tools {
-        let writes = tool["name"] == "set";
+        let writes = tool["name"] == "set" || tool["name"] == "redline";
+        let description = tool["description"].as_str().unwrap();
+        assert!(
+            !description.contains('\\'),
+            "no stray backslash: {description}"
+        );
         assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
         assert_eq!(tool["annotations"]["readOnlyHint"], !writes, "{tool}");
         assert_eq!(tool["annotations"]["idempotentHint"], !writes, "{tool}");
@@ -556,4 +561,134 @@ fn a_diff_can_leave_out_what_the_caller_does_not_need_and_says_how_much() {
         );
         assert_eq!(result["isError"], true, "{result}");
     }
+}
+
+#[test]
+fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
+    // Read, point at the circle, change its radius, draw the change.
+    let dir = scratch("skeleton");
+    let (cx, cy, r) = circle();
+    let original = std::fs::read(CORPUS_DWG).unwrap();
+    let (_, summary) = answer(&["summarize", CORPUS_DWG]);
+    assert!(
+        summary["by_type"]["CIRCLE"].as_u64().unwrap() >= 1,
+        "{summary}"
+    );
+
+    let (x, y) = ((cx + r).to_string(), cy.to_string());
+    let (_, hits) = answer(&[
+        "hit-test",
+        CORPUS_DWG,
+        "--x",
+        &x,
+        "--y",
+        &y,
+        "--tolerance",
+        "0.001",
+    ]);
+    let hit = &hits["hits"][0];
+    assert_eq!(hit["entity_type"], "CIRCLE", "{hits}");
+    let id = hit["id"].to_string();
+
+    let edited = dir.join("edited.json");
+    let smaller = (r / 2.0).to_string();
+    answer(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        &smaller,
+        "-o",
+        arg(&edited),
+    ]);
+
+    let picture = dir.join("redline.svg");
+    let (_, report) = answer(&["redline", CORPUS_DWG, arg(&edited), "-o", arg(&picture)]);
+    let marked = report["marked"].as_array().unwrap();
+    assert_eq!(marked.len(), 1, "{report}");
+    assert_eq!(marked[0]["kind"], "MODIFIED");
+    assert_eq!(marked[0]["before"].to_string(), id);
+    assert_eq!(marked[0]["after"].to_string(), id);
+    assert!(
+        report["not_marked"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+    assert!(
+        report.get("svg").is_none(),
+        "the picture is in the file, not the answer"
+    );
+
+    let svg = std::fs::read_to_string(&picture).unwrap();
+    assert!(svg.starts_with("<svg"));
+    assert!(svg.contains("<g id=\"original\">"));
+    assert!(svg.contains("class=\"cloud\""));
+    // The drawing it all started from is untouched.
+    assert_eq!(std::fs::read(CORPUS_DWG).unwrap(), original);
+}
+
+#[test]
+fn redline_writes_nothing_it_should_not() {
+    let dir = scratch("redline-refuse");
+    let taken = dir.join("taken.svg");
+    std::fs::write(&taken, "keep").unwrap();
+    let out = run(&["redline", CORPUS_DWG, CORPUS_DWG, "-o", arg(&taken)]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
+
+    let wrong = dir.join("picture.pdf");
+    let out = run(&["redline", CORPUS_DWG, CORPUS_DWG, "-o", arg(&wrong)]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains(".svg nor .png"));
+    assert!(!wrong.exists());
+
+    // A drawing against itself: nothing to mark, and still a picture.
+    let png = dir.join("same.png");
+    let (_, report) = answer(&["redline", CORPUS_DWG, CORPUS_DWG, "-o", arg(&png)]);
+    assert!(report["marked"].as_array().unwrap().is_empty(), "{report}");
+    assert!(std::fs::read(&png).unwrap().starts_with(b"\x89PNG"));
+}
+
+#[test]
+fn redline_as_a_tool_answers_and_draws_as_the_command_line_does() {
+    let dir = scratch("redline-mcp");
+    let id = circle_id(&dir);
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        "1",
+        "-o",
+        arg(&edited),
+    ]);
+    let (by_cli, by_tool) = (dir.join("cli.svg"), dir.join("tool.svg"));
+    let (cli, _) = answer(&[
+        "redline",
+        CORPUS_DWG,
+        arg(&edited),
+        "-o",
+        arg(&by_cli),
+        "--omit",
+        "within",
+    ]);
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "redline",
+        json!({"before": CORPUS_DWG, "after": arg(&edited), "output": arg(&by_tool),
+               "omit": ["within"]}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+    assert_eq!(
+        std::fs::read(&by_cli).unwrap(),
+        std::fs::read(&by_tool).unwrap()
+    );
 }

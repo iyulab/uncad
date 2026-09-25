@@ -29,6 +29,13 @@ Notable changes to this project are recorded here. The format follows
   never writes over an existing file, so its input is never changed; an edit the drawing
   does not allow is refused with its reason, and nothing is written. The MCP tool of the
   same name is marked as writing, not destructive and not idempotent.
+- `uncad redline <before> <after> -o <out.svg|out.png>` draws the difference between two
+  drawing states on top of the first (`iron-render-cad`'s overlay): the first drawing as
+  it renders alone, and over it, in red, what each changed entity became, what was removed
+  (dashed) and a revision cloud around every change. It takes `diff`'s comparison options
+  and `--omit`, writes a new file (never over an existing one), and answers with the
+  changes it marked and those it could not show, with the reason. An MCP tool of the same
+  name.
 - `uncad diff` and `uncad set` take `--omit within,unstated` (MCP: `omit`), which leaves out
   the field changes within tolerance, those one drawing does not state, or both, and counts
   them in the answer's `omitted` (`iron-diff-cad`'s projection). By default nothing is left

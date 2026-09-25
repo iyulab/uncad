@@ -39,7 +39,15 @@ Usage:
                                     set one field of one entity, write the
                                       result as model JSON (never over an
                                       existing file), answer with the diff
-  uncad mcp                         serve the four verbs above as MCP tools
+  uncad redline <before> <after> -o <out.svg|out.png>
+                [--matching ...] [--length-tolerance <n>]
+                [--angle-tolerance <n>] [--omit <within,unstated>]
+                                    draw the difference on top of <before>:
+                                      the original unchanged, the changes in
+                                      red with a revision cloud (never over
+                                      an existing file); answer with what
+                                      was marked and what could not be
+  uncad mcp                         serve the five verbs above as MCP tools
                                       over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --

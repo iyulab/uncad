@@ -10,9 +10,9 @@
 //!
 //! A drawing argument is a DWG or DXF file, or the model JSON this tool
 //! writes (`uncad <drawing> -o <state.json>`, or `set`'s output) -- which is
-//! how an edit's result is the next call's input. The one verb that writes,
-//! `set`, writes model JSON only, never over an existing file, and never
-//! changes its input.
+//! how an edit's result is the next call's input. Two verbs write a file:
+//! `set` the edited model JSON, `redline` a picture of the edit. Neither
+//! writes over an existing file, and neither changes its input.
 //!
 //! Argument names are snake_case, as the libraries spell them; the command
 //! line writes them as `--kebab-case` flags.
@@ -152,28 +152,9 @@ pub const VERBS: &[Verb] = &[
                 positional: true,
                 description: "The later drawing (.dwg, .dxf, or model JSON .json).",
             },
-            Param {
-                name: "matching",
-                kind: Kind::Choice(&["reference", "geometry"]),
-                required: false,
-                positional: false,
-                description: "How entities of the two drawings are paired (default: reference).",
-            },
-            Param {
-                name: "length_tolerance",
-                kind: Kind::NonNegative,
-                required: false,
-                positional: false,
-                description: "Tolerance for every numeric field except angles, in drawing \
-                    units (default: 1e-6).",
-            },
-            Param {
-                name: "angle_tolerance",
-                kind: Kind::NonNegative,
-                required: false,
-                positional: false,
-                description: "Tolerance for angles, in radians (default: 1e-9).",
-            },
+            MATCHING,
+            LENGTH_TOLERANCE,
+            ANGLE_TOLERANCE,
             OMIT,
         ],
         writes: false,
@@ -232,9 +213,77 @@ pub const VERBS: &[Verb] = &[
         writes: true,
         run: set,
     },
+    Verb {
+        name: "redline",
+        description: "Draws the difference between two drawing states on top of the first: the \
+            first drawing exactly as it renders alone, and over it, in red, what each changed \
+            entity became, what was removed (dashed), and a revision cloud around every change. \
+            A change whose counterpart is uncertain gets a dashed cloud and no geometry. Writes \
+            an SVG or PNG file -- never over an existing one -- and answers with what it marked \
+            and what it could not (inside a block definition, or nothing drawn), each with the \
+            change's index in the change set `diff` gives for the same arguments.",
+        params: &[
+            Param {
+                name: "before",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: "The drawing as it is (.dwg, .dxf, or model JSON .json): drawn \
+                    unchanged.",
+            },
+            Param {
+                name: "after",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: "The drawing as proposed (.dwg, .dxf, or model JSON .json) -- \
+                    what `set` writes.",
+            },
+            Param {
+                name: "output",
+                kind: Kind::Path,
+                required: true,
+                positional: false,
+                description: "Where to write the picture: a .svg or .png path that does not \
+                    exist yet.",
+            },
+            MATCHING,
+            LENGTH_TOLERANCE,
+            ANGLE_TOLERANCE,
+            OMIT,
+        ],
+        writes: true,
+        run: redline,
+    },
 ];
 
 const DRAWING: &str = "The drawing (.dwg, .dxf, or model JSON .json).";
+
+/// How the two drawings of a comparison are paired.
+const MATCHING: Param = Param {
+    name: "matching",
+    kind: Kind::Choice(&["reference", "geometry"]),
+    required: false,
+    positional: false,
+    description: "How entities of the two drawings are paired (default: reference).",
+};
+
+const LENGTH_TOLERANCE: Param = Param {
+    name: "length_tolerance",
+    kind: Kind::NonNegative,
+    required: false,
+    positional: false,
+    description: "Tolerance for every numeric field except angles, in drawing units (default: \
+        1e-6).",
+};
+
+const ANGLE_TOLERANCE: Param = Param {
+    name: "angle_tolerance",
+    kind: Kind::NonNegative,
+    required: false,
+    positional: false,
+    description: "Tolerance for angles, in radians (default: 1e-9).",
+};
 
 /// The projection a change-set answer may ask for.
 const OMIT: Param = Param {
@@ -558,6 +607,16 @@ fn diff(args: &Map<String, Value>) -> Result<Answer, String> {
     let mut warnings = Vec::new();
     let before = read(&path(args, "before"), &mut warnings)?;
     let after = read(&path(args, "after"), &mut warnings)?;
+    answer(&compare(&before, &after, args), warnings)
+}
+
+/// The change set from `before` to `after` under the comparison arguments
+/// (`matching`, the tolerances), projected as `omit` asks.
+fn compare(
+    before: &CadDatabase,
+    after: &CadDatabase,
+    args: &Map<String, Value>,
+) -> iron_diff_cad::ChangeSet {
     let mut options = iron_diff_cad::DiffOptions::default();
     if let Some(matching) = args.get("matching").and_then(Value::as_str) {
         options.matching = match matching {
@@ -571,10 +630,58 @@ fn diff(args: &Map<String, Value>) -> Result<Answer, String> {
     if let Some(angle) = number(args, "angle_tolerance") {
         options.tolerance.angle = angle;
     }
-    answer(
-        &projected(iron_diff_cad::diff(&before, &after, options), args),
-        warnings,
-    )
+    projected(iron_diff_cad::diff(before, after, options), args)
+}
+
+/// A new file at `output`, refused when one is there already -- checked
+/// again, atomically, by the write itself.
+fn create_new(output: &str, bytes: &[u8]) -> Result<(), String> {
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+        .map_err(|e| format!("cannot write '{output}': {e}"))?;
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| format!("cannot write '{output}': {e}"))
+}
+
+fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
+    let output = path(args, "output");
+    let extension = std::path::Path::new(&output)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let png = match extension.as_deref() {
+        Some("svg") => false,
+        Some("png") => true,
+        _ => {
+            return Err(format!(
+                "redline writes SVG or PNG: '{output}' ends in neither .svg nor .png"
+            ))
+        }
+    };
+    // Checked before anything is read, so a refused call costs nothing.
+    if std::path::Path::new(&output).exists() {
+        return Err(format!(
+            "'{output}' already exists -- redline never writes over a file; give a new path"
+        ));
+    }
+    let mut warnings = Vec::new();
+    let before = read(&path(args, "before"), &mut warnings)?;
+    let after = read(&path(args, "after"), &mut warnings)?;
+    let changes = compare(&before, &after, args);
+    let overlay = iron_render_cad::overlay_to_svg(
+        &before,
+        &after,
+        &changes,
+        iron_render_cad::OverlayOptions::default(),
+    );
+    if png {
+        let bytes = iron_render_cad::svg_to_png(&overlay.svg, 1.0).map_err(|e| e.to_string())?;
+        create_new(&output, &bytes)?;
+    } else {
+        create_new(&output, overlay.svg.as_bytes())?;
+    }
+    answer(&overlay, warnings)
 }
 
 fn set(args: &Map<String, Value>) -> Result<Answer, String> {
@@ -608,13 +715,7 @@ fn set(args: &Map<String, Value>) -> Result<Answer, String> {
     let json = after
         .to_json(uncad::ToJsonOptions::default())
         .map_err(|e| e.to_string())?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&output)
-        .map_err(|e| format!("cannot write '{output}': {e}"))?;
-    std::io::Write::write_all(&mut file, json.as_bytes())
-        .map_err(|e| format!("cannot write '{output}': {e}"))?;
+    create_new(&output, json.as_bytes())?;
     answer(
         &projected(
             iron_diff_cad::diff(&before, &after, iron_diff_cad::DiffOptions::default()),

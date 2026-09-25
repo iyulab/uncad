@@ -86,7 +86,19 @@ uncad diff part.dwg step2.json                                # both edits, and 
 uncad step2.json -o step2.svg                                 # what the edited state looks like
 ```
 
-`uncad mcp` serves the same four verbs as [Model Context
+`redline` draws that difference on top of the first drawing: the first drawing
+exactly as it renders alone, and over it, in red, what each changed entity
+became, what was removed (dashed), and a revision cloud around every change. A
+change whose counterpart is uncertain gets a dashed cloud and no geometry. It
+writes an SVG or PNG file -- never over an existing one -- and answers with what
+it marked and what it could not show, and why:
+
+```bash
+uncad redline part.dwg step2.json -o proposal.svg
+uncad redline part.dwg step2.json -o proposal.png --omit within  # only changes beyond tolerance
+```
+
+`uncad mcp` serves the same five verbs as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files
