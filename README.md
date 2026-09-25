@@ -37,6 +37,9 @@ std::fs::write("drawing.svg", result.svg)?;
 
 ## CLI
 
+The binary is `uncad`. From a clone, `cargo install --path crates/uncad-cli`
+puts it on your `PATH`; the lines below run it through `cargo run` instead.
+
 ```bash
 cargo run -p uncad-cli -- drawing.dwg                            # summary: entity count per type
 cargo run -p uncad-cli -- drawing.dwg -o drawing.json --pretty   # export the parsed model
@@ -113,9 +116,9 @@ well as Windows.
 ## License
 
 **GPLv3-or-later**. LibreDWG (GPLv3+) is the only third-party component linked
-in, and its license carries over. The vendored copy carries five local patches;
-`crates/libredwg-sys/NOTICE.md` is their modification notice, inside the crate
-so that it reaches the published tarball. Copyright and license details for
+in, and its license carries over. The vendored copy carries local patches;
+`crates/libredwg-sys/NOTICE.md` lists each one and is their modification
+notice, inside the crate so that it reaches the published tarball. Copyright and license details for
 third-party components are in
 [`docs/THIRD_PARTY_NOTICES.md`](./docs/THIRD_PARTY_NOTICES.md).
 
@@ -128,7 +131,7 @@ lib/libredwg/            LibreDWG upstream, as a git submodule. Not used by the 
 crates/
   libredwg-sys/          raw FFI (cc + bindgen). vendor/libredwg/ holds the subset of C
                          sources actually compiled (for publishing to crates.io), with
-                         five local patches marked "uncad local patch" and listed in
+                         local patches marked "uncad local patch" and listed in
                          NOTICE.md; shim/ holds the C accessors for opaque types, and
                          vendor-config/config.h stands in for autotools
   uncad/                 the safe API: parse() / parse_bytes() -> uncad_model::CadDatabase,
