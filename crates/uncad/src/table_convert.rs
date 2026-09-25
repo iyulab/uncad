@@ -17,7 +17,7 @@ use crate::dynapi::{
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
-use uncad_model::model::{Point2D, Ref};
+use uncad_model::model::{Point2D, Point3D, Ref};
 use uncad_model::tables::{
     AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, FractionFormat, ImageDefinition,
     LayerRecord, LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings,
@@ -79,7 +79,15 @@ pub(crate) unsafe fn convert_tables(
             if !object_ptr.is_null() {
                 if let Some(name) = block_record_name(text, object_ptr) {
                     let entities = unsafe { owned_entities(dwg, text, obj) };
-                    block_records.insert(name.clone(), BlockRecord { name, entities });
+                    let base_point = block_base_point(object_ptr);
+                    block_records.insert(
+                        name.clone(),
+                        BlockRecord {
+                            name,
+                            entities,
+                            base_point,
+                        },
+                    );
                 }
             }
         } else if fixedtype == libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMSTYLE {
@@ -365,6 +373,37 @@ fn dimunit(value: i32) -> (Option<LinearUnitFormat>, Option<FractionFormat>) {
 /// sentinels entirely. Without this, every anonymous block in a drawing
 /// collapses onto one `"*D"` map key. Falls back to the abbreviated name if
 /// there is no BLOCK entity.
+/// The block's base point: the BLOCK_HEADER's (R13 on), or -- in a file
+/// older than R13, where the library keeps it on the BLOCK entity as a 2D
+/// point and leaves the header's at the origin -- the BLOCK's. Neither
+/// stated reads as the format's default, the origin.
+fn block_base_point(block_header_object_ptr: *mut c_void) -> Point3D {
+    let header = get_point3d(block_header_object_ptr, "BLOCK_HEADER", "base_pt");
+    if let Some(p) = header.filter(|p| (p.x, p.y, p.z) != (0.0, 0.0, 0.0)) {
+        return p;
+    }
+    let entity = get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+        block_header_object_ptr,
+        "BLOCK_HEADER",
+        "block_entity",
+    )
+    .filter(|r| !r.is_null())
+    // SAFETY: as in `block_record_name` -- a non-null Dwg_Object_Ref
+    // populated by the reader, whose `obj` is the BLOCK entity's object.
+    .map(|r| unsafe { (*r).obj })
+    .filter(|o| !o.is_null())
+    .map(|o| unsafe { libredwg_sys::uncad_object_entity_ptr(o.cast()) })
+    .and_then(|e| get_point2d(e, "BLOCK", "base_pt"));
+    match entity {
+        Some(p) => Point3D {
+            x: p.x,
+            y: p.y,
+            z: 0.0,
+        },
+        None => header.unwrap_or_default(),
+    }
+}
+
 fn block_record_name(text: &TextDecoder, block_header_object_ptr: *mut c_void) -> Option<String> {
     let abbreviated = text.field(block_header_object_ptr, "BLOCK_HEADER", "name");
 

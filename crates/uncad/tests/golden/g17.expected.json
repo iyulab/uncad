@@ -724,11 +724,21 @@
             },
             "style": "OUTER"
           }
-        ]
+        ],
+        "base_point": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
       },
       "*Paper_Space": {
         "name": "*Paper_Space",
-        "entities": []
+        "entities": [],
+        "base_point": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
       }
     },
     "dim_styles": {},

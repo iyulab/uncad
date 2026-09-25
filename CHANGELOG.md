@@ -267,6 +267,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A block's base point is read -- from a DWG's block header, a pre-R13 file's BLOCK entity,
+  or a DXF's BLOCK 10/20/30 -- into the model's `BlockRecord::base_point`, and a block
+  reference puts it on its insertion point when rendering, summarizing and pointing.
+  Before, every block was placed as though its base point were the origin, so the contents
+  of a block with another base point were drawn and searched off by that point, scaled and
+  turned.
 - From a DXF, a fit-point SPLINE whose file also writes the control points and knots
   computed for it keeps its knots, and its weights when group 41 gives them. The knots
   were dropped while the control points were kept, so the spline arrived with a
