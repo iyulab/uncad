@@ -16,6 +16,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Rendering to SVG or PNG warns about ARCs it did not draw because their start and end angles
+  are equal. The format does not say whether such an arc is the whole circle or nothing.
 - `uncad summarize`, `uncad hit-test` and `uncad diff` answer one question each about a
   drawing as one line of JSON: the result structure of `iron-scout-cad` (`summarize`,
   `hit_test`) or `iron-diff-cad` (`diff`), serialized as it is. `hit-test` has no default
