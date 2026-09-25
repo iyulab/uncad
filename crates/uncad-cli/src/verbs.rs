@@ -1,5 +1,5 @@
-//! The verb table: every read-only question this tool answers about a
-//! drawing, written down once.
+//! The verb table: every question this tool answers about a drawing, and
+//! the one edit it makes, written down once.
 //!
 //! The command line (`uncad <verb> ...`) and the MCP server (`uncad mcp`)
 //! both answer from here, through [`Verb::call`], so a verb's answer is the
@@ -7,6 +7,12 @@
 //! of the library that computes it, serialized as it is -- this table adds
 //! no schema of its own, and holds no state between calls: every call reads
 //! its files again.
+//!
+//! A drawing argument is a DWG or DXF file, or the model JSON this tool
+//! writes (`uncad <drawing> -o <state.json>`, or `set`'s output) -- which is
+//! how an edit's result is the next call's input. The one verb that writes,
+//! `set`, writes model JSON only, never over an existing file, and never
+//! changes its input.
 //!
 //! Argument names are snake_case, as the libraries spell them; the command
 //! line writes them as `--kebab-case` flags.
@@ -26,8 +32,14 @@ pub struct Answer {
 
 /// The type of an argument value.
 pub enum Kind {
-    /// A drawing file (DWG or DXF), as a path.
+    /// A file, as a path.
     Path,
+    /// An integer, 0 or more.
+    Integer,
+    /// A non-empty string.
+    Text,
+    /// Any JSON value. The command line takes it as JSON text.
+    Json,
     /// A finite number.
     Number,
     /// A finite number, 0 or more.
@@ -50,6 +62,8 @@ pub struct Verb {
     pub name: &'static str,
     pub description: &'static str,
     pub params: &'static [Param],
+    /// Whether the verb writes a file. None changes its input.
+    pub writes: bool,
     run: fn(&Map<String, Value>) -> Result<Answer, String>,
 }
 
@@ -65,8 +79,9 @@ pub const VERBS: &[Verb] = &[
             kind: Kind::Path,
             required: true,
             positional: true,
-            description: "The drawing (.dwg or .dxf).",
+            description: DRAWING,
         }],
+        writes: false,
         run: summarize,
     },
     Verb {
@@ -82,7 +97,7 @@ pub const VERBS: &[Verb] = &[
                 kind: Kind::Path,
                 required: true,
                 positional: true,
-                description: "The drawing (.dwg or .dxf).",
+                description: DRAWING,
             },
             Param {
                 name: "x",
@@ -108,6 +123,7 @@ pub const VERBS: &[Verb] = &[
                     on the drawing's scale.",
             },
         ],
+        writes: false,
         run: hit_test,
     },
     Verb {
@@ -124,14 +140,14 @@ pub const VERBS: &[Verb] = &[
                 kind: Kind::Path,
                 required: true,
                 positional: true,
-                description: "The earlier drawing (.dwg or .dxf).",
+                description: "The earlier drawing (.dwg, .dxf, or model JSON .json).",
             },
             Param {
                 name: "after",
                 kind: Kind::Path,
                 required: true,
                 positional: true,
-                description: "The later drawing (.dwg or .dxf).",
+                description: "The later drawing (.dwg, .dxf, or model JSON .json).",
             },
             Param {
                 name: "matching",
@@ -156,9 +172,64 @@ pub const VERBS: &[Verb] = &[
                 description: "Tolerance for angles, in radians (default: 1e-9).",
             },
         ],
+        writes: false,
         run: diff,
     },
+    Verb {
+        name: "set",
+        description: "Sets one field of one entity to a value and writes the edited drawing as \
+            a new model JSON file, which every verb reads as a drawing -- so edits chain, each \
+            call starting from the last one's output. The answer is the numeric difference from \
+            the input to what was written (as `diff` answers it), which shows that the one field \
+            changed and nothing else. The input is never changed and an existing file is never \
+            written over. An edit the drawing does not allow is refused with the reason, and \
+            nothing is written.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "id",
+                kind: Kind::Integer,
+                required: true,
+                positional: false,
+                description: "The entity's reference ID, as summarize and hit_test give it.",
+            },
+            Param {
+                name: "path",
+                kind: Kind::Text,
+                required: true,
+                positional: false,
+                description: "The field, as the model JSON names it: `radius`, `center.x`, \
+                    `vertices[2].point.y`, `common.layer`.",
+            },
+            Param {
+                name: "value",
+                kind: Kind::Json,
+                required: true,
+                positional: false,
+                description: "The new value, in the model JSON's form for that field: a number, \
+                    a string in quotes, an object.",
+            },
+            Param {
+                name: "output",
+                kind: Kind::Path,
+                required: true,
+                positional: false,
+                description: "Where to write the edited drawing: a .json path that does not \
+                    exist yet.",
+            },
+        ],
+        writes: true,
+        run: set,
+    },
 ];
+
+const DRAWING: &str = "The drawing (.dwg, .dxf, or model JSON .json).";
 
 /// The verb named `name`, in either spelling (`hit_test` or `hit-test`).
 pub fn find(name: &str) -> Option<&'static Verb> {
@@ -193,7 +264,9 @@ impl Verb {
                 continue;
             };
             let fits = match &param.kind {
-                Kind::Path => value.as_str().is_some_and(|s| !s.is_empty()),
+                Kind::Path | Kind::Text => value.as_str().is_some_and(|s| !s.is_empty()),
+                Kind::Integer => value.as_u64().is_some(),
+                Kind::Json => true,
                 Kind::Number => value.as_f64().is_some_and(f64::is_finite),
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
                 Kind::Choice(words) => value.as_str().is_some_and(|s| words.contains(&s)),
@@ -215,9 +288,15 @@ impl Verb {
         for param in self.params {
             let mut schema = Map::new();
             match &param.kind {
-                Kind::Path => {
+                Kind::Path | Kind::Text => {
                     schema.insert("type".into(), "string".into());
                 }
+                Kind::Integer => {
+                    schema.insert("type".into(), "integer".into());
+                    schema.insert("minimum".into(), 0.into());
+                }
+                // Any JSON value: the schema leaves the type open.
+                Kind::Json => {}
                 Kind::Number => {
                     schema.insert("type".into(), "number".into());
                 }
@@ -256,7 +335,11 @@ impl Verb {
         let mut positionals = self.params.iter().filter(|p| p.positional);
         let mut i = 0;
         while i < argv.len() {
-            let word = argv[i].as_str();
+            // `-o` is short for `--output`, as it is for the plain command.
+            let word = match argv[i].as_str() {
+                "-o" => "--output",
+                other => other,
+            };
             if let Some(flag) = word.strip_prefix("--").filter(|f| !f.is_empty()) {
                 let param = self
                     .params
@@ -271,7 +354,13 @@ impl Verb {
                         .ok()
                         .and_then(|v| serde_json::Number::from_f64(v).map(Value::Number))
                         .ok_or_else(|| format!("{word} must be a finite number (got '{raw}')"))?,
-                    Kind::Path | Kind::Choice(_) => Value::String(raw.clone()),
+                    Kind::Integer => raw.parse::<u64>().map(Value::from).map_err(|_| {
+                        format!("{word} must be an integer, 0 or more (got '{raw}')")
+                    })?,
+                    Kind::Json => serde_json::from_str(raw).map_err(|e| {
+                        format!("{word} must be JSON -- a string in quotes (got '{raw}': {e})")
+                    })?,
+                    Kind::Path | Kind::Text | Kind::Choice(_) => Value::String(raw.clone()),
                 };
                 args.insert(param.name.into(), value);
             } else if word.starts_with('-') && word.len() > 1 {
@@ -314,6 +403,9 @@ impl Kind {
     fn expected(&self) -> String {
         match self {
             Kind::Path => "a file path".into(),
+            Kind::Integer => "an integer, 0 or more".into(),
+            Kind::Text => "a non-empty string".into(),
+            Kind::Json => "a JSON value".into(),
             Kind::Number => "a finite number".into(),
             Kind::NonNegative => "a finite number, 0 or more".into(),
             Kind::Choice(words) => format!("one of {}", words.join(", ")),
@@ -323,7 +415,9 @@ impl Kind {
     fn placeholder(&self) -> String {
         match self {
             Kind::Path => "path".into(),
-            Kind::Number | Kind::NonNegative => "n".into(),
+            Kind::Integer | Kind::Number | Kind::NonNegative => "n".into(),
+            Kind::Text => "text".into(),
+            Kind::Json => "json".into(),
             Kind::Choice(words) => words.join("|"),
         }
     }
@@ -341,11 +435,40 @@ fn number(args: &Map<String, Value>, name: &str) -> Option<f64> {
         .map(|v| v.as_f64().expect("checked by Verb::call"))
 }
 
-/// Reads a drawing, with the reader's non-fatal problems as warnings.
+/// Whether `path` names model JSON rather than a drawing file.
+pub fn is_model_json(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+}
+
+/// Reads a drawing -- a DWG or DXF file, or model JSON -- with the reader's
+/// non-fatal problems as warnings. Model JSON carries the problems of the
+/// read that produced it, and they are reported the same way.
 fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, String> {
-    let (db, _) = crate::parse_input(input)?;
+    let db = if is_model_json(input) {
+        let text = std::fs::read_to_string(input)
+            .map_err(|e| format!("cannot open input file '{input}': {e}"))?;
+        serde_json::from_str::<CadDatabase>(&text).map_err(|e| {
+            format!(
+                "cannot read '{input}' as model JSON ({e}) -- write it again from the drawing \
+                 with `uncad <drawing> -o <file.json>`"
+            )
+        })?
+    } else {
+        crate::parse_input(input)?.0
+    };
     if !db.read_diagnostics.is_clean() {
-        warnings.push(crate::read_warning(input, &db));
+        warnings.push(if is_model_json(input) {
+            format!(
+                "'{input}' records non-fatal problems ({}) from the read of the drawing it was \
+                 written from; objects that read could not decode are missing from it",
+                db.read_diagnostics.warnings.join(", ")
+            )
+        } else {
+            crate::read_warning(input, &db)
+        });
     }
     Ok(db)
 }
@@ -390,4 +513,48 @@ fn diff(args: &Map<String, Value>) -> Result<Answer, String> {
         options.tolerance.angle = angle;
     }
     answer(&iron_diff_cad::diff(&before, &after, options), warnings)
+}
+
+fn set(args: &Map<String, Value>) -> Result<Answer, String> {
+    let input = path(args, "input");
+    let output = path(args, "output");
+    if !is_model_json(&output) {
+        return Err(format!(
+            "set writes model JSON only: '{output}' does not end in .json"
+        ));
+    }
+    // Checked before anything is read, so a refused call costs nothing; the
+    // write below refuses an existing file again, atomically.
+    if std::path::Path::new(&output).exists() {
+        return Err(format!(
+            "'{output}' already exists -- set never writes over a file, its input included; \
+             give a new path"
+        ));
+    }
+    let mut warnings = Vec::new();
+    let before = read(&input, &mut warnings)?;
+    let id = uncad::model::EntityId::new(args["id"].as_u64().expect("checked by Verb::call"));
+    let field = args["path"].as_str().expect("checked by Verb::call");
+    let after =
+        iron_hand_cad::set(&before, id, field, args["value"].clone()).map_err(|refusal| {
+            let reason = serde_json::to_value(&refusal)
+                .ok()
+                .and_then(|v| v["reason"].as_str().map(str::to_string))
+                .unwrap_or_default();
+            format!("refused ({reason}): {refusal}")
+        })?;
+    let json = after
+        .to_json(uncad::ToJsonOptions::default())
+        .map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output)
+        .map_err(|e| format!("cannot write '{output}': {e}"))?;
+    std::io::Write::write_all(&mut file, json.as_bytes())
+        .map_err(|e| format!("cannot write '{output}': {e}"))?;
+    answer(
+        &iron_diff_cad::diff(&before, &after, iron_diff_cad::DiffOptions::default()),
+        warnings,
+    )
 }

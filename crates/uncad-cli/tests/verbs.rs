@@ -1,5 +1,5 @@
-//! The verbs (`summarize`, `hit-test`, `diff`) and `uncad mcp`, which serves
-//! the same verbs as MCP tools.
+//! The verbs (`summarize`, `hit-test`, `diff`, `set`) and `uncad mcp`, which
+//! serves the same verbs as MCP tools.
 //!
 //! The property that matters most is that the two front ends give the same
 //! answer: a tool result's first content block must be byte for byte what
@@ -241,15 +241,19 @@ impl Drop for Mcp {
 }
 
 #[test]
-fn mcp_lists_the_verbs_as_read_only_tools() {
+fn mcp_lists_the_verbs_and_only_set_writes() {
     let mut mcp = Mcp::start();
     let list = mcp.request("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["summarize", "hit_test", "diff"]);
+    assert_eq!(names, ["summarize", "hit_test", "diff", "set"]);
     for tool in tools {
+        let writes = tool["name"] == "set";
         assert_eq!(tool["inputSchema"]["type"], "object", "{tool}");
-        assert_eq!(tool["annotations"]["readOnlyHint"], true, "{tool}");
+        assert_eq!(tool["annotations"]["readOnlyHint"], !writes, "{tool}");
+        assert_eq!(tool["annotations"]["idempotentHint"], !writes, "{tool}");
+        // A new file, never one written over: not destructive.
+        assert_eq!(tool["annotations"]["destructiveHint"], false, "{tool}");
     }
 }
 
@@ -316,6 +320,177 @@ fn a_bad_tool_call_is_an_error_result_the_caller_can_read() {
     assert_eq!(result["isError"], true, "{result}");
 
     // An unknown tool is a protocol error, not a result.
-    let response = mcp.request("tools/call", json!({"name": "set", "arguments": {}}));
+    let response = mcp.request("tools/call", json!({"name": "rotate", "arguments": {}}));
     assert!(response["error"].is_object(), "{response}");
+}
+
+/// A directory of its own for one test's files, empty.
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("uncad-cli-set-{}-{name}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("the scratch directory is created");
+    dir
+}
+
+fn arg(path: &std::path::Path) -> &str {
+    path.to_str().expect("temp paths are UTF-8 here")
+}
+
+/// The reference ID of the DWG fixture's one circle, from the model export.
+fn circle_id(dir: &std::path::Path) -> String {
+    let model = dir.join("model.json");
+    assert!(run(&[CORPUS_DWG, "-o", arg(&model)]).status.success());
+    let db: Value = serde_json::from_str(&std::fs::read_to_string(&model).unwrap())
+        .expect("the export is JSON");
+    db["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "CIRCLE")
+        .expect("the fixture has a circle")["common"]["id"]
+        .to_string()
+}
+
+#[test]
+fn set_chains_through_model_json_and_diff_shows_only_the_edits() {
+    let dir = scratch("chain");
+    let id = circle_id(&dir);
+    let original = std::fs::read(CORPUS_DWG).unwrap();
+    let (first, second) = (dir.join("first.json"), dir.join("second.json"));
+
+    let (_, answer1) = answer(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        "7.25",
+        "-o",
+        arg(&first),
+    ]);
+    // The answer is the change set of the one edit.
+    let changes = answer1["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 1, "{answer1}");
+    let paths: Vec<&str> = changes[0]["data"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["radius"]);
+
+    // The next edit starts from the first one's output.
+    answer(&[
+        "set",
+        arg(&first),
+        "--id",
+        &id,
+        "--path",
+        "center.x",
+        "--value",
+        "-3",
+        "-o",
+        arg(&second),
+    ]);
+    let (_, both) = answer(&["diff", CORPUS_DWG, arg(&second)]);
+    let changes = both["changes"].as_array().unwrap();
+    assert_eq!(changes.len(), 1, "{both}");
+    let fields: Vec<(&str, &Value)> = changes[0]["data"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| (f["path"].as_str().unwrap(), &f["after"]))
+        .collect();
+    assert_eq!(
+        fields,
+        [("center.x", &json!(-3.0)), ("radius", &json!(7.25))]
+    );
+
+    // The input is never touched.
+    assert_eq!(std::fs::read(CORPUS_DWG).unwrap(), original);
+}
+
+#[test]
+fn set_writes_nothing_it_should_not() {
+    let dir = scratch("refuse");
+    let id = circle_id(&dir);
+    let taken = dir.join("taken.json");
+    std::fs::write(&taken, "keep").unwrap();
+    let set = |path: &str, value: &str, output: &str| {
+        run(&[
+            "set", CORPUS_DWG, "--id", &id, "--path", path, "--value", value, "-o", output,
+        ])
+    };
+
+    // An existing file -- the input included -- is never written over.
+    let out = set("radius", "2", arg(&taken));
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
+
+    // Model JSON only.
+    let dxf = dir.join("out.dxf");
+    assert!(!set("radius", "2", arg(&dxf)).status.success());
+    assert!(!dxf.exists());
+
+    // A refused edit names its reason and writes nothing.
+    let refused = dir.join("refused.json");
+    let out = set("radius", "-1", arg(&refused));
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("refused (CONSTRAINT)"), "{stderr}");
+    assert!(!refused.exists());
+
+    // A value is JSON: a bare word is not a string.
+    let out = set("common.layer", "HIDDEN", arg(&refused));
+    assert!(!out.status.success());
+    assert!(!refused.exists());
+}
+
+#[test]
+fn set_as_a_tool_answers_as_the_command_line_does() {
+    let dir = scratch("mcp");
+    let id = circle_id(&dir);
+    let (by_cli, by_tool) = (dir.join("cli.json"), dir.join("tool.json"));
+    let (cli, _) = answer(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        "3",
+        "-o",
+        arg(&by_cli),
+    ]);
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "set",
+        json!({"input": CORPUS_DWG, "id": id.parse::<u64>().unwrap(), "path": "radius",
+               "value": 3, "output": arg(&by_tool)}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+    // The same edit writes the same bytes.
+    assert_eq!(
+        std::fs::read(&by_cli).unwrap(),
+        std::fs::read(&by_tool).unwrap()
+    );
+}
+
+#[test]
+fn a_verb_reads_model_json_as_the_drawing_it_was_written_from() {
+    let dir = scratch("json");
+    let model = dir.join("model.json");
+    assert!(run(&[CORPUS_DXF, "-o", arg(&model)]).status.success());
+    let (from_drawing, _) = answer(&["summarize", CORPUS_DXF]);
+    let (from_json, _) = answer(&["summarize", arg(&model)]);
+    assert_eq!(from_json, from_drawing);
+    // A command that needs the drawing itself says so.
+    let out = run(&["export", arg(&model), "-o", arg(&dir.join("package"))]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("model JSON"));
 }

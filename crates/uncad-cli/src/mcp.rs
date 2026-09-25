@@ -21,11 +21,13 @@ use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use std::sync::Arc;
 
-const INSTRUCTIONS: &str = "Read-only questions about DWG and DXF drawings. Every tool \
+const INSTRUCTIONS: &str = "Questions about DWG and DXF drawings, and one edit. Every tool \
     reads the files it is given, by path on this machine, and answers with a JSON document; \
     the same files and arguments give the same answer. A value the drawing does not establish \
     is reported as such (absent, ambiguous with every candidate, or not searched with a \
-    reason), never guessed.";
+    reason), never guessed. `set` changes one field and writes the result as a new model JSON \
+    file -- never over an existing one, never into its input -- which every tool reads as a \
+    drawing, so edits chain; its answer is the difference it made.";
 
 struct Server;
 
@@ -45,11 +47,14 @@ impl ServerHandler for Server {
             .iter()
             .map(|verb| {
                 Tool::new(verb.name, verb.description, Arc::new(verb.input_schema()))
+                    // A verb that writes creates a new file and never
+                    // overwrites one, so it is not destructive -- and not
+                    // idempotent, since a second call finds its file taken.
                     .with_annotations(ToolAnnotations::from_raw(
                         None,
-                        Some(true),
+                        Some(!verb.writes),
                         Some(false),
-                        Some(true),
+                        Some(!verb.writes),
                         Some(false),
                     ))
             })

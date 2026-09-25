@@ -64,7 +64,20 @@ uncad diff rev-a.dwg rev-b.dwg                                # exact numeric di
 uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01
 ```
 
-`uncad mcp` serves the same three verbs as [Model Context
+One verb edits: `set` changes one field of one entity and writes the result as a
+new model JSON file -- never over an existing file, never into its input -- and
+answers with the difference it made, as `diff` reports it. The field and the
+value are named as the model JSON names them (the value is JSON: a number, a
+string in quotes, an object). Every verb reads model JSON as a drawing, so edits
+chain and the last state can be compared with the first:
+
+```bash
+uncad set part.dwg --id 42 --path radius --value 6.5 -o step1.json
+uncad set step1.json --id 42 --path center.x --value 10 -o step2.json
+uncad diff part.dwg step2.json                                # both edits, and nothing else
+```
+
+`uncad mcp` serves the same four verbs as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files

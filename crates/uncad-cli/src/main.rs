@@ -3,8 +3,9 @@
 //! Reading only -- with no `-o` it prints a summary, and the `-o` targets are
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
 //! DWG/DXF output. The verbs (`summarize`, `hit-test`, `diff`) answer one
-//! question each as JSON, from the table in `verbs.rs`, which `uncad mcp`
-//! also serves as MCP tools.
+//! question each as JSON, and `set` makes one edit and writes it as model
+//! JSON, from the table in `verbs.rs`, which `uncad mcp` also serves as MCP
+//! tools. The verbs read model JSON as a drawing too.
 
 mod mcp;
 mod verbs;
@@ -33,8 +34,15 @@ Usage:
   uncad diff <before> <after> [--matching <reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
                                     the numeric difference, as JSON
-  uncad mcp                         serve the three verbs above as MCP tools
+  uncad set <input> --id <n> --path <field> --value <json> -o <new.json>
+                                    set one field of one entity, write the
+                                      result as model JSON (never over an
+                                      existing file), answer with the diff
+  uncad mcp                         serve the four verbs above as MCP tools
                                       over stdio
+
+  The four verbs read model JSON (.json) as a drawing too -- what
+  `-o <output.json>` and `set` write -- so edits chain.
 
 JSON options:
   --pretty                    indented, multi-line JSON (default: one line)
@@ -319,6 +327,12 @@ fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
 /// wrong. Both commands read their input through here, so they word a bad
 /// input the same way.
 fn parse_input(input: &str) -> Result<(CadDatabase, uncad::Header), String> {
+    if verbs::is_model_json(input) {
+        return Err(format!(
+            "'{input}' is model JSON; this command needs the drawing itself (.dwg or .dxf) -- \
+             the verbs summarize, hit-test, diff and set read model JSON"
+        ));
+    }
     match std::fs::metadata(input) {
         Ok(meta) if meta.is_dir() => {
             return Err(format!("input path is a directory, not a file: '{input}'"))
