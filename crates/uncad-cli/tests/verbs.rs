@@ -12,6 +12,7 @@
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const EXE: &str = env!("CARGO_BIN_EXE_uncad");
 
@@ -49,9 +50,15 @@ fn answer(args: &[&str]) -> (String, Value) {
 }
 
 /// The one circle of the DWG fixture, read from the model export: the
-/// point tests aim at it without copying its numbers here.
+/// point tests aim at it without copying its numbers here. Each call writes
+/// its own file -- the tests of this binary run in parallel in one process.
 fn circle() -> (f64, f64, f64) {
-    let model = std::env::temp_dir().join(format!("uncad-cli-verbs-{}.json", std::process::id()));
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let model = std::env::temp_dir().join(format!(
+        "uncad-cli-verbs-{}-{}.json",
+        std::process::id(),
+        CALLS.fetch_add(1, Ordering::Relaxed)
+    ));
     let model_arg = model.to_str().expect("temp paths are UTF-8 here");
     assert!(run(&[CORPUS_DWG, "-o", model_arg]).status.success());
     let text = std::fs::read_to_string(&model).expect("the export was written");
