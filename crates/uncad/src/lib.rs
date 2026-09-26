@@ -9,6 +9,7 @@
 
 mod acis;
 mod convert;
+mod dxf_records;
 mod dynapi;
 pub mod header;
 mod table_convert;
@@ -323,6 +324,12 @@ pub fn parse_bytes_with_header(
     read_diagnostics
         .warnings
         .extend(missing_required_groups(&entities));
+    if format == Format::Dxf {
+        read_diagnostics.warnings.extend(entities_lost(
+            dxf_records::entities_section_records(bytes),
+            entities.len(),
+        ));
+    }
 
     // Nothing needs LibreDWG's structure past this point: this crate has no
     // write path, and the model above is what every export reads. Freeing it
@@ -347,6 +354,26 @@ pub fn parse_bytes_with_header(
         },
         header,
     ))
+}
+
+/// The check against a DXF read that lost entities without saying so: the
+/// importer can stop partway through a file (a malformed value it logs and
+/// moves past) and still return success, leaving the model with a fraction
+/// of what the file holds. `stated` is the number of top-level entity
+/// records the file's ENTITIES section holds (see [`dxf_records`]), `read`
+/// the number of top-level entities in the model. A model can hold more than
+/// the section states (paper-space content kept in BLOCKS), never fewer
+/// unless some were lost -- measured on the corpus, every ASCII DXF that
+/// reads holds at least as many.
+fn entities_lost(stated: Option<usize>, read: usize) -> Option<String> {
+    let stated = stated?;
+    (read < stated).then(|| {
+        format!(
+            "ENTITIES_MISSING: the file's ENTITIES section holds {stated} entity records \
+             (a polyline's vertices and an insert's attributes counted with their owner); \
+             {read} reached the drawing"
+        )
+    })
 }
 
 /// The guard against the silent R2007+ DXF failure: a DXF saved as R2007 or
@@ -510,5 +537,29 @@ mod unplaced_entities_tests {
         assert!(r2007);
         // 69 on this file when measured; any count at all is the point.
         assert!(placed > 0, "{placed}");
+    }
+}
+
+#[cfg(test)]
+mod entities_lost_tests {
+    use super::entities_lost;
+
+    #[test]
+    fn fewer_than_the_file_states_is_reported_with_both_counts() {
+        let warning = entities_lost(Some(68), 1).unwrap();
+        assert!(warning.starts_with("ENTITIES_MISSING: "), "{warning}");
+        assert!(warning.contains("holds 68 entity records"), "{warning}");
+        assert!(warning.ends_with("1 reached the drawing"), "{warning}");
+    }
+
+    #[test]
+    fn as_many_or_more_than_the_file_states_is_silent() {
+        assert_eq!(entities_lost(Some(68), 68), None);
+        assert_eq!(entities_lost(Some(69), 72), None);
+    }
+
+    #[test]
+    fn an_unscanned_file_is_silent() {
+        assert_eq!(entities_lost(None, 0), None);
     }
 }

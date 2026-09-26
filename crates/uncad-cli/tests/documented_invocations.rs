@@ -614,6 +614,13 @@ fn export_writes_a_package_and_refuses_unknown_options() {
     );
     assert!(dir.join("manifest.json").is_file());
     assert!(dir.join("overview.png").is_file());
+    // The reader's non-fatal problems are said here as every other command
+    // says them, not only inside the package's drawing.json.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("non-fatal problems (UNHANDLEDCLASS"),
+        "{stderr}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 
     let bad = std::process::Command::new(EXE)

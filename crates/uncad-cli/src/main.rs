@@ -570,6 +570,9 @@ fn run_export(argv: &[String]) -> Result<(), String> {
     let input = input.ok_or("uncad export needs an input drawing")?;
     let output = output.ok_or("uncad export needs -o <dir>")?;
     let (db, header) = parse_input(input)?;
+    if !db.read_diagnostics.is_clean() {
+        eprintln!("warning: {}", read_warning(input, &db));
+    }
     let input = Path::new(input);
     let header = pack_header(&header)?;
     if options.source_name.is_none() {

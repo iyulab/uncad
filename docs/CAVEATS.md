@@ -152,6 +152,18 @@ A sharper example: taking `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (60
 entities), writing it out as R2007 DXF with LibreDWG's own DXF writer, and reading that
 back with `dxf_read_file` returns exactly 1 entity.
 
+**A read that loses entities is reported.** The importer can also stop partway through a
+file without failing: `example_r14.dxf` logs malformed hex values (`in_hex2bin`) to stderr and
+returns 1 of the 68 top-level entity records its ENTITIES section holds (its DWG twin reads
+72), with no error bit set. Such a read now carries an `ENTITIES_MISSING` warning in
+`read_diagnostics`, stating both counts. The count comes from the file's own bytes: every
+record in the ENTITIES section except `VERTEX`, `ATTRIB` and `SEQEND`, which belong to the
+entity before them. A model may hold *more* top-level entities than that (later versions keep
+paper-space content in BLOCKS), so only fewer is reported. Measured on the corpus: of the 57
+ASCII DXFs that read, every one holds at least as many except that file. A binary DXF is not
+scanned. The warning says entities were lost, not which ones -- the model has no trace of
+them (`tests/dxf_entities_missing.rs`).
+
 The declared version, by contrast, does not change what is read: the corpus R2000 file
 `2000/entities-2d.dxf` gives the same model under every `$ACADVER` from `AC1015` to
 `AC1032` (`tests/dxf_pipeline.rs`), although from `AC1021` on the importer stores its

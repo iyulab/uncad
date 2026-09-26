@@ -16,6 +16,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- A DXF read that keeps fewer top-level entities than the file's ENTITIES section holds
+  carries an `ENTITIES_MISSING` warning in `read_diagnostics`, with both counts. The importer
+  can stop partway through a file without setting an error bit; such a read used to look
+  clean.
+- `uncad export` prints the reader's non-fatal problems on stderr, as every other command
+  does; they used to reach only the package's `drawing.json`.
 - Rendering to SVG or PNG warns about ARCs it did not draw because their start and end angles
   are equal. The format does not say whether such an arc is the whole circle or nothing.
 - `uncad summarize`, `uncad hit-test` and `uncad diff` answer one question each about a
