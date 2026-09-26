@@ -240,57 +240,12 @@ fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
     }
 }
 
-/// This reader does not read an entity's extended data yet, so it does not
-/// look for the style variables a dimension or leader sets for itself and
-/// says `None` ("did not look") where the spec says an empty list.
-///
-/// TODO: remove this, and `style_overrides_are_not_read_yet` below, once the
-/// readers fill `style_overrides` from the entity's extended data.
-fn apply_unread_style_overrides(expected: &mut CadDatabase) {
-    fn unread(entity: &mut Entity) {
-        match entity {
-            Entity::Dimension(d) => d.style_overrides = None,
-            Entity::Leader(l) => l.style_overrides = None,
-            _ => {}
-        }
-    }
-    expected.entities.iter_mut().for_each(unread);
-    for block in expected.tables.block_records.values_mut() {
-        block.entities.iter_mut().for_each(unread);
-    }
-}
-
-/// The tripwire for `apply_unread_style_overrides`: a corpus dimension that
-/// sets `DIMDEC` for itself still reads as "did not look".
-#[test]
-fn style_overrides_are_not_read_yet() {
-    let db = uncad::parse(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../lib/libredwg/test/test-data/example_r13.dxf"
-    ))
-    .expect("reads");
-    let dims: Vec<_> = db
-        .entities
-        .iter()
-        .filter_map(|e| match e {
-            Entity::Dimension(d) => Some(d),
-            _ => None,
-        })
-        .collect();
-    assert!(!dims.is_empty());
-    assert!(
-        dims.iter().all(|d| d.style_overrides.is_none()),
-        "this reader reads style overrides now -- remove apply_unread_style_overrides"
-    );
-}
-
 fn assert_reads_back_exactly(name: &str, dxf: &[u8], expected_json: &str) {
     let fixture = Fixture::write(&format!("golden-{name}.dxf"), dxf);
     let db = uncad::parse(&fixture.0).unwrap_or_else(|e| panic!("{name} should parse: {e}"));
     let mut expected: CadDatabase =
         serde_json::from_str(expected_json).expect("the expected model deserializes");
     apply_known_deviations(&db, &mut expected);
-    apply_unread_style_overrides(&mut expected);
 
     // Entity by entity first, so a failure names the entity rather than
     // dumping two whole drawings.

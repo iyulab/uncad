@@ -428,3 +428,154 @@ uncad_dwg_is_wide_string (const Dwg_Data *dwg)
    * importer (DWG_OPTS_IN -- DXF/JSON input). */
   return (dwg && IS_FROM_TU_DWG (dwg)) ? 1 : 0;
 }
+
+/* Whether the APPID record `handle` names is "ACAD". Its name is 8-bit or
+ * UTF-16 depending on how the drawing was read (an R2007+ DWG, or an
+ * importer that stored the file's width); "A" is never 0, so a 0 second
+ * byte says which. */
+static bool
+uncad_appid_is_acad (const Dwg_Data *dwg, const Dwg_Handle *handle)
+{
+  if (!handle->value)
+    return false;
+  Dwg_Object *app = dwg_resolve_handle (dwg, handle->value);
+  if (!app || app->fixedtype != DWG_TYPE_APPID || !app->tio.object
+      || !app->tio.object->tio.APPID)
+    return false;
+  const char *name = (const char *)app->tio.object->tio.APPID->name;
+  if (!name)
+    return false;
+  if (name[0] && !name[1])
+    {
+      const uint16_t *wide = (const uint16_t *)(const void *)name;
+      return wide[0] == 'A' && wide[1] == 'C' && wide[2] == 'A' && wide[3] == 'D'
+             && wide[4] == 0;
+    }
+  return strcmp (name, "ACAD") == 0;
+}
+
+/* Whether EED item `d` is the string "DSTYLE", in its own width. */
+static bool
+uncad_eed_is_dstyle (const Dwg_Eed_Data *d)
+{
+  static const char want[] = "DSTYLE";
+  if (!d || d->code != 0)
+    return false;
+  if (d->u.eed_0.is_tu)
+    {
+      if (d->u.eed_0_r2007.length != 6)
+        return false;
+      for (int i = 0; i < 6; i++)
+        if (d->u.eed_0_r2007.string[i] != (DWGCHAR)want[i])
+          return false;
+      return true;
+    }
+  return d->u.eed_0.length == 6 && memcmp (d->u.eed_0.string, want, 6) == 0;
+}
+
+unsigned int
+uncad_entity_style_overrides (const Dwg_Data *dwg, const Dwg_Object *obj,
+                              uncad_style_override_t **out)
+{
+  *out = NULL;
+  if (!dwg || !obj || obj->supertype != DWG_SUPERTYPE_ENTITY
+      || !obj->tio.entity)
+    return 0;
+  const Dwg_Object_Entity *ent = obj->tio.entity;
+  if (!ent->eed || ent->num_eed == 0)
+    return 0;
+
+  bool acad = false;
+  BITCODE_BL start = 0, end = 0;
+  bool found = false;
+  for (BITCODE_BL i = 0; i < ent->num_eed && !found; i++)
+    {
+      const Dwg_Eed *e = &ent->eed[i];
+      if (e->size)
+        acad = uncad_appid_is_acad (dwg, &e->handle);
+      if (acad && uncad_eed_is_dstyle (e->data))
+        {
+          start = i + 1;
+          /* The opening brace. */
+          if (start < ent->num_eed && ent->eed[start].data
+              && ent->eed[start].data->code == 2
+              && ent->eed[start].data->u.eed_2.close == 0)
+            start++;
+          end = start;
+          while (end < ent->num_eed && ent->eed[end].data
+                 && !(ent->eed[end].data->code == 2))
+            end++;
+          found = true;
+        }
+    }
+  if (!found || end <= start)
+    return 0;
+
+  unsigned int capacity = (unsigned int)((end - start) / 2);
+  if (capacity == 0)
+    return 0;
+  uncad_style_override_t *list
+      = calloc (capacity, sizeof (uncad_style_override_t));
+  if (!list)
+    return 0;
+  unsigned int n = 0;
+  for (BITCODE_BL i = start; i + 1 < end; i += 2)
+    {
+      const Dwg_Eed_Data *var = ent->eed[i].data;
+      const Dwg_Eed_Data *val = ent->eed[i + 1].data;
+      if (!var || !val || var->code != 70)
+        break;
+      uncad_style_override_t *o = &list[n];
+      o->variable = var->u.eed_70.rs;
+      switch (val->code)
+        {
+        case 40:
+          o->kind = 0;
+          o->real = val->u.eed_40.real;
+          break;
+        case 70:
+          o->kind = 1;
+          o->integer = (int16_t)val->u.eed_70.rs;
+          break;
+        case 71:
+          o->kind = 1;
+          o->integer = (int32_t)val->u.eed_71.rl;
+          break;
+        case 0:
+          o->kind = 2;
+          o->text_is_wide = val->u.eed_0.is_tu ? 1 : 0;
+          if (o->text_is_wide)
+            {
+              o->text = (const char *)val->u.eed_0_r2007.string;
+              o->text_len = val->u.eed_0_r2007.length;
+            }
+          else
+            {
+              o->text = val->u.eed_0.string;
+              o->text_len = val->u.eed_0.length;
+            }
+          break;
+        case 5:
+          o->kind = 3;
+          o->handle = val->u.eed_5.entity;
+          break;
+        default:
+          goto done;
+        }
+      n++;
+    }
+done:
+  if (n == 0)
+    {
+      free (list);
+      return 0;
+    }
+  *out = list;
+  return n;
+}
+
+void
+uncad_free_style_overrides (uncad_style_override_t *list)
+{
+  free (list);
+}

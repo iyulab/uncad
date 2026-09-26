@@ -16,8 +16,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
-- Dimensions and leaders carry `style_overrides: None`: this reader does not read extended data
-  yet, so it says it did not look rather than that there are none.
+- Reads the style variables a dimension or leader sets for itself -- the `ACAD` application's
+  `DSTYLE` list in its extended data -- into `style_overrides`, from DWG and DXF alike, each
+  value in the kind the file states it in; an entity without one reads as an empty list.
 - A DXF read that keeps fewer top-level entities than the file's ENTITIES section holds
   carries an `ENTITIES_MISSING` warning in `read_diagnostics`, with both counts. The importer
   can stop partway through a file without setting an error bit; such a read used to look

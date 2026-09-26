@@ -241,6 +241,35 @@ uint16_t uncad_dwg_codepage(const Dwg_Data *dwg);
  */
 int uncad_dwg_is_wide_string(const Dwg_Data *dwg);
 
+/* One dimension-style variable an entity sets for itself -- a pair of the
+ * `DSTYLE` list its extended data carries under the `ACAD` application. */
+typedef struct uncad_style_override
+{
+  uint16_t variable; /* the variable's DIMSTYLE group code (41 DIMASZ, ...) */
+  uint8_t kind;      /* 0 real, 1 integer, 2 text, 3 handle */
+  uint8_t text_is_wide; /* text is UTF-16 (text_len units), else 8-bit bytes */
+  double real;
+  int32_t integer;
+  uint64_t handle;
+  const char *text;  /* points into the drawing; valid while it lives */
+  uint32_t text_len; /* bytes, or UTF-16 units when text_is_wide */
+} uncad_style_override_t;
+
+/* The `DSTYLE` list in `obj`'s extended data under the `ACAD` application:
+ * the string "DSTYLE", "{", then (70 variable, value) pairs up to "}". The
+ * value's group says its kind: 40 a real, 70 or 71 an integer, 0 a string,
+ * 5 a handle; a pair of any other kind ends the list. The application is
+ * matched by its APPID record's name, in either string width.
+ *
+ * Returns the number of pairs and mallocs *out to that length; 0 with *out
+ * NULL when the entity carries no such list. Free with
+ * uncad_free_style_overrides. */
+unsigned int uncad_entity_style_overrides(const Dwg_Data *dwg,
+                                          const Dwg_Object *obj,
+                                          uncad_style_override_t **out);
+
+void uncad_free_style_overrides(uncad_style_override_t *list);
+
 #ifdef __cplusplus
 }
 #endif

@@ -501,6 +501,18 @@ An arc-length dimension is a separate entity in the format rather than a value o
 the group says 5 on such a dimension, which would read as a three-point angular one. It is
 filed by the entity it is.
 
+## Dimension style variables an entity sets for itself
+
+A dimension or leader whose arrow size, decimal places or arrow block was changed on its own
+keeps those variables in its extended data, as the `ACAD` application's `DSTYLE` list. The
+library exposes extended data only as raw items, so a shim (`uncad_entity_style_overrides`)
+walks them: the list's (variable, value) pairs come back as `style_overrides`, each value in the
+kind the file states it in, the application matched by its APPID record's name in either
+string width. Nothing is merged with the named style; which value applies is the consumer's
+call. On the corpus a second DWG reader gives the same lists. Where a DXF twin and its DWG
+disagree (`example_r13`, `example_r14`, `2018/Leader`), it is the files that differ: both DWG
+readers agree with each other, not with the DXF.
+
 ## Object coordinate systems: coordinates as stated, with their normal
 
 CIRCLE, ARC, LWPOLYLINE, POLYLINE_2D, TEXT, ATTRIB, ATTDEF, INSERT, SOLID and TRACE state

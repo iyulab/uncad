@@ -29,8 +29,8 @@ use uncad_model::model::{
     ViewportEntity, ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
-    AttributeFlags, EntityLinetype, HorizontalJustification, Point2D, Point3D, PolylineVertex,
-    VerticalJustification,
+    AttributeFlags, EntityLinetype, HorizontalJustification, OverrideValue, Point2D, Point3D,
+    PolylineVertex, StyleOverride, VerticalJustification,
 };
 
 /// The `flag` bit that means "closed" on POLYLINE_2D and POLYLINE_3D: bit 1,
@@ -1710,7 +1710,8 @@ unsafe fn convert_entity(
                 ),
                 ordinate_axis: (kind == Some(DimensionKind::Ordinate))
                     .then(|| ordinate_axis(dwg, entity_ptr, dxfname)),
-                style_overrides: None,
+                // SAFETY: obj is a live entity object of dwg.
+                style_overrides: Some(unsafe { style_overrides(dwg, obj, text) }),
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
@@ -2008,7 +2009,8 @@ unsafe fn convert_entity(
                     c"DIMSTYLE",
                     |handle_ptr| text.handle_name(dwg, handle_ptr),
                 ),
-                style_overrides: None,
+                // SAFETY: obj is a live entity object of dwg.
+                style_overrides: Some(unsafe { style_overrides(dwg, obj, text) }),
             })
         }
         // SAFETY: obj is valid per this function's own `# Safety` doc contract.
@@ -2017,6 +2019,63 @@ unsafe fn convert_entity(
             type_name: unsafe { dxfname(obj) },
         },
     })
+}
+
+/// The dimension-style variables an entity sets for itself -- the `DSTYLE`
+/// list in its extended data under `ACAD` -- through the
+/// `uncad_entity_style_overrides` shim, which walks the extended-data items
+/// dynapi does not expose. Empty when the entity carries no such list.
+///
+/// # Safety
+/// `dwg` must be live and `obj` one of its entity objects.
+unsafe fn style_overrides(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    obj: *mut libredwg_sys::Dwg_Object,
+    text: &TextDecoder,
+) -> Vec<StyleOverride> {
+    let mut list: *mut libredwg_sys::uncad_style_override_t = std::ptr::null_mut();
+    // SAFETY: per this function's contract; on success the shim mallocs
+    // `list` (`count` entries), freed below. Text pointers in it point into
+    // the drawing, which outlives this call.
+    let count = unsafe { libredwg_sys::uncad_entity_style_overrides(dwg, obj, &mut list) };
+    if list.is_null() {
+        return Vec::new();
+    }
+    let raw = unsafe { std::slice::from_raw_parts(list, count as usize) };
+    let overrides = raw
+        .iter()
+        .filter_map(|o| {
+            let value = match o.kind {
+                0 => OverrideValue::Real(o.real),
+                1 => OverrideValue::Integer(o.integer),
+                2 if o.text.is_null() => OverrideValue::Text(String::new()),
+                2 if o.text_is_wide != 0 => {
+                    // SAFETY: text_len UTF-16 units at text, per the shim.
+                    let units = unsafe {
+                        std::slice::from_raw_parts(o.text.cast::<u16>(), o.text_len as usize)
+                    };
+                    OverrideValue::Text(String::from_utf16_lossy(units))
+                }
+                2 => {
+                    // SAFETY: text_len bytes at text, per the shim.
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(o.text.cast::<u8>(), o.text_len as usize)
+                    };
+                    OverrideValue::Text(text.decode(bytes, || {
+                        format!("style override {} of an entity", o.variable)
+                    }))
+                }
+                3 => OverrideValue::Handle(format!("{:X}", o.handle)),
+                _ => return None,
+            };
+            Some(StyleOverride {
+                variable: o.variable,
+                value,
+            })
+        })
+        .collect();
+    unsafe { libredwg_sys::uncad_free_style_overrides(list) };
+    overrides
 }
 
 /// Reads a MULTILEADER's leader lines through the `uncad_multileader_get_lines`
