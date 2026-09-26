@@ -49,6 +49,8 @@ pub enum Kind {
     /// Some of the listed words, each once. The command line takes them
     /// comma-separated.
     Choices(&'static [&'static str]),
+    /// A color as `#rrggbb`: six hexadecimal digits after a `#`.
+    Color,
 }
 
 pub struct Param {
@@ -216,8 +218,8 @@ pub const VERBS: &[Verb] = &[
     Verb {
         name: "redline",
         description: "Draws the difference between two drawing states on top of the first: the \
-            first drawing exactly as it renders alone, and over it, in red, what each changed \
-            entity became, what was removed (dashed), and a revision cloud around every change. \
+            first drawing exactly as it renders alone, and over it, in red (or the color given), what each \
+            changed entity became, what was removed (dashed), and a revision cloud around every change. \
             A change whose counterpart is uncertain gets a dashed cloud and no geometry. Writes \
             an SVG or PNG file -- never over an existing one -- and answers with what it marked \
             and what it could not (inside a block definition, or nothing drawn), each with the \
@@ -263,6 +265,15 @@ pub const VERBS: &[Verb] = &[
                 description: "What the picture shows: the whole drawing (default), or the \
                     changes with some of the drawing around them -- in a large drawing a small \
                     change is otherwise a few pixels of the picture.",
+            },
+            Param {
+                name: "proposal_color",
+                kind: Kind::Color,
+                required: false,
+                positional: false,
+                description: "The color the changes are drawn in (default #e4002b, a red). \
+                    Give another when the drawing itself uses colors close to it -- the answer \
+                    lists those as proposal_color_conflicts.",
             },
             MATCHING,
             LENGTH_TOLERANCE,
@@ -354,6 +365,7 @@ impl Verb {
                 Kind::Number => value.as_f64().is_some_and(f64::is_finite),
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
                 Kind::Choice(words) => value.as_str().is_some_and(|s| words.contains(&s)),
+                Kind::Color => value.as_str().and_then(color).is_some(),
                 Kind::Choices(words) => value.as_array().is_some_and(|items| {
                     items
                         .iter()
@@ -402,6 +414,10 @@ impl Verb {
                 Kind::Choice(words) => {
                     schema.insert("type".into(), "string".into());
                     schema.insert("enum".into(), (*words).into());
+                }
+                Kind::Color => {
+                    schema.insert("type".into(), "string".into());
+                    schema.insert("pattern".into(), "^#[0-9A-Fa-f]{6}$".into());
                 }
                 Kind::Choices(words) => {
                     let mut item = Map::new();
@@ -468,7 +484,9 @@ impl Verb {
                             .map(|w| Value::String(w.trim().to_string()))
                             .collect(),
                     ),
-                    Kind::Path | Kind::Text | Kind::Choice(_) => Value::String(raw.clone()),
+                    Kind::Path | Kind::Text | Kind::Choice(_) | Kind::Color => {
+                        Value::String(raw.clone())
+                    }
                 };
                 args.insert(param.name.into(), value);
             } else if word.starts_with('-') && word.len() > 1 {
@@ -518,6 +536,7 @@ impl Kind {
             Kind::NonNegative => "a finite number, 0 or more".into(),
             Kind::Choice(words) => format!("one of {}", words.join(", ")),
             Kind::Choices(words) => format!("a list of distinct words from {}", words.join(", ")),
+            Kind::Color => "a color as #rrggbb".into(),
         }
     }
 
@@ -529,8 +548,18 @@ impl Kind {
             Kind::Json => "json".into(),
             Kind::Choice(words) => words.join("|"),
             Kind::Choices(words) => format!("{}[,...]", words.join("|")),
+            Kind::Color => "#rrggbb".into(),
         }
     }
+}
+
+/// The red, green and blue of a `#rrggbb` color, or `None` for anything else.
+fn color(text: &str) -> Option<[u8; 3]> {
+    let hex = text
+        .strip_prefix('#')
+        .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
+    let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
 fn path(args: &Map<String, Value>, name: &str) -> String {
@@ -690,6 +719,9 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
     if args.get("frame").and_then(Value::as_str) == Some("changes") {
         options.frame = iron_render_cad::OverlayFrame::Changes;
     }
+    if let Some(given) = args.get("proposal_color").and_then(Value::as_str) {
+        options.proposal_color = color(given).expect("checked by Verb::call");
+    }
     let overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
     if !overlay.proposal_color_conflicts.is_empty() {
         let colors: Vec<String> = overlay
@@ -700,7 +732,9 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         let [r, g, b] = options.proposal_color;
         warnings.push(format!(
             "the original is drawn in colors close to #{r:02x}{g:02x}{b:02x}, the color the \
-             changes are drawn in ({}): a change may not stand out from the lines around it",
+             changes are drawn in ({}): a change may not stand out from the lines around it \
+             -- draw the changes in another color with --proposal-color <#rrggbb> \
+             (MCP: proposal_color)",
             colors.join(", ")
         ));
     }

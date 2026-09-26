@@ -87,9 +87,11 @@ uncad step2.json -o step2.svg                                 # what the edited 
 ```
 
 `redline` draws that difference on top of the first drawing: the first drawing
-exactly as it renders alone, and over it, in red, what each changed entity
-became, what was removed (dashed), and a revision cloud around every change. A
-change whose counterpart is uncertain gets a dashed cloud and no geometry. It
+exactly as it renders alone, and over it, in red (or `--proposal-color`), what
+each changed entity became, what was removed (dashed), and a revision cloud
+around every change. A change whose counterpart is uncertain gets a dashed
+cloud and no geometry. When the drawing itself uses colors close to the one the
+changes are drawn in, the answer lists them and a warning suggests another. It
 writes an SVG or PNG file -- never over an existing one -- and answers with what
 it marked and what it could not show, and why:
 
@@ -97,6 +99,7 @@ it marked and what it could not show, and why:
 uncad redline part.dwg step2.json -o proposal.svg
 uncad redline part.dwg step2.json -o proposal.png --fit 2000 --omit within  # 2000 px, beyond tolerance only
 uncad redline plan.dwg step2.json -o detail.png --fit 1200 --frame changes  # just the changes, and around them
+uncad redline plan.dwg step2.json -o proposal.svg --proposal-color '#0057b8'  # a drawing already in red
 ```
 
 `uncad mcp` serves `summarize`, `hit-test`, `diff`, `set` and `redline` as [Model Context

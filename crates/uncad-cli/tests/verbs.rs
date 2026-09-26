@@ -803,4 +803,104 @@ fn a_redline_on_a_drawing_already_in_red_says_the_changes_may_not_stand_out() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("close to #e4002b"), "{stderr}");
     assert!(stderr.contains("#ff0000 (4 uses)"), "{stderr}");
+    assert!(stderr.contains("--proposal-color <#rrggbb>"), "{stderr}");
+}
+
+/// The same G1 edit drawn in blue: the changes are in the color asked for,
+/// the red holes no longer clash, and the tool draws the same picture.
+#[test]
+fn a_redline_draws_the_changes_in_the_color_asked_for() {
+    let g1 = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uncad/tests/golden/g1.expected.json"
+    );
+    let dir = scratch("redline-color");
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        g1,
+        "--id",
+        "289",
+        "--path",
+        "radius",
+        "--value",
+        "4",
+        "-o",
+        arg(&edited),
+    ]);
+    let picture = dir.join("blue.svg");
+    let out = run(&[
+        "redline",
+        g1,
+        arg(&edited),
+        "-o",
+        arg(&picture),
+        "--proposal-color",
+        "#0057B8",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    assert_eq!(report["proposal_color_conflicts"], json!([]), "{report}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("close to"), "{stderr}");
+    let svg = std::fs::read_to_string(&picture).unwrap();
+    // The change layer is colored by its style rule, which outranks the
+    // entities' own stroke attributes.
+    let style = &svg[svg.find("<style>").unwrap()..svg.find("</style>").unwrap()];
+    assert!(style.contains("#changes *{stroke:#0057b8"), "{style}");
+    assert!(!svg.contains("#e4002b"), "the default is not used");
+
+    let by_tool = dir.join("tool.svg");
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "redline",
+        json!({"before": g1, "after": arg(&edited), "output": arg(&by_tool),
+               "proposal_color": "#0057B8"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(
+        std::fs::read(&picture).unwrap(),
+        std::fs::read(&by_tool).unwrap()
+    );
+}
+
+/// Anything but `#rrggbb` is refused before anything is read or written, and
+/// the tool's schema says the same.
+#[test]
+fn a_redline_color_is_six_hex_digits_after_a_hash() {
+    let dir = scratch("redline-color-refuse");
+    for bad in ["red", "e4002b", "#e4002", "#e4002bb", "#g4002b"] {
+        let picture = dir.join("never.svg");
+        let out = run(&[
+            "redline",
+            CORPUS_DWG,
+            CORPUS_DWG,
+            "-o",
+            arg(&picture),
+            "--proposal-color",
+            bad,
+        ]);
+        assert!(!out.status.success(), "{bad}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("a color as #rrggbb"), "{bad}: {stderr}");
+        assert!(!picture.exists(), "{bad}");
+    }
+
+    let mut mcp = Mcp::start();
+    let list = mcp.request("tools/list", json!({}));
+    let redline = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "redline")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        redline["inputSchema"]["properties"]["proposal_color"]["pattern"],
+        "^#[0-9A-Fa-f]{6}$"
+    );
 }

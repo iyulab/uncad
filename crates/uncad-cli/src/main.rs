@@ -40,13 +40,14 @@ Usage:
                                       result as model JSON (never over an
                                       existing file), answer with the diff
   uncad redline <before> <after> -o <out.svg|out.png> [--fit <px>]
-                [--frame <drawing|changes>]
+                [--frame <drawing|changes>] [--proposal-color <#rrggbb>]
                 [--matching ...] [--length-tolerance <n>]
                 [--angle-tolerance <n>] [--omit <within,unstated>]
                                     draw the difference on top of <before>:
                                       the original unchanged, the changes in
-                                      red with a revision cloud (never over
-                                      an existing file); answer with what
+                                      red (or --proposal-color) with a
+                                      revision cloud (never over an
+                                      existing file); answer with what
                                       was marked and what could not be
   uncad mcp                         serve summarize, hit-test, diff, set and
                                       redline as MCP tools over stdio
