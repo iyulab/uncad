@@ -300,36 +300,16 @@ fn convert_dim_style(
         linear_unit_format: if !r2000 {
             dimunit.0
         } else {
-            small("DIMLUNIT").and_then(|v| match v {
-                1 => Some(LinearUnitFormat::Scientific),
-                2 => Some(LinearUnitFormat::Decimal),
-                3 => Some(LinearUnitFormat::Engineering),
-                4 => Some(LinearUnitFormat::Architectural),
-                5 => Some(LinearUnitFormat::Fractional),
-                6 => Some(LinearUnitFormat::WindowsDesktop),
-                _ => None,
-            })
+            small("DIMLUNIT").and_then(LinearUnitFormat::from_code)
         },
         zero_suppression: small("DIMZIN"),
         rounding: number("DIMRND"),
-        angular_unit_format: small("DIMAUNIT").and_then(|v| match v {
-            0 => Some(AngularUnitFormat::DecimalDegrees),
-            1 => Some(AngularUnitFormat::DegreesMinutesSeconds),
-            2 => Some(AngularUnitFormat::Gradians),
-            3 => Some(AngularUnitFormat::Radians),
-            4 => Some(AngularUnitFormat::SurveyorsUnits),
-            _ => None,
-        }),
+        angular_unit_format: small("DIMAUNIT").and_then(AngularUnitFormat::from_code),
         angular_decimal_places: small("DIMADEC").filter(|_| r2000),
         fraction_format: if !r2000 {
             dimunit.1
         } else {
-            small("DIMFRAC").and_then(|v| match v {
-                0 => Some(FractionFormat::Horizontal),
-                1 => Some(FractionFormat::Diagonal),
-                2 => Some(FractionFormat::NotStacked),
-                _ => None,
-            })
+            small("DIMFRAC").and_then(FractionFormat::from_code)
         },
         arc_symbol: small("DIMARCSYM")
             .filter(|_| has_arc_symbol)
