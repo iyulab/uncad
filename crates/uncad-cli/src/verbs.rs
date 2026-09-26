@@ -691,6 +691,19 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         options.frame = iron_render_cad::OverlayFrame::Changes;
     }
     let overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
+    if !overlay.proposal_color_conflicts.is_empty() {
+        let colors: Vec<String> = overlay
+            .proposal_color_conflicts
+            .iter()
+            .map(|c| format!("{} ({} uses)", c.color, c.uses))
+            .collect();
+        let [r, g, b] = options.proposal_color;
+        warnings.push(format!(
+            "the original is drawn in colors close to #{r:02x}{g:02x}{b:02x}, the color the \
+             changes are drawn in ({}): a change may not stand out from the lines around it",
+            colors.join(", ")
+        ));
+    }
     if png {
         // Pixels per drawing unit: the longer side at `fit` pixels, or one.
         let scale = match args.get("fit").and_then(Value::as_u64) {

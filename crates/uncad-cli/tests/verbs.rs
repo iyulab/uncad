@@ -765,3 +765,42 @@ fn redline_can_frame_the_changes() {
     // The same change is marked either way.
     assert_eq!(f["marked"], w["marked"]);
 }
+
+/// G1's holes are pure red, close to the red the changes are drawn in: the
+/// answer lists the clash and the command says so on stderr.
+#[test]
+fn a_redline_on_a_drawing_already_in_red_says_the_changes_may_not_stand_out() {
+    let g1 = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uncad/tests/golden/g1.expected.json"
+    );
+    let dir = scratch("redline-red");
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        g1,
+        "--id",
+        "289",
+        "--path",
+        "radius",
+        "--value",
+        "4",
+        "-o",
+        arg(&edited),
+    ]);
+    let picture = dir.join("redline.svg");
+    let out = run(&["redline", g1, arg(&edited), "-o", arg(&picture)]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let conflicts = report["proposal_color_conflicts"].as_array().unwrap();
+    assert_eq!(conflicts.len(), 1, "{report}");
+    assert_eq!(conflicts[0]["color"], "#ff0000");
+    assert_eq!(conflicts[0]["uses"], 4);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("close to #e4002b"), "{stderr}");
+    assert!(stderr.contains("#ff0000 (4 uses)"), "{stderr}");
+}

@@ -20,6 +20,8 @@ Notable changes to this project are recorded here. The format follows
   carries an `ENTITIES_MISSING` warning in `read_diagnostics`, with both counts. The importer
   can stop partway through a file without setting an error bit; such a read used to look
   clean.
+- `uncad redline` answers with `proposal_color_conflicts` and warns when the original is drawn
+  in colors close to the one the changes are drawn in (a drawing whose holes are already red).
 - `uncad export` prints the reader's non-fatal problems on stderr, as every other command
   does; they used to reach only the package's `drawing.json`.
 - `--help` (for the command, a verb, or `export`) prints on stdout and exits 0; the usage
