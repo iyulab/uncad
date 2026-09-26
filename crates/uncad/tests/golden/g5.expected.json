@@ -62,7 +62,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -126,7 +127,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -190,7 +192,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -255,7 +258,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -319,7 +323,8 @@
         "type": "UNRESOLVED",
         "data": "NOT-DECLARED"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -380,7 +385,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -448,7 +454,8 @@
         "type": "RESOLVED",
         "data": "ISO-25"
       },
-      "ordinate_axis": null
+      "ordinate_axis": null,
+      "style_overrides": []
     }
   ],
   "tables": {
@@ -1533,7 +1540,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1597,7 +1605,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1661,7 +1670,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1726,7 +1736,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1790,7 +1801,8 @@
               "type": "UNRESOLVED",
               "data": "NOT-DECLARED"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1851,7 +1863,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1919,7 +1932,8 @@
               "type": "RESOLVED",
               "data": "ISO-25"
             },
-            "ordinate_axis": null
+            "ordinate_axis": null,
+            "style_overrides": []
           }
         ],
         "base_point": {

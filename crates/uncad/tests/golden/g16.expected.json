@@ -133,7 +133,8 @@
         "type": "RESOLVED",
         "data": "ORD"
       },
-      "ordinate_axis": "X"
+      "ordinate_axis": "X",
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -197,7 +198,8 @@
         "type": "RESOLVED",
         "data": "ORD"
       },
-      "ordinate_axis": "X"
+      "ordinate_axis": "X",
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -262,7 +264,8 @@
         "type": "RESOLVED",
         "data": "ARCH"
       },
-      "ordinate_axis": "X"
+      "ordinate_axis": "X",
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -326,7 +329,8 @@
         "type": "RESOLVED",
         "data": "ORD"
       },
-      "ordinate_axis": "Y"
+      "ordinate_axis": "Y",
+      "style_overrides": []
     },
     {
       "type": "DIMENSION",
@@ -390,7 +394,8 @@
         "type": "RESOLVED",
         "data": "ORD"
       },
-      "ordinate_axis": "Y"
+      "ordinate_axis": "Y",
+      "style_overrides": []
     }
   ],
   "tables": {
@@ -1014,7 +1019,8 @@
               "type": "RESOLVED",
               "data": "ORD"
             },
-            "ordinate_axis": "X"
+            "ordinate_axis": "X",
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1078,7 +1084,8 @@
               "type": "RESOLVED",
               "data": "ORD"
             },
-            "ordinate_axis": "X"
+            "ordinate_axis": "X",
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1143,7 +1150,8 @@
               "type": "RESOLVED",
               "data": "ARCH"
             },
-            "ordinate_axis": "X"
+            "ordinate_axis": "X",
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1207,7 +1215,8 @@
               "type": "RESOLVED",
               "data": "ORD"
             },
-            "ordinate_axis": "Y"
+            "ordinate_axis": "Y",
+            "style_overrides": []
           },
           {
             "type": "DIMENSION",
@@ -1271,7 +1280,8 @@
               "type": "RESOLVED",
               "data": "ORD"
             },
-            "ordinate_axis": "Y"
+            "ordinate_axis": "Y",
+            "style_overrides": []
           }
         ],
         "base_point": {

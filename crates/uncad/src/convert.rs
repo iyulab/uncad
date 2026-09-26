@@ -1710,6 +1710,7 @@ unsafe fn convert_entity(
                 ),
                 ordinate_axis: (kind == Some(DimensionKind::Ordinate))
                     .then(|| ordinate_axis(dwg, entity_ptr, dxfname)),
+                style_overrides: None,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_TABLE => {
@@ -2007,6 +2008,7 @@ unsafe fn convert_entity(
                     c"DIMSTYLE",
                     |handle_ptr| text.handle_name(dwg, handle_ptr),
                 ),
+                style_overrides: None,
             })
         }
         // SAFETY: obj is valid per this function's own `# Safety` doc contract.

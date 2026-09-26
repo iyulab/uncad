@@ -16,6 +16,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- Dimensions and leaders carry `style_overrides: None`: this reader does not read extended data
+  yet, so it says it did not look rather than that there are none.
 - A DXF read that keeps fewer top-level entities than the file's ENTITIES section holds
   carries an `ENTITIES_MISSING` warning in `read_diagnostics`, with both counts. The importer
   can stop partway through a file without setting an error bit; such a read used to look
