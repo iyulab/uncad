@@ -48,8 +48,8 @@ Usage:
                                       red with a revision cloud (never over
                                       an existing file); answer with what
                                       was marked and what could not be
-  uncad mcp                         serve the five verbs above as MCP tools
-                                      over stdio
+  uncad mcp                         serve summarize, hit-test, diff, set and
+                                      redline as MCP tools over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --
   what `-o <output.json>` and `set` write -- so edits chain, and the last
@@ -218,13 +218,15 @@ fn main() -> ExitCode {
         }
     };
 
-    if args.help || args.input.is_none() {
+    // Asked-for help is the answer, on stdout; usage after a call without an
+    // input is an error message, on stderr.
+    if args.help {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
+    if args.input.is_none() {
         eprintln!("{USAGE}");
-        return if args.help {
-            ExitCode::SUCCESS
-        } else {
-            ExitCode::FAILURE
-        };
+        return ExitCode::FAILURE;
     }
 
     match run(&args) {
@@ -334,7 +336,7 @@ fn read_warning(input: &str, db: &CadDatabase) -> String {
 /// stderr -- the same answer `uncad mcp` gives for the same arguments.
 fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
     if argv.iter().any(|a| a == "-h" || a == "--help") {
-        eprintln!("{}\n\n{}", verb.usage(), verb.description);
+        println!("{}\n\n{}", verb.usage(), verb.description);
         return ExitCode::SUCCESS;
     }
     match verb.parse_cli(argv).and_then(|args| verb.call(&args)) {
@@ -550,7 +552,7 @@ fn run_export(argv: &[String]) -> Result<(), String> {
             "--no-sheets" => options.sheets = false,
             "--svg" => options.svg = true,
             "-h" | "--help" => {
-                eprintln!("{USAGE}");
+                println!("{USAGE}");
                 return Ok(());
             }
             flag if flag.starts_with('-') => {

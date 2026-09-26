@@ -397,8 +397,24 @@ fn rejects_scale_and_fit_together_and_bad_values() {
 fn help_exits_successfully_and_lists_the_options() {
     let out = run(&["--help"]);
     assert!(out.status.success(), "--help should exit 0");
+    // Asked-for help is the answer (stdout, so `uncad --help | less` works);
+    // the usage printed after a call with no input is an error (stderr).
+    assert!(
+        out.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let bare = run(&[]);
+    assert!(!bare.status.success());
+    assert!(bare.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&bare.stderr).contains("Usage:"));
+    for verb in [&["summarize", "--help"][..], &["export", "--help"][..]] {
+        let out = run(verb);
+        assert!(out.status.success(), "{verb:?}");
+        assert!(!out.stdout.is_empty() && out.stderr.is_empty(), "{verb:?}");
+    }
 
-    let text = String::from_utf8_lossy(&out.stderr);
+    let text = String::from_utf8_lossy(&out.stdout);
     for flag in [
         "--space",
         "--scale",

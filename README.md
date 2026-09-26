@@ -99,7 +99,7 @@ uncad redline part.dwg step2.json -o proposal.png --fit 2000 --omit within  # 20
 uncad redline plan.dwg step2.json -o detail.png --fit 1200 --frame changes  # just the changes, and around them
 ```
 
-`uncad mcp` serves the same five verbs as [Model Context
+`uncad mcp` serves `summarize`, `hit-test`, `diff`, `set` and `redline` as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files

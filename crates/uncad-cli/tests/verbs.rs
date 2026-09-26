@@ -260,6 +260,27 @@ fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
         // A new file, never one written over: not destructive.
         assert_eq!(tool["annotations"]["destructiveHint"], false, "{tool}");
     }
+
+    // `--help` names the tools `uncad mcp` serves, as the command spells
+    // them, and no others: a verb added to one list and not the other
+    // fails here.
+    let help = String::from_utf8(run(&["--help"]).stdout).expect("UTF-8 help");
+    let mcp_line: String = help
+        .lines()
+        .skip_while(|line| !line.trim_start().starts_with("uncad mcp"))
+        .take_while(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let named: Vec<&str> = ["summarize", "hit-test", "diff", "set", "redline", "export"]
+        .into_iter()
+        .filter(|verb| {
+            mcp_line
+                .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+                .any(|word| word == *verb)
+        })
+        .collect();
+    let served: Vec<String> = names.iter().map(|n| n.replace('_', "-")).collect();
+    assert_eq!(named, served, "{mcp_line}");
 }
 
 #[test]

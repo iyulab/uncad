@@ -22,6 +22,10 @@ Notable changes to this project are recorded here. The format follows
   clean.
 - `uncad export` prints the reader's non-fatal problems on stderr, as every other command
   does; they used to reach only the package's `drawing.json`.
+- `--help` (for the command, a verb, or `export`) prints on stdout and exits 0; the usage
+  printed after a call with no input stays on stderr with exit 1. `--help` and the README
+  name the tools `uncad mcp` serves instead of "the five verbs above", which read as
+  including `export`.
 - Rendering to SVG or PNG warns about ARCs it did not draw because their start and end angles
   are equal. The format does not say whether such an arc is the whole circle or nothing.
 - `uncad summarize`, `uncad hit-test` and `uncad diff` answer one question each about a
