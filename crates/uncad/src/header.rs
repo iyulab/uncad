@@ -42,56 +42,8 @@ use crate::dynapi::{self, RawPoint2D, RawPoint3D};
 use crate::text::{codepage_name, TextDecoder};
 use crate::Format;
 
-/// The drawing unit a `$INSUNITS` code names, with its conversion to
-/// millimetres when the code is a length.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Units {
-    /// Short name: `"mm"`, `"in"`, `"ft"`, `"m"`, ... -- or `"du"` ("drawing
-    /// units") for code 0 (unitless) and for a code the DXF reference does
-    /// not define.
-    pub name: String,
-    /// Millimetres per drawing unit; `None` when unitless or unknown.
-    pub to_mm: Option<f64>,
-}
-
-impl Units {
-    /// The DXF reference's `$INSUNITS` table (codes 0..=24). LibreDWG has no
-    /// such table of its own -- it only reads and writes the code.
-    pub fn from_insunits(code: u16) -> Units {
-        let (name, to_mm): (&str, Option<f64>) = match code {
-            1 => ("in", Some(25.4)),
-            2 => ("ft", Some(304.8)),
-            3 => ("mi", Some(1_609_344.0)),
-            4 => ("mm", Some(1.0)),
-            5 => ("cm", Some(10.0)),
-            6 => ("m", Some(1000.0)),
-            7 => ("km", Some(1_000_000.0)),
-            8 => ("uin", Some(2.54e-5)),
-            9 => ("mil", Some(0.0254)),
-            10 => ("yd", Some(914.4)),
-            11 => ("angstrom", Some(1e-7)),
-            12 => ("nm", Some(1e-6)),
-            13 => ("um", Some(1e-3)),
-            14 => ("dm", Some(100.0)),
-            15 => ("dam", Some(10_000.0)),
-            16 => ("hm", Some(100_000.0)),
-            17 => ("Gm", Some(1e12)),
-            18 => ("au", Some(1.495_978_707e14)),
-            19 => ("ly", Some(9.460_730_472_580_8e18)),
-            20 => ("pc", Some(3.085_677_581_491_367e19)),
-            // US survey units: 1200/3937 m to the foot.
-            21 => ("us-ft", Some(304.800_609_601_219_2)),
-            22 => ("us-in", Some(25.400_050_800_101_6)),
-            23 => ("us-yd", Some(914.401_828_803_657_7)),
-            24 => ("us-mi", Some(1_609_347.218_694_437_2)),
-            _ => ("du", None),
-        };
-        Units {
-            name: name.to_string(),
-            to_mm,
-        }
-    }
-}
+/// The drawing unit a `$INSUNITS` code names -- the model's table.
+pub use uncad_model::Units;
 
 /// File-level facts and the header variables a consumer needs to give the
 /// model's numbers a meaning. Variable fields are named after the DXF

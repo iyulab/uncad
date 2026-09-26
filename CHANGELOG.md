@@ -246,6 +246,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- `header::Units` is `uncad_model::Units`, re-exported: the `$INSUNITS` table now lives in the
+  model. The type's path, fields and values are unchanged.
 - A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not
   measure, reports `measurement: None` rather than `-1.0`, the way a `0` already did.
 - A polyline's vertices are `PolylineVertex { point, bulge, start_width, end_width }` --
