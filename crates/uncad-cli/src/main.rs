@@ -11,8 +11,8 @@ mod mcp;
 mod verbs;
 
 use iron_render_cad::{
-    to_png, to_svg, Background, Crop, LeftOut, LeftOutReason, PngError, PngSize, Space,
-    ToPngOptions, ToSvgOptions, DEFAULT_MAX_EDGE,
+    to_png, to_svg, Background, Crop, LeftOut, PngError, PngSize, Space, ToPngOptions,
+    ToSvgOptions, DEFAULT_MAX_EDGE,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -339,12 +339,7 @@ fn run(args: &Args) -> Result<(), String> {
 fn set_aside(left_out: &[LeftOut]) -> Vec<String> {
     left_out
         .iter()
-        .filter(|l| {
-            matches!(
-                l.reason,
-                LeftOutReason::ScaleOutlier | LeftOutReason::FarOutlier
-            )
-        })
+        .filter(|l| l.reason.is_set_aside())
         .map(|l| format!("{} {}", l.type_name, l.id.value()))
         .collect()
 }
