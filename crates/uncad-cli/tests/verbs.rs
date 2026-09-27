@@ -637,6 +637,7 @@ fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
         report["not_marked"].as_array().unwrap().is_empty(),
         "{report}"
     );
+    assert_eq!(report["left_out"], serde_json::json!([]), "{report}");
     assert!(
         report.get("svg").is_none(),
         "the picture is in the file, not the answer"
@@ -648,6 +649,31 @@ fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
     assert!(svg.contains("class=\"cloud\""));
     // The drawing it all started from is untouched.
     assert_eq!(std::fs::read(CORPUS_DWG).unwrap(), original);
+}
+
+/// A redline of a drawing with a block reference scaled 3256 times beside
+/// it frames the drawing, not the giant, and names what its original layer
+/// leaves out.
+#[test]
+fn a_redline_frames_the_drawing_and_names_a_giant_it_sets_aside() {
+    const GIANT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/example_2000.dwg"
+    );
+    let dir = scratch("redline-giant");
+    let picture = dir.join("redline.svg");
+    let (_, report) = answer(&["redline", GIANT, GIANT, "-o", arg(&picture)]);
+    let left_out = report["left_out"].as_array().unwrap();
+    assert!(
+        left_out
+            .iter()
+            .any(|l| l["type_name"] == "INSERT" && l["reason"] == "scale_outlier"),
+        "{report}"
+    );
+    let width = report["view_box"]["max_x"].as_f64().unwrap()
+        - report["view_box"]["min_x"].as_f64().unwrap();
+    // The drawing is some 15 000 units across; the giant, 3.4 million.
+    assert!(width < 100_000.0, "{report}");
 }
 
 #[test]

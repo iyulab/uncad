@@ -264,6 +264,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- `uncad-cli`: a rendered image (`-o .svg`/`.png`) and `redline` are framed by the renderer's
+  guard by default, as `export` already was: the few entities far larger or farther than the
+  rest of the drawing -- a block reference scaled thousands of times beside it -- are set aside
+  and not drawn, instead of stretching the picture until the drawing is a speck. The image
+  commands name them in a warning; `redline`'s answer lists them in `left_out`. `--no-trim`
+  frames and draws every entity.
 - `header::Units` is `uncad_model::Units`, re-exported: the `$INSUNITS` table now lives in the
   model. The type's path, fields and values are unchanged.
 - A dimension whose group 42 is `-1`, the value writers leave for a dimension they did not

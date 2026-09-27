@@ -545,6 +545,48 @@ fn no_trim_keeps_the_outlier_inside_the_viewbox() {
     );
 }
 
+/// A corpus drawing with a block reference scaled 3256 times that touches
+/// the drawing: the default frame sets it aside and says so; `--no-trim`
+/// frames it.
+const CORPUS_WITH_A_GIANT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/example_2000.dwg"
+);
+
+#[test]
+fn the_default_frame_sets_a_giant_aside_and_names_it() {
+    let framed = TempFile::new("giant-default.svg");
+    let untrimmed = TempFile::new("giant-no-trim.svg");
+    let out = run(&[CORPUS_WITH_A_GIANT, "-o", framed.arg()]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("farther than the rest of the drawing") && stderr.contains("INSERT "),
+        "the default should name what it set aside: {stderr}"
+    );
+    let out = run(&[CORPUS_WITH_A_GIANT, "-o", untrimmed.arg(), "--no-trim"]);
+    assert!(out.status.success());
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("farther than the rest of the drawing"),
+        "--no-trim sets nothing aside"
+    );
+
+    let width = |vb: &str| -> f64 {
+        vb.split_whitespace()
+            .nth(2)
+            .and_then(|w| w.parse().ok())
+            .expect("viewBox has four numbers")
+    };
+    // The drawing is some 15 000 units across; the giant, 3.4 million.
+    let framed = width(&view_box(&framed.bytes()));
+    let untrimmed = width(&view_box(&untrimmed.bytes()));
+    assert!(framed < 100_000.0, "default viewBox width {framed}");
+    assert!(
+        untrimmed > 1_000_000.0,
+        "--no-trim viewBox width {untrimmed}"
+    );
+}
+
 /// `--version` answers; an option the command does not know, a missing
 /// value and a second input are errors, not ignored.
 #[test]

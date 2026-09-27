@@ -738,6 +738,18 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
             colors.join(", ")
         ));
     }
+    if !overlay.left_out.is_empty() {
+        let names: Vec<String> = overlay
+            .left_out
+            .iter()
+            .map(|l| format!("{} {}", l.type_name, l.id.value()))
+            .collect();
+        warnings.push(format!(
+            "the original is drawn without the entities far larger or farther than the rest \
+             of the drawing (listed in left_out): {}",
+            names.join(", ")
+        ));
+    }
     if png {
         // Pixels per drawing unit: the longer side at `fit` pixels, or one.
         let scale = match args.get("fit").and_then(Value::as_u64) {

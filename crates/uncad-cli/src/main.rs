@@ -11,8 +11,8 @@ mod mcp;
 mod verbs;
 
 use iron_render_cad::{
-    to_png, to_svg, Background, Crop, PngError, PngSize, Space, ToPngOptions, ToSvgOptions,
-    DEFAULT_MAX_EDGE,
+    to_png, to_svg, Background, Crop, LeftOut, LeftOutReason, PngError, PngSize, Space,
+    ToPngOptions, ToSvgOptions, DEFAULT_MAX_EDGE,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -66,8 +66,9 @@ SVG/PNG options:
                                 model = the drawing itself
                                 paper = sheet borders and title blocks
                                 all   = everything, in one document
-  --no-trim                   keep outlying coordinates in the viewBox instead
-                                of trimming to the drawing's main cluster
+  --no-trim                   frame and draw every entity, instead of setting
+                                aside the few far larger or farther than the
+                                rest of the drawing (named in a warning)
   --padding <units>           margin around the drawing, in drawing units
 
 PNG options:
@@ -262,7 +263,7 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let (unsupported, empty_blocks, undefined_arcs) = match extension.as_str() {
+    let (unsupported, empty_blocks, undefined_arcs, left_out) = match extension.as_str() {
         "json" => {
             let json = db
                 .to_json(ToJsonOptions {
@@ -270,7 +271,7 @@ fn run(args: &Args) -> Result<(), String> {
                 })
                 .map_err(|e| e.to_string())?;
             write_output(output, json.as_bytes())?;
-            (Vec::new(), Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
         }
         "svg" => {
             let result = to_svg(&db, svg_options(args)?);
@@ -279,6 +280,7 @@ fn run(args: &Args) -> Result<(), String> {
                 result.unsupported_types,
                 result.empty_blocks,
                 result.undefined_arcs,
+                result.crop.left_out,
             )
         }
         "png" => {
@@ -288,6 +290,7 @@ fn run(args: &Args) -> Result<(), String> {
                 result.unsupported_types,
                 result.empty_blocks,
                 result.undefined_arcs,
+                result.crop.left_out,
             )
         }
         other => {
@@ -320,7 +323,30 @@ fn run(args: &Args) -> Result<(), String> {
             ids.join(", ")
         );
     }
+    let set_aside = set_aside(&left_out);
+    if !set_aside.is_empty() {
+        eprintln!(
+            "warning: left out of the image, far larger or farther than the rest of the \
+             drawing (--no-trim draws them): {}",
+            set_aside.join(", ")
+        );
+    }
     Ok(())
+}
+
+/// The entities a crop set aside and did not draw, as `TYPE id`. One outside
+/// the view is still in the document, so it is not among them.
+fn set_aside(left_out: &[LeftOut]) -> Vec<String> {
+    left_out
+        .iter()
+        .filter(|l| {
+            matches!(
+                l.reason,
+                LeftOutReason::ScaleOutlier | LeftOutReason::FarOutlier
+            )
+        })
+        .map(|l| format!("{} {}", l.type_name, l.id.value()))
+        .collect()
 }
 
 /// The reader's non-fatal problems with `input`, worded once for every
@@ -387,7 +413,7 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
     let mut options = ToSvgOptions {
         space: parse_space(&args.space)?,
         crop: if args.outlier_trim {
-            Crop::Cluster
+            Crop::default()
         } else {
             Crop::Everything
         },
