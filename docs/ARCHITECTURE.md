@@ -252,13 +252,13 @@ the block owns, reached through `BLOCK_HEADER`'s `block_entity` handle field.
 
 ## 3DSOLID/REGION ACIS wireframes (`acis.rs`)
 
-`crates/uncad/src/acis.rs` is not a general ACIS/B-rep parser. It is a minimal wireframe
-extractor that pulls one straight segment per `edge` record out of ACIS SAT (v1, ASCII)
-text. Spatial's public "SAT Save File Format" documentation (long mirrored at, for
-example, paulbourke.net/dataformats/sat) was used only as a reference for what records and
-fields *mean*; no code or text from it is reproduced, and the implementation was written
-independently. Curved edges are approximated as chords, and faces and surfaces are not
-interpreted at all -- the result is always a wireframe, never a filled solid.
+The SAT reading is not in this crate: `uncad_model::acis::wireframe` takes the SAT (v1,
+ASCII) text of a body and returns one straight segment per `edge` record, plus the count of
+edges it could not resolve. It is not a general ACIS/B-rep parser -- curved edges are
+approximated as chords, and faces and surfaces are not interpreted at all, so the result is
+always a wireframe, never a filled solid. `crates/uncad/src/acis.rs` is the part that needs
+LibreDWG: it reads the entity's ACIS fields through dynapi and, for a binary body, converts
+it to SAT text first.
 
 A solid stored as SAB (v2, binary) has to be converted to SAT text first, and LibreDWG's
 `dwg_convert_SAB_to_SAT1` converts **in place**: it sets `version` to 1, fills

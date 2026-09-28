@@ -1036,11 +1036,12 @@ explains why that directory is gitignored and links here. `docs/ARCHITECTURE.md`
 layout" covers where a new test belongs. The test count changes with every change;
 `cargo test --workspace -- --list` gives the current one.
 
-**Unit tests** sit next to the code they check, in `crates/uncad/src/` (`acis.rs`: SAT
-record parsing and wireframe extraction; `convert.rs`: HATCH gradient colors and other
+**Unit tests** sit next to the code they check, in `crates/uncad/src/` (`convert.rs`: HATCH gradient colors and other
 conversion helpers; `header.rs`, `table_convert.rs`, `text.rs`: header variables, table
 records and string decoding). Most are pure functions checked on synthetic data. Rendering
-and colour resolution are not this crate's: their tests live in `iron-render-cad`.
+and colour resolution are not this crate's: their tests live in `iron-render-cad`; neither is
+SAT record parsing and wireframe extraction, whose tests live with
+`uncad_model::acis::wireframe`.
 
 **Oracles that are not this crate's own output:**
 
