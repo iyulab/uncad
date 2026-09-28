@@ -8,12 +8,11 @@
 #include "dwg_api.h"
 /* Private LibreDWG headers (vendor/libredwg/src, on the include path in
    build.rs): bits.h for Bit_Chain and IS_FROM_TU_DWG; decode.h for
-   dwg_decode; in_dxf.h for dwg_read_dxf/dwg_read_dxfb; logging.h for the
-   `loglevel` global the file-based readers set from dwg->opts. */
+   dwg_decode; logging.h for the `loglevel` global the file-based reader
+   sets from dwg->opts. */
 #include "bits.h"
 #include "decode.h"
-#include "logging.h" /* must precede in_dxf.h (logging.h enforces it) */
-#include "in_dxf.h"
+#include "logging.h"
 #include "uncad_shim.h"
 
 void *
@@ -118,75 +117,6 @@ uncad_dwg_read_bytes (const unsigned char *buf, size_t len, Dwg_Data *dwg)
   return error;
 }
 
-int
-uncad_dxf_read_bytes (const unsigned char *buf, size_t len, Dwg_Data *dwg)
-{
-  Bit_Chain dat;
-  int error;
-  unsigned int opts;
-  Dwg_Version_Type version;
-
-  if (!dwg)
-    return DWG_ERR_INVALIDDWG;
-  /* Same reset as dxf_read_file(): keep the log level and a caller-preset
-     target version. */
-  opts = dwg->opts & DWG_OPTS_LOGLEVEL;
-  loglevel = opts;
-  version = dwg->header.version;
-  memset (dwg, 0, sizeof (Dwg_Data));
-  dwg->opts = opts | DWG_OPTS_INDXF;
-  dwg->header.version = version;
-
-  /* "0\nSECTION\n2\nENTITIES\n0\nENDSEC\n" is the smallest DXF the reader
-     accepts; dxf_read_file() rejects anything shorter the same way. */
-  if (!buf || len < 31)
-    return DWG_ERR_IOERROR;
-
-  memset (&dat, 0, sizeof (Bit_Chain));
-  dat.chain = (unsigned char *)calloc (1, len + 2);
-  if (!dat.chain)
-    return DWG_ERR_OUTOFMEM;
-  memcpy (dat.chain, buf, len);
-  dat.size = len;
-  dat.from_version = dwg->header.from_version;
-  dat.version = dwg->header.version;
-  dat.opts = dwg->opts;
-
-  /* Terminate the buffer for the strtol()/sscanf() readers -- reproduced
-     verbatim from dxf_read_file(), including its quirk of writing the NUL
-     over the newline it just appended (the calloc'd slack keeps the result
-     NUL-terminated either way). */
-  if (dat.chain[len - 1] != '\n')
-    {
-      dat.chain[len] = '\n';
-      dat.size++;
-    }
-  dat.chain[len] = '\0';
-
-  /* Fail on DWG */
-  if (!memcmp (dat.chain, "AC10", 4) || !memcmp (dat.chain, "AC1.", 4)
-      || !memcmp (dat.chain, "AC2.10", 4) || !memcmp (dat.chain, "MC0.0", 4))
-    {
-      free (dat.chain);
-      return DWG_ERR_INVALIDDWG;
-    }
-  /* See if binary or ascii */
-  if (!memcmp (dat.chain, "AutoCAD Binary DXF",
-               sizeof ("AutoCAD Binary DXF") - 1))
-    {
-      dat.byte = 22;
-      error = dwg_read_dxfb (&dat, dwg);
-    }
-  else
-    error = dwg_read_dxf (&dat, dwg);
-
-  dwg->opts |= (DWG_OPTS_INDXF | opts);
-  free (dat.chain);
-  if (error >= DWG_ERR_CRITICAL)
-    return error;
-  return 0;
-}
-
 /* --- file header ---------------------------------------------------------- */
 
 int
@@ -199,12 +129,6 @@ int
 uncad_dwg_from_version (const Dwg_Data *dwg)
 {
   return dwg ? (int)dwg->header.from_version : 0;
-}
-
-int
-uncad_dwg_from_dxf (const Dwg_Data *dwg)
-{
-  return (dwg && (dwg->opts & DWG_OPTS_INDXF)) ? 1 : 0;
 }
 
 Dwg_Object_Ref *

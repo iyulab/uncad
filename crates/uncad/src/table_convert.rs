@@ -5,14 +5,13 @@
 //!
 //! All of them are collected by one pass over the objects, dispatching on
 //! `dwg_object_get_fixedtype`. The named object dictionary is never walked:
-//! a file with no LAYOUT object -- a DXF without an OBJECTS section, or a
-//! drawing older than R2000 that no application with layouts saved -- has
-//! no layouts.
+//! a drawing with no LAYOUT object -- one older than R2000 that no
+//! application with layouts saved -- has no layouts.
 
 use crate::convert::{entity_identity, entity_reference, owned_entities, reference};
 use crate::dynapi::{
-    get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_from_dxf,
-    is_r2000_or_later, RawPoint2D,
+    get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_r2000_or_later,
+    RawPoint2D,
 };
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
@@ -44,12 +43,8 @@ pub(crate) unsafe fn convert_tables(
     // DIMARCSYM is a variable of an R2000 DXF, but a DWG stores it only
     // from R2007 on.
     #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
-    let has_arc_symbol = if is_from_dxf(dwg) {
-        r2000
-    } else {
-        (unsafe { libredwg_sys::uncad_dwg_from_version(dwg) })
-            >= libredwg_sys::DWG_VERSION_TYPE_R_2007a as i32
-    };
+    let has_arc_symbol = (unsafe { libredwg_sys::uncad_dwg_from_version(dwg) })
+        >= libredwg_sys::DWG_VERSION_TYPE_R_2007a as i32;
     let mut layers = BTreeMap::new();
     let mut block_records = BTreeMap::new();
     let mut mlinestyles = BTreeMap::new();
@@ -152,11 +147,7 @@ fn convert_image_definition(text: &TextDecoder, object_ptr: *mut c_void) -> Imag
 /// `Dwg_Object_PLOTSETTINGS` read through its own dynapi table; see
 /// [`get_sub_field`]).
 ///
-/// Every value is what the object holds. Two of them a DXF may leave out
-/// and the importer fills in, so they cannot be told from a stated value:
-/// the zero points, and the paper-units side of the custom scale (DXF 142),
-/// which the importer sets to 1 on every LAYOUT before it reads the groups.
-/// A plot unit or rotation outside the format's range is `None`.
+/// Every value is what the object holds. A plot unit or rotation outside the format's range is `None`.
 fn convert_layout(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
@@ -459,21 +450,13 @@ fn convert_mlinestyle(text: &TextDecoder, object_ptr: *mut c_void) -> Option<(St
 /// Reads a LAYER table entry: its colour, its state and the linetype it
 /// names.
 ///
-/// Which fields state the layer's state depends on who read the file. The
-/// binary format's decoder fills the `off`, `frozen` and `locked` bits (for
-/// a drawing older than R13 it derives them from group 70 and the colour's
-/// sign itself). LibreDWG's DXF importer instead applies the binary layout
-/// to group 70 -- bit 2 becomes "off", 4 "frozen in new viewports", 8
-/// "locked" -- where a DXF means 1 frozen, 2 frozen in new viewports, 4
-/// locked, and says "off" with a negative colour; so for a DXF the raw
-/// group 70 and the colour's sign are read instead. A negative colour
-/// means "off" whoever read it, as [`LayerRecord::color_index`] documents.
+/// The binary format's decoder fills the `off`, `frozen` and `locked` bits
+/// (for a drawing older than R13 it derives them from group 70 and the
+/// colour's sign itself). A negative colour means "off" as well, as
+/// [`LayerRecord::color_index`] documents.
 ///
 /// The plot flag (DXF 290) and the lineweight (DXF 370) exist from R2000
-/// on. A DWG states both. The DXF importer leaves a flag the file left out
-/// at 0, so a DXF's stated "do not plot" (290 = 0) and its silence read the
-/// same -- `None`, not `Some(false)` -- and likewise a lineweight code of 0
-/// (0.00 mm, or absent).
+/// on, and a DWG of that age states both.
 fn convert_layer(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
@@ -481,25 +464,13 @@ fn convert_layer(
 ) -> Option<LayerRecord> {
     let name = text.field(object_ptr, "LAYER", "name")?;
     let color = get_field::<libredwg_sys::Dwg_Color>(object_ptr, "LAYER", "color")?;
-    let from_dxf = is_from_dxf(dwg);
-    let color_index = resolve_layer_color_index(color.index, color.method, color.rgb, from_dxf);
+    let color_index = resolve_layer_color_index(color.index, color.method, color.rgb);
     let bit = |field: &str| get_field::<u8>(object_ptr, "LAYER", field).is_some_and(|b| b != 0);
-    let (off, frozen, locked) = if from_dxf {
-        let flag = get_field::<u8>(object_ptr, "LAYER", "flag").unwrap_or(0);
-        (color.index < 0, flag & 1 != 0, flag & 4 != 0)
-    } else {
-        (bit("off") || color.index < 0, bit("frozen"), bit("locked"))
-    };
+    let (off, frozen, locked) = (bit("off") || color.index < 0, bit("frozen"), bit("locked"));
     let r2000 = is_r2000_or_later(dwg);
-    let plot = if !r2000 {
-        None
-    } else if from_dxf {
-        bit("plotflag").then_some(true)
-    } else {
-        Some(bit("plotflag"))
-    };
+    let plot = r2000.then(|| bit("plotflag"));
     let lineweight = get_field::<u8>(object_ptr, "LAYER", "linewt")
-        .filter(|&code| r2000 && !(from_dxf && code == 0))
+        .filter(|_| r2000)
         .and_then(layer_lineweight);
     let linetype = reference(
         dwg,
@@ -552,22 +523,10 @@ fn layer_lineweight(code: u8) -> Option<i16> {
 /// if it were an RGB color. That lookup fails (the "no match" `256`) for most
 /// small values, and -- worse -- succeeds for some: `0xC3000068` (ACI 104) is
 /// the RGB color (0, 0, 104), which is palette entry 176, so the layer came
-/// back as 176. For method `0xC3` read from a DWG the low byte is therefore
-/// taken whatever the lookup said; every other method keeps the library's
-/// index.
-///
-/// Read from DXF it is the other way round: the importer takes the index
-/// from group 62 and stores the palette's RGB color under the same method
-/// (white is `0xC3FFFFFF`), so there the library's index is the one the file
-/// stated, and only its "no match" `256` falls back to the low byte.
-fn resolve_layer_color_index(
-    index: i16,
-    method: libredwg_sys::Dwg_Color_Method,
-    rgb: u32,
-    from_dxf: bool,
-) -> i16 {
-    let index_color = method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR;
-    if index_color && (!from_dxf || index == 256) {
+/// back as 176. For method `0xC3` the low byte is therefore taken whatever
+/// the lookup said; every other method keeps the library's index.
+fn resolve_layer_color_index(index: i16, method: libredwg_sys::Dwg_Color_Method, rgb: u32) -> i16 {
+    if method == libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR {
         (rgb & 0xff) as i16
     } else {
         index
@@ -595,7 +554,6 @@ mod tests {
             256,
             libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
             0xc3000007,
-            false,
         );
         assert_eq!(resolved, 7);
     }
@@ -608,31 +566,14 @@ mod tests {
             176,
             libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
             0xc3000068,
-            false,
         );
         assert_eq!(resolved, 104);
     }
 
     #[test]
     fn another_method_keeps_the_librarys_index() {
-        let resolved = resolve_layer_color_index(
-            256,
-            libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI,
-            0,
-            false,
-        );
+        let resolved =
+            resolve_layer_color_index(256, libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_ACI, 0);
         assert_eq!(resolved, 256);
-    }
-
-    #[test]
-    fn read_from_dxf_the_importers_index_is_the_files() {
-        // White, from group 62 = 7: the importer stores the palette's RGB.
-        let resolved = resolve_layer_color_index(
-            7,
-            libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_TRUECOLOR,
-            0xc3ffffff,
-            true,
-        );
-        assert_eq!(resolved, 7);
     }
 }

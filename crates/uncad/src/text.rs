@@ -1,27 +1,16 @@
 //! Text fields as UTF-8 `String`s, decoded here from what LibreDWG holds.
 //!
-//! How a drawing's strings sit in LibreDWG's memory depends on where they
-//! came from, and the library's text accessors (`dwg_dynapi_*_utf8text`,
+//! How a DWG's strings sit in LibreDWG's memory depends on its version, and
+//! the library's text accessors (`dwg_dynapi_*_utf8text`,
 //! `dwg_dynapi_handle_name`) convert only one of the cases:
 //!
-//! - **R2007 and later, from DWG:** stored as UTF-16 (`TU`); the accessors
-//!   convert them to UTF-8 themselves.
+//! - **R2007 and later:** stored as UTF-16 (`TU`); the accessors convert
+//!   them to UTF-8 themselves.
 //! - **Before R2007:** stored as the file's own 8-bit bytes (`TV`) in the
-//!   drawing's codepage -- `header.codepage`, read from the DWG header or
-//!   from DXF `$DWGCODEPAGE` -- and handed out unchanged, whatever the
-//!   `utf8` in the accessor's name says. Read as UTF-8, every non-ASCII
-//!   character of a CP949 or CP1252 drawing came out as mojibake or U+FFFD,
-//!   with clean diagnostics.
-//! - **R2007 and later, from DXF:** the DXF importer writes every string it
-//!   sets through the library's field setter as UTF-16, exactly as for a DWG
-//!   -- but the accessors convert only for a DWG, so they hand the UTF-16
-//!   out as if it were an 8-bit string, which stops at its first NUL byte
-//!   (`*Model_Space` read as `*`). The exceptions are the strings the
-//!   importer copies byte for byte: MTEXT's text (groups 1 and 3) and the
-//!   HEADER variables, parsed before the importer knows the version. Those
-//!   are the file's own bytes -- UTF-8, since an R2007+ DXF is UTF-8 -- and
-//!   must never be read as UTF-16, which would look for a 16-bit NUL past
-//!   their allocation.
+//!   drawing's codepage -- `header.codepage`, read from the DWG header --
+//!   and handed out unchanged, whatever the `utf8` in the accessor's name
+//!   says. Read as UTF-8, every non-ASCII character of a CP949 or CP1252
+//!   drawing would come out as mojibake or U+FFFD.
 //!
 //! [`TextDecoder`] is the one place any of this becomes a `String`. It knows
 //! which case the drawing is, reads each stored string in the width it was
@@ -206,30 +195,11 @@ pub fn decode_codepage(bytes: &[u8], codepage: u16) -> (String, usize) {
 /// How one drawing's strings sit in LibreDWG's memory -- see the module doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Storage {
-    /// Read from an R2007+ DWG: the accessors convert from UTF-16 themselves.
+    /// R2007 and later: UTF-16, which the accessors convert themselves.
     WideDwg,
-    /// Read from an R2007+ DXF: the strings the importer set are UTF-16 the
-    /// accessors do not convert; those it copied are the file's UTF-8.
-    WideDxf,
-    /// Before R2007: 8-bit bytes in the drawing's codepage. `utf8_first` for
-    /// a DXF, whose importer keeps the file's bytes and assumes UTF-8 --
-    /// LibreDWG's own DXF writer emits UTF-8 text whatever `$DWGCODEPAGE` it
-    /// declares -- so bytes that are valid UTF-8 are taken as UTF-8 first and
-    /// the codepage is tried only for the rest. A DWG never holds UTF-8 in a
-    /// codepage string, so there the codepage always applies.
-    Narrow { utf8_first: bool },
-}
-
-/// The fields LibreDWG's DXF importer copies from the file byte for byte
-/// whatever its version, so that in an R2007+ DXF they are 8-bit while every
-/// other string is UTF-16: `in_dxf.c` special-cases MTEXT's group 1/3 text
-/// chunks (`strdup`, then `realloc` + `memcpy`, no `bit_utf8_to_TU`).
-/// Everything else this crate reads goes through the library's field
-/// setter, which widens once `header.version` is R2007 or later. (The HEADER
-/// variables are the other byte-for-byte case; they are read through
-/// [`TextDecoder::header_text`].)
-fn stored_8bit_in_dxf(dxfname: &str, field: &str) -> bool {
-    matches!((dxfname, field), ("MTEXT", "text"))
+    /// Before R2007: 8-bit bytes in the drawing's codepage, which always
+    /// applies -- a DWG never holds UTF-8 in a codepage string.
+    Narrow,
 }
 
 /// Decodes every string of one drawing and collects what it could not
@@ -238,9 +208,6 @@ fn stored_8bit_in_dxf(dxfname: &str, field: &str) -> bool {
 pub struct TextDecoder {
     codepage: u16,
     storage: Storage,
-    /// Read from a DXF file, whose values are one line each and so write a
-    /// control character in caret notation (`^J`).
-    from_dxf: bool,
     warnings: RefCell<Vec<String>>,
 }
 
@@ -250,35 +217,20 @@ impl TextDecoder {
     pub unsafe fn new(dwg: *mut libredwg_sys::Dwg_Data) -> Self {
         // SAFETY: the shim reads header fields of a live Dwg_Data (caller
         // contract) and null-checks it itself.
-        let (codepage, wide_dwg, from_dxf, version) = unsafe {
+        let (codepage, wide) = unsafe {
             (
                 libredwg_sys::uncad_dwg_codepage(dwg),
                 libredwg_sys::uncad_dwg_is_wide_string(dwg) != 0,
-                libredwg_sys::uncad_dwg_from_dxf(dwg) != 0,
-                libredwg_sys::uncad_dwg_version(dwg),
             )
         };
-        // The library's own rule for when its field setter widens a string:
-        // the drawing's version (`header.version`, which the DXF importer
-        // sets from `$ACADVER` once the HEADER section is read), not where
-        // the data came from. Cast the constant, not the version: see
-        // convert.rs's DWG_OBJECT_TYPE comment for why the enum's width
-        // differs between targets.
-        #[allow(clippy::unnecessary_cast)]
-        let r2007_or_later = version >= libredwg_sys::DWG_VERSION_TYPE_R_2007 as i32;
-        let storage = if wide_dwg {
+        let storage = if wide {
             Storage::WideDwg
-        } else if from_dxf && r2007_or_later {
-            Storage::WideDxf
         } else {
-            Storage::Narrow {
-                utf8_first: from_dxf,
-            }
+            Storage::Narrow
         };
         TextDecoder {
             codepage,
             storage,
-            from_dxf,
             warnings: RefCell::new(Vec::new()),
         }
     }
@@ -309,21 +261,19 @@ impl TextDecoder {
     pub(crate) fn for_tests() -> Self {
         TextDecoder {
             codepage: 0,
-            storage: Storage::Narrow { utf8_first: false },
-            from_dxf: false,
+            storage: Storage::Narrow,
             warnings: RefCell::new(Vec::new()),
         }
     }
 
-    /// The width of a `dxfname.field` string the library hands out
-    /// unconverted. For an R2007+ DWG that happens only when its accessor
-    /// could not find the object the pointer belongs to (a struct embedded
-    /// in another object), and the string is then the stored UTF-16.
-    fn stored_width(&self, dxfname: &str, field: &str) -> StoredWidth {
+    /// The width of a string the library hands out unconverted. For an
+    /// R2007+ drawing that happens only when its accessor could not find the
+    /// object the pointer belongs to (a struct embedded in another object),
+    /// and the string is then the stored UTF-16.
+    fn stored_width(&self) -> StoredWidth {
         match self.storage {
             Storage::WideDwg => StoredWidth::Wide,
-            Storage::WideDxf if !stored_8bit_in_dxf(dxfname, field) => StoredWidth::Wide,
-            Storage::WideDxf | Storage::Narrow { .. } => StoredWidth::Bytes,
+            Storage::Narrow => StoredWidth::Bytes,
         }
     }
 
@@ -331,7 +281,7 @@ impl TextDecoder {
     /// `None` only when the field does not exist or is a null string; a
     /// string that is present always comes back, decoded as far as it can be.
     pub fn field(&self, entity: *mut c_void, dxfname: &str, field: &str) -> Option<String> {
-        let raw = dynapi::get_text(entity, dxfname, field, self.stored_width(dxfname, field))?;
+        let raw = dynapi::get_text(entity, dxfname, field, self.stored_width())?;
         Some(self.decode_raw(raw, || {
             // SAFETY: entity is the type-specific struct pointer of a live
             // object (get_text just read a field through it); the accessor
@@ -359,9 +309,9 @@ impl TextDecoder {
         if ptr.is_null() {
             return None;
         }
-        // Nothing has converted this one: an R2007+ DWG's string is its
+        // Nothing has converted this one: an R2007+ drawing's string is its
         // stored UTF-16 here, which stored_width already answers.
-        let width = self.stored_width(dxfname, field);
+        let width = self.stored_width();
         // SAFETY: a live string field of this drawing (caller contract),
         // read in the width this drawing stores it in.
         let raw = unsafe { dynapi::read_stored(ptr, width) };
@@ -394,14 +344,13 @@ impl TextDecoder {
     }
 
     /// The name of whatever a handle reference points at, decoded -- see
-    /// `dynapi::handle_name`. Such a name is a table record's or an
-    /// object's, which the importer always sets through the field setter.
+    /// `dynapi::handle_name`.
     pub fn handle_name(
         &self,
         dwg: *mut libredwg_sys::Dwg_Data,
         handle: *mut libredwg_sys::Dwg_Object_Ref,
     ) -> Option<String> {
-        let raw = dynapi::handle_name(dwg, handle, self.stored_width("", "name"))?;
+        let raw = dynapi::handle_name(dwg, handle, self.stored_width())?;
         Some(self.decode_raw(raw, || {
             // SAFETY: handle is non-null (handle_name returned) and a
             // Dwg_Object_Ref the live Dwg_Data owns.
@@ -412,8 +361,8 @@ impl TextDecoder {
 
     /// The name of the table entry a reference points at, decoded -- see
     /// `dynapi::table_entry_name_bytes`. The library converts the name itself
-    /// for every R2007+ drawing (for a DXF through the vendored `dwg.c`
-    /// patch), so only a pre-R2007 one is left as codepage bytes.
+    /// for an R2007+ drawing, so only a pre-R2007 one is left as codepage
+    /// bytes.
     pub fn table_entry_name(
         &self,
         dwg: *mut libredwg_sys::Dwg_Data,
@@ -422,8 +371,8 @@ impl TextDecoder {
     ) -> Option<String> {
         let bytes = dynapi::table_entry_name_bytes(dwg, handle, table)?;
         let raw = match self.storage {
-            Storage::WideDwg | Storage::WideDxf => RawText::Converted(bytes),
-            Storage::Narrow { .. } => RawText::Bytes(bytes),
+            Storage::WideDwg => RawText::Converted(bytes),
+            Storage::Narrow => RawText::Bytes(bytes),
         };
         Some(self.decode_raw(raw, || {
             let value = unsafe { (*handle).absolute_ref };
@@ -434,9 +383,8 @@ impl TextDecoder {
         }))
     }
 
-    /// A text header variable (`DIMPOST`, ...), decoded. The DXF importer
-    /// stores these 8-bit whatever the version: it reads the HEADER section
-    /// before `$ACADVER` has told it to widen anything.
+    /// A text header variable (`DIMPOST`, ...), decoded. One the library
+    /// hands out unconverted is read as 8-bit bytes.
     pub fn header_text(&self, dwg: *const libredwg_sys::Dwg_Data, name: &str) -> Option<String> {
         let raw = dynapi::get_header_text(dwg, name, StoredWidth::Bytes)?;
         Some(self.decode_raw(raw, || format!("header variable ${name}")))
@@ -446,14 +394,7 @@ impl TextDecoder {
     /// rule; `what` names the string for a diagnostic.
     fn decode_raw(&self, raw: RawText, what: impl FnOnce() -> String) -> String {
         let text = self.decode_stored(raw, what);
-        let text = match uncad_model::text::decode_escapes(&text, multibyte) {
-            std::borrow::Cow::Borrowed(_) => text,
-            std::borrow::Cow::Owned(undone) => undone,
-        };
-        if !self.from_dxf {
-            return text;
-        }
-        match uncad_model::text::decode_caret(&text) {
+        match uncad_model::text::decode_escapes(&text, multibyte) {
             std::borrow::Cow::Borrowed(_) => text,
             std::borrow::Cow::Owned(undone) => undone,
         }
@@ -500,20 +441,10 @@ impl TextDecoder {
             // ASCII is the same in every codepage this crate meets.
             return String::from_utf8_lossy(bytes).into_owned();
         }
-        let utf8_first = match self.storage {
-            // An R2007+ drawing's 8-bit strings are UTF-8: the converted
-            // ones by construction, the ones an R2007+ DXF keeps as they
-            // are because such a file is UTF-8.
-            Storage::WideDwg | Storage::WideDxf => return self.decode_utf8(bytes, what),
-            Storage::Narrow { .. } if self.codepage == CP_UTF8 => {
-                return self.decode_utf8(bytes, what)
-            }
-            Storage::Narrow { utf8_first } => utf8_first,
-        };
-        if utf8_first {
-            if let Ok(text) = std::str::from_utf8(bytes) {
-                return text.to_string();
-            }
+        // An R2007+ drawing's 8-bit strings are UTF-8: the accessors
+        // converted them.
+        if self.storage == Storage::WideDwg || self.codepage == CP_UTF8 {
+            return self.decode_utf8(bytes, what);
         }
         if !has_codepage_tables(self.codepage) {
             return match std::str::from_utf8(bytes) {
@@ -556,13 +487,12 @@ mod tests {
         TextDecoder {
             codepage,
             storage,
-            from_dxf: false,
             warnings: RefCell::new(Vec::new()),
         }
     }
 
-    fn narrow(codepage: u16, utf8_first: bool) -> TextDecoder {
-        decoder(codepage, Storage::Narrow { utf8_first })
+    fn narrow(codepage: u16) -> TextDecoder {
+        decoder(codepage, Storage::Narrow)
     }
 
     #[test]
@@ -656,7 +586,7 @@ mod tests {
 
     #[test]
     fn the_decoder_reports_what_it_could_not_decode_once() {
-        let d = narrow(ANSI_1252, false);
+        let d = narrow(ANSI_1252);
         assert_eq!(d.decode(b"plain", || unreachable!()), "plain");
         assert_eq!(d.decode(b"caf\xE9", || unreachable!()), "caf\u{E9}");
         assert_eq!(
@@ -678,25 +608,18 @@ mod tests {
     }
 
     #[test]
-    fn a_dxf_string_that_is_valid_utf8_is_read_as_utf8_first() {
-        // The same bytes are CP949 in a DWG and UTF-8 in a DXF import.
+    fn a_codepage_string_is_read_in_its_codepage_even_when_it_is_valid_utf8() {
+        // A DWG never holds UTF-8 in a codepage string: these bytes are CP949.
         let utf8 = "\u{B3C4}\u{BA74}".as_bytes();
-        assert_eq!(
-            narrow(ANSI_949, true).decode(utf8, || unreachable!()),
-            "\u{B3C4}\u{BA74}"
-        );
         let (as_cp949, _) = decode_codepage(utf8, ANSI_949);
-        assert_eq!(
-            narrow(ANSI_949, false).decode(utf8, || "x".into()),
-            as_cp949
-        );
+        assert_eq!(narrow(ANSI_949).decode(utf8, || "x".into()), as_cp949);
         assert_ne!(as_cp949, "\u{B3C4}\u{BA74}");
     }
 
     #[test]
     fn an_undefined_or_corrupt_codepage_never_reaches_the_tables() {
         for (codepage, label) in [(0xFF, "undefined (255)"), (100, "codepage 100 ")] {
-            let d = narrow(codepage, false);
+            let d = narrow(codepage);
             assert_eq!(
                 d.decode("caf\u{E9}".as_bytes(), || unreachable!()),
                 "caf\u{E9}"
@@ -713,31 +636,19 @@ mod tests {
 
     #[test]
     fn a_wide_string_drawing_is_utf8_whatever_its_codepage_says() {
-        for storage in [Storage::WideDwg, Storage::WideDxf] {
-            let d = decoder(ANSI_949, storage);
-            assert_eq!(
-                d.decode("\u{B3C4}".as_bytes(), || unreachable!()),
-                "\u{B3C4}"
-            );
-            assert!(d.into_warnings().is_empty());
-            // Bytes that are not UTF-8 are reported, never guessed at.
-            let d = decoder(ANSI_949, storage);
-            assert_eq!(
-                d.decode(b"\xB5\xB5", || "MTEXT.text".into()),
-                "\u{FFFD}\u{FFFD}"
-            );
-            assert_eq!(d.into_warnings().len(), 1);
-        }
-    }
-
-    #[test]
-    fn an_r2007_dxf_reads_its_stored_strings_in_the_width_the_importer_wrote() {
-        let d = decoder(CP_UTF16, Storage::WideDxf);
-        assert_eq!(d.stored_width("LAYER", "name"), StoredWidth::Wide);
-        assert_eq!(d.stored_width("TEXT", "text_value"), StoredWidth::Wide);
-        assert_eq!(d.stored_width("MTEXT", "text"), StoredWidth::Bytes);
-        let d = narrow(ANSI_1252, true);
-        assert_eq!(d.stored_width("LAYER", "name"), StoredWidth::Bytes);
+        let d = decoder(ANSI_949, Storage::WideDwg);
+        assert_eq!(
+            d.decode("\u{B3C4}".as_bytes(), || unreachable!()),
+            "\u{B3C4}"
+        );
+        assert!(d.into_warnings().is_empty());
+        // Bytes that are not UTF-8 are reported, never guessed at.
+        let d = decoder(ANSI_949, Storage::WideDwg);
+        assert_eq!(
+            d.decode(b"\xB5\xB5", || "MTEXT.text".into()),
+            "\u{FFFD}\u{FFFD}"
+        );
+        assert_eq!(d.into_warnings().len(), 1);
     }
 
     #[test]
@@ -745,7 +656,7 @@ mod tests {
         // U+AC00 then "A" and a 16-bit NUL: the first byte of U+AC00 in memory is 0x00,
         // where an 8-bit read would have stopped with nothing.
         let units: [u16; 3] = [0xAC00, 0x0041, 0];
-        let d = decoder(CP_UTF16, Storage::WideDxf);
+        let d = decoder(CP_UTF16, Storage::WideDwg);
         let got = unsafe { d.stored_field(units.as_ptr().cast(), "LAYOUT", "layout_name") };
         assert_eq!(got.as_deref(), Some("\u{AC00}A"));
         // An unpaired surrogate is replaced and reported.

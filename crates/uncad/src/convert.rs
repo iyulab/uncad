@@ -12,8 +12,8 @@
 
 use crate::dynapi::{
     get_array_field, get_common_field, get_field, get_point2d, get_point2d_array, get_point3d,
-    get_point3d_array, is_from_dxf, is_pre_r13, is_r2000_or_later, is_r2010_or_later,
-    is_r2013_or_later, RawSegmentWidth, SplineControlPoint,
+    get_point3d_array, is_pre_r13, is_r2000_or_later, is_r2010_or_later, is_r2013_or_later,
+    RawSegmentWidth, SplineControlPoint,
 };
 use crate::table_convert::LINEWEIGHTS;
 use crate::text::TextDecoder;
@@ -861,21 +861,16 @@ fn viewport_view(
     })
 }
 
-/// Whether a viewport is on. From R2000 on, both formats state it as bit
-/// 0x20000 of the status flags (DXF 90), set when it is off. A DXF also
-/// writes group 68, the viewport's place in the stack of active viewports,
-/// where 0 is also what a viewport of a layout that is not the current one
-/// is written with, on or not -- so 68 is read only for a DXF older than
-/// R2000, which has no status flags; the binary format does not store it
-/// (LibreDWG makes one up for a DWG, in block order).
+/// Whether a viewport is on. From R2000 on, the drawing states it as bit
+/// 0x20000 of the status flags (DXF 90), set when it is off. An older DWG
+/// has no status flags, and the binary format does not store DXF group 68
+/// (LibreDWG makes one up, in block order), so there it is unknown.
 fn viewport_on(
     dwg: *mut libredwg_sys::Dwg_Data,
     entity_ptr: *mut std::ffi::c_void,
 ) -> Option<bool> {
     if is_r2000_or_later(dwg) {
         get_field::<u32>(entity_ptr, "VIEWPORT", "status_flag").map(|f| f & VIEWPORT_OFF_FLAG == 0)
-    } else if is_from_dxf(dwg) {
-        get_field::<u16>(entity_ptr, "VIEWPORT", "on_off").map(|on| on != 0)
     } else {
         None
     }
@@ -895,10 +890,7 @@ fn attribute_flags(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Attribut
 }
 
 /// The text style (DXF 7) a TEXT, ATTRIB, ATTDEF or MTEXT names, as a
-/// reference like a layer. The DXF reference's default for an absent group
-/// is the style named STANDARD, and LibreDWG's DXF importer already points
-/// such an entity at that entry when the drawing declares it; a drawing
-/// that declares none leaves the reference null, which is `Absent`.
+/// reference like a layer. A null reference is `Absent`.
 fn text_style(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
@@ -1365,12 +1357,9 @@ unsafe fn convert_entity(
                 view: viewport_view(dwg, entity_ptr),
                 on: viewport_on(dwg, entity_ptr),
                 // DXF 69. The binary format stores no such number: LibreDWG
-                // makes one up for a DWG's viewports, in block order, so
-                // only a DXF's is the file's.
-                viewport_id: is_from_dxf(dwg)
-                    .then(|| get_field::<u16>(entity_ptr, "VIEWPORT", "id"))
-                    .flatten()
-                    .map(i32::from),
+                // makes one up for a DWG's viewports, in block order, so it
+                // is not the file's and is not read.
+                viewport_id: None,
                 frozen_layers: get_array_field::<u32, *mut libredwg_sys::Dwg_Object_Ref>(
                     entity_ptr,
                     "VIEWPORT",
@@ -1556,25 +1545,11 @@ unsafe fn convert_entity(
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_2D => {
-            // A DXF states the polyline's default widths once (its own
-            // groups 40/41) and leaves them out of every VERTEX that has
-            // them, and the importer reads an absent vertex width as 0: so
-            // there a vertex that states no width has the default. A DWG
-            // stores every vertex's widths on the vertex (the DWG twin of
-            // 2000/PolyLine2D.dxf has 0.15 on each vertex where the DXF has
-            // it once, on the POLYLINE).
-            let default_width = if is_from_dxf(dwg) {
-                (
-                    get_field::<f64>(entity_ptr, "POLYLINE_2D", "start_width").unwrap_or(0.0),
-                    get_field::<f64>(entity_ptr, "POLYLINE_2D", "end_width").unwrap_or(0.0),
-                )
-            } else {
-                (0.0, 0.0)
-            };
             // Each VERTEX_2D carries its own bulge (the segment to the next
-            // vertex) and widths; an unreadable bulge is a straight segment.
-            // A VERTEX_2D's stored point is 3D, but its z is the polyline's
-            // own elevation repeated.
+            // vertex) and widths -- a DWG stores every vertex's widths on the
+            // vertex, not once on the POLYLINE; an unreadable bulge is a
+            // straight segment. A VERTEX_2D's stored point is 3D, but its z
+            // is the polyline's own elevation repeated.
             // SAFETY: obj is a POLYLINE_2D of dwg per fixedtype.
             let vertices: Vec<PolylineVertex> = unsafe {
                 polyline_vertices(
@@ -1587,8 +1562,10 @@ unsafe fn convert_entity(
                         let width =
                             |field: &str| get_field::<f64>(v, "VERTEX_2D", field).unwrap_or(0.0);
                         let stated = (width("start_width"), width("end_width"));
+                        // A vertex with no width reads as +0.0 on both sides,
+                        // whatever sign its zeros were stored with.
                         let (start_width, end_width) = if stated == (0.0, 0.0) {
-                            default_width
+                            (0.0, 0.0)
                         } else {
                             stated
                         };
@@ -1636,7 +1613,7 @@ unsafe fn convert_entity(
             // field name than every other subtype does. The mapping is written out
             // per subtype rather than passing this backend's field names
             // through, so one model field never holds two different points.
-            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype, is_from_dxf(dwg));
+            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
             let point = |field: Option<&'static str>| {
                 field.and_then(|f| get_point3d(entity_ptr, dxfname, f))
             };
@@ -1645,14 +1622,13 @@ unsafe fn convert_entity(
                 common,
                 block_name,
                 kind,
-                // This backend has no "the file did not carry this group":
-                // an absent DXF 42 and a stated 0.0 arrive the same way. A
-                // dimension that measures nothing is not a measurement, so
-                // zero is reported as "not stated" -- erring toward not
-                // knowing rather than toward a value the file never gave.
-                // Drawings older than R2000 routinely omit the group, and
-                // reporting 0.0 for them would put a false difference
-                // between a drawing and its own twin in the other format.
+                // A DWG stores the measurement (DXF 42) from R2000 on; an
+                // older one does not, and the field then reads 0.0 -- the
+                // same value as a stated zero. A dimension that measures
+                // nothing is not a measurement, so zero is reported as "not
+                // stated" -- erring toward not knowing rather than toward a
+                // value the file never gave, which would also put a false
+                // difference between a drawing and its own DXF twin.
                 // -1 is the other "not measured" the format's writers leave
                 // behind (no length or angle is negative); any other value
                 // is the file's, whether or not it agrees with the points --
@@ -1664,11 +1640,9 @@ unsafe fn convert_entity(
                 ),
                 // A two-line angular dimension decoded from a DWG keeps group
                 // 10 in the record's last point, which this library names
-                // `xline2end_pt` (its `def_pt` holds group 16); the DXF
-                // importer fills the two by group code instead -- see
+                // `xline2end_pt` (its `def_pt` holds group 16) -- see
                 // `dimension_point_fields`.
-                definition_point: if kind == Some(DimensionKind::Angular2Line) && !is_from_dxf(dwg)
-                {
+                definition_point: if kind == Some(DimensionKind::Angular2Line) {
                     get_point3d(entity_ptr, dxfname, "xline2end_pt")
                 } else {
                     get_point3d(entity_ptr, dxfname, "def_pt")
@@ -1678,18 +1652,7 @@ unsafe fn convert_entity(
                     extension1: point(p13),
                     extension2: point(p14),
                     radial: point(p15),
-                    arc: if kind == Some(DimensionKind::ArcLength) && is_from_dxf(dwg) {
-                        // Read from DXF, a zeroed first leader point is also
-                        // what the importer leaves when the file omits group
-                        // 16, which it does when the dimension has no leader
-                        // (group 71): only a stated leader makes it a fact.
-                        get_field::<u8>(entity_ptr, dxfname, "has_leader")
-                            .is_some_and(|v| v != 0)
-                            .then(|| point(p16))
-                            .flatten()
-                    } else {
-                        point(p16)
-                    },
+                    arc: point(p16),
                 },
                 // Group 50 is the measured angle only for a rotated linear
                 // dimension; the other subtypes do not write it, and the
@@ -2687,18 +2650,17 @@ unsafe fn dxfname(obj: *mut libredwg_sys::Dwg_Object) -> String {
 }
 
 /// Which coordinate an ordinate dimension measures (DXF 70, bit 64: X when
-/// set). A DXF, and a drawing older than R13, state it in `flag`, the group
-/// 70 the file wrote. From R13 on a DWG states it as bit 1 of the
-/// stream-only `flag2` byte, and the decoder rebuilds `flag` from it wrongly
-/// -- it sets bit 128 and clears bit 64 (`dwg.spec`'s DIMENSION_ORDINATE) --
-/// so there `flag2` is read. The DXF importer, for its part, never fills
-/// `flag2`.
+/// set). A drawing older than R13 states it in `flag`, the group 70 the file
+/// wrote. From R13 on a DWG states it as bit 1 of the stream-only `flag2`
+/// byte, and the decoder rebuilds `flag` from it wrongly -- it sets bit 128
+/// and clears bit 64 (`dwg.spec`'s DIMENSION_ORDINATE) -- so there `flag2`
+/// is read.
 fn ordinate_axis(
     dwg: *mut libredwg_sys::Dwg_Data,
     entity_ptr: *mut std::ffi::c_void,
     dxfname: &str,
 ) -> OrdinateAxis {
-    let x = if is_from_dxf(dwg) || is_pre_r13(dwg) {
+    let x = if is_pre_r13(dwg) {
         get_field::<u8>(entity_ptr, dxfname, "flag").is_some_and(|f| f & 0x40 != 0)
     } else {
         get_field::<u8>(entity_ptr, dxfname, "flag2").is_some_and(|f| f & 1 != 0)
@@ -2715,15 +2677,11 @@ fn ordinate_axis(
 ///
 /// The library's own names are not a mapping: `xline1_pt` is group 13 for a
 /// linear dimension, while a two-line angular dimension calls its group 13
-/// `xline1start_pt` and its group 16 `xline2end_pt` -- when the DXF importer
-/// filled the record, that is. The two readers disagree on a two-line
-/// angular dimension's last two points: the DWG decoder fills the record in
-/// stream order (the leading 2RD, `def_pt`, is the arc point, group 16, and
-/// `xline2end_pt` the last point, group 10), the DXF importer by group code
-/// (`def_pt` 10, `xline2end_pt` 16). `from_dxf` says which reader filled it.
+/// `xline1start_pt` and its group 16 `xline2end_pt` by name -- but the DWG
+/// decoder fills that record in stream order: the leading 2RD, `def_pt`, is
+/// the arc point, group 16, and `xline2end_pt` the last point, group 10.
 fn dimension_point_fields(
     fixedtype: libredwg_sys::Dwg_Object_Type,
-    from_dxf: bool,
 ) -> (
     Option<&'static str>,
     Option<&'static str>,
@@ -2744,8 +2702,8 @@ fn dimension_point_fields(
         // Measured against the same drawing in both formats: decoded from
         // the DWG, this library's `def_pt` holds group 16 here, and
         // `xline2end_pt` holds group 10 (the dimension's definition point)
-        // rather than 16; read from the DXF, each holds the group its name
-        // says. The mapping follows the measurement, not the field names.
+        // rather than 16. The mapping follows the measurement, not the field
+        // names.
         // (An earlier measurement read `xline2end_pt` as group 13's point;
         // that drawing has groups 10 and 13 at the same place, so it could
         // not tell.)
@@ -2753,7 +2711,7 @@ fn dimension_point_fields(
             Some("xline1start_pt"),
             Some("xline1end_pt"),
             Some("xline2start_pt"),
-            Some(if from_dxf { "xline2end_pt" } else { "def_pt" }),
+            Some("def_pt"),
         ),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {
@@ -2767,8 +2725,7 @@ fn dimension_point_fields(
         ),
         // Group 16 here is the first leader point. A DWG record stores it
         // whether or not the dimension has a leader (group 71), so it is
-        // carried either way -- what the file states; from DXF, see the
-        // caller.
+        // carried either way -- what the file states.
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_ARC_DIMENSION => (
             Some("xline1_pt"),
             Some("xline2_pt"),

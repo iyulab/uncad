@@ -39,7 +39,7 @@ void *uncad_object_object_ptr(Dwg_Object *obj);
 
 /* --- reading from memory ------------------------------------------------
  *
- * dwg_read_file()/dxf_read_file() take a `const char *filename` and open it
+ * dwg_read_file() takes a `const char *filename` and opens it
  * with fopen(). On Windows the MSVC C runtime interprets that byte string in
  * the process's ANSI code page, so a UTF-8 path with non-ASCII characters
  * (e.g. a Korean directory name) fails with DWG_ERR_IOERROR even though the
@@ -47,15 +47,14 @@ void *uncad_object_object_ptr(Dwg_Object *obj);
  * paths on every platform) and decoding from memory sidesteps that, and is
  * also what a server that already holds the file in memory wants.
  *
- * Both functions mirror the body of their file-based LibreDWG counterpart
- * (src/dwg.c): `dwg` is cleared except for the log-level bits of its `opts`
- * (and, for DXF, its `header.version`), the buffer is copied into a
- * Bit_Chain LibreDWG owns for the duration of the decode, and the return
- * value has the same meaning (0 or a DWG_ERROR bit set; >= DWG_ERR_CRITICAL
- * means the decode failed). `buf` is only read, never retained.
+ * The function mirrors the body of its file-based LibreDWG counterpart
+ * (src/dwg.c): `dwg` is cleared except for the log-level bits of its `opts`,
+ * the buffer is copied into a Bit_Chain LibreDWG owns for the duration of
+ * the decode, and the return value has the same meaning (0 or a DWG_ERROR
+ * bit set; >= DWG_ERR_CRITICAL means the decode failed). `buf` is only
+ * read, never retained.
  */
 int uncad_dwg_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
-int uncad_dxf_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
 
 /* --- file header ----------------------------------------------------------
  *
@@ -69,13 +68,6 @@ int uncad_dxf_read_bytes(const unsigned char *buf, size_t len, Dwg_Data *dwg);
  */
 int uncad_dwg_version(const Dwg_Data *dwg);
 int uncad_dwg_from_version(const Dwg_Data *dwg);
-
-/* 1 when the data came from DXF text (LibreDWG's DWG_OPTS_INDXF flag on
- * `dwg->opts`), 0 for a DWG or a NULL `dwg`. Some fields mean something
- * else on that path (a LAYER's plot flag, for one), and an R2007+ DXF holds
- * its strings differently from an R2007+ DWG (see uncad_dwg_is_wide_string).
- */
-int uncad_dwg_from_dxf(const Dwg_Data *dwg);
 
 /* The handle of the CONTINUOUS linetype the header names
  * (`header_vars.LTYPE_CONTINUOUS`): what an entity whose linetype flags

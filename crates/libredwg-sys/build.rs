@@ -210,11 +210,10 @@ fn main() {
         .clang_arg(format!("-I{}", libredwg_include.display()))
         .clang_arg(format!("-I{}", shim_dir.display()))
         .allowlist_function("dwg_read_file")
-        .allowlist_function("dxf_read_file")
         // Deliberately NOT allowlisted: dwg_write_file. It exists in the
-        // compiled library (config.h defines USE_WRITE, which dxf_read_file
-        // also needs -- see the LIBREDWG_SOURCES comment), but this
-        // workspace has no write path; keeping the binding out makes that a
+        // compiled library (config.h defines USE_WRITE -- see the
+        // LIBREDWG_SOURCES comment), but this workspace has no write
+        // path; keeping the binding out makes that a
         // property of the crate rather than of its callers.
         .allowlist_function("dwg_get_num_objects")
         .allowlist_function("dwg_get_object")
@@ -252,10 +251,8 @@ fn main() {
         // and the file-header accessors -- see shim/uncad_shim.h for why
         // each exists.
         .allowlist_function("uncad_dwg_read_bytes")
-        .allowlist_function("uncad_dxf_read_bytes")
         .allowlist_function("uncad_dwg_version")
         .allowlist_function("uncad_dwg_from_version")
-        .allowlist_function("uncad_dwg_from_dxf")
         .allowlist_function("uncad_dwg_ltype_continuous")
         .allowlist_function("uncad_dwg_numheader_vars")
         .allowlist_function("uncad_dwg_template_read")

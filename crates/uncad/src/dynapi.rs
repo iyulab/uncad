@@ -352,9 +352,10 @@ pub enum RawText {
 
 /// How a string the library hands out *unconverted* -- a pointer straight
 /// into the parsed `Dwg_Data` -- is laid out in memory. The library cannot
-/// be asked: the text accessors hand out such a pointer both for 8-bit
-/// strings and, in an R2007+ DXF, for the UTF-16 ones its DXF importer
-/// wrote, so the caller ([`crate::text::TextDecoder`]) says which it is.
+/// be asked: the text accessors hand out such a pointer both for a pre-R2007
+/// drawing's 8-bit strings and, in an R2007+ drawing, for a UTF-16 string
+/// they could not place (a field of a struct embedded in another object), so
+/// the caller ([`crate::text::TextDecoder`]) says which it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoredWidth {
     /// 8-bit bytes, NUL-terminated.
@@ -440,8 +441,7 @@ pub fn handle_name(
     Some(unsafe { take_text(name_ptr, alloced != 0, stored) })
 }
 
-/// `true` when the drawing was read from a pre-R13 source (DWG R1.4 .. R12,
-/// or a DXF stamped so). Such a drawing points at its tables by index rather
+/// `true` when the drawing is older than R13 (DWG R1.4 .. R12). Such a drawing points at its tables by index rather
 /// than by handle -- see [`resolve_table_entry_name`].
 pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     if dwg.is_null() {
@@ -452,27 +452,13 @@ pub fn is_pre_r13(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     unsafe { libredwg_sys::uncad_dwg_is_pre_r13(dwg) != 0 }
 }
 
-/// `true` when the drawing was read from a DXF rather than a DWG. The two
-/// readers leave some fields in different states -- the DXF importer
-/// applies the binary format's bit layout to a LAYER's group 70, and fills
-/// a two-line angular dimension's points by group code rather than in
-/// stream order -- so a field's meaning can depend on which of them read it.
-pub fn is_from_dxf(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
-    if dwg.is_null() {
-        return false;
-    }
-    // SAFETY: dwg is a live Dwg_Data (caller contract, same as the rest of
-    // this crate's conversion pass); the shim null-checks it again itself.
-    unsafe { libredwg_sys::uncad_dwg_from_dxf(dwg) != 0 }
-}
-
 /// `true` when the drawing is R2000 or later: the first version whose
 /// LAYER records carry a plot flag and a lineweight.
 pub fn is_r2000_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
     if dwg.is_null() {
         return false;
     }
-    // SAFETY: as `is_from_dxf`.
+    // SAFETY: as `is_pre_r13`.
     let version = unsafe { libredwg_sys::uncad_dwg_version(dwg) };
     // The enum constant's width is whatever bindgen inferred for the target
     // (see convert.rs on DWG_OBJECT_TYPE); the shim returns a plain int.
@@ -511,8 +497,8 @@ pub fn is_r2013_or_later(dwg: *mut libredwg_sys::Dwg_Data) -> bool {
 /// table's entry order, since such references carry no handle; from R13 on it
 /// matches the handle. Returns `None` when there is no such table or entry.
 /// The library always hands back a copy, freed here once it has been read:
-/// UTF-8 it converted for an R2007+ drawing (a DXF one too, through the
-/// vendored `dwg.c` patch), the stored 8-bit bytes before R2007.
+/// UTF-8 it converted for an R2007+ drawing, the stored 8-bit bytes before
+/// R2007.
 pub fn table_entry_name_bytes(
     dwg: *mut libredwg_sys::Dwg_Data,
     handle: *mut libredwg_sys::Dwg_Object_Ref,
@@ -540,13 +526,12 @@ pub fn table_entry_name_bytes(
 /// it into a `String`; nothing else reads text fields. Returns `None` if the
 /// field doesn't exist or is a null string.
 ///
-/// Despite its name the C function converts only an R2007+ *DWG*'s UTF-16
-/// strings, into a freshly `malloc`'d UTF-8 buffer (`isnew`, freed here once
-/// copied so no string leaks per field read). For every other drawing it
-/// returns a pointer straight into the parsed `Dwg_Data`: the file's own
-/// 8-bit bytes before R2007, and in an R2007+ DXF the UTF-16 its importer
-/// stored -- or, for the few fields that importer keeps 8-bit, the file's
-/// bytes. `stored` says which width that pointer is read in.
+/// For an R2007+ drawing the C function converts the stored UTF-16 into a
+/// freshly `malloc`'d UTF-8 buffer (`isnew`, freed here once copied so no
+/// string leaks per field read). Otherwise it returns a pointer straight
+/// into the parsed `Dwg_Data` -- despite its name, the file's own 8-bit
+/// bytes before R2007, or the stored UTF-16 of an R2007+ string it could
+/// not place. `stored` says which width that pointer is read in.
 pub fn get_text(
     entity: *mut c_void,
     dxfname: &str,
