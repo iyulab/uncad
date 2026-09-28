@@ -259,8 +259,10 @@ fn main() {
         .allowlist_function("uncad_dwg_ltype_continuous")
         .allowlist_function("uncad_dwg_numheader_vars")
         .allowlist_function("uncad_dwg_template_read")
-        // Version enum -> "r2004"-style name, for the parsed header.
+        // Version enum -> "r2004"-style name, for the parsed header, and a
+        // version code ("AC1015") -> enum, for a DXF's $ACADVER.
         .allowlist_function("dwg_version_type")
+        .allowlist_function("dwg_version_hdr_type")
         // The codepage tables (src/codepages.h): what decodes a pre-R2007
         // string's bytes, since the library's text accessors return them
         // undecoded. Predicates plus the byte -> code point lookups.

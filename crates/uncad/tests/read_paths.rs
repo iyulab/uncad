@@ -87,13 +87,13 @@ fn a_missing_file_is_an_io_error() {
 }
 
 #[test]
-fn garbage_bytes_are_a_critical_decode_error() {
-    for format in [uncad::Format::Dwg, uncad::Format::Dxf] {
-        let err = uncad::parse_bytes(b"this is not a drawing, in any format", format)
-            .expect_err("must fail");
-        assert!(
-            matches!(err, uncad::ParseError::Critical(_)),
-            "{format:?}: {err:?}"
-        );
-    }
+fn garbage_bytes_are_a_decode_error_of_the_format_they_were_read_as() {
+    let garbage = b"this is not a drawing, in any format";
+    let err = uncad::parse_bytes(garbage, uncad::Format::Dwg).expect_err("must fail");
+    assert!(matches!(err, uncad::ParseError::Critical(_)), "{err:?}");
+    // The DXF reader says where the text stops being DXF.
+    let err = uncad::parse_bytes(garbage, uncad::Format::Dxf).expect_err("must fail");
+    assert!(matches!(err, uncad::ParseError::Dxf(_)), "{err:?}");
+    assert!(err.to_string().contains("line 1"), "{err}");
+    assert!(std::error::Error::source(&err).is_some());
 }

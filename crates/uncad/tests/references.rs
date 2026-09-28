@@ -109,15 +109,8 @@ impl TempFile {
 
 /// Two INSERTs in one file: one whose block is defined in the BLOCKS
 /// section, one whose block is not. The first must resolve to its name; the
-/// second must not come back as a *name* -- and neither as an empty string.
-/// (Measured: LibreDWG's importer stores no handle at all for the unknown
-/// block, so it reads as `Absent`; a handle that points at nothing would be
-/// `Unresolved`. Both are "not a name", which is what a consumer must be
-/// able to tell from "the block called `""`".)
-///
-/// A LINE on a layer no LAYER table declares is not testable this way:
-/// LibreDWG refuses such a file outright (`IOERROR`), so a dangling layer
-/// cannot even be written into a DXF by hand.
+/// second must not come back as a resolved *name* -- and neither as an
+/// empty string -- but as the name the file wrote, unresolved.
 #[test]
 fn a_reference_to_a_missing_block_is_not_a_name() {
     let pairs: &[(u16, &str)] = &[
@@ -179,11 +172,10 @@ fn a_reference_to_a_missing_block_is_not_a_name() {
 
     // The control: a block that exists resolves to its name.
     assert_eq!(inserts[0].block_name, Ref::Resolved("REAL".to_string()));
-    // The case: a block that does not exist is not a name of any kind.
-    assert!(
-        !inserts[1].block_name.is_resolved(),
-        "a block that does not exist must not come back as a name: {:?}",
-        inserts[1].block_name
+    // The case: a block that does not exist keeps the name, unresolved.
+    assert_eq!(
+        inserts[1].block_name,
+        Ref::Unresolved("NOBLOCK".to_string())
     );
 
     for e in &db.entities {
@@ -419,22 +411,11 @@ fn entity_kind(entity: &Entity) -> &'static str {
     }
 }
 
-/// Every table this model names by name, probed for the same defect.
-///
-/// A DXF names a table entry by name, and the entry may not be declared.
-/// The model's contract is that such a reference comes back as the name the
-/// file wrote, never as "the file names nothing" -- what the file said is
-/// not the reader's to discard. Two places were already known to break it
-/// (a block, and a dimension style), each found by accident. This is the
-/// sweep that stops the third from being found the same way.
-///
-/// The set is closed by reading which fields the importer resolves by name
-/// and intersecting it with the references this model carries: block,
-/// dimension style, text style, and mline style. Line type (group 6) is not
-/// in it -- this model does not carry a line type at all, so there is
-/// nothing to drop. A layer cannot be probed this way, for the reason the
-/// block test above records: a file naming an undeclared layer is refused
-/// outright, so the case cannot be written by hand.
+/// Every table this model names by name, probed: a DXF names a table entry
+/// by name, and the entry may not be declared. The model's contract is that
+/// such a reference comes back as the name the file wrote, unresolved --
+/// never as "the file names nothing". The probes below cover the dimension
+/// style a leader names and the mline style; the block is the test above.
 fn dxf_from(pairs: &[(u16, &str)]) -> String {
     pairs
         .iter()
@@ -442,15 +423,10 @@ fn dxf_from(pairs: &[(u16, &str)]) -> String {
         .collect()
 }
 
-/// Tripwire, not a requirement: it asserts the defect is still here.
-///
-/// A leader names its dimension style by name (group 3), and a style the
-/// file does not declare loses that name -- the same importer behaviour the
-/// block and dimension probes record. When the DXF path stops going through
-/// that importer this test goes red, which is the point: it says to come
-/// back and take the recorded deviations out.
+/// A leader names its dimension style by name (group 3); a style the file
+/// does not declare keeps that name, unresolved.
 #[test]
-fn the_dxf_importer_still_drops_an_undeclared_dimension_style_named_by_a_leader() {
+fn an_undeclared_dimension_style_named_by_a_leader_keeps_its_name() {
     let pairs: &[(u16, &str)] = &[
         (0, "SECTION"),
         (2, "TABLES"),
@@ -501,25 +477,19 @@ fn the_dxf_importer_still_drops_an_undeclared_dimension_style_named_by_a_leader(
     assert_eq!(styles.len(), 2, "{:?}", db.entities);
     // The control: a declared style still resolves, so the probe is sound.
     assert_eq!(styles[0], &Ref::Resolved("REAL".to_string()));
-    // The defect: the name the file wrote is gone. What it should be is
-    // `Unresolved("NOSTYLE")` -- the drawing named something.
-    assert_eq!(
-        styles[1],
-        &Ref::Absent,
-        "the name survived -- take the recorded deviations out"
-    );
+    // The drawing named something: the name, unresolved.
+    assert_eq!(styles[1], &Ref::Unresolved("NOSTYLE".to_string()));
 }
 
-/// Tripwire, as above: the last table this model names by name and that a
-/// file can be written for by hand.
+/// The last table this model names by name and that a file can be written
+/// for by hand.
 ///
 /// There is no control entity here, unlike the block and dimension-style
 /// probes: an mline style is declared in a dictionary rather than a table,
 /// so a hand-written declaration is not a fair one. The control is instead
-/// that the entity itself arrives with its other values intact -- if it did
-/// not parse at all, the reference would say nothing for a different reason.
+/// that the entity itself arrives with its other values intact.
 #[test]
-fn the_dxf_importer_still_drops_an_undeclared_mline_style_name() {
+fn an_undeclared_mline_style_keeps_its_name() {
     let pairs: &[(u16, &str)] = &[
         (0, "SECTION"),
         (2, "ENTITIES"),
@@ -561,51 +531,32 @@ fn the_dxf_importer_still_drops_an_undeclared_mline_style_name() {
     ];
     let file = TempFile::new("undeclared-mline-style.dxf");
     fs::write(file.path(), dxf_from(pairs)).expect("temp dir writable");
-    let Ok(db) = uncad::parse(file.path()) else {
-        // Recorded rather than asserted: the same reason a dangling layer
-        // cannot be probed. If the reader refuses the file, this table
-        // stays unmeasured and the sweep says so instead of guessing.
-        eprintln!("mline probe: the reader refused the hand-written file");
-        return;
-    };
-    let mlines: Vec<_> = db
+    let db = uncad::parse(file.path()).expect("the DXF should parse");
+    let mline = db
         .entities
         .iter()
-        .filter_map(|e| match e {
+        .find_map(|e| match e {
             Entity::MLine(m) => Some(m),
             _ => None,
         })
-        .collect();
-    let Some(mline) = mlines.first() else {
-        eprintln!("mline probe: the reader parsed no MLINE from the probe");
-        return;
-    };
+        .expect("the probe's MLINE");
     // The control: the entity itself came through.
     assert_eq!(mline.vertices.len(), 2, "{mline:?}");
-    // The defect: should be `Unresolved("NOSTYLE")` -- the drawing named
-    // something, and the name is the reader's to carry, not to discard.
+    // The drawing named something, and the name is the reader's to carry.
     assert_eq!(
         mline.mlinestyle_name,
-        Ref::Absent,
-        "the name survived -- take the recorded deviations out"
+        Ref::Unresolved("NOSTYLE".to_string())
     );
 }
 
-/// Tripwire for the same importer, on a flag rather than a name: a text
-/// drawing may omit a leader's arrowhead flag (group 71) and path type
-/// (group 72), and the model can say "the file did not state it". This
-/// reader cannot: the importer leaves both fields at their zero value, so an
-/// omitted flag reads as a stated one. (A binary drawing always stores both
-/// values; nothing here applies to it.)
+/// A text drawing may omit a leader's arrowhead flag (group 71) and path
+/// type (group 72), and the model says "the file did not state it". (A
+/// binary drawing always stores both values; nothing here applies to it.)
 ///
 /// The control is a second leader that states both, as the opposite of the
 /// zero value, so a reader that dropped the flags wholesale cannot pass.
-/// The assertion states the defect, so the day the importer stops filling
-/// the fields this goes red and the recorded deviation should come out.
 #[test]
-fn the_dxf_importer_still_fills_a_leaders_omitted_flags() {
-    // The same shape as the dimension-style probe above: the importer
-    // refuses a leader that names no declared style, so both name one.
+fn a_leaders_omitted_flags_read_as_unstated() {
     let pairs: &[(u16, &str)] = &[
         (0, "SECTION"),
         (2, "TABLES"),
@@ -660,12 +611,7 @@ fn the_dxf_importer_still_fills_a_leaders_omitted_flags() {
     // The control: the stated values come through as stated.
     assert_eq!(stated.has_arrowhead, Some(true), "{stated:?}");
     assert_eq!(stated.path_type, Some(LeaderPath::Spline), "{stated:?}");
-    // The defect: both should be `None`.
-    assert_eq!(
-        (omitted.has_arrowhead, omitted.path_type),
-        (Some(false), Some(LeaderPath::Straight)),
-        "an omitted flag no longer reads as stated -- take the recorded deviation out"
-    );
+    assert_eq!((omitted.has_arrowhead, omitted.path_type), (None, None));
 }
 
 /// A leader's arrowhead flag from DWG, across versions, against the text

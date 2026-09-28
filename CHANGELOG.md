@@ -19,10 +19,6 @@ Notable changes to this project are recorded here. The format follows
 - Reads the style variables a dimension or leader sets for itself -- the `ACAD` application's
   `DSTYLE` list in its extended data -- into `style_overrides`, from DWG and DXF alike, each
   value in the kind the file states it in; an entity without one reads as an empty list.
-- A DXF read that keeps fewer top-level entities than the file's ENTITIES section holds
-  carries an `ENTITIES_MISSING` warning in `read_diagnostics`, with both counts. The importer
-  can stop partway through a file without setting an error bit; such a read used to look
-  clean.
 - `uncad redline` answers with `proposal_color_conflicts` and warns when the original is drawn
   in colors close to the one the changes are drawn in (a drawing whose holes are already red).
 - `uncad redline --proposal-color <#rrggbb>` (MCP: `proposal_color`) draws the changes in
@@ -263,6 +259,27 @@ Notable changes to this project are recorded here. The format follows
   job that checks the workspace with exactly the declared toolchain.
 
 ### Changed
+
+- **Breaking:** a DXF, ASCII or binary, is read by [undxf](https://github.com/iyulab/undxf)
+  instead of LibreDWG's DXF importer; DWG reading is unchanged. Every DXF of the LibreDWG test
+  corpus but one pre-R10 file reads (58 of 67 did), R2007-and-later files included, and a
+  drawing's DXF and DWG twins read to the same entities. What the file states is what the
+  model holds:
+  - a name the file uses but never declares (a block, a dimension, text or mline style, a
+    linetype, `$CLAYER`) is `Unresolved` with that name, where it read as absent;
+  - a group the file leaves out is not stated -- a leader's arrowhead flag and path type,
+    a layer's plot flag (`290 = 0` is `Some(false)`, no 290 is `None`);
+  - an entity the file writes without a handle has no source handle, where the importer
+    minted one.
+- **Breaking:** `ParseError::UnsupportedDxfVersion` is gone; a DXF that cannot be read is
+  `ParseError::Dxf`, carrying the DXF reader's error (where in the file, and why). A DXF's
+  non-fatal problems in `read_diagnostics` are the DXF reader's (`TEXT_ENCODING`,
+  `CODEPAGE_ASSUMED`, `CODEPAGE_UNSUPPORTED`, ...).
+- A DXF's `Header` comes from the variables its HEADER section states, binary DXF included
+  (whose variables used to be all `None`).
+- DXF reads no longer take the lock DWG reads share, so they run in parallel.
+- The CLI's warning for a read with non-fatal problems no longer names LibreDWG: it is
+  worded for either reader.
 
 - `uncad-cli`: a rendered image (`-o .svg`/`.png`) and `redline` are framed by the renderer's
   guard by default, as `export` already was: the few entities far larger or farther than the

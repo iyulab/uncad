@@ -11,11 +11,7 @@
 //!
 //! # Unknown is `None`
 //!
-//! LibreDWG's header struct holds every variable whether or not the file
-//! states it: a variable the file leaves out reads as whatever the reader put
-//! there -- zero, or the importer's default -- and cannot be told from a
-//! stated one by its value. So a variable is `Some` only when the file is
-//! known to state it:
+//! A variable is `Some` only when the file is known to state it:
 //!
 //! - **DWG:** the header section has a fixed layout per version, and every
 //!   variable in that layout is stated. `$INSUNITS`, `$DIMADEC`, `$DIMFRAC`
@@ -25,15 +21,13 @@
 //!   `$DIMPOST`, `$DIMLFAC` and the paper-space extents and limits in the
 //!   older releases. `$MEASUREMENT` is not in the header section at all but
 //!   in the optional Template section, and is stated only when that was read.
-//! - **ASCII DXF:** exactly the variables its HEADER section names, found by
-//!   a scan of the file's own text (bounded by that section).
-//! - **Binary DXF:** not scanned, so nothing can be told apart from a
-//!   default and every variable is `None`.
+//!   (LibreDWG's header struct holds every variable whether or not the file
+//!   states it, so the layout is what tells them apart.)
+//! - **DXF**, ASCII or binary: exactly the variables its HEADER section
+//!   states, as the DXF reader returns them.
 //!
 //! What is stated is kept as stated: `$EXTMIN`/`$EXTMAX` may be stale or
 //! AutoCAD's `1e20` "never set" sentinel, and are not corrected here.
-
-use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use uncad_model::{Point2D, Point3D, Ref};
@@ -142,77 +136,17 @@ impl Header {
     }
 }
 
-/// What the scan of an ASCII DXF's HEADER section found.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct DxfHeaderScan {
-    /// `$ACADVER`'s value, trimmed.
-    pub acadver: Option<String>,
-    /// Every variable the section names, without the `$`.
-    pub variables: BTreeSet<String>,
+/// What says which header variables a DWG states: its version's header
+/// layout -- see the module doc.
+pub(crate) struct DwgLayout {
+    pub version: i32,
+    pub numheader_vars: u16,
+    pub template_read: bool,
 }
 
-/// Reads the variable names out of an ASCII DXF's HEADER section, as
-/// (group code, value) line pairs, up to the section's `ENDSEC`. A file
-/// whose first section is not HEADER states no variables. `None` for a
-/// binary DXF, which is not scanned.
-pub(crate) fn scan_dxf_header(bytes: &[u8]) -> Option<DxfHeaderScan> {
-    if bytes.starts_with(b"AutoCAD Binary DXF") {
-        return None;
-    }
-    fn trim(line: &[u8]) -> &[u8] {
-        line.trim_ascii()
-    }
-    let mut scan = DxfHeaderScan::default();
-    let mut lines = bytes.split(|&b| b == b'\n').map(trim);
-    let mut in_header = false;
-    let mut current: Option<Vec<u8>> = None;
-    while let (Some(code), Some(value)) = (lines.next(), lines.next()) {
-        match (code, value) {
-            (b"0", b"SECTION") => continue,
-            (b"0", b"ENDSEC") | (b"0", b"EOF") => break,
-            (b"2", b"HEADER") if !in_header => in_header = true,
-            // The first section is some other one: no HEADER to read.
-            (b"2", _) if !in_header => break,
-            (b"9", name) if in_header => {
-                let name = name.strip_prefix(b"$").unwrap_or(name);
-                scan.variables
-                    .insert(String::from_utf8_lossy(name).into_owned());
-                current = Some(name.to_vec());
-            }
-            (b"1", value) if in_header && current.as_deref() == Some(b"ACADVER") => {
-                scan.acadver = Some(String::from_utf8_lossy(value).into_owned());
-            }
-            _ => {}
-        }
-    }
-    Some(scan)
-}
-
-/// Which header variables the file states -- see the module doc.
-pub(crate) enum Stated {
-    /// A DWG, by its version's header layout.
-    Dwg {
-        version: i32,
-        numheader_vars: u16,
-        template_read: bool,
-    },
-    /// An ASCII DXF, by the variables its HEADER section names.
-    Dxf(BTreeSet<String>),
-    /// A binary DXF: nothing known.
-    Unknown,
-}
-
-impl Stated {
+impl DwgLayout {
     fn has(&self, name: &str) -> bool {
-        match self {
-            Stated::Dxf(variables) => variables.contains(name),
-            Stated::Unknown => false,
-            Stated::Dwg {
-                version,
-                numheader_vars,
-                template_read,
-            } => dwg_layout_has(name, *version, *numheader_vars, *template_read),
-        }
+        dwg_layout_has(name, self.version, self.numheader_vars, self.template_read)
     }
 }
 
@@ -284,9 +218,9 @@ pub(crate) fn release_name(version: i32) -> Option<String> {
     Some(name.into_owned())
 }
 
-/// Reads the header out of a live `Dwg_Data`. `acadver` is the version code
-/// the file states (see [`Header::acadver`]), `stated` which variables it
-/// states.
+/// Reads a DWG's header out of a live `Dwg_Data`. `acadver` is the version
+/// code the file states (see [`Header::acadver`]), `stated` which variables
+/// it states.
 ///
 /// # Safety
 /// `dwg` must point at a `Dwg_Data` a successful read filled in and that
@@ -294,9 +228,8 @@ pub(crate) fn release_name(version: i32) -> Option<String> {
 pub(crate) unsafe fn read_header(
     dwg: *mut libredwg_sys::Dwg_Data,
     text: &TextDecoder,
-    format: Format,
     acadver: Option<String>,
-    stated: &Stated,
+    stated: &DwgLayout,
 ) -> Header {
     // SAFETY: the shim reads one header field of a live Dwg_Data.
     let from_version = unsafe { libredwg_sys::uncad_dwg_from_version(dwg) };
@@ -338,7 +271,7 @@ pub(crate) unsafe fn read_header(
     };
 
     Header {
-        format,
+        format: Format::Dwg,
         acadver,
         version,
         codepage,
@@ -373,6 +306,90 @@ pub(crate) unsafe fn read_header(
         textsize: f64_var("TEXTSIZE"),
         clayer,
     }
+}
+
+/// A DXF's header, from the variables its HEADER section states (the DXF
+/// reader's [`undxf::Header`]) and the tables it declares.
+///
+/// The file-level facts follow what LibreDWG's own DXF import made of the
+/// same variables, so a DXF's header reads the same whichever reader took it:
+/// `version` is LibreDWG's release name for `$ACADVER`; `codepage` is the
+/// number of the code page `$DWGCODEPAGE` names (a name looked up without
+/// regard to case, R12's `undefined` and a name with no table being
+/// `CP_UNDEFINED`), and where the file names none, `ANSI_1252` before R2007
+/// and UTF-16 from it. `$CLAYER`, which a DXF states by name, resolves
+/// against the LAYER table: `Resolved` when declared, `Unresolved` with the
+/// name when not.
+pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> Header {
+    let acadver = stated.text("ACADVER").map(|v| v.trim().to_string());
+    let version = acadver.as_deref().and_then(release_of_acadver);
+    let r2007_or_later = acadver.as_deref().is_some_and(|v| v >= "AC1021");
+    let codepage = match stated.text("DWGCODEPAGE") {
+        Some(name) => codepage_number(name.trim()),
+        None if r2007_or_later => crate::text::CP_UTF16,
+        None => crate::text::CP_ANSI_1252,
+    };
+    let u16_var = |name: &str| stated.int(name).and_then(|v| u16::try_from(v).ok());
+    let clayer = match stated.text("CLAYER") {
+        Some(name) if tables.layers.contains_key(&name) => Ref::Resolved(name),
+        Some(name) => Ref::Unresolved(name),
+        None => Ref::Absent,
+    };
+    Header {
+        format: Format::Dxf,
+        acadver,
+        version,
+        codepage,
+        codepage_name: codepage_name(codepage),
+        insunits: u16_var("INSUNITS"),
+        measurement: u16_var("MEASUREMENT"),
+        lunits: u16_var("LUNITS"),
+        luprec: u16_var("LUPREC"),
+        aunits: u16_var("AUNITS"),
+        auprec: u16_var("AUPREC"),
+        extmin: stated.point3("EXTMIN"),
+        extmax: stated.point3("EXTMAX"),
+        limmin: stated.point2("LIMMIN"),
+        limmax: stated.point2("LIMMAX"),
+        pextmin: stated.point3("PEXTMIN"),
+        pextmax: stated.point3("PEXTMAX"),
+        plimmin: stated.point2("PLIMMIN"),
+        plimmax: stated.point2("PLIMMAX"),
+        dimscale: stated.real("DIMSCALE"),
+        dimlfac: stated.real("DIMLFAC"),
+        dimdec: u16_var("DIMDEC"),
+        dimlunit: u16_var("DIMLUNIT"),
+        dimpost: stated.text("DIMPOST"),
+        dimrnd: stated.real("DIMRND"),
+        dimzin: u16_var("DIMZIN"),
+        dimfrac: u16_var("DIMFRAC"),
+        dimaunit: u16_var("DIMAUNIT"),
+        dimadec: u16_var("DIMADEC"),
+        dimtxt: stated.real("DIMTXT"),
+        dimasz: stated.real("DIMASZ"),
+        ltscale: stated.real("LTSCALE"),
+        textsize: stated.real("TEXTSIZE"),
+        clayer,
+    }
+}
+
+/// LibreDWG's release name for a `$ACADVER` code (`AC1015` -> `r2000`), the
+/// same lookup its DXF import made.
+fn release_of_acadver(acadver: &str) -> Option<String> {
+    let code = std::ffi::CString::new(acadver).ok()?;
+    // SAFETY: a NUL-terminated string that outlives the call; the function
+    // only compares it against LibreDWG's static version table.
+    let version = unsafe { libredwg_sys::dwg_version_hdr_type(code.as_ptr()) };
+    release_name(version as i32)
+}
+
+/// The number of the code page a `$DWGCODEPAGE` names -- LibreDWG's table,
+/// looked up without regard to case -- or `CP_UNDEFINED` for a name it has
+/// no table for (R12's `undefined` among them).
+fn codepage_number(name: &str) -> u16 {
+    (0..=crate::text::CP_LAST)
+        .find(|&n| codepage_name(n).is_some_and(|known| known.eq_ignore_ascii_case(name)))
+        .unwrap_or(crate::text::CP_UNDEFINED)
 }
 
 /// `$CLAYER` as a reference: the layer's name when the table resolves it
@@ -434,23 +451,45 @@ mod tests {
         }
     }
 
+    fn dxf(text: &str) -> Header {
+        let (db, stated) = undxf::read_str_with_header(text).expect("DXF");
+        from_dxf(&stated, &db.tables)
+    }
+
     #[test]
-    fn the_scan_reads_the_header_section_only() {
-        let dxf = b"  0\r\nSECTION\r\n  2\r\nHEADER\r\n  9\r\n$ACADVER\r\n  1\r\nAC1015 \r\n  9\r\n$INSUNITS\r\n 70\r\n     4\r\n  0\r\nENDSEC\r\n  0\r\nSECTION\r\n  2\r\nENTITIES\r\n  9\r\n$DIMPOST\r\n  0\r\nENDSEC\r\n";
-        let scan = scan_dxf_header(dxf).expect("ASCII DXF");
-        assert_eq!(scan.acadver.as_deref(), Some("AC1015"));
-        assert_eq!(
-            scan.variables
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            ["ACADVER", "INSUNITS"]
-        );
-        // No HEADER section: nothing stated.
-        let scan = scan_dxf_header(b"  0\nSECTION\n  2\nENTITIES\n  9\n$ACADVER\n  1\nAC1015\n")
-            .expect("ASCII DXF");
-        assert_eq!(scan, DxfHeaderScan::default());
-        assert_eq!(scan_dxf_header(b"AutoCAD Binary DXF\r\n\x1a\0"), None);
+    fn a_dxf_header_is_what_its_header_section_states() {
+        let h = dxf("  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  9\n$INSUNITS\n 70\n     4\n  9\n$DIMPOST\n  1\n\n  9\n$CLAYER\n  8\nWalls\n  0\nENDSEC\n  0\nEOF\n");
+        assert_eq!(h.format, Format::Dxf);
+        assert_eq!(h.acadver.as_deref(), Some("AC1015"));
+        assert_eq!(h.version.as_deref(), Some("r2000"));
+        assert_eq!(h.insunits, Some(4));
+        // Stated empty is not unstated.
+        assert_eq!(h.dimpost.as_deref(), Some(""));
+        assert_eq!(h.dimscale, None);
+        // A layer the file does not declare keeps its name, unresolved.
+        assert_eq!(h.clayer, Ref::Unresolved("Walls".to_string()));
+        // No $DWGCODEPAGE before R2007: ANSI_1252.
+        assert_eq!(h.codepage_name.as_deref(), Some("ANSI_1252"));
+    }
+
+    #[test]
+    fn a_dxf_code_page_is_looked_up_by_name_and_defaults_by_version() {
+        let with = |vars: &str| {
+            dxf(&format!(
+                "  0\nSECTION\n  2\nHEADER\n{vars}  0\nENDSEC\n  0\nEOF\n"
+            ))
+        };
+        let h = with("  9\n$ACADVER\n  1\nAC1015\n  9\n$DWGCODEPAGE\n  3\nansi_949\n");
+        assert_eq!(h.codepage_name.as_deref(), Some("ANSI_949"));
+        let h = with("  9\n$ACADVER\n  1\nAC1021\n");
+        assert_eq!(h.codepage, crate::text::CP_UTF16);
+        let h = with("  9\n$ACADVER\n  1\nAC1009\n  9\n$DWGCODEPAGE\n  3\nundefined\n");
+        assert_eq!(h.codepage, crate::text::CP_UNDEFINED);
+        assert_eq!(h.codepage_name, None);
+        // No $ACADVER at all: no version, and the pre-R2007 default.
+        let h = with("");
+        assert_eq!((h.acadver, h.version), (None, None));
+        assert_eq!(h.codepage_name.as_deref(), Some("ANSI_1252"));
     }
 
     #[test]

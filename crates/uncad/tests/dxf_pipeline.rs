@@ -257,34 +257,49 @@ fn ref_name(r: &uncad::model::Ref<String>) -> String {
 /// What the parser states about a drawing that two decoders of the same
 /// drawing must agree on: how many entities, on which layers, and which
 /// block record each INSERT names.
+/// An anonymous block's name without its number (`*U100` -> `*U#`): the
+/// number is assigned when the file is saved, so a drawing's DWG and DXF
+/// twins can number the same block differently.
+fn anonymous_numbered(name: String) -> String {
+    match name.strip_prefix('*') {
+        Some(rest)
+            if rest.len() > 1
+                && rest[..1].chars().all(|c| c.is_ascii_alphabetic())
+                && rest[1..].chars().all(|c| c.is_ascii_digit()) =>
+        {
+            format!("*{}#", &rest[..1])
+        }
+        _ => name,
+    }
+}
+
 fn names(db: &uncad::CadDatabase) -> (usize, BTreeMap<String, usize>, BTreeMap<String, usize>) {
     let mut layers = BTreeMap::new();
     let mut blocks = BTreeMap::new();
     for entity in &db.entities {
         *layers.entry(ref_name(&entity.common().layer)).or_insert(0) += 1;
         if let uncad::Entity::Insert(insert) = entity {
-            *blocks.entry(ref_name(&insert.block_name)).or_insert(0) += 1;
+            *blocks
+                .entry(anonymous_numbered(ref_name(&insert.block_name)))
+                .or_insert(0) += 1;
         }
     }
     (db.entities.len(), layers, blocks)
 }
 
 #[test]
-fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin_or_fails_in_libredwg() {
+fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin() {
     let mut files = Vec::new();
     dxf_files_under(Path::new(CORPUS_ROOT), &mut files);
     files.sort();
 
     // Known deviations, each pinned with a tripwire: if the twins ever
     // agree, the entry is stale and must go.
-    // - 2010/gh209_1: LibreDWG's importer leaves every entity without a
-    //   layer handle (the DWG puts them on five layers); the model says so
-    //   with `Absent`, which is what the parser owes.
     // - 2018/Leader: the DXF itself puts one LEADER on a layer "0 @ 1" that
     //   the DWG does not have (groups 8 at lines 1836 and 2606 of the file).
-    let deviations = ["2010/gh209_1.dxf", "2018/Leader.dxf"];
+    let deviations = ["2018/Leader.dxf"];
 
-    let (mut read, mut failed, mut twins) = (Vec::new(), Vec::new(), 0usize);
+    let (mut read, mut twins) = (Vec::new(), 0usize);
     for path in &files {
         let is_r2007_plus = acadver_by_search(path)
             .as_deref()
@@ -298,16 +313,7 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin_or_fails_in_libredwg() {
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        let db = match uncad::parse(path) {
-            Ok(db) => db,
-            // LibreDWG's own reader gives up on these, as it does on the
-            // older DXFs that fail: an error, never an empty drawing.
-            Err(uncad::ParseError::Critical(_)) => {
-                failed.push(rel);
-                continue;
-            }
-            Err(e) => panic!("{rel}: {e}"),
-        };
+        let db = uncad::parse(path).unwrap_or_else(|e| panic!("{rel}: {e}"));
         assert!(!db.entities.is_empty(), "{rel} read as an empty drawing");
         read.push(rel.clone());
 
@@ -332,21 +338,12 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin_or_fails_in_libredwg() {
         );
     }
     eprintln!(
-        "R2007+ corpus DXF: {} read ({twins} against a DWG twin), {} failed in LibreDWG: {failed:?}",
-        read.len(),
-        failed.len()
+        "R2007+ corpus DXF: {} read ({twins} against a DWG twin)",
+        read.len()
     );
-    assert_eq!((read.len(), twins), (27, 24));
-    assert_eq!(
-        failed,
-        [
-            "2013/gh109_1.dxf",
-            "2018/Constraints.dxf",
-            "2018/Dynblocks.dxf",
-            "2018/LiveSection1.dxf",
-            "2018/TS1.dxf"
-        ]
-    );
+    // Every one reads: 32, 28 of them against a DWG twin. (27 and 24 while
+    // DXF went through LibreDWG's importer, which failed on five.)
+    assert_eq!((read.len(), twins), (32, 28));
 }
 
 /// The corpus R2000 drawing with its `$ACADVER` value line rewritten -- the

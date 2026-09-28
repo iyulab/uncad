@@ -41,11 +41,11 @@ fn the_fixture_layers_carry_the_state_their_groups_state() {
     // layout, where they would mean "off" and "frozen in new viewports".
     assert_eq!(state(&l["FROZEN"]), (false, true, false));
     assert_eq!(state(&l["LOCKED"]), (false, false, true));
-    // The importer leaves an absent 290 at 0, so a stated 0 cannot be told
-    // from silence: not plotting is not something this DXF can be read to
-    // say, and every plot flag is unknown rather than a guess.
+    // NOPLOT and Defpoints state 290 = 0 and do not plot; the others state
+    // no 290, and their plot flag is unknown rather than a guess.
     for layer in l.values() {
-        assert_eq!(layer.plot, None, "{}", layer.name);
+        let stated = ["NOPLOT", "Defpoints"].contains(&layer.name.as_str());
+        assert_eq!(layer.plot, stated.then_some(false), "{}", layer.name);
         assert_eq!(layer.lineweight, None, "{}: no 370", layer.name);
         assert_eq!(
             layer.linetype,
@@ -78,8 +78,7 @@ fn autocad_written_layer_state_reads_the_same_from_dwg_and_dxf() {
             assert_eq!(layer.lineweight, Some(-3), "{path}: {}", layer.name);
         }
         // The R2000 DWG states the plot flag of every layer; the DXF states
-        // only Defpoints' 290 = 0, which its importer cannot tell from an
-        // absent group.
+        // only Defpoints' 290 = 0, and the others' flag is unknown.
         let plot: Vec<(&str, Option<bool>)> =
             l.values().map(|l| (l.name.as_str(), l.plot)).collect();
         let expected: Vec<(&str, Option<bool>)> = if from_dwg {
@@ -91,7 +90,9 @@ fn autocad_written_layer_state_reads_the_same_from_dwg_and_dxf() {
                 ("Tavolo 3", Some(true)),
             ]
         } else {
-            l.keys().map(|name| (name.as_str(), None)).collect()
+            l.keys()
+                .map(|name| (name.as_str(), (name == "Defpoints").then_some(false)))
+                .collect()
         };
         assert_eq!(plot, expected, "{path}");
     }

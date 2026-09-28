@@ -51,9 +51,14 @@ const CP_BIG5: u16 = 24;
 /// EUC-CN: like Big5, and the library's table for it is indexed by the 7-bit
 /// ISO-2022 form of a pair (`0x2121..0x777E`), not by the bytes in the file.
 const CP_GB2312: u16 = 31;
-const CP_UTF16: u16 = 43;
+/// Western European: LibreDWG's default for a pre-R2007 drawing that names
+/// no codepage.
+pub(crate) const CP_ANSI_1252: u16 = 30;
+pub(crate) const CP_UTF16: u16 = 43;
 /// The last codepage the library has a table for (`CP_ANSI_1258`).
-const CP_LAST: u16 = 44;
+pub(crate) const CP_LAST: u16 = 44;
+/// No codepage (R12's `undefined`, and a name the library has no table for).
+pub(crate) const CP_UNDEFINED: u16 = 0xFF;
 
 /// Whether the library can decode `codepage` at all. `CP_UNDEFINED` (0xFF,
 /// "mostly R11") and anything past the table range must never reach the

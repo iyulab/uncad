@@ -16,7 +16,7 @@
 
 use std::fs;
 use std::path::PathBuf;
-use uncad::model::{EntityLinetype, Ref};
+use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
@@ -125,127 +125,11 @@ impl Drop for Fixture {
     }
 }
 
-/// The one way this reader knowingly differs from the spec, and why.
-///
-/// A DXF entity points at a table entry by *name*, so naming an entry the
-/// file never declares is a reference that exists and answers to nothing:
-/// unresolved, carrying the name. The vendored library's DXF importer looks
-/// each such name up in its table and, when the lookup fails, only warns and
-/// leaves the field empty -- the name it read is never stored on the entity,
-/// so nothing downstream of that importer can recover it. This reader
-/// reports those as absent.
-///
-/// Three cases carry one: G10's INSERT names a block the file never defines,
-/// G5's last dimension names a style it never declares, and G18's last line
-/// a linetype it never declares. The same cause in three places, which is
-/// why the deviation is written once over all of them.
-/// It is applied to the expectation rather than by weakening the
-/// comparison, so every other value in those cases stays pinned exactly.
-///
-/// A text style takes a different turn through the same importer: a TEXT
-/// naming a style the file never declares (G13's `GOST`) is pointed at the
-/// STANDARD entry instead, the entry an absent group 7 means. The name the
-/// file wrote is lost the same way; what arrives is a resolved reference
-/// to a style the entity did not name.
-///
-/// A layer's plot flag goes the same way from the other side. The importer
-/// leaves an absent group 290 at 0, so a layer that states `290 = 0` (G14's
-/// NOPLOT) cannot be told from one that states nothing, and this reader
-/// reports both as "not stated" rather than guess: `None` where the spec
-/// says `Some(false)`.
-///
-/// The style table carries a second, smaller one. A DIMSTYLE writes a
-/// variable only when it differs from the value the application starts from.
-/// Where every template starts from the same value, the model says an
-/// unwritten variable is that value, and the importer reports exactly that.
-/// Where the templates differ (text height, arrow size, the two decimal
-/// places, zero suppression), the model says "not stated" -- but this
-/// library holds a style as a struct with no "the group was not written", so
-/// for a DXF it reports its own starting value there. The variables a case
-/// *does* state are compared exactly; those five, where a case leaves them
-/// out, are taken from what this reader said, because this reader cannot
-/// know them. Both differences have the same cause and the same end (see
-/// `docs/CAVEATS.md`).
-///
-/// TODO: remove this, and `the_dxf_importer_still_drops_an_undeclared_name`
-/// below, once this crate's DXF path no longer goes through that importer.
-fn apply_known_deviations(actual: &CadDatabase, expected: &mut CadDatabase) {
-    for (name, style) in &mut expected.tables.dim_styles {
-        let Some(read) = actual.tables.dim_styles.get(name) else {
-            continue;
-        };
-        for (want, got) in [
-            (&mut style.text_height, read.text_height),
-            (&mut style.arrow_size, read.arrow_size),
-        ] {
-            if want.is_none() {
-                *want = got;
-            }
-        }
-        for (want, got) in [
-            (&mut style.decimal_places, read.decimal_places),
-            (
-                &mut style.tolerance_decimal_places,
-                read.tolerance_decimal_places,
-            ),
-            (&mut style.zero_suppression, read.zero_suppression),
-        ] {
-            if want.is_none() {
-                *want = got;
-            }
-        }
-    }
-
-    for layer in expected.tables.layers.values_mut() {
-        if layer.plot == Some(false) {
-            layer.plot = None;
-        }
-    }
-
-    fn lower(entity: &mut Entity) {
-        if let EntityLinetype::Named(linetype @ Ref::Unresolved(_)) =
-            &mut entity.common_mut().linetype
-        {
-            *linetype = Ref::Absent;
-        }
-        let text_style = match entity {
-            Entity::Text(text) => Some(&mut text.style_name),
-            Entity::Attrib(attrib) => Some(&mut attrib.style_name),
-            Entity::Attdef(attdef) => Some(&mut attdef.style_name),
-            Entity::MText(mtext) => Some(&mut mtext.style_name),
-            _ => None,
-        };
-        if let Some(style) = text_style {
-            if matches!(style, Ref::Unresolved(_)) {
-                *style = Ref::Resolved("STANDARD".to_string());
-            }
-            return;
-        }
-        let reference = match entity {
-            Entity::Insert(insert) => &mut insert.block_name,
-            Entity::Dimension(dimension) => &mut dimension.style_name,
-            _ => return,
-        };
-        if matches!(reference, Ref::Unresolved(_)) {
-            *reference = Ref::Absent;
-        }
-    }
-    for entity in &mut expected.entities {
-        lower(entity);
-    }
-    for block in expected.tables.block_records.values_mut() {
-        for entity in &mut block.entities {
-            lower(entity);
-        }
-    }
-}
-
 fn assert_reads_back_exactly(name: &str, dxf: &[u8], expected_json: &str) {
     let fixture = Fixture::write(&format!("golden-{name}.dxf"), dxf);
     let db = uncad::parse(&fixture.0).unwrap_or_else(|e| panic!("{name} should parse: {e}"));
-    let mut expected: CadDatabase =
+    let expected: CadDatabase =
         serde_json::from_str(expected_json).expect("the expected model deserializes");
-    apply_known_deviations(&db, &mut expected);
 
     // Entity by entity first, so a failure names the entity rather than
     // dumping two whole drawings.
@@ -274,89 +158,6 @@ fn assert_reads_back_exactly(name: &str, dxf: &[u8], expected_json: &str) {
         db.read_diagnostics.is_clean(),
         "{name}: a drawing read exactly must have nothing to warn about: {:?}",
         db.read_diagnostics.warnings
-    );
-}
-
-/// The tripwire for the deviation above: it asserts the defect is still
-/// there, in all the places the golden cases put it. The day this reader
-/// returns the name the file wrote, this test fails -- which is the signal
-/// to delete both it and `apply_known_deviations`.
-#[test]
-fn the_dxf_importer_still_drops_an_undeclared_name() {
-    let fixture = Fixture::write("golden-g10-deviation.dxf", include_bytes!("golden/g10.dxf"));
-    let db = uncad::parse(&fixture.0).expect("g10 should parse");
-    let insert = db
-        .entities
-        .iter()
-        .find_map(|e| match e {
-            Entity::Insert(insert) => Some(insert),
-            _ => None,
-        })
-        .expect("g10 has one block reference");
-    assert_eq!(
-        insert.block_name,
-        Ref::Absent,
-        "the importer kept the name of an undefined block -- remove the known deviation"
-    );
-
-    let fixture = Fixture::write("golden-g5-deviation.dxf", include_bytes!("golden/g5.dxf"));
-    let db = uncad::parse(&fixture.0).expect("g5 should parse");
-    let undeclared = db
-        .entities
-        .iter()
-        .filter_map(|e| match e {
-            Entity::Dimension(d) => Some(&d.style_name),
-            _ => None,
-        })
-        .find(|s| !matches!(s, Ref::Resolved(_)))
-        .expect("g5 has a dimension naming a style the file never declares");
-    assert_eq!(
-        undeclared,
-        &Ref::Absent,
-        "the importer kept the name of an undeclared style -- remove the known deviation"
-    );
-
-    let fixture = Fixture::write("golden-g18-deviation.dxf", include_bytes!("golden/g18.dxf"));
-    let db = uncad::parse(&fixture.0).expect("g18 should parse");
-    assert_eq!(
-        db.entities[3].common().linetype,
-        EntityLinetype::Named(Ref::Absent),
-        "the importer kept the name of an undeclared linetype -- remove the known deviation"
-    );
-
-    let fixture = Fixture::write("golden-g14-deviation.dxf", include_bytes!("golden/g14.dxf"));
-    let db = uncad::parse(&fixture.0).expect("g14 should parse");
-    let expected: CadDatabase =
-        serde_json::from_str(include_str!("golden/g14.expected.json")).unwrap();
-    assert_eq!(expected.tables.layers["NOPLOT"].plot, Some(false));
-    assert_eq!(
-        db.tables.layers["NOPLOT"].plot, None,
-        "the importer told a stated 290 = 0 from an absent one -- remove the known deviation"
-    );
-
-    let fixture = Fixture::write("golden-g13-deviation.dxf", include_bytes!("golden/g13.dxf"));
-    let db = uncad::parse(&fixture.0).expect("g13 should parse");
-    let expected: CadDatabase =
-        serde_json::from_str(include_str!("golden/g13.expected.json")).unwrap();
-    let styles = |db: &CadDatabase| -> Vec<Ref<String>> {
-        db.entities
-            .iter()
-            .filter_map(|e| match e {
-                Entity::Text(t) => Some(t.style_name.clone()),
-                _ => None,
-            })
-            .collect()
-    };
-    let (read, stated) = (styles(&db), styles(&expected));
-    let undeclared = stated
-        .iter()
-        .position(|s| matches!(s, Ref::Unresolved(_)))
-        .expect("g13 has a text naming a style the file never declares");
-    assert_eq!(stated[undeclared], Ref::Unresolved("GOST".to_string()));
-    assert_eq!(
-        read[undeclared],
-        Ref::Resolved("STANDARD".to_string()),
-        "the importer kept the name of an undeclared text style -- remove the known deviation"
     );
 }
 

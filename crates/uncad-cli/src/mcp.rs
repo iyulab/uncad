@@ -8,8 +8,8 @@
 //! warnings it prints on stderr. The server keeps nothing between calls:
 //! each call reads its files again.
 //!
-//! Calls run one at a time on a single thread. Reading a drawing goes
-//! through LibreDWG, which is not written for concurrent use.
+//! Calls run one at a time on a single thread. Reading a DWG goes through
+//! LibreDWG, which is not written for concurrent use.
 
 use crate::verbs::VERBS;
 use rmcp::model::{

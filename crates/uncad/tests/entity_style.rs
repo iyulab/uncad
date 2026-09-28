@@ -60,12 +60,10 @@ fn bylayer_and_byblock_are_not_table_entries() {
         line(Some("AC1018"), &[(6, "BYLAYER")]).linetype,
         EntityLinetype::ByLayer
     );
-    // A name the file never declares: the DXF importer drops the name it
-    // could not look up, so the reference arrives absent rather than
-    // unresolved (docs/CAVEATS.md -- the same as for blocks and styles).
+    // A name the file never declares keeps the name, unresolved.
     assert_eq!(
         line(Some("AC1018"), &[(6, "DASHED")]).linetype,
-        EntityLinetype::Named(Ref::Absent)
+        EntityLinetype::Named(Ref::Unresolved("DASHED".to_string()))
     );
     assert_eq!(
         line(Some("AC1018"), &[(440, "16777216")])

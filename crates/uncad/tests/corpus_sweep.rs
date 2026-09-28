@@ -84,7 +84,7 @@ fn sweep() -> Sweep {
             .is_some_and(|e| e.eq_ignore_ascii_case("dxf"));
         let db = match uncad::parse(path) {
             Ok(db) => db,
-            Err(ParseError::UnsupportedDxfVersion(_)) => {
+            Err(ParseError::Dxf(_)) => {
                 s.dxf_refused += 1;
                 continue;
             }
@@ -203,13 +203,11 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     }
 
     // --- how the files read ---
-    // (31, 32, 4) while every R2007+ DXF was refused. Read now: 27 of the 32
-    // parse, and the other 5 (2013/gh109_1, 2018/Constraints, Dynblocks,
-    // LiveSection1, TS1) fail inside LibreDWG's importer with critical
-    // error 2048. None trips the guard against an R2007+ DXF whose entities
-    // all go missing (`dxf_refused`).
+    // Every DWG reads; of the 67 DXFs, 66 read and one is refused by the DXF
+    // reader -- `r1.4/entities.dxf`, a pre-R10 file not in group-code form.
+    // (58 read and 9 failed while DXF went through LibreDWG's importer.)
     assert_eq!((s.files, s.dwg_parsed), (208, 141));
-    assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (58, 0, 9));
+    assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (66, 1, 0));
 
     // --- LibreDWG's non-fatal error bits, which used to be discarded ---
     assert_eq!(s.clean_dwg, 98);
@@ -240,25 +238,19 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
             "{file}: an index only goes unresolved when the table is missing"
         );
     }
-    assert_eq!(s.refs[&("2018".to_string(), "block", "absent")], 18);
+    // `2018/Dynblocks`: 18 dimensions inside its dynamic blocks name no
+    // block, read the same from the DWG and from its DXF twin.
+    assert_eq!(s.refs[&("2018".to_string(), "block", "absent")], 36);
     let layers: usize = s
         .refs
         .iter()
         .filter(|((_, field, _), _)| *field == "layer")
         .map(|(_, n)| n)
         .sum();
-    // 64,697 before the attribute-chain fix: 36 more entities (all ATTDEFs in
-    // blocks with several of them, in the R2000 and R13/R14 files) are read
-    // now that this crate walks the R13..R2000 block chain itself instead of
-    // through the library's walker, which skipped them. 64,733 then; 1,331
-    // more since the 27 readable R2007+ DXFs are read instead of refused --
-    // all resolved but the 21 of 2010/gh209_1.dxf, whose entities LibreDWG's
-    // importer leaves without a layer handle (absent, as the model says) --
-    // and 62 fewer since a polyline's VERTEX records are no longer entities
-    // of the block that holds the polyline: seven pre-R13 DXFs (r2.6, r2.10,
-    // r9, r10, both r11 ones and r12's Leader) listed each polyline's
-    // vertices again as `Unknown` entities of their own.
-    assert_eq!(layers, 66_002);
+    // 66,002 while DXF went through LibreDWG's importer: the nine DXFs it
+    // failed on read now, and 2010/gh209_1's entities, which that importer left without a layer, sit
+    // on their layers as in the DWG twin.
+    assert_eq!(layers, 116_494);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
     // file, and the index fallback is measured, not assumed ---
@@ -270,8 +262,13 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // The empty-block count is six higher than it was before pre-R13 block
     // references resolved: a reference that could not be looked up was never
     // reported as empty, so resolving it made the empty definitions visible. ---
-    assert_eq!(s.skipped_edges, 1_034);
-    assert_eq!(s.files_with_empty_blocks, 20);
+    // 1,034 while DXF went through LibreDWG's importer: example_r14.dxf's
+    // three bodies (4 + 18 + 4 edges) read now, and like its DWG twin's their
+    // R14-era vertices do not resolve.
+    assert_eq!(s.skipped_edges, 1_060);
+    // 20 while DXF went through LibreDWG's importer. Now every DXF on the
+    // list has its DWG twin on it, with the same empty block.
+    assert_eq!(s.files_with_empty_blocks, 17);
 }
 
 /// Which of this library's point fields is which DXF group cannot be read off

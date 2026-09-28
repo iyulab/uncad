@@ -345,11 +345,11 @@ fn set_aside(left_out: &[LeftOut]) -> Vec<String> {
 }
 
 /// The reader's non-fatal problems with `input`, worded once for every
-/// command.
+/// command and either reader (LibreDWG for a DWG, the DXF reader for a DXF).
 fn read_warning(input: &str, db: &CadDatabase) -> String {
     format!(
-        "LibreDWG read '{input}' with non-fatal problems ({}); objects it could not decode \
-         are missing from the result",
+        "'{input}' was read with non-fatal problems ({}); what the reader could not decode \
+         is missing from the result or marked in it",
         db.read_diagnostics.warnings.join(", ")
     )
 }
@@ -377,7 +377,7 @@ fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
 }
 
 /// `uncad::parse()` reports a path it cannot read as `ParseError::Io`, and a
-/// file that is not a drawing as a bare LibreDWG error code, which is accurate
+/// DWG that is not a drawing as a bare LibreDWG error code, which is accurate
 /// but not something a user can act on without cross-referencing dwg.h. The
 /// obvious cases are checked here first so the message says what is actually
 /// wrong. Both commands read their input through here, so they word a bad

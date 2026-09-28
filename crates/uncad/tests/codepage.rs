@@ -74,7 +74,7 @@ fn text_encoding_warnings(db: &CadDatabase) -> Vec<&String> {
     db.read_diagnostics
         .warnings
         .iter()
-        .filter(|w| w.starts_with("TEXT_ENCODING"))
+        .filter(|w| w.starts_with("TEXT_ENCODING") || w.starts_with("CODEPAGE_"))
         .collect()
 }
 
@@ -108,11 +108,9 @@ fn an_unmappable_byte_becomes_a_reported_replacement_character_not_a_truncation(
     assert_eq!(text_values(&db), vec!["A\u{FFFD}B".to_string()]);
     let warnings = text_encoding_warnings(&db);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(
-        warnings[0].contains("TEXT.text_value") && warnings[0].contains("ANSI_1252 (30)"),
-        "{}",
-        warnings[0]
-    );
+    // A DXF's warning is the DXF reader's, for the file as a whole; it names
+    // the code page.
+    assert!(warnings[0].contains("ANSI_1252"), "{}", warnings[0]);
 }
 
 #[test]
@@ -364,5 +362,5 @@ fn an_r2018_dxf_mtext_that_is_not_utf8_is_reported() {
     assert_eq!(mtext_values(&db), vec!["\u{FFFD}".repeat(4)]);
     let warnings = text_encoding_warnings(&db);
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    assert!(warnings[0].contains("MTEXT.text"), "{}", warnings[0]);
+    assert!(warnings[0].starts_with("TEXT_ENCODING"), "{}", warnings[0]);
 }

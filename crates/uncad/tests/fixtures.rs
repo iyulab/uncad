@@ -88,11 +88,14 @@ fn resolved(name: &str) -> Ref<String> {
     Ref::Resolved(name.to_string())
 }
 
-/// The handle the file gave an entity, as the model records it.
+/// The handle the file gave an entity, as the model records it; `""` for
+/// an entity the file wrote without one (no group 5) -- the cp949 and
+/// mirrored fixtures write none at all.
 fn handle(entity: &Entity) -> &str {
     match &entity.common().source_handle {
         Ref::Resolved(h) => h,
-        other => panic!("every fixture entity has a handle: {other:?}"),
+        Ref::Absent => "",
+        other => panic!("a handle is written or not: {other:?}"),
     }
 }
 
@@ -144,13 +147,14 @@ fn cp949_strings_decode_through_the_file_code_page() {
     // The bytes are B5B5 B8E9 / A1BE 33 / 3332 2E35 A7B3 (README): "±" is a
     // two-byte KS X 1001 character, the case a single-byte reading gets
     // wrong.
+    // The file writes no handles.
     assert_eq!(
         texts,
         [
-            ("23", "\u{B3C4}\u{BA74}"),
-            ("24", "\u{B1}3"),
-            ("25", "32.5\u{33A1}"),
-            ("27", "PLAIN"),
+            ("", "\u{B3C4}\u{BA74}"),
+            ("", "\u{B1}3"),
+            ("", "32.5\u{33A1}"),
+            ("", "PLAIN"),
         ]
     );
     // The MTEXT keeps its format code `\P` verbatim.
@@ -188,7 +192,8 @@ fn dimlfac12_fixture_has_a_line_and_a_dimension_bound_to_its_cached_block() {
             _ => None,
         })
         .expect("DIMENSION");
-    assert_eq!(dim.common.source_handle, resolved("45"));
+    // The DIMENSION record carries no group 5: the file gives it no handle.
+    assert_eq!(dim.common.source_handle, Ref::Absent);
     // `2 *D1`, bound through the BLOCK_RECORD table, and `42 = 10.0`.
     assert_eq!(dim.block_name, resolved("*D1"));
     assert_eq!(dim.measurement, Some(10.0));
@@ -488,19 +493,18 @@ fn mirrored_ocs_entities_keep_their_stated_coordinates_and_carry_their_normal() 
     };
     let outline = [(0.0, 0.0), (100.0, 0.0), (100.0, 50.0), (0.0, 50.0)];
 
-    // Handle 20: DXF 70 = 1 with extrusion (0,0,-1); LibreDWG stores
-    // flag = 513 (512 closed | 1 has-extrusion).
+    // The first: DXF 70 = 1 with extrusion (0,0,-1). The file writes no
+    // handles.
     let mirrored = polylines[0];
-    assert_eq!(mirrored.common.source_handle, resolved("20"));
+    assert_eq!(mirrored.common.source_handle, Ref::Absent);
     assert!(mirrored.closed);
     assert_eq!(mirrored.extrusion, DOWN);
     assert_eq!(xy(mirrored), outline);
     assert_eq!(mirrored.elevation, 0.0);
 
-    // Handle 21: DXF 70 = 0 (flag = 16: neither bit set), extrusion
-    // (0,0,1) stated.
+    // The second: DXF 70 = 0, extrusion (0,0,1) stated.
     let upright = polylines[1];
-    assert_eq!(upright.common.source_handle, resolved("21"));
+    assert_eq!(upright.common.source_handle, Ref::Absent);
     assert!(!upright.closed);
     assert_eq!(upright.extrusion, UP);
     assert_eq!(xy(upright), outline);
@@ -560,13 +564,14 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
             })
             .collect()
     };
-    // The mirrored fixture: handle 20 states no bulge, handle 21 one of
-    // tan(22.5 degrees) after its second vertex -- a quarter circle.
+    // The mirrored fixture (no handles): the first polyline states no
+    // bulge, the second one of tan(22.5 degrees) after its second vertex --
+    // a quarter circle.
     assert_eq!(
         bulged_polyline(MIRRORED),
         [
-            ("20".to_string(), vec![0.0; 4], DOWN),
-            ("21".to_string(), vec![0.0, 0.41421356, 0.0, 0.0], UP),
+            (String::new(), vec![0.0; 4], DOWN),
+            (String::new(), vec![0.0, 0.41421356, 0.0, 0.0], UP),
         ]
     );
     // The same outline in a mirrored OCS keeps the sign the file wrote:
@@ -574,7 +579,7 @@ fn polyline_bulges_are_carried_as_the_file_states_them() {
     // world only once a consumer takes it there.
     assert_eq!(
         bulged_polyline(MIRRORED_BULGE),
-        [("20".to_string(), vec![0.0, 0.41421356, 0.0, 0.0], DOWN)]
+        [(String::new(), vec![0.0, 0.41421356, 0.0, 0.0], DOWN)]
     );
     // A POLYLINE_2D's bulges are its VERTEX records' (group 42): the
     // semicircle's one bulge of 1.0, and the square's none.
