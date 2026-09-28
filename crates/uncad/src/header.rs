@@ -322,14 +322,28 @@ pub(crate) unsafe fn read_header(
 /// name when not.
 pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> Header {
     let acadver = stated.text("ACADVER").map(|v| v.trim().to_string());
-    let version = acadver.as_deref().and_then(release_of_acadver);
-    let r2007_or_later = acadver.as_deref().is_some_and(|v| v >= "AC1021");
+    let version_type = acadver.as_deref().map(version_of_acadver);
+    let version = version_type.and_then(release_name);
+    #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
+    let r2007_or_later =
+        version_type.is_some_and(|v| v >= libredwg_sys::DWG_VERSION_TYPE_R_2007 as i32);
     let codepage = match stated.text("DWGCODEPAGE") {
         Some(name) => codepage_number(name.trim()),
         None if r2007_or_later => crate::text::CP_UTF16,
         None => crate::text::CP_ANSI_1252,
     };
     let u16_var = |name: &str| stated.int(name).and_then(|v| u16::try_from(v).ok());
+    // Before R11 a DXF writes the extents as a planar point (10 and 20):
+    // the drawing's plane, z = 0.
+    let point3_var = |name: &str| {
+        stated.point3(name).or_else(|| {
+            stated.point2(name).map(|p| Point3D {
+                x: p.x,
+                y: p.y,
+                z: 0.0,
+            })
+        })
+    };
     let clayer = match stated.text("CLAYER") {
         Some(name) if tables.layers.contains_key(&name) => Ref::Resolved(name),
         Some(name) => Ref::Unresolved(name),
@@ -347,12 +361,12 @@ pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> 
         luprec: u16_var("LUPREC"),
         aunits: u16_var("AUNITS"),
         auprec: u16_var("AUPREC"),
-        extmin: stated.point3("EXTMIN"),
-        extmax: stated.point3("EXTMAX"),
+        extmin: point3_var("EXTMIN"),
+        extmax: point3_var("EXTMAX"),
         limmin: stated.point2("LIMMIN"),
         limmax: stated.point2("LIMMAX"),
-        pextmin: stated.point3("PEXTMIN"),
-        pextmax: stated.point3("PEXTMAX"),
+        pextmin: point3_var("PEXTMIN"),
+        pextmax: point3_var("PEXTMAX"),
         plimmin: stated.point2("PLIMMIN"),
         plimmax: stated.point2("PLIMMAX"),
         dimscale: stated.real("DIMSCALE"),
@@ -373,14 +387,16 @@ pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> 
     }
 }
 
-/// LibreDWG's release name for a `$ACADVER` code (`AC1015` -> `r2000`), the
-/// same lookup its DXF import made.
-fn release_of_acadver(acadver: &str) -> Option<String> {
-    let code = std::ffi::CString::new(acadver).ok()?;
+/// LibreDWG's version for a `$ACADVER` code (`AC1015` -> R_2000), the same
+/// lookup its DXF import made; `R_INVALID` for a code it does not know.
+#[allow(clippy::unnecessary_cast)] // the enum's width differs by target
+fn version_of_acadver(acadver: &str) -> i32 {
+    let Ok(code) = std::ffi::CString::new(acadver) else {
+        return libredwg_sys::DWG_VERSION_TYPE_R_INVALID as i32;
+    };
     // SAFETY: a NUL-terminated string that outlives the call; the function
     // only compares it against LibreDWG's static version table.
-    let version = unsafe { libredwg_sys::dwg_version_hdr_type(code.as_ptr()) };
-    release_name(version as i32)
+    unsafe { libredwg_sys::dwg_version_hdr_type(code.as_ptr()) as i32 }
 }
 
 /// The number of the code page a `$DWGCODEPAGE` names -- LibreDWG's table,
@@ -463,6 +479,7 @@ mod tests {
         assert_eq!(h.acadver.as_deref(), Some("AC1015"));
         assert_eq!(h.version.as_deref(), Some("r2000"));
         assert_eq!(h.insunits, Some(4));
+        assert_eq!(h.extmin, None);
         // Stated empty is not unstated.
         assert_eq!(h.dimpost.as_deref(), Some(""));
         assert_eq!(h.dimscale, None);
@@ -483,6 +500,9 @@ mod tests {
         assert_eq!(h.codepage_name.as_deref(), Some("ANSI_949"));
         let h = with("  9\n$ACADVER\n  1\nAC1021\n");
         assert_eq!(h.codepage, crate::text::CP_UTF16);
+        // A pre-R10 code is not four digits; it is older, not later.
+        let h = with("  9\n$ACADVER\n  1\nAC2.10\n");
+        assert_eq!(h.codepage_name.as_deref(), Some("ANSI_1252"));
         let h = with("  9\n$ACADVER\n  1\nAC1009\n  9\n$DWGCODEPAGE\n  3\nundefined\n");
         assert_eq!(h.codepage, crate::text::CP_UNDEFINED);
         assert_eq!(h.codepage_name, None);
