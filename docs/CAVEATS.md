@@ -885,7 +885,7 @@ extract the same wireframe for every solid.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries ten local patches, in seven files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches, in four files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -899,24 +899,8 @@ the files and the copy disagree. `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
 a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file
-(line endings aside), the two trees differ in exactly these seven files.
+(line endings aside), the two trees differ in exactly these four files.
 
-- **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
-  `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
-  for DXF and JSON input even when the record's name is stored as UTF-16 -- which it is for
-  an R2007+ DXF (see "DXF saved as R2007 or later is read, each string in the width it was
-  stored in" above). So "Tavolo 3" compared as "T", and every name the importer resolves while it
-  builds the drawing (the group 8 layer, the group 2 block name, the linetype, text
-  style, dimstyle, UCS, VPORT and APPID names) failed for any name longer than one
-  character. The three functions now share one helper, `uncad_record_name_utf8()`, whose
-  predicate `UNCAD_IS_TU_DWG()` is the one the storage actually follows, and the one
-  `crates/uncad/src/text.rs` reads the strings by. The patch deliberately stops there: the strings
-  `in_dxf.c` stores through `dwg_add_u8_input()` (`DICTIONARY.texts`,
-  `LTYPE.dashes[].text`) really are 8-bit for DXF input, so `dwg_find_dictionary()` and
-  `dwg_find_dicthandle()` keep the original predicate. LibreDWG has the same gap; it is not
-  reported there yet. `crates/uncad/tests/r2007_dxf_handles.rs` is the regression: without
-  the patch its three tests fail, `example_2018.dxf` putting 65 of its 72 entities on no
-  layer, and so do `tests/dxf_pipeline.rs`'s two R2007+ twin tests.
 - **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
   and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
   caller passes the result straight to `strftime()` (`dec_macros.h`'s `FIELD_TIMEBLL` and
@@ -937,19 +921,6 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   is one abort fixed, not a guarantee: the decoder is ~100 000 lines of C over
   attacker-controlled offsets and lengths, so a service that parses untrusted drawings
   should still do it in a process it can afford to lose.
-- **`src/in_dxf.c` and `src/dynapi.c`** -- a polygon mesh's vertices carry the subclass
-  marker `AcDbPolygonMeshVertex`, which appeared nowhere in LibreDWG: the VERTEX_2D
-  upgrade chain in `in_dxf.c` knows `AcDb3dPolylineVertex`, `AcDbPolyFaceMeshVertex` and
-  `AcDbFaceRecord` only, and `dwg_name_subclasses[]` does not list it either. The object
-  stayed a VERTEX_2D, failed the "is this subclass allowed in this object" check and took
-  `goto invalid_dxf` -- `DWG_ERR_INVALIDDWG`, a *critical* error, so **the whole file was
-  refused**. One POLYLINE written by REVSURF, RULESURF, EDGESURF or `ezdxf.add_polymesh()`
-  cost every other entity in the DXF. The patch adds the missing spelling to the upgrade
-  chain (to VERTEX_MESH, which is where the neighbouring branch already sends a polygon
-  mesh's vertices) and to VERTEX_MESH's subclass list.
-  `crates/uncad/tests/vendored_patches.rs` is the regression: the corpus
-  `2000/entities-2d.dxf` with one 2 x 2 polygon mesh added reads with every one of its own
-  entities, where it was critical error 2048 without the patch.
 - **`src/common_entity_data.spec`** -- for an R2004+ entity whose ENC flag has both `0x80`
   (an inline RGB follows) and `0x20` (a transparency follows), the spec read the two BLs
   in the wrong order, so the colour landed in `alpha_raw` and the transparency in `rgb`.
@@ -964,28 +935,6 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
   colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
   true colour is what the file states" for how the colour is read).
-- **`src/in_dxf.c`**, a HATCH spline edge -- two misreadings of the same edge. The
-  format writes a rational spline edge's weights in group 42, after its control points;
-  the importer had no handler for a 42 on an edge path (it takes a 40 after the knots as a
-  weight instead, which no writer met so far does), so every DXF weight arrived as 0. And
-  fit data (a 97 count, then fit points and end tangents) came with R2010: before it, the
-  97 after a spline edge is the path's own count of the objects its boundary was picked
-  from. The importer read it as a fit-point count whatever the version, so an associative
-  R2000 hatch whose path ends in a spline edge came back with a made-up fit point and end
-  tangents of (0, 0), and the path's handles were dropped. The patch reads 42 into the
-  control points' weights in order and takes the 97 as the path's before R2010.
-  `tests/hatch_edges.rs` (an R2010 edge: weights `[1, 0.5, 0.5, 1]`, zeros without the
-  patch) and the golden case G17 (`tests/golden.rs` -- an R2000 file: two associative
-  hatches, one with a rational spline edge ending its path, one with a second path after
-  it; without the patch, zero weights and a fit point and tangents where the file states
-  none) are the regressions.
-- **`src/in_dxf.c`**, an entity's transparency (DXF 440) -- the value is the one a DWG
-  stores (`common_entity_data.spec`: the method in the high byte, the alpha in the low one),
-  but the importer took the alpha from the high byte, the method from the value shifted by 8,
-  and never set `alpha_raw`, the field a DWG's transparency is read from. Every
-  transparency a DXF stated read as BYLAYER. The patch stores the value in `alpha_raw` and
-  splits it the way the DWG decoder does. `tests/entity_style.rs` is the regression: a
-  stated `0x020000CC` reads as that, where it was 0 without the patch.
 - **`src/common_entity_data.spec`**, an R13/R14 entity's linetype -- those releases store
   one bit, "BYLAYER", and otherwise a handle to the LTYPE record (which may be the BYBLOCK
   record). The decoder derived the later releases' linetype flags from the bit only when

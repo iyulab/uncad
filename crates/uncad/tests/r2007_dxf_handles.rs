@@ -1,21 +1,11 @@
 //! An R2007+ DXF must resolve its entities' *handle-borne* names -- the
 //! layer every entity points at and the block record every INSERT points at
-//! -- exactly as the DWG of the same drawing does.
-//!
-//! LibreDWG's DXF importer stores table-record names as UTF-16 as soon as
-//! `$ACADVER` is AC1021 or later (its field setter widens every string once
-//! `header.version >= R_2007`), but its own name->handle lookups read those
-//! names back as 8-bit C strings, which stop at the first NUL. So every name
-//! longer than one character compared as just its first letter,
-//! `entity->layer` and `INSERT->block_header` were left NULL, and the only
-//! entities with a layer were those on layer `0`. The fix is the
-//! `uncad local patch` block in `crates/libredwg-sys/vendor/libredwg/src/dwg.c`
-//! (see `docs/CAVEATS.md`, "Local patches to the vendored LibreDWG"): these
-//! tests are what pins it. This crate's half -- reading each string in the
-//! width it was stored in -- is `crates/uncad/src/text.rs`.
+//! -- exactly as the DWG of the same drawing does. An R2007+ DXF is UTF-8,
+//! and a name longer than one character is the case a reader that took its
+//! strings in the wrong width would get wrong.
 //!
 //! The corpus carries the same drawing in both formats, which makes the DWG
-//! an independent reference for the DXF: two different decoders, one
+//! an independent reference for the DXF: two different readers, one
 //! drawing. The absolute numbers below were derived a third way -- by
 //! walking the DXF's own text -- and each assertion says how.
 
@@ -127,13 +117,14 @@ fn the_r2018_dxf_layers_and_block_names_match_the_dxf_text() {
 
     // Derived independently of this crate, by walking example_2018.dxf's own
     // group codes: for every record in its ENTITIES section (skipping the
-    // VERTEX and SEQEND sub-records, which LibreDWG folds into their owning
+    // VERTEX and SEQEND sub-records, which belong to their owning
     // POLYLINE/INSERT), the group 8 value. That walk yields
     // {"Tavolo 3": 57, "Tavolo 2": 7, "0": 6, "*ADSK_SYSTEM_LIGHTS": 1} over
     // 71 records. The seventh layer-`0` entity is the second paper-space
-    // VIEWPORT: the ENTITIES section spells out one VIEWPORT record, and
-    // LibreDWG materialises the layout's own viewport alongside it (the DWG
-    // decoder produces the same pair, which is why both formats report 2).
+    // VIEWPORT: the ENTITIES section spells out one VIEWPORT record, and the
+    // layout's own viewport is written in its paper-space block in BLOCKS
+    // (the DWG decoder produces the same pair, which is why both formats
+    // report 2).
     let expected: BTreeMap<String, usize> = [
         ("*ADSK_SYSTEM_LIGHTS", 1),
         ("0", 7),
@@ -172,13 +163,11 @@ fn the_r2018_dxf_layers_and_block_names_match_the_dxf_text() {
 
 #[test]
 fn every_readable_r2007_plus_corpus_dxf_resolves_its_entity_layers() {
-    // The same failure hit every R2007+ DXF in the corpus, not just the one
-    // above; sample_2007/sample_2010 came back as {"": 4, "0": 2}. A layer
-    // that is not resolved means the entity's layer handle did not match
-    // its table row. (2010/gh209_1.dxf is not in this list: LibreDWG's
-    // importer leaves every one of its entities without a layer handle,
-    // with and without the patch -- an absent reference, reported as such.)
+    // Every R2007+ DXF of the corpus, not just the one above. A layer that
+    // is not resolved means the entity names a layer its table does not
+    // declare.
     for name in [
+        "2010/gh209_1.dxf",
         "example_2007.dxf",
         "example_2010.dxf",
         "example_2013.dxf",
