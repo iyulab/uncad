@@ -268,10 +268,6 @@ fn main() {
         .allowlist_function("dwg_codepage_uc")
         .allowlist_function("dwg_codepage_uwc")
         .allowlist_function("dwg_codepage_dxfstr")
-        // The library's own RGB for an ACI index (its palette, not the
-        // model's display one): what split_entity_color compares a colour's
-        // RGB with.
-        .allowlist_function("dwg_rgb_palette_index")
         // The handle of the object a type-specific struct pointer belongs
         // to, for naming a string in a diagnostic.
         .allowlist_function("dwg_obj_generic_handlevalue")

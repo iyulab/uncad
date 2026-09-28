@@ -614,6 +614,25 @@ fn a_leaders_omitted_flags_read_as_unstated() {
     assert_eq!((omitted.has_arrowhead, omitted.path_type), (None, None));
 }
 
+/// The same, on a leader an application wrote: LEADER 22E of the corpus
+/// `2000/TS1.dxf` states neither group 71 nor group 72.
+#[test]
+fn a_corpus_leader_that_omits_its_flags_reads_them_as_unstated() {
+    let path = format!(
+        "{}/../../lib/libredwg/test/test-data/2000/TS1.dxf",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let db = uncad::parse(&path).expect("the corpus drawing parses");
+    let leader = db
+        .all_entities()
+        .find_map(|e| match e {
+            Entity::Leader(l) if l.common.source_handle == Ref::Resolved("22E".into()) => Some(l),
+            _ => None,
+        })
+        .expect("the leader, handle 22E");
+    assert_eq!((leader.has_arrowhead, leader.path_type), (None, None));
+}
+
 /// A leader's arrowhead flag from DWG, across versions, against the text
 /// twin that states it (group 71 = 0 on this leader in every version).
 ///
