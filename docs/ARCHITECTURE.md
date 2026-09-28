@@ -16,7 +16,7 @@ crates/
                          opaque types, a walker that flattens nested structs dynapi
                          cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
                          conversion that runs on a copy rather than the original,
-                         readers that decode a DWG or DXF from a memory buffer rather
+                         a reader that decodes a DWG from a memory buffer rather
                          than a path, and the file-header fields (version, codepage,
                          string width, a pre-R13 header's length, whether the Template
                          section was read) that decoding a drawing's text and header
@@ -25,13 +25,14 @@ crates/
                          ones carrying a local patch are listed in NOTICE.md
     vendor-config/       config.h -- hand-written, standing in for autotools' output
     examples/            smoke.rs -- manual check of the raw FFI (see "Test layout")
-  uncad/                 the safe API, layered: dynapi.rs (reflection helpers) ->
-                         convert.rs (raw Dwg_Data* -> uncad_model's Entity) ->
-                         table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/MLINESTYLE and
-                         LAYOUT with its plot settings), with acis.rs
-                         for 3DSOLID wireframes; header.rs and text.rs decode the
-                         header variables and strings. The model and its JSON form
-                         are the uncad-model crate's; SVG/PNG rendering is the
+  uncad/                 the safe API. A DXF is read by the undxf crate (pure Rust);
+                         a DWG goes through the layers here: dynapi.rs (reflection
+                         helpers) -> convert.rs (raw Dwg_Data* -> uncad_model's
+                         Entity) -> table_convert.rs (LAYER/BLOCK_RECORD/DIMSTYLE/
+                         MLINESTYLE and LAYOUT with its plot settings), with acis.rs
+                         for 3DSOLID wireframes; header.rs (both formats) and text.rs
+                         decode the header variables and strings. The model and its
+                         JSON form are the uncad-model crate's; SVG/PNG rendering is the
                          iron-render-cad crate's (uncad-cli and this crate's tests use
                          it). Read-only: there is no DWG/DXF write path.
     tests/               integration tests against the public API (dxf_pipeline.rs,
@@ -151,9 +152,8 @@ reflection API keyed by string field name, with runtime type and range checks.
 dynapi reports against the requested Rust type's size so a wrong type mapping fails loudly
 instead of quietly corrupting data. Text fields come back undecoded on purpose, as LibreDWG
 hands them out: a UTF-8 copy it converted (R2007+ DWG), or the stored string -- codepage
-bytes before R2007, and in an R2007+ DXF the UTF-16 its importer wrote or, for the few
-fields it copies byte for byte, the file's UTF-8. `uncad::text::TextDecoder` (one per
-`parse()`) says which width a stored string is read in and is the only place any of them
+bytes before R2007. `uncad::text::TextDecoder` (one per DWG read) says which width a
+stored string is read in and is the only place any of them
 become `String`s -- through LibreDWG's codepage tables where a codepage applies, with what
 could not be decoded reported in `read_diagnostics` (see `docs/CAVEATS.md`).
 
@@ -182,10 +182,11 @@ immediately, so the rest of the code only ever compares one canonical type.
 ## Thread safety
 
 The LibreDWG C library is not thread-safe: it has non-reentrant global state such as
-`loglevel`. The `uncad` crate serializes every FFI entry point through a process-wide
-`Mutex` (recovering from poisoning rather than propagating it) and so offers a safe public
-API. Using `libredwg-sys` directly means upholding that constraint yourself -- concurrent
-calls have reproducibly caused `STATUS_HEAP_CORRUPTION`.
+`loglevel`. The `uncad` crate serializes every DWG read through a process-wide `Mutex`
+(recovering from poisoning rather than propagating it) and so offers a safe public API. A
+DXF read runs no C code: it takes no lock, and DXF reads run in parallel. Using
+`libredwg-sys` directly means upholding that constraint yourself -- concurrent calls have
+reproducibly caused `STATUS_HEAP_CORRUPTION`.
 
 ## Model: `uncad-model`'s `CadDatabase`, with `Dwg_Data` living only inside `parse()`
 
@@ -196,8 +197,9 @@ this crate depends on by version and re-exports as `uncad::model` / `uncad::tabl
 paper spaces own), `tables` (LAYER, every BLOCK_RECORD, DIMSTYLE, MLINESTYLE, and the
 LAYOUTs with their plot settings) and `read_diagnostics` (the reader's non-fatal
 warnings). `parse()` reads the file into memory itself (LibreDWG's own readers `fopen()` a
-path, which on Windows cannot open a non-ASCII one), and the `Dwg_Data` that the shim's
-`uncad_dwg_read_bytes`/`uncad_dxf_read_bytes` fill from those bytes is walked inside
+path, which on Windows cannot open a non-ASCII one). A DXF's bytes go to undxf, which
+returns the model and the stated header variables, and never cross the FFI boundary. A
+DWG's go to the shim's `uncad_dwg_read_bytes`, and the `Dwg_Data` it fills is walked inside
 `parse()` (`convert_entities`, `convert_tables`, then the header read), freed with
 `dwg_free` immediately afterwards, and never reaches the return value. The hub of
 "DWG/DXF -> one model -> several outputs" is therefore the model
@@ -219,12 +221,13 @@ that needs them gets them beside the model, as this crate's own `uncad::Header`,
 project offers no writing (0.1.0's `write_dwg`/`write_dxf`/`dwg_to_dxf` were removed; see
 `CHANGELOG.md`).
 
-The C build still includes the encoder sources and defines `USE_WRITE`, because reading
-depends on them: `dwg.c` gates `dxf_read_file()` on `USE_WRITE`, `in_dxf.c` uses
-`encode.c`'s handle post-processing helpers, and `out_dxf.c` hosts
-`dwg_convert_SAB_to_SAT1`, which the 3DSOLID wireframe extraction needs. No write entry
-point is bound to Rust: `dwg_write_file` is left out of the bindgen allowlist and the DXF
-write shim was deleted.
+The C build still includes the encoder sources and defines `USE_WRITE`, because the
+sources this crate needs reference them: with `USE_WRITE`, `dwg.c` defines
+`dxf_read_file()`, which calls `in_dxf.c`'s DXF reader, which uses `encode.c`'s handle
+post-processing helpers -- so both are compiled, although nothing in this crate calls that
+reader -- and `out_dxf.c` hosts `dwg_convert_SAB_to_SAT1`, which the 3DSOLID wireframe
+extraction needs. No write entry point is bound to Rust: `dwg_write_file` is left out of
+the bindgen allowlist.
 
 ## The entity model and block-based traversal
 
@@ -258,7 +261,7 @@ edges it could not resolve. It is not a general ACIS/B-rep parser -- curved edge
 approximated as chords, and faces and surfaces are not interpreted at all, so the result is
 always a wireframe, never a filled solid. `crates/uncad/src/acis.rs` is the part that needs
 LibreDWG: it reads the entity's ACIS fields through dynapi and, for a binary body, converts
-it to SAT text first.
+it to SAT text first. A DXF's SAT text is read by undxf and goes to the same function.
 
 A solid stored as SAB (v2, binary) has to be converted to SAT text first, and LibreDWG's
 `dwg_convert_SAB_to_SAT1` converts **in place**: it sets `version` to 1, fills

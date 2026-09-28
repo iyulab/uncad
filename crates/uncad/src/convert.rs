@@ -39,11 +39,11 @@ const POLYLINE_CLOSED_FLAG: u16 = 1;
 
 /// The `flag` bit that means "closed" on LWPOLYLINE: **512**, not 1. The
 /// library stores LWPOLYLINE's flag in its DWG layout, where bit 1 means
-/// "has extrusion" and 512 means closed (`dwg.h`, `Dwg_Entity_LWPOLYLINE`);
-/// its DXF importer maps group 70 bit 1 onto 512 accordingly. Reading bit 1
-/// here reported every closed LWPOLYLINE as open -- across the whole corpus
-/// (1,137 of them) not one came back closed. Caught by a synthetic drawing
-/// whose spec said "closed" and whose outline came back as an open polyline.
+/// "has extrusion" and 512 means closed (`dwg.h`, `Dwg_Entity_LWPOLYLINE`).
+/// Reading bit 1 here reported every closed LWPOLYLINE as open -- across
+/// the whole corpus (1,137 of them) not one came back closed. Caught by a
+/// synthetic drawing whose spec said "closed" and whose outline came back
+/// as an open polyline.
 const LWPOLYLINE_CLOSED_FLAG: u16 = 512;
 
 /// The LWPOLYLINE `flag` bit that says the record stores an extrusion. The
@@ -179,11 +179,9 @@ pub unsafe fn convert_entities(
 /// owns them and are read from *its* chain (see [`polyline_vertex_records`]),
 /// not drawing content of the block. That is the contract LibreDWG
 /// documents for `get_next_owned_entity` ("Not subentities: ATTRIB,
-/// VERTEX") and what the R13..R2000 walk here implements -- but the
-/// library's walker for other versions hands back whatever its list holds,
-/// and the DXF importer fills that list with every object between a BLOCK
-/// and its ENDBLK. Each polyline's vertices came back as entities of their
-/// own: in a drawing older than R13, one `VERTEX_2D` "entity" per vertex.
+/// VERTEX") and what the R13..R2000 walk here implements. The library's
+/// walker for other versions hands back whatever its list holds, so the
+/// VERTEX kinds are skipped here too.
 ///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `block_obj` was obtained from;
@@ -214,8 +212,7 @@ pub(crate) unsafe fn owned_entities(
 }
 
 /// The object a handle reference points at: the pointer the reference
-/// already carries, or a lookup by handle when it carries none -- which is
-/// the state the DXF importer leaves `first_attrib`/`last_attrib` in.
+/// already carries, or a lookup by handle when it carries none.
 ///
 /// # Safety
 /// `dwg` must be live, and `reference` either null or a valid
@@ -317,13 +314,12 @@ unsafe fn chained_block_entities(
 /// An INSERT's attributes in an R13..R2000 drawing, walked here rather than
 /// through the library's `get_first_owned_subentity`.
 ///
-/// Two sources, tried in order. The `attribs[]` array (`num_owned` long) is
-/// what the DXF importer fills correctly; its `first_attrib`/`last_attrib`
-/// links are not usable after an import (measured: `first_attrib` with a zero
-/// handle and no object, `last_attrib` pointing at an unrelated object), and
-/// the library's walker reads `first_attrib->obj` without resolving it, so
-/// every attribute of an imported INSERT was lost. A drawing decoded from
-/// DWG carries the chain and no array, so the chain is the fallback.
+/// Two sources, tried in order: the `attribs[]` array (`num_owned` long)
+/// when it is present, and otherwise the `first_attrib` .. `last_attrib`
+/// chain, which is what a drawing decoded from DWG carries. The chain is
+/// walked here because the library's walker reads `first_attrib->obj`
+/// without resolving it, so a link that carries only a handle ends the
+/// walk before its first attribute.
 ///
 /// Either source is data from the file, so both are bounded: only ATTRIB
 /// objects are converted (an INSERT owns nothing else, and converting what
@@ -445,12 +441,8 @@ unsafe fn is_attrib(obj: *mut libredwg_sys::Dwg_Object) -> bool {
 /// so a polyline arrived one vertex short -- a file's DXF twin writes the
 /// vertex they drop.
 ///
-/// A polyline from R13 on can also own none of the records that follow it:
-/// the DXF importer attaches a VERTEX to its polyline by the owner the
-/// VERTEX names (group 330), and a file whose vertices name the block record
-/// instead -- the shape ezdxf writes for a polyface and a polygon mesh --
-/// leaves the polyline's own list empty. Its records are then the ones that
-/// follow it in the object stream, as before R13.
+/// A polyline from R13 on whose own list is empty takes the records that
+/// follow it in the object stream instead, as before R13.
 ///
 /// The records are data from the file, so both walks are bounded: the one
 /// through the object stream by the number of objects, the owned one by
@@ -628,14 +620,8 @@ fn extrusion(entity_ptr: *mut std::ffi::c_void, dxfname: &str) -> Point3D {
 /// the sign carries no other meaning, so it is just dropped) -- directly;
 /// LibreDWG's own accessor for this type is documented as not implemented.
 ///
-/// A position vertex is a `VERTEX_PFACE` *or* a `VERTEX_MESH`. Both mean the
-/// same thing inside a POLYLINE_PFACE's own chain, and the DXF importer hands
-/// back the second one for a polyface whose `AcDbPolyFaceMeshVertex` records
-/// name the block record as their owner rather than the POLYLINE: `in_dxf.c`
-/// picks between the two types by looking the VERTEX's own group 330 up and
-/// asking whether it is a POLYLINE_PFACE, and falls back to VERTEX_MESH when
-/// it is not. ezdxf writes exactly that shape (and its `audit()` passes it),
-/// and such a polyface found no positions at all.
+/// A position vertex is a `VERTEX_PFACE` *or* a `VERTEX_MESH`: both mean the
+/// same thing inside a POLYLINE_PFACE's own chain.
 ///
 /// Face records may be interleaved with vertex records, so indices are only
 /// resolved once the whole chain has been walked. A face with fewer than two
@@ -1296,8 +1282,8 @@ unsafe fn convert_entity(
 
             // ATTRIBs are owned by the INSERT itself -- a separate ownership
             // relationship from BLOCK_HEADER -> entity. R13..R2000 chains
-            // them and the library's own walker cannot follow a chain the
-            // DXF importer built (see chained_insert_attribs); from R2004 on
+            // them and the library's own walker does not resolve a link that
+            // carries only a handle (see chained_insert_attribs); from R2004 on
             // they are an owned array the library resolves correctly, walked
             // from the INSERT's own Dwg_Object rather than from entity_ptr
             // (the type-specific struct dynapi needs, a different pointer).
@@ -1426,19 +1412,16 @@ unsafe fn convert_entity(
             // The curve's definition -- its knots, and its weights when it
             // has them -- goes with its control points, whichever form the
             // record is flagged as. A DWG record of the fit-point form stores
-            // none of them; a DXF of that form writes the control points and
-            // knots its program computed, and they define the curve all the
-            // same.
+            // none of them.
             let knots = if control.is_empty() {
                 Vec::new()
             } else {
                 get_array_field::<u32, f64>(entity_ptr, "SPLINE", "num_knots", "knots")
             };
-            // Weights are stated when the record says it is weighted, or --
-            // read from a DXF -- when a group 41 gave one: the importer fills
-            // `w` from 41 but sets the weighted bit from another bit of group
-            // 70. The library leaves `w` at 0 where no weight was given,
-            // which is not a weight. No weights means every weight is 1.
+            // Weights are stated when the record says it is weighted, or when
+            // a control point carries one. The library leaves `w` at 0 where
+            // no weight was given, which is not a weight. No weights means
+            // every weight is 1.
             let weighted = get_field::<u8>(entity_ptr, "SPLINE", "weighted") == Some(1);
             let weights = if !control.is_empty() && (weighted || control.iter().any(|p| p.w != 0.0))
             {
@@ -2418,27 +2401,24 @@ fn entity_color(entity_ptr: *mut std::ffi::c_void) -> (i16, Option<u32>) {
 }
 
 /// Decides whether a `Dwg_Color` read off an *entity* really states a direct
-/// RGB, from the three fields the two readers fill differently. Testing
-/// `method == TRUECOLOR` alone is wrong in both directions:
+/// RGB. Testing `method == TRUECOLOR` alone is wrong for a DWG: from R2004
+/// `bit_read_ENC` puts the 420 value in `rgb` under `flag & 0x80` and
+/// leaves `method` at 0, so a real true colour would be dropped. The flag
+/// decides first.
 ///
-/// * **DWG, R2004+** -- `bit_read_ENC` puts the 420 value in `rgb` under
-///   `flag & 0x80` and leaves `method` at 0, so a real true colour was
-///   dropped: no entity of any corpus DWG reported one.
-/// * **DXF** -- `dxf_set_CMC_index` (in_dxf.c) answers a plain group 62 with
-///   `method = 0xc3` and an `rgb` *synthesised* from LibreDWG's own ACI
-///   palette, so an entity that states only an index was reported as
-///   carrying an RGB the file never wrote. A real group 420 instead takes the
-///   `color.method = value >> 24` path, which is 0 for a plain 24-bit value.
-///
-/// `palette` is the RGB the library synthesises for an ACI index -- its own
-/// table (`dwg_rgb_palette_index`), which is not the display palette the
-/// model publishes; the two disagree on most indices, and only the
-/// library's tells a synthesised RGB from a stated one.
+/// Past the flag, the method-byte test follows LibreDWG's own colour
+/// conventions (the ones its DXF import writes, which this crate does not
+/// use for reading): a method byte of VOID, ACI or TRUECOLOR with a non-zero
+/// RGB is a stated colour unless the RGB is the library's own palette entry
+/// for the index. `palette` is that table (`dwg_rgb_palette_index`), which
+/// is not the display palette the model publishes. `bit_read_ENC` leaves
+/// the method byte at 0, so for an R2004+ DWG entity without the flag this
+/// reduces to a non-zero RGB that is not the palette's entry.
 ///
 /// Two cases stay indistinguishable from the fields available and are
-/// reported as "no true colour", which renders identically either way: a
-/// group 420 of pure black (`rgb` 0 is also what an untouched field holds),
-/// and a group 420 that repeats the library's RGB for the entity's own ACI
+/// reported as "no true colour", which renders identically either way: an
+/// RGB of pure black (`rgb` 0 is also what an untouched field holds), and
+/// an RGB that repeats the library's palette entry for the entity's own ACI
 /// index exactly.
 fn split_entity_color(
     index: i16,
@@ -2454,10 +2434,10 @@ fn split_entity_color(
     if flag & COLOR_FLAG_INLINE_RGB != 0 {
         return (index, Some(rgb24));
     }
-    // The DXF reader's method byte. VOID (0) is a plain 24-bit group 420;
-    // ACI (0xc2) and TRUECOLOR (0xc3) are a pre-tagged one -- except that
-    // 0xc2 with no RGB is how it spells BYLAYER and 0xc3 with the palette's
-    // own entry is how it spells a plain group 62.
+    // The method byte, in LibreDWG's conventions. VOID (0) is a plain
+    // 24-bit group 420; ACI (0xc2) and TRUECOLOR (0xc3) are a pre-tagged one
+    // -- except that 0xc2 with no RGB spells BYLAYER and 0xc3 with the
+    // palette's own entry spells a plain group 62.
     let tagged_rgb = matches!(
         method,
         libredwg_sys::DWG_COLOR_METHOD_DWG_COLOR_METHOD_VOID
@@ -2869,10 +2849,11 @@ mod tests {
     }
 
     /// Each case below is the `(index, flag, method, rgb)` LibreDWG leaves in
-    /// `Dwg_Color` for one way of writing a colour, read off the reader that
-    /// writes it: `bit_read_ENC` / `common_entity_data.spec` for the DWG
-    /// rows and `dxf_set_CMC_index` / the group-420 arm of the common-entity
-    /// loop in `in_dxf.c` for the DXF ones.
+    /// `Dwg_Color` for one way of writing a colour: `bit_read_ENC` /
+    /// `common_entity_data.spec` for the DWG rows, and for the rows marked
+    /// DXF the conventions of LibreDWG's own DXF import (`dxf_set_CMC_index`
+    /// and the group-420 arm of the common-entity loop in `in_dxf.c`), which
+    /// this crate does not use for reading but the function still accepts.
     #[test]
     fn split_entity_color_follows_what_each_reader_actually_stores() {
         // --- R2004+ DWG (bit_read_ENC): flag 0x80 says an RGB follows, and

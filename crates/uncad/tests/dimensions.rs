@@ -2,10 +2,10 @@
 //! group, the measurement the file stored, its text and style. Sources: the
 //! `dimlfac12_r2000.dxf` fixture (ground truth in tests/fixtures/README.md),
 //! the corpus's `example_2000.dwg` and its text twin -- the same drawing
-//! through LibreDWG's DWG decoder and its DXF importer, which lay two kinds'
-//! points out differently -- `2000/TS1.dwg` for the radial and 3-point
-//! kinds `example_2000` lacks, and the `example_2007` / R13 / R14 family,
-//! the same drawing with and without a stored measurement.
+//! through the DWG and the DXF reader, for two kinds whose points a DWG
+//! stores in other fields than their groups -- `2000/TS1.dwg` for the
+//! radial and 3-point kinds `example_2000` lacks, and the `example_2007` /
+//! R13 / R14 family, the same drawing with and without a stored measurement.
 //!
 //! How a measurement is displayed, and whether it agrees with the points,
 //! are consumers' questions: the model carries what the file states.
@@ -88,10 +88,10 @@ fn the_fixture_dimension_carries_its_value_points_and_style() {
 }
 
 /// `example_2000.dxf` is AutoCAD's DXF of `example_2000.dwg`, so every
-/// dimension must come out the same whichever of LibreDWG's readers read
-/// it -- in particular the 2-line angular (43B, 108 degrees) and the
-/// X-type ordinate (430, 4630.52), whose points and axis the DXF importer
-/// stores in different fields from the DWG decoder.
+/// dimension must come out the same whichever reader read it -- in
+/// particular the 2-line angular (43B, 108 degrees) and the X-type ordinate
+/// (430, 4630.52), whose points and axis the DWG decoder stores in other
+/// fields than their DXF groups.
 #[test]
 fn the_dwg_and_dxf_readers_agree_on_every_dimension() {
     let (dwg, dxf) = (corpus("example_2000.dwg"), corpus("example_2000.dxf"));
@@ -118,8 +118,7 @@ fn the_dwg_and_dxf_readers_agree_on_every_dimension() {
         }
         // An arc-length dimension without a leader is where the two readers
         // part: the DWG record states group 16 whatever the leader, and the
-        // DXF importer leaves the group zero when the file omits it, so the
-        // DXF side cannot tell a stated point from silence and says none.
+        // DXF may leave the group out, which is not stated.
         let leaderless_arc_length =
             a.kind == Some(DimensionKind::ArcLength) && b.points.arc.is_none();
         if leaderless_arc_length {

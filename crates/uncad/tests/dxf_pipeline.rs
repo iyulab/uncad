@@ -21,9 +21,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A DXF from the LibreDWG corpus (R2000, a version LibreDWG's DXF reader
-/// handles well -- see `docs/CAVEATS.md`, "DXF reading"); the same fixture the
-/// CLI tests use.
+/// A DXF from the LibreDWG corpus (R2000); the same fixture the CLI tests
+/// use.
 const CORPUS_DXF: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../lib/libredwg/test/test-data/2000/entities-2d.dxf"
@@ -179,8 +178,8 @@ fn a_trace_written_by_a_cad_program_fills_as_a_simple_quadrilateral() {
 
 #[test]
 fn no_corpus_example_makes_the_parser_panic() {
-    // Whether each of these parses is LibreDWG's business (see
-    // `docs/CAVEATS.md`, "DXF reading"); that none of them brings the process
+    // Whether each of these parses is the readers' business (see
+    // `docs/CAVEATS.md`, "DXF"); that none of them brings the process
     // down is this crate's. A polyface mesh with an unused face slot used to
     // underflow an index here, in debug builds only.
     let dir = Path::new(CORPUS_DXF)
@@ -204,13 +203,10 @@ fn no_corpus_example_makes_the_parser_panic() {
 
 // --- R2007+ DXF reads, and reads like its DWG twin ------------------------
 //
-// LibreDWG's DXF importer stores an R2007+ file's strings in two widths
-// (`docs/CAVEATS.md`, "DXF saved as R2007 or later"), and until both were
-// read in the right one such a file came back as a drawing with no entities
-// and no error -- which is why it used to be refused. Two tests pin the
-// reading from both sides the refusal was pinned from: every corpus DXF of
-// that age, against the DWG of the same drawing where the corpus has one;
-// and one drawing under several `$ACADVER` stamps, against itself.
+// An R2007+ DXF is UTF-8 text (`docs/CAVEATS.md`, "DXF"). Two tests pin its
+// reading from two sides: every corpus DXF of that age, against the DWG of
+// the same drawing where the corpus has one; and one drawing under several
+// `$ACADVER` stamps, against itself.
 
 /// Root of the LibreDWG corpus (submodule); every `.dxf` under it is walked.
 const CORPUS_ROOT: &str = concat!(
@@ -341,16 +337,13 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin() {
         "R2007+ corpus DXF: {} read ({twins} against a DWG twin)",
         read.len()
     );
-    // Every one reads: 32, 28 of them against a DWG twin. (27 and 24 while
-    // DXF went through LibreDWG's importer, which failed on five.)
+    // Every one reads: 32, 28 of them against a DWG twin.
     assert_eq!((read.len(), twins), (32, 28));
 }
 
 /// The corpus R2000 drawing with its `$ACADVER` value line rewritten -- the
 /// same file otherwise, so every reading of it differs in nothing but the
-/// version stamp. (A synthetic HEADER holding only `$ACADVER` is not
-/// enough for LibreDWG's importer, which is why the drawing is not built
-/// from scratch.)
+/// version stamp.
 fn corpus_dxf_stamped(acadver: &str) -> String {
     let text = fs::read_to_string(CORPUS_DXF).expect("the corpus DXF should be readable text");
     let at = text
@@ -375,10 +368,10 @@ fn corpus_dxf_stamped(acadver: &str) -> String {
 
 #[test]
 fn the_same_drawing_reads_the_same_whatever_release_it_is_stamped() {
-    // The drawing is its own reference: stamped R2007 and later, the
-    // importer stores every string it sets as UTF-16 instead of 8-bit, and
+    // The drawing is its own reference: whatever release it is stamped,
     // nothing of what comes out may change -- not a name, not a text, not a
-    // reference. Restamping with the file's own version is the null control.
+    // reference -- beyond what the release itself decides. Restamping with
+    // the file's own version is the null control.
     let reference = uncad::parse(CORPUS_DXF).expect("the untouched corpus DXF should parse");
     assert!(!reference.entities.is_empty());
     for acadver in ["AC1015", "AC1018", "AC1021", "AC1024", "AC1027", "AC1032"] {

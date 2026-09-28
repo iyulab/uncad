@@ -1,20 +1,22 @@
 use std::path::{Path, PathBuf};
 
-// Core LibreDWG sources actually needed for DWG/DXF *reading*, mirroring the
-// former WASM build's `emmake make -C src` scope (which itself excludes
-// examples/programs/test/). JSON/GeoJSON in/out modules are excluded outright
-// (not compiled-and-ifdef'd-out) since this project never enables them --
-// matches the WASM build's `--disable-json` flag.
+// Core LibreDWG sources needed for DWG *reading* (a DXF is read by the
+// undxf crate, not by LibreDWG), mirroring the former WASM build's
+// `emmake make -C src` scope (which itself excludes examples/programs/test/).
+// JSON/GeoJSON in/out modules are excluded outright (not compiled-and-
+// ifdef'd-out) since this project never enables them -- matches the WASM
+// build's `--disable-json` flag.
 //
-// encode.c/encode2.c/out_dxf.c/out_dxfb.c are *writer* sources, and nothing
-// in this workspace writes DWG or DXF any more (the write API was removed --
-// see CHANGELOG.md). They stay compiled because reading depends on them:
-// dwg.c gates dxf_read_file() on USE_WRITE, in_dxf.c calls encode.c's
+// in_dxf.c is LibreDWG's DXF reader, and encode.c/encode2.c/out_dxf.c/
+// out_dxfb.c are *writer* sources; nothing in this workspace calls the one
+// or writes DWG or DXF. They stay compiled because the sources this crate
+// needs reference them: dwg.c, with USE_WRITE, defines dxf_read_file(),
+// which calls in_dxf.c's dwg_read_dxf(); in_dxf.c calls encode.c's
 // in_postprocess_handles()/in_postprocess_SEQEND() (and dwg.c's own
-// USE_WRITE-gated dwg_find_tablehandle_silent()), and out_dxf.c hosts
-// dwg_convert_SAB_to_SAT1(), which the 3DSOLID wireframe extraction
-// needs. Only the symbols in the bindgen allowlist below reach Rust, and no
-// writer entry point is among them.
+// USE_WRITE-gated dwg_find_tablehandle_silent()); and out_dxf.c hosts
+// dwg_convert_SAB_to_SAT1(), which the 3DSOLID wireframe extraction needs.
+// Only the symbols in the bindgen allowlist below reach Rust, and no writer
+// or DXF-reader entry point is among them.
 const LIBREDWG_SOURCES: &[&str] = &[
     "bits.c",
     "classes.c",
@@ -266,17 +268,17 @@ fn main() {
         .allowlist_function("dwg_codepage_uc")
         .allowlist_function("dwg_codepage_uwc")
         .allowlist_function("dwg_codepage_dxfstr")
-        // The RGB the library's DXF importer synthesises for a plain ACI
-        // index (dxf_set_CMC_index): how an entity's stated true colour is
-        // told from one the importer made up.
+        // The library's own RGB for an ACI index (its palette, not the
+        // model's display one): what split_entity_color compares a colour's
+        // RGB with.
         .allowlist_function("dwg_rgb_palette_index")
         // The handle of the object a type-specific struct pointer belongs
         // to, for naming a string in a diagnostic.
         .allowlist_function("dwg_obj_generic_handlevalue")
         // The R13..R2000 entity chain is walked by this crate's consumer
         // itself (see uncad_shim.h, uncad_dwg_is_r13_to_r2000): the next
-        // link, and a handle -> object lookup for links the DXF importer
-        // left unresolved.
+        // link, and a handle -> object lookup for links that carry a handle
+        // but no object pointer.
         .allowlist_function("dwg_next_entity")
         .allowlist_function("dwg_resolve_handle")
         // Before R13 a POLYLINE's vertices follow it in the object stream up

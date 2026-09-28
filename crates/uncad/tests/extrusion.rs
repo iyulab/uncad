@@ -3,9 +3,8 @@
 //! LibreDWG leaves the field zero when the record does not store it -- an
 //! LWPOLYLINE unless its flag says so, a pre-R13 entity unless its options
 //! do. A zero vector is no direction: it is the absent group, whose default
-//! is the world Z axis. The DXF twins state no normal either, and the
-//! library's DXF importer fills in (0, 0, 1) itself, so the two formats of
-//! each drawing have to agree.
+//! is the world Z axis. The DXF twins state no normal either, which reads
+//! as the same default, so the two formats of each drawing have to agree.
 
 use std::collections::BTreeMap;
 

@@ -50,7 +50,7 @@ pub struct Header {
     pub format: Format,
     /// The version code as the file states it: the magic of a DWG
     /// (`"AC1015"`), `$ACADVER` of a DXF. `None` for a DXF without
-    /// `$ACADVER` (pre-R10) or a binary one.
+    /// `$ACADVER` (pre-R10).
     pub acadver: Option<String>,
     /// LibreDWG's release name for that version (`"r2000"`, `"r2018"`, ...);
     /// `None` exactly when [`acadver`](Self::acadver) is, or when LibreDWG
@@ -58,9 +58,10 @@ pub struct Header {
     pub version: Option<String>,
     /// The codepage this read decoded the drawing's 8-bit strings with, as
     /// LibreDWG's `Dwg_Codepage` number (30 `ANSI_1252`, 40 `ANSI_949`, ...):
-    /// the DWG file header's (R13 and later), a DXF's `$DWGCODEPAGE`, and
-    /// LibreDWG's own default where a file names none -- which is why it is
-    /// a fact of the read, not a variable. An R2007+ drawing's strings are
+    /// the DWG file header's (R13 and later; LibreDWG's own default where
+    /// it names none), a DXF's `$DWGCODEPAGE` or, where the DXF names none,
+    /// `ANSI_1252` before R2007 and UTF-16 from it -- which is why it is a
+    /// fact of the read, not a variable. An R2007+ drawing's strings are
     /// Unicode and do not depend on it.
     pub codepage: u16,
     /// LibreDWG's name for [`codepage`](Self::codepage) (`"ANSI_1252"`);
@@ -311,9 +312,8 @@ pub(crate) unsafe fn read_header(
 /// A DXF's header, from the variables its HEADER section states (the DXF
 /// reader's [`undxf::Header`]) and the tables it declares.
 ///
-/// The file-level facts follow what LibreDWG's own DXF import made of the
-/// same variables, so a DXF's header reads the same whichever reader took it:
-/// `version` is LibreDWG's release name for `$ACADVER`; `codepage` is the
+/// The file-level facts use LibreDWG's tables, as a DWG's do: `version` is
+/// LibreDWG's release name for `$ACADVER`; `codepage` is the
 /// number of the code page `$DWGCODEPAGE` names (a name looked up without
 /// regard to case, R12's `undefined` and a name with no table being
 /// `CP_UNDEFINED`), and where the file names none, `ANSI_1252` before R2007
@@ -387,8 +387,9 @@ pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> 
     }
 }
 
-/// LibreDWG's version for a `$ACADVER` code (`AC1015` -> R_2000), the same
-/// lookup its DXF import made; `R_INVALID` for a code it does not know.
+/// LibreDWG's version for a `$ACADVER` code (`AC1015` -> R_2000), from the
+/// same version table a DWG's version is named by; `R_INVALID` for a code
+/// it does not know.
 #[allow(clippy::unnecessary_cast)] // the enum's width differs by target
 fn version_of_acadver(acadver: &str) -> i32 {
     let Ok(code) = std::ffi::CString::new(acadver) else {

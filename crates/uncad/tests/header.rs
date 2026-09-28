@@ -30,10 +30,8 @@ const TEST_DATA: &str = concat!(
     "/../../lib/libredwg/test/test-data/"
 );
 
-/// Every R2007+ DXF in the corpus that LibreDWG reads (`$ACADVER` AC1021 or
-/// later; `2013/gh109_1`, `2018/Constraints`, `Dynblocks`, `LiveSection1`
-/// and `TS1` fail in LibreDWG itself). All of them declare an empty
-/// `$DIMPOST` (`grep -A1 '^\$DIMPOST'` over the files).
+/// Twenty of the corpus's R2007+ DXFs (`$ACADVER` AC1021 or later). All of
+/// them declare an empty `$DIMPOST` (`grep -A1 '^\$DIMPOST'` over the files).
 const R2007_PLUS_DXFS: &[&str] = &[
     "example_2007.dxf",
     "example_2010.dxf",
@@ -233,12 +231,8 @@ fn a_chinese_r2013_file_reports_its_code_page_and_unitless_units() {
 
 #[test]
 fn r2007_and_later_dxf_header_text_variables_are_not_read_as_utf16() {
-    // LibreDWG parses the HEADER section before it sets header.version (only
-    // R13..R2000 get it from $ACADVER; dxf_fixup_header runs afterwards), so
-    // every $ text variable is a plain 8-bit copy of the file's bytes even
-    // in an R2007+ DXF. Read as UTF-16, the 1-byte allocation of an empty
-    // $DIMPOST was overrun into "DIMSE..."-style heap garbage on every one of
-    // these files.
+    // An R2007+ DXF's $ text variables are the file's UTF-8: an empty
+    // $DIMPOST is empty, and nothing is reported.
     for name in R2007_PLUS_DXFS {
         let (db, h) = uncad::parse_with_header(format!("{TEST_DATA}{name}"))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
@@ -260,8 +254,7 @@ fn r2007_and_later_dxf_header_text_variables_are_not_read_as_utf16() {
 }
 
 /// A DXF of version `acadver` whose only header variables are `$ACADVER`
-/// and `$DIMPOST` (`dimpost` written as the raw bytes), padded with LINEs
-/// past LibreDWG's 256-byte minimum.
+/// and `$DIMPOST` (`dimpost` written as the raw bytes), and eight LINEs.
 fn dxf_with_dimpost(acadver: &str, dimpost: &[u8]) -> Vec<u8> {
     let mut dxf = Vec::new();
     dxf.extend_from_slice(b"  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\n");
@@ -281,10 +274,9 @@ fn dxf_with_dimpost(acadver: &str, dimpost: &[u8]) -> Vec<u8> {
 #[test]
 fn a_dimpost_suffix_round_trips_through_every_dxf_version() {
     // "<> mm" is the DXF reference's own example of $DIMPOST (the "<>" is
-    // where the measurement goes); a 6-byte allocation that used to come
-    // back as 13 UTF-16 units of heap. The R2018 non-ASCII variant is UTF-8
-    // in the file (AC1021+ DXF), the R2000 one CP1252 (B5 = U+00B5; with no
-    // $DWGCODEPAGE, LibreDWG assumes ANSI_1252).
+    // where the measurement goes). The R2018 non-ASCII variant is UTF-8 in
+    // the file (AC1021+ DXF), the R2000 one CP1252 (B5 = U+00B5; a pre-R2007
+    // DXF that names no $DWGCODEPAGE and is not UTF-8 is read as ANSI_1252).
     let cases: [(&str, &[u8], &str); 4] = [
         ("AC1032", b"<> mm", "<> mm"),
         ("AC1015", b"<> mm", "<> mm"),
@@ -300,8 +292,8 @@ fn a_dimpost_suffix_round_trips_through_every_dxf_version() {
 
 #[test]
 fn a_dxf_states_only_the_variables_its_header_section_names() {
-    // LibreDWG fills the rest of its header struct with zeros or its own
-    // defaults; none of those may come out as if the file had said them.
+    // Only what the HEADER section names is stated: no default may come
+    // out as if the file had said it.
     let (_, h) = uncad::parse_bytes_with_header(&dxf_with_dimpost("AC1015", b"<>"), Format::Dxf)
         .expect("the DXF must parse");
     assert_eq!(h.acadver.as_deref(), Some("AC1015"));
@@ -314,8 +306,8 @@ fn a_dxf_states_only_the_variables_its_header_section_names() {
     assert_eq!((h.dimscale, h.dimlfac, h.ltscale), (None, None, None));
     assert_eq!(h.clayer, Ref::Absent);
 
-    // A DXF without $ACADVER (pre-R10) states no version either: LibreDWG
-    // assumes R11 for it, which is a default, not what the file says.
+    // A DXF without $ACADVER (pre-R10) states no version either: any
+    // release assumed for it would be a default, not what the file says.
     let text = String::from_utf8(dxf_with_dimpost("AC1015", b"<>")).expect("ASCII");
     let headerless = text.replace("  9\n$ACADVER\n  1\nAC1015\n", "");
     let (_, h) = uncad::parse_bytes_with_header(headerless.as_bytes(), Format::Dxf)

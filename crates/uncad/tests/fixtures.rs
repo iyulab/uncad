@@ -2,11 +2,10 @@
 //! public API.
 //!
 //! Unlike the corpus-based tests, these files were written by this project
-//! from group codes (`tests/fixtures/make_fixtures.py`; what each one holds,
-//! and what LibreDWG itself reads back from it, is in
-//! `tests/fixtures/README.md`), so the values below are the ones the files
-//! state -- worked out from the definitions, not copied out of this crate's
-//! own output.
+//! from group codes (`tests/fixtures/make_fixtures.py`; what each one holds
+//! is in `tests/fixtures/README.md`), so the values below are the ones the
+//! files state -- worked out from the definitions, not copied out of this
+//! crate's own output.
 //!
 //! Only what the *model* carries is asserted here. How a renderer draws a
 //! fixture, or what an export writes for it, is a question for those crates.
@@ -325,13 +324,12 @@ fn the_title_block_fixture_keeps_every_string_in_paper_space() {
 
 // --------------------------------------------------- polyline vertices
 
-/// Regression for the last vertex LibreDWG's own
-/// `dwg_object_polyline_{2,3}d_get_points` drop on every R13/R14/R2000 file.
-/// The vertices are the ones `make_fixtures.py` writes: a 100 by 100 closed
+/// Every vertex of an old-style POLYLINE, the last one included. The
+/// vertices are the ones `make_fixtures.py` writes: a 100 by 100 closed
 /// square, a two-vertex polyline whose one bulge makes it a semicircle, and a
-/// five-point 3D polyline. Read through the library's accessors each came
-/// back one vertex short: the square a right triangle, the semicircle a
-/// single point, the 3D polyline ending at (0, 10, 5).
+/// five-point 3D polyline. One vertex short, the square would be a right
+/// triangle, the semicircle a single point, and the 3D polyline would end at
+/// (0, 10, 5).
 #[test]
 fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
     let db = parse(POLYLINE_VERTICES);
@@ -397,10 +395,8 @@ fn every_polyline_vertex_survives_the_r2000_subentity_chain() {
 
 // --------------------------------------------------------- mesh polylines
 
-/// A DXF whose one polygon mesh made an unpatched LibreDWG refuse the whole
-/// file, and whose polyface mesh found no vertex positions: the importer
-/// types its vertices VERTEX_MESH, because they name the block record as
-/// their owner.
+/// A DXF with a polyface and a polygon mesh whose VERTEX records name the
+/// block record as their owner rather than their POLYLINE.
 ///
 /// The edge counts are the grids `make_fixtures.py` writes, worked out from
 /// the mesh definitions: the polyface has two quad faces, so 2 * 4 = 8
@@ -671,8 +667,7 @@ fn a_nested_block_reference_carries_its_attribute_once() {
 
 /// The four ways a DXF entity can state its colour, on a layer whose own ACI
 /// is 3. 65407 is `0x00ff7f` and 255 is `0x0000ff`, the file's own group 420
-/// values; a plain group 62 states no RGB, although LibreDWG's importer
-/// synthesises one for it from its own palette.
+/// values; a plain group 62 states no RGB.
 #[test]
 fn a_dxf_entity_carries_the_true_colour_it_states_and_no_other() {
     let db = parse(ENTITY_TRUECOLOR);
@@ -714,8 +709,8 @@ fn rounded(p: Option<uncad::model::Point3D>) -> Option<(i64, i64)> {
     p.map(|p| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64))
 }
 
-/// The two kinds whose points LibreDWG's DXF importer lays out differently
-/// from its DWG decoder, every value derived by hand in the fixture's
+/// The two kinds whose points a DWG stores in other fields than their DXF
+/// groups, every value derived by hand in the fixture's
 /// README: a 2-line angular dimension between (0,0)-(10,0) and
 /// (0,0)-(5, 8.660254) with its arc point 30 degrees along a radius of 5,
 /// and an X- and a Y-type ordinate sharing the datum (100, 200) and the

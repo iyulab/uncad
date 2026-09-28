@@ -1,6 +1,6 @@
 //! A dimension or leader that sets style variables for itself: the `DSTYLE`
 //! list in its extended data under `ACAD`, read as the file states it --
-//! through the DWG decoder and through the DXF importer alike. The expected
+//! through the DWG reader and through the DXF reader alike. The expected
 //! values are the files' own (the DXF twins' text, and a second DWG reader
 //! agrees on the DWG ones).
 
@@ -50,7 +50,7 @@ fn a_string_value_is_read_as_text() {
 }
 
 #[test]
-fn the_dxf_importer_keeps_the_list_too() {
+fn the_dxf_reader_keeps_the_list_too() {
     let list = overrides_of("example_r13.dxf", "43B").expect("the reader looked");
     assert_eq!(
         pairs(&list),

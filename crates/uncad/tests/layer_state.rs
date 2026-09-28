@@ -37,8 +37,7 @@ fn the_fixture_layers_carry_the_state_their_groups_state() {
     // Off is a negative colour in a DXF; the index keeps its sign.
     assert_eq!(state(&l["OFF"]), (true, false, false));
     assert_eq!(l["OFF"].color_index, -3);
-    // Group 70 bit 1; bit 4. The importer read both into its own bit
-    // layout, where they would mean "off" and "frozen in new viewports".
+    // Group 70 bit 1; bit 4.
     assert_eq!(state(&l["FROZEN"]), (false, true, false));
     assert_eq!(state(&l["LOCKED"]), (false, false, true));
     // NOPLOT and Defpoints state 290 = 0 and do not plot; the others state

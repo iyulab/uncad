@@ -11,8 +11,7 @@ use uncad::Format;
 /// could not be drawn.
 #[test]
 fn a_polyface_mesh_reads_as_the_wireframe_of_its_faces() {
-    // The subclass markers and handles the DXF importer needs to tell the
-    // two kinds of VERTEX apart.
+    // The subclass markers and handles an AutoCAD-written polyface carries.
     let handle = std::cell::Cell::new(0x30);
     let next = || {
         handle.set(handle.get() + 1);

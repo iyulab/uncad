@@ -65,8 +65,8 @@ struct Sweep {
     /// (file, reference ID) for every ID two different entities of one
     /// file share -- the model requires none.
     duplicate_ids: Vec<(String, u64)>,
-    /// Entities whose ID had to be minted from the object index because the
-    /// file gave them no handle.
+    /// Entities whose ID had to be minted from their position in the file
+    /// because the file gave them no handle.
     handleless: usize,
 }
 
@@ -205,11 +205,10 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // --- how the files read ---
     // Every DWG reads; of the 67 DXFs, 66 read and one is refused by the DXF
     // reader -- `r1.4/entities.dxf`, a pre-R10 file not in group-code form.
-    // (58 read and 9 failed while DXF went through LibreDWG's importer.)
     assert_eq!((s.files, s.dwg_parsed), (208, 141));
     assert_eq!((s.dxf_parsed, s.dxf_refused, s.critical), (66, 1, 0));
 
-    // --- LibreDWG's non-fatal error bits, which used to be discarded ---
+    // --- LibreDWG's non-fatal error bits, over the DWGs ---
     assert_eq!(s.clean_dwg, 98);
     assert_eq!(s.diagnostics.get("UNHANDLEDCLASS"), Some(&17));
     // 31 until an R2010+ ATTRIB stopped reading a byte its record does not
@@ -247,9 +246,8 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
         .filter(|((_, field, _), _)| *field == "layer")
         .map(|(_, n)| n)
         .sum();
-    // 66,002 while DXF went through LibreDWG's importer: the nine DXFs it
-    // failed on read now, and 2010/gh209_1's entities, which that importer left without a layer, sit
-    // on their layers as in the DWG twin.
+    // Every file that reads, DWG and DXF alike; 2010/gh209_1.dxf's entities
+    // sit on their layers as in its DWG twin.
     assert_eq!(layers, 116_494);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
@@ -262,23 +260,20 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // The empty-block count is six higher than it was before pre-R13 block
     // references resolved: a reference that could not be looked up was never
     // reported as empty, so resolving it made the empty definitions visible. ---
-    // 1,034 while DXF went through LibreDWG's importer: example_r14.dxf's
-    // three bodies (4 + 18 + 4 edges) read now, and like its DWG twin's their
-    // R14-era vertices do not resolve.
+    // example_r14.dxf's three bodies (4 + 18 + 4 edges) are among them: like
+    // its DWG twin's, their R14-era vertices do not resolve.
     assert_eq!(s.skipped_edges, 1_060);
-    // 20 while DXF went through LibreDWG's importer. Now every DXF on the
-    // list has its DWG twin on it, with the same empty block.
+    // Every DXF on the list has its DWG twin on it, with the same empty block.
     assert_eq!(s.files_with_empty_blocks, 17);
 }
 
 /// Which of this library's point fields is which DXF group cannot be read off
 /// the field names for a two-line angular dimension: decoded from a DWG,
-/// `def_pt` holds group 16 there, and `xline2end_pt` holds group 10; the DXF
-/// importer fills the same two fields the other way round. The mapping in the
-/// reader follows a measurement against the same drawing in both formats, so
-/// the measurement is pinned here, for both readers -- if the library's field
-/// layout changes, this fails rather than the model quietly holding the wrong
-/// point.
+/// `def_pt` holds group 16 there, and `xline2end_pt` holds group 10. The
+/// mapping in the reader follows a measurement against the same drawing in
+/// both formats, so the measurement is pinned here, for both readers -- if
+/// the library's field layout changes, this fails rather than the model
+/// quietly holding the wrong point.
 ///
 /// The second drawing is what settles group 10: in the first, groups 10 and
 /// 13 are the same point, so a reading of either looks like the other.

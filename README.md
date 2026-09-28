@@ -116,13 +116,11 @@ again -- the server keeps no state -- and calls run one at a time.
 
 1. **DWG** — read through [LibreDWG](https://www.gnu.org/software/libredwg/)
    (GPLv3+), bound directly via Rust FFI (`bindgen`). All versions.
-2. **DXF** — read through the same LibreDWG engine, chosen by file extension
-   (`parse`) or by the caller (`parse_bytes`). Every version, R2007 and later
-   included: such a file holds its strings in two widths in LibreDWG's memory,
-   and each is read in its own — see `docs/CAVEATS.md`, "DXF saved as R2007 or
-   later is read". LibreDWG's own DXF importer is documented as working "for most
-   objects", so it is less complete than its DWG reading, and slower than linear
-   in the entity count ([`docs/CAVEATS.md`](./docs/CAVEATS.md)).
+2. **DXF** — ASCII and binary, R2007 and later included, read by the pure-Rust
+   `undxf` crate (MIT) rather than by LibreDWG; chosen by file extension
+   (`parse`) or by the caller (`parse_bytes`). A drawing's DXF and DWG read to
+   the same model except where the two formats state different things
+   ([`docs/CAVEATS.md`](./docs/CAVEATS.md), "DXF").
 3. **Output** — the parsed model as JSON (`CadDatabase::to_json`, from
    `uncad-model`). SVG and PNG come from the
    [`iron-render-cad`](https://github.com/iyulab/iron-render-cad) crate (MIT), which

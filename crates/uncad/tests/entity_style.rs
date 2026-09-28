@@ -75,8 +75,7 @@ fn bylayer_and_byblock_are_not_table_entries() {
 
 /// An unstated property is BYLAYER where the version has it: lineweight from
 /// R2000, transparency from R2004. Before that the file cannot state it,
-/// and the model says so. (A DXF with no header is refused by the importer,
-/// so that case has nothing to read here.)
+/// and the model says so.
 #[test]
 fn an_unstated_property_is_bylayer_only_where_the_version_has_it() {
     let r2004 = line(Some("AC1018"), &[]);

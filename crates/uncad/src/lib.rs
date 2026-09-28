@@ -32,10 +32,11 @@ pub use header::{Header, Units};
 /// cycles overlapped. Sequential reuse across many calls is fine; concurrent
 /// calls are what this lock closes off.
 ///
-/// [`parse_bytes_with_header`] (which every other entry point calls) is the
-/// only one that touches the FFI boundary and it holds this lock for its
-/// whole duration, so callers never need to know `libredwg-sys` exists, let
-/// alone serialize around it themselves.
+/// A DWG read through [`parse_bytes_with_header`] (which every other entry
+/// point calls) is the only thing that touches the FFI boundary, and it
+/// holds this lock for its whole duration, so callers never need to know
+/// `libredwg-sys` exists, let alone serialize around it themselves. A DXF
+/// read runs no C code and takes no lock.
 static LIBREDWG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Names for the non-critical `DWG_ERROR` bits, in bit order (dwg.h).
@@ -195,9 +196,8 @@ pub fn parse(path: impl AsRef<Path>) -> Result<CadDatabase, ParseError> {
 ///
 /// The header is a type of this crate rather than part of the model, which
 /// deliberately carries no header variables (see [`header`]); it is read in
-/// the same pass, under the same lock, from the same decoded drawing, so
-/// asking for it costs no second decode -- which a separate header read
-/// would, and a DXF decode is the expensive part.
+/// the same pass, from the same decoded drawing, so asking for it costs no
+/// second decode.
 pub fn parse_with_header(path: impl AsRef<Path>) -> Result<(CadDatabase, Header), ParseError> {
     let path = path.as_ref();
     let format = Format::from_path(path);
@@ -321,9 +321,8 @@ mod missing_required_groups_tests {
         AttribEntity, Confidence, Entity, EntityCommon, EntityId, Origin, Point2D, Ref,
     };
 
-    /// No drawing is known to make this fire through the importer, so the
-    /// wording is pinned on the function itself: it must be the other
-    /// reader's, word for word.
+    /// No DWG is known to make this fire, so the wording is pinned on the
+    /// function itself: it must be the DXF reader's, word for word.
     #[test]
     fn an_untagged_attribute_is_reported_in_the_other_readers_words() {
         let untagged = Entity::Attrib(AttribEntity {

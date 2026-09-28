@@ -3,10 +3,10 @@
 //! character for is U+FFFD *and* a `TEXT_ENCODING` warning, the DOS-era
 //! double-byte pages (Big5, GB2312, CP932) pair only the bytes that can
 //! pair, a code page LibreDWG has no table for is reported and read as
-//! UTF-8, and an R2007+ DXF's strings are read in the width LibreDWG's DXF
-//! importer stored each of them in. The 8-bit fixtures are written by the
-//! tests themselves from group codes, so the expected strings are the ones
-//! the test encoded; `text.rs` has the byte-level cases.
+//! UTF-8, and an R2007+ DXF's strings are read as the UTF-8 the file holds.
+//! The 8-bit fixtures are written by the tests themselves from group codes,
+//! so the expected strings are the ones the test encoded; `text.rs` has the
+//! byte-level cases.
 
 use std::path::PathBuf;
 
@@ -49,8 +49,7 @@ fn dxf_with_texts(codepage: &str, texts: &[&[u8]]) -> Vec<u8> {
         dxf.extend_from_slice(text);
         dxf.extend_from_slice(b"\n");
     }
-    // LibreDWG's DXF reader rejects files under 256 bytes; pad with LINEs,
-    // which the assertions never look at.
+    // Padding: eight LINEs, which the assertions never look at.
     for i in 0..8 {
         dxf.extend_from_slice(
             format!("  0\nLINE\n  8\n0\n 10\n{i}.0\n 20\n0.0\n 11\n{i}.0\n 21\n1.0\n").as_bytes(),
@@ -149,7 +148,7 @@ fn the_dos_era_double_byte_code_pages_decode_their_cjk_pairs() {
     // Byte sequences from Python: '中国 AB'.encode('gb2312') (EUC-CN),
     // '中文 AB'.encode('big5'), '日本 AB'.encode('shift_jis') (CP932). The
     // Windows twins 936/950/932 of the same bytes are the control group.
-    // The last CP932 case keeps 0x5C a backslash (LibreDWG's table says
+    // The last CP932 case keeps 0x5C a backslash (a CP932 table may say
     // yen), so the \P stays the MTEXT code it is and the \U+ escape is
     // still read as one: the escape is how the file stored the character,
     // and the model carries the character.
@@ -227,7 +226,7 @@ fn a_corrupt_code_page_in_the_file_header_is_reported_not_guessed() {
     }
 }
 
-// --- R2007 and later: strings in the width the DXF importer stored them ---
+// --- R2007 and later: a DXF's strings are UTF-8 ---
 
 const EXAMPLE_2018_DWG: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -292,12 +291,11 @@ fn mtext_values(db: &CadDatabase) -> Vec<String> {
 }
 
 #[test]
-fn r2007_and_later_dxf_input_decodes_its_utf16_strings() {
+fn r2007_and_later_dxf_input_reads_its_names_and_entities() {
     for (path, version) in [(TEXT_2007_DXF, "r2007"), (LEADER_2018_DXF, "r2018")] {
         let (db, header) = uncad::parse_with_header(path).expect("corpus file must parse");
         assert_eq!(header.version.as_deref(), Some(version), "{path}");
-        // Read 8-bit, every block name stopped at the first NUL byte of its
-        // UTF-16 storage: "*Model_Space" read as "*", nothing was selected.
+        // The model space is found by its name, and the entities in it.
         assert!(
             db.tables.block_records.contains_key("*Model_Space"),
             "{path}: {:?}",
@@ -310,11 +308,8 @@ fn r2007_and_later_dxf_input_decodes_its_utf16_strings() {
 
 #[test]
 fn r2007_and_later_dxf_mtext_is_read_as_the_utf8_it_is_stored_as() {
-    // in_dxf.c stores MTEXT's group 1/3 text 8-bit (strdup) with no R2007
-    // branch, unlike every other string, which becomes UTF-16. Reading it as
-    // UTF-16 gave "\u{6554}\u{736b}..." ("Te", "ks" as one unit each) plus
-    // whatever heap bytes followed the NUL. The reference is the same
-    // drawing as a DWG, which LibreDWG converts itself.
+    // MTEXT's text (groups 1 and 3) is the file's UTF-8. The reference is
+    // the same drawing as a DWG, which LibreDWG converts itself.
     let dwg = uncad::parse(EXAMPLE_2018_DWG).expect("corpus file must parse");
     let mut expected = mtext_values(&dwg);
     expected.sort();
@@ -334,10 +329,9 @@ fn r2007_and_later_dxf_mtext_is_read_as_the_utf8_it_is_stored_as() {
 #[test]
 fn an_r2018_dxf_carries_its_non_ascii_text_as_utf8_and_its_escapes_undone() {
     // An AC1021+ DXF is UTF-8 by definition. U+AC00 U+B098, two Hangul syllables, the
-    // bytes EA B0 80 EB 82 98. TEXT goes through the importer's UTF-16
-    // storage, MTEXT stays 8-bit: both must come back the same. The escaped
-    // spelling older writers use stores the same characters, and reads as
-    // them in both.
+    // bytes EA B0 80 EB 82 98. TEXT and MTEXT must both come back as the
+    // characters. The escaped spelling older writers use stores the same
+    // characters, and reads as them in both.
     let hangul: &[u8] = b"\xEA\xB0\x80\xEB\x82\x98 AB";
     let escaped: &[u8] = b"\\U+AC00\\U+B098 AB";
     let bytes = dxf_with_strings("AC1032", &[hangul, escaped], &[hangul, escaped]);

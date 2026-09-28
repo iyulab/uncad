@@ -36,8 +36,7 @@ impl Drop for TempDir {
 /// An AC1015 DXF with: a center/middle-justified TEXT anchored at (50,50)
 /// with a width factor of 0.8 and a 15-degree slant; a plain left/baseline
 /// TEXT; and a middle-center MTEXT rotated 90 degrees (direction vector
-/// (0,1,0)) with a wrap width and a paragraph break. Padded past LibreDWG's
-/// 256-byte minimum with LINEs.
+/// (0,1,0)) with a wrap width and a paragraph break, and LINEs as padding.
 fn text_dxf() -> String {
     let mut dxf = String::from(
         "  0\nSECTION\n  2\nHEADER\n  9\n$ACADVER\n  1\nAC1015\n  0\nENDSEC\n  0\nSECTION\n  2\nENTITIES\n",
