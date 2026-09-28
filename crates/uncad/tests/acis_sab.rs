@@ -77,3 +77,29 @@ fn sab_solids_get_the_same_wireframe_in_entities_and_in_their_block_record() {
         );
     }
 }
+
+/// The converter writes a body's doubles to full precision: the solid of
+/// `example_2010.dwg` (a SAB body) reads its first vertex to every digit its
+/// DXF twin's SAT text states, not rounded to six significant digits
+/// (4235.41, 14168.8).
+#[test]
+fn a_sab_body_keeps_every_digit_of_its_coordinates() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/example_2010.dwg"
+    );
+    let db = uncad::parse(path).expect("example_2010.dwg should parse");
+    let solid = db
+        .entities
+        .iter()
+        .find_map(|e| match e {
+            uncad::Entity::Solid3D(s) => Some(s),
+            _ => None,
+        })
+        .expect("example_2010.dwg holds a 3DSOLID");
+    let first = solid.wireframe_edges[0][0];
+    assert!(
+        (first.x - 4235.406760796846).abs() < 1e-9 && (first.y - 14168.837206813574).abs() < 1e-9,
+        "{first:?}"
+    );
+}

@@ -59,6 +59,7 @@ const LOCAL_PATCHES: &[(&str, usize)] = &[
     ("src/dwg.spec", 1),
     ("src/dynapi.c", 1),
     ("src/in_dxf.c", 10),
+    ("src/out_dxf.c", 3),
 ];
 
 fn main() {

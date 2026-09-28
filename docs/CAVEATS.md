@@ -885,7 +885,7 @@ extract the same wireframe for every solid.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries nine local patches, in six files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries ten local patches, in seven files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -899,7 +899,7 @@ the files and the copy disagree. `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
 a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file
-(line endings aside), the two trees differ in exactly these six files.
+(line endings aside), the two trees differ in exactly these seven files.
 
 - **`src/dwg.c`** -- `dwg_find_tablehandle()`, `dwg_find_dicthandle_objname()` and
   `dwg_handle_name()` read a table record's `name` with `IS_FROM_TU_DWG()`, which is false
@@ -1004,6 +1004,14 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `Hebtxt`. The patch drops that read for an ATTRIB; two corpus drawings no longer report
   `VALUEOUTOFBOUNDS` at all. `tests/vendored_patches.rs` is the regression (`Absent`
   without the patch).
+- **`src/out_dxf.c`** -- `dwg_convert_SAB_to_SAT1()`, which turns a binary (SAB) ACIS body
+  into the SAT text a 3DSOLID's or a REGION's wireframe is read from, wrote every double
+  with `%g`: six significant digits, so a vertex at x = 4235.406760796846 came out at
+  4235.41 -- about 0.003 drawing units off, where the same body read from the drawing's DXF
+  twin keeps every digit. The patch writes `%.17g`, which round-trips a double, and since a
+  value can now be 25 characters long, reserves 32 bytes per value (buffer growth and the
+  converter's 255-character line split) instead of 16. `tests/acis_sab.rs` is the
+  regression: `example_2010.dwg`'s solid reads its first vertex to full precision.
 
 **An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
 an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some
