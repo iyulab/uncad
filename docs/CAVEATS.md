@@ -289,9 +289,8 @@ out), and `Solid3DEntity::skipped_edges` counts the ACIS edges that could not be
 wireframe segments. Neither is an error; both are the difference between "empty" and "not
 read".
 
-Measured across the corpus: 208 ACIS edges skipped, all in the R13 and R14 `example_*`
-drawings (DWG and DXF alike): three SAT bodies each, whose R13/R14-era vertices do not
-resolve to points. Every binary (SAB) body in the corpus reads in full -- including the 58
+Measured across the corpus: no ACIS edge skipped. Every body that is read reads in full --
+SAT text of every version, and binary (SAB) bodies, including the 58
 solids of one large R2007 drawing, 62 of whose 116 copies were unread while SAB bodies went
 through LibreDWG's SAB-to-SAT conversion (it dropped records it did not know without
 renumbering the rest, so pointers ran past the end). A body whose pointers do run past its
@@ -306,8 +305,7 @@ the drawing's solids in that order -- not by the handle each data record names. 
 `example_2013.dwg` that put a REGION's 4 edges on the 3DSOLID and the 3DSOLID's 18 on a
 REGION (the DXF twin says which is which); in `example_2018.dwg` it finds nothing, because
 an R2018 body opens with `ASM BinaryFile4`. An entity that says it has a data-storage record
-is therefore not read, whatever LibreDWG attached to it. Reading these bodies by their
-handles is future work. Block references that drew
+is therefore not read, whatever LibreDWG attached to it. Block references that drew
 nothing: 17 files -- `BLOCK2` of the R2000 and pre-R13 `entities` drawings, in both
 formats, and one block of `2013/gh44-error.dwg`. A reference that cannot be looked up is
 not reported as empty. `tests/corpus_sweep.rs` pins these counts, together with the parse

@@ -260,11 +260,10 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // block references resolved: a reference that could not be looked up was
     // never reported as empty, so resolving it made the empty definitions
     // visible. ---
-    // Every skipped edge is in the R13/R14 examples (DWG and DXF, 4 files):
-    // three SAT bodies each (4 + 18 + 4 edges), counted in the entity list and
-    // in the block record, whose R13/R14-era vertices do not resolve. Every
-    // binary (SAB) body in the corpus reads in full.
-    assert_eq!(s.skipped_edges, 208);
+    // Every ACIS body in the corpus that is read at all reads in full: SAT
+    // text of every version (R13/R14's with its one-line header) and SAB
+    // bytes alike.
+    assert_eq!(s.skipped_edges, 0);
     // Every DXF on the list has its DWG twin on it, with the same empty block.
     assert_eq!(s.files_with_empty_blocks, 17);
 }
