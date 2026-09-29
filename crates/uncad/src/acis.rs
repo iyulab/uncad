@@ -15,19 +15,16 @@ use uncad_model::model::Point3D;
 /// could not be read, which the caller reports as an entity it does not
 /// read rather than as an empty solid.
 ///
-/// - The entity says its body is in the file's data storage (R2013 on):
-///   `None`, whether or not LibreDWG attached a body to it. LibreDWG finds
-///   those bodies by searching the storage for a signature and hands them to
-///   the drawing's solids in the order it found them, not by the handle each
-///   record names -- in a drawing with more than one solid, a body can land on
-///   the wrong entity (measured: two swapped in a three-solid R2013 drawing),
-///   and an R2018 body, whose signature the search does not look for, lands
-///   nowhere.
+/// - No body in the object, and the entity says its body is in the file's
+///   data storage (R2013 on): `None` -- no data-storage record named this
+///   entity with a body LibreDWG could attach (the vendored copy attaches
+///   each by the handle its record names; see `docs/CAVEATS.md`, "Local
+///   patches to the vendored LibreDWG").
 /// - No body in the object and no data-storage record: an empty solid,
 ///   `(vec![], 0)`.
 /// - SAT text (`version` 1): the model's SAT reading.
-/// - SAB bytes (`version` 2): the model's SAB reading -- `None` when they do
-///   not decode.
+/// - SAB bytes (`version` 2, and every body attached from the data
+///   storage): the model's SAB reading -- `None` when they do not decode.
 ///
 /// `dxfname` must be the entity's own real name (`"3DSOLID"`, `"REGION"`, ...).
 /// dynapi checks it against the object's actual `obj->name` and refuses to read
@@ -43,12 +40,10 @@ pub unsafe fn extract_wireframe(
     entity_ptr: *mut c_void,
     dxfname: &str,
 ) -> Option<(Vec<[Point3D; 2]>, usize)> {
-    if get_common_field::<u8>(entity_ptr, "has_ds_data").unwrap_or(0) != 0 {
-        return None;
-    }
     let acis_empty = get_field::<u8>(entity_ptr, dxfname, "acis_empty").unwrap_or(0);
     if acis_empty != 0 {
-        return Some((Vec::new(), 0));
+        let has_ds_data = get_common_field::<u8>(entity_ptr, "has_ds_data").unwrap_or(0);
+        return (has_ds_data == 0).then(|| (Vec::new(), 0));
     }
     let version = get_field::<u16>(entity_ptr, dxfname, "version")?;
     let ptr = get_field::<*const u8>(entity_ptr, dxfname, "acis_data")?;

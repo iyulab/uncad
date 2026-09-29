@@ -42,6 +42,11 @@ changes, and cites this list as "The two changes"; it is this one.
    reads the version byte only an ATTDEF stores; read past the record, it
    ended the decode before the text style handle, so every such attribute
    came back with no style.
+5. **`vendor/libredwg/src/acds.spec`**, 2026-09-30 — an ACIS body in an
+   R2013+ drawing's data storage goes to the entity whose handle its `_data_`
+   record names, instead of to the drawing's solids in the order a signature
+   search found the bodies (which put bodies on the wrong solids and found no
+   R2018 body, whose signature differs).
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or

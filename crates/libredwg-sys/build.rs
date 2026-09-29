@@ -51,12 +51,13 @@ const LOCAL_PATCH_MARKER: &[u8] = b"uncad local patch";
 
 // The local patches the vendored copy carries, as (path under
 // vendor/libredwg, times LOCAL_PATCH_MARKER occurs in that file). NOTICE.md
-// lists the same four changes and docs/CAVEATS.md, "Local patches to the
+// lists the same five changes and docs/CAVEATS.md, "Local patches to the
 // vendored LibreDWG", says why each exists. scripts/sync-libredwg-vendor.sh
 // deletes and recopies the whole directory, so a re-vendor silently drops
 // every one of them; main() compares the tree against this table so that it
 // cannot.
 const LOCAL_PATCHES: &[(&str, usize)] = &[
+    ("src/acds.spec", 2),
     ("src/common.c", 3),
     ("src/common_entity_data.spec", 3),
     ("src/dwg.spec", 1),

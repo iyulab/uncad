@@ -14,10 +14,15 @@ Notable changes to this project are recorded here. The format follows
   now reads in full. With the model's reading of R13/R14 SAT text fixed as well, no ACIS
   edge across the corpus is skipped any more (1,060 before).
 - A 3DSOLID or REGION whose body could not be read is `Entity::Unknown` under its own name
-  instead of a solid with no edges: a SAB body that does not decode, and every R2013+ body
-  kept in the file's data storage. LibreDWG attaches those bodies to solids in the order it
-  finds them, not by handle -- in a drawing with several solids a body could land on the
-  wrong one -- and misses R2018 bodies altogether.
+  instead of a solid with no edges: a SAB body that does not decode, or an R2013+ body the
+  file's data storage does not hold for it.
+
+### Fixed
+
+- An R2013+ solid's body, kept in the file's data storage, reaches the entity whose handle
+  its record names (a local patch to the vendored `acds.spec`). LibreDWG handed those bodies
+  to solids in the order its signature search found them, which put bodies on the wrong
+  solids, and missed every R2018 body.
 
 ### Removed
 

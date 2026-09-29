@@ -298,14 +298,10 @@ records is still reported whole as unread (`skipped_edges` = its edge count, no
 `wireframe_edges`) rather than attached to whatever record sits at a stale index.
 
 A 3DSOLID or REGION whose body could not be read is `Entity::Unknown` under its own name,
-never an empty solid: a SAB body that does not decode, and every body kept in the file's
-data storage. R2013 and later keep a solid's body there, and LibreDWG attaches those bodies
-by searching the storage for the `ACIS BinaryFile` signature and handing what it finds to
-the drawing's solids in that order -- not by the handle each data record names. In
-`example_2013.dwg` that put a REGION's 4 edges on the 3DSOLID and the 3DSOLID's 18 on a
-REGION (the DXF twin says which is which); in `example_2018.dwg` it finds nothing, because
-an R2018 body opens with `ASM BinaryFile4`. An entity that says it has a data-storage record
-is therefore not read, whatever LibreDWG attached to it. Block references that drew
+never an empty solid: a SAB body that does not decode, and an R2013+ entity that says its
+body is in the file's data storage when no data-storage record with a body names it. R2013
+and later keep a solid's body there; see "Local patches to the vendored LibreDWG" for how
+each body reaches its entity. Block references that drew
 nothing: 17 files -- `BLOCK2` of the R2000 and pre-R13 `entities` drawings, in both
 formats, and one block of `2013/gh44-error.dwg`. A reference that cannot be looked up is
 not reported as empty. `tests/corpus_sweep.rs` pins these counts, together with the parse
@@ -767,7 +763,7 @@ walks get the same wireframe for every solid and that none has an edge skipped.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries four local patches, in three files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches, in four files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -835,6 +831,18 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `Hebtxt`. The patch drops that read for an ATTRIB; two corpus drawings no longer report
   `VALUEOUTOFBOUNDS` at all. `tests/vendored_patches.rs` is the regression (`Absent`
   without the patch).
+- **`src/acds.spec`** -- an R2013+ drawing keeps each 3DSOLID's or REGION's ACIS body in its
+  data storage, one record per body in a `_data_` segment, under the handle of the entity
+  it belongs to: a 0x30-byte segment header, an array of 20-byte record headers (size 20, 1,
+  the 8-byte handle, an offset), then the records, each a 4-byte size and its bytes. Upstream
+  did not read that array; it searched the section for the `ACIS BinaryFile` signature and
+  handed the bodies it found to the drawing's solids in the order it found them. The records
+  are not in entity order, so in `example_2013.dwg` the 3DSOLID got a REGION's body (4 edges
+  instead of 18) and a REGION the 3DSOLID's, and an R2018 body opens with `ASM BinaryFile4`,
+  so `example_2018.dwg`'s three bodies were not found at all. The patch walks the record
+  headers and gives each body whose bytes open with either signature to the solid its handle
+  names; the sizes and handles match the drawings' DXF twins (`ACDSDATA` groups 320 and 94).
+  `tests/acis_sab.rs` is the regression: every solid of both drawings reads its twin's edges.
 
 **An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
 an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some

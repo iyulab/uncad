@@ -10,11 +10,9 @@
 //!   must get the same wireframe. (An in-place conversion once made the
 //!   second walk read binary SAB as SAT text and get nothing.)
 //! - A body is read to every digit its file states.
-//! - A body in the file's data storage (R2013 on) is not read: LibreDWG
-//!   attaches those bodies to solids in the order it finds them rather than by
-//!   the handle each names, and misses R2018's altogether. Such an entity is
-//!   one this crate does not read, not an empty solid and not a solid with
-//!   another solid's edges.
+//! - A body in the file's data storage (R2013 on) goes to the entity whose
+//!   handle its record names: every solid of `example_2013.dwg` and
+//!   `example_2018.dwg` reads the edges its DXF twin gives it.
 //!
 //! The assertions against the entity list and the block record are
 //! reference-free: whatever wireframe a solid gets in one, it must get in the
@@ -133,39 +131,41 @@ fn every_sab_body_of_the_fixture_reads_in_full() {
     assert_eq!(without_edges, 2);
 }
 
-/// R2013 and later keep a solid's body in the file's data storage. LibreDWG
-/// attaches those bodies in the order it finds them, not by the handle each
-/// names: in `example_2013.dwg` the 3DSOLID got a REGION's 4 edges and a REGION
-/// the 3DSOLID's 18 (its DXF twin says which is which). In `example_2018.dwg`
-/// it attaches none -- an R2018 body opens with `ASM BinaryFile4`, and the
-/// search looks for `ACIS BinaryFile`. Every such solid is not read, rather
-/// than read with another solid's edges or with none.
+/// R2013 and later keep a solid's body in the file's data storage, one record
+/// per body under the handle of the entity it belongs to. The records are not
+/// written in entity order (`example_2013.dwg`: REGION 176, then the thumbnail,
+/// REGION 37D, 3DSOLID 2E1; `example_2018.dwg`: another order), and R2018's
+/// bodies open with `ASM BinaryFile4` rather than `ACIS BinaryFile`. Each
+/// solid reads the edges its DXF twin gives it: 3DSOLID 2E1 18, the two
+/// REGIONs 4 each -- the vendored LibreDWG attaches the bodies by handle
+/// (upstream attached them in the order it found them, which swapped them
+/// here, and found none in R2018).
 #[test]
-fn a_body_in_the_data_storage_is_not_read() {
-    for (drawing, solids) in [
-        (
-            "example_2013.dwg",
-            [(0x2E1, "3DSOLID"), (0x37D, "REGION"), (0x176, "REGION")],
-        ),
-        (
-            "example_2018.dwg",
-            [(0x2E1, "3DSOLID"), (0x37D, "REGION"), (0x176, "REGION")],
-        ),
-    ] {
+fn a_body_in_the_data_storage_goes_to_the_entity_its_record_names() {
+    for drawing in ["example_2013.dwg", "example_2018.dwg"] {
         let path = format!(
             "{}/../../lib/libredwg/test/test-data/{drawing}",
             env!("CARGO_MANIFEST_DIR")
         );
         let db = uncad::parse(&path).expect("the drawing should parse");
-        for (handle, name) in solids {
+        for (handle, name, edges) in [
+            (0x2E1, "3DSOLID", 18),
+            (0x37D, "REGION", 4),
+            (0x176, "REGION", 4),
+        ] {
             let e = db
                 .entities
                 .iter()
                 .find(|e| e.common().id.value() == handle)
                 .unwrap_or_else(|| panic!("{drawing} holds {name} {handle:X}"));
-            assert!(
-                matches!(e, uncad::Entity::Unknown { type_name, .. } if type_name == name),
-                "{drawing} {handle:X}: {e:?}"
+            let (uncad::Entity::Solid3D(s) | uncad::Entity::Region(s)) = e else {
+                panic!("{drawing} {handle:X}: {e:?}");
+            };
+            assert_eq!(e.type_name(), name, "{drawing} {handle:X}");
+            assert_eq!(
+                (s.wireframe_edges.len(), s.skipped_edges),
+                (edges, 0),
+                "{drawing} {name} {handle:X}"
             );
         }
     }
