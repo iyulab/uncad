@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 // needs reference them: dwg.c, with USE_WRITE, defines dxf_read_file(),
 // which calls in_dxf.c's dwg_read_dxf(); in_dxf.c calls encode.c's
 // in_postprocess_handles()/in_postprocess_SEQEND() (and dwg.c's own
-// USE_WRITE-gated dwg_find_tablehandle_silent()); and out_dxf.c hosts
-// dwg_convert_SAB_to_SAT1(), which the 3DSOLID wireframe extraction needs.
+// USE_WRITE-gated dwg_find_tablehandle_silent()). out_dxf.c hosts
+// dwg_convert_SAB_to_SAT1(), which this crate no longer calls -- an ACIS body
+// is decoded from its SAB bytes by uncad-model -- and stays compiled with the
+// rest of the writer sources rather than being carved out symbol by symbol.
 // Only the symbols in the bindgen allowlist below reach Rust, and no writer
 // or DXF-reader entry point is among them.
 const LIBREDWG_SOURCES: &[&str] = &[
@@ -49,7 +51,7 @@ const LOCAL_PATCH_MARKER: &[u8] = b"uncad local patch";
 
 // The local patches the vendored copy carries, as (path under
 // vendor/libredwg, times LOCAL_PATCH_MARKER occurs in that file). NOTICE.md
-// lists the same five changes and docs/CAVEATS.md, "Local patches to the
+// lists the same four changes and docs/CAVEATS.md, "Local patches to the
 // vendored LibreDWG", says why each exists. scripts/sync-libredwg-vendor.sh
 // deletes and recopies the whole directory, so a re-vendor silently drops
 // every one of them; main() compares the tree against this table so that it
@@ -58,7 +60,6 @@ const LOCAL_PATCHES: &[(&str, usize)] = &[
     ("src/common.c", 3),
     ("src/common_entity_data.spec", 3),
     ("src/dwg.spec", 1),
-    ("src/out_dxf.c", 3),
 ];
 
 fn main() {
@@ -238,8 +239,6 @@ fn main() {
         .allowlist_function("uncad_free_style_overrides")
         .allowlist_type("uncad_style_override_t")
         .allowlist_function("dwg_free")
-        .allowlist_function("uncad_3dsolid_sab_to_sat_text")
-        .allowlist_function("uncad_free_sat_text")
         .allowlist_function("uncad_dwg_is_pre_r13")
         .allowlist_function("uncad_dwg_is_r13_to_r2000")
         .allowlist_function("uncad_dwg_is_r2010_or_later")
@@ -316,9 +315,8 @@ fn main() {
         // otherwise-allowlisted functions even with Dwg_Object itself opaque.
         // Dwg_Entity__3DSOLID stays listed because bindgen still reaches it
         // transitively and emits it as an opaque blob, even though nothing
-        // allowlisted names it directly any more (the SAB conversion goes
-        // through the uncad_3dsolid_sab_to_sat_text shim, which takes a
-        // void*).
+        // allowlisted names it directly (its fields are read through
+        // dynapi).
         .opaque_type("_dwg_object_entity")
         .opaque_type("Dwg_Object_Entity")
         .opaque_type("_dwg_object_object")

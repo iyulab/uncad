@@ -186,11 +186,9 @@ LAYER table. A binary DXF's header is read too.
 (LibreDWG is not reentrant; see "Thread safety"), and DXF reads run in parallel.
 
 **3DSOLID and REGION.** In a DXF up to R2010 the ACIS body is SAT text in groups 1 and 3
-(obfuscated), which undxf reads; the wireframe is computed by
-`uncad_model::acis::wireframe`, the same function the DWG path uses once LibreDWG has
-converted a binary (SAB) body to SAT (see "Local patches to the vendored LibreDWG" for the
-precision of that text). From R2013 a DXF keeps the body in the ACDSDATA section, which is
-binary and which undxf does not read: such an entity is `Entity::Unknown`.
+(obfuscated); from R2013 it is binary (SAB) in the ACDSDATA section. undxf reads both, and
+the wireframe is computed by `uncad_model::acis` -- the same functions the DWG path hands
+a body's text or bytes to.
 
 ## Text before R2007 is decoded here, through the drawing's codepage
 
@@ -291,17 +289,25 @@ out), and `Solid3DEntity::skipped_edges` counts the ACIS edges that could not be
 wireframe segments. Neither is an error; both are the difference between "empty" and "not
 read".
 
-Measured across the corpus: 1,060 ACIS edges skipped, concentrated in one large R2007
-drawing (720 across 116 solids) and in the `example_*` drawings. The cause, classified on
-that R2007 drawing: in
-62 of its 116 solids the SAT text that comes back from the SAB-to-SAT conversion refers to
-records that are not in it -- pointers run 6 to 166 records past the end, so the converter
-dropped records without renumbering the rest -- and in every one of those solids all edges
-fail, while all 54 solids whose pointers stay in range extract completely. Since records are
-addressed by position, such a text cannot be followed safely; the extractor now checks the
-pointer range first and reports the whole solid as unread (`skipped_edges` = its edge count,
-no `wireframe_edges`) instead of attaching edges to whatever record sits at a stale index.
-Why the conversion loses records is an upstream question. Block references that drew
+Measured across the corpus: 208 ACIS edges skipped, all in the R13 and R14 `example_*`
+drawings (DWG and DXF alike): three SAT bodies each, whose R13/R14-era vertices do not
+resolve to points. Every binary (SAB) body in the corpus reads in full -- including the 58
+solids of one large R2007 drawing, 62 of whose 116 copies were unread while SAB bodies went
+through LibreDWG's SAB-to-SAT conversion (it dropped records it did not know without
+renumbering the rest, so pointers ran past the end). A body whose pointers do run past its
+records is still reported whole as unread (`skipped_edges` = its edge count, no
+`wireframe_edges`) rather than attached to whatever record sits at a stale index.
+
+A 3DSOLID or REGION whose body could not be read is `Entity::Unknown` under its own name,
+never an empty solid: a SAB body that does not decode, and every body kept in the file's
+data storage. R2013 and later keep a solid's body there, and LibreDWG attaches those bodies
+by searching the storage for the `ACIS BinaryFile` signature and handing what it finds to
+the drawing's solids in that order -- not by the handle each data record names. In
+`example_2013.dwg` that put a REGION's 4 edges on the 3DSOLID and the 3DSOLID's 18 on a
+REGION (the DXF twin says which is which); in `example_2018.dwg` it finds nothing, because
+an R2018 body opens with `ASM BinaryFile4`. An entity that says it has a data-storage record
+is therefore not read, whatever LibreDWG attached to it. Reading these bodies by their
+handles is future work. Block references that drew
 nothing: 17 files -- `BLOCK2` of the R2000 and pre-R13 `entities` drawings, in both
 formats, and one block of `2013/gh44-error.dwg`. A reference that cannot be looked up is
 not reported as empty. `tests/corpus_sweep.rs` pins these counts, together with the parse
@@ -748,26 +754,22 @@ displaces exactly along `miter_direction`), but that only confirms the arithmeti
 that using LibreDWG's `miter_direction` this way matches AutoCAD's real MLINE geometry. It
 is a reasonable reading of `dwg.h`'s field names and semantics, not a confirmed fact.
 
-## 3DSOLID SAB conversion runs on a copy
+## 3DSOLID SAB bodies are read, not converted
 
-`acis.rs` used to call LibreDWG's `dwg_convert_SAB_to_SAT1` directly on the live entity to
-get SAT text for the wireframe. That function converts in place: `version` 2 -> 1,
-plaintext SAT into `encr_sat_data`, `acis_data` left as SAB bytes. Since `parse()` reads
-every solid twice (`convert_entities`, then `convert_tables`'s walk over block records),
-the second read took the `version != 2` branch, parsed binary SAB as SAT text, and lost
-the wireframe -- present in `entities`, missing from
-`tables.block_records["*Model_Space"]`. With the write path that existed at the time, the
-same mutation reached the encoder and corrupted every solid on the way back out (measured
-on `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg`, 58 SAB solids). The
-`uncad_3dsolid_sab_to_sat_text` shim in `libredwg-sys` now converts on a shallow copy and
-returns only the text, so `parse()` never touches the `Dwg_Data` at all.
-`crates/uncad/tests/acis_sab.rs` guards this with the same file, checking that both walks
-extract the same wireframe for every solid.
+A solid stored as SAB (binary ACIS) is decoded from its bytes by
+`uncad_model::acis::wireframe_sab`; LibreDWG's `dwg_convert_SAB_to_SAT1` is not called.
+That conversion both lost records (above) and worked in place (`version` 2 -> 1, plaintext
+SAT into `encr_sat_data`, `acis_data` left as SAB bytes): since `parse()` reads every solid
+twice (`convert_entities`, then `convert_tables`'s walk over block records), a conversion
+on the live entity once made the second read parse binary SAB as SAT text and lose the
+wireframe. Reading the bytes leaves the `Dwg_Data` untouched. `crates/uncad/tests/acis_sab.rs`
+checks, on `lib/libredwg/test/test-data/2007/ATMOS-DC22S.dwg` (58 SAB solids), that both
+walks get the same wireframe for every solid and that none has an edge skipped.
 
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches, in four files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries four local patches, in three files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -835,14 +837,6 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   `Hebtxt`. The patch drops that read for an ATTRIB; two corpus drawings no longer report
   `VALUEOUTOFBOUNDS` at all. `tests/vendored_patches.rs` is the regression (`Absent`
   without the patch).
-- **`src/out_dxf.c`** -- `dwg_convert_SAB_to_SAT1()`, which turns a binary (SAB) ACIS body
-  into the SAT text a 3DSOLID's or a REGION's wireframe is read from, wrote every double
-  with `%g`: six significant digits, so a vertex at x = 4235.406760796846 came out at
-  4235.41 -- about 0.003 drawing units off, where the same body read from the drawing's DXF
-  twin keeps every digit. The patch writes `%.17g`, which round-trips a double, and since a
-  value can now be 25 characters long, reserves 32 bytes per value (buffer growth and the
-  converter's 255-character line split) instead of 16. `tests/acis_sab.rs` is the
-  regression: `example_2010.dwg`'s solid reads its first vertex to full precision.
 
 **An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
 an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some

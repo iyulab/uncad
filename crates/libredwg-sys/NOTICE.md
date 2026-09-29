@@ -42,11 +42,6 @@ changes, and cites this list as "The two changes"; it is this one.
    reads the version byte only an ATTDEF stores; read past the record, it
    ended the decode before the text style handle, so every such attribute
    came back with no style.
-5. **`vendor/libredwg/src/out_dxf.c`**, 2026-09-29 — `dwg_convert_SAB_to_SAT1()`
-   writes a binary ACIS body's doubles with `%.17g` instead of `%g`, so a
-   coordinate keeps every digit rather than six significant ones, and
-   reserves 32 bytes per value (buffer and line) instead of 16 for the longer
-   text.
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or

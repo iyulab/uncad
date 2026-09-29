@@ -2219,33 +2219,26 @@ dwg_convert_SAB_to_SAT1 (Dwg_Entity_3DSOLID *restrict _obj)
   src.size = _obj->sab_size - 15;
 
 // header only
-/* --- uncad local patch (see docs/CAVEATS.md, "Local patches to the
-   vendored LibreDWG"): SAB doubles are written with "%.17g", which
-   round-trips a double, instead of "%g", which keeps six significant
-   digits and moved a coordinate like 4235.406760796846 to 4235.41. A value
-   is at most 25 characters that way, so the two record writers below
-   reserve 32 bytes (buffer and line) per value instead of 16.
-   --- end uncad local patch --- */
 #  define SAB_RD(key)                                                         \
     c = bit_read_RC (&src); /* 6 */                                           \
     LOG_HANDLE (#key " [%d] ", c);                                            \
     key = bit_read_RD (&src);                                                 \
-    dest.byte += sprintf ((char *)&dest.chain[dest.byte], "%.17g ", key);     \
+    dest.byte += sprintf ((char *)&dest.chain[dest.byte], "%g ", key);        \
     LOG_TRACE ("%g ", key)
 // record variant
 #  define SAB_RD1()                                                           \
     {                                                                         \
       double f = bit_read_RD (&src);                                          \
       int s;                                                                  \
-      if (dest.byte + 32 >= dest.size)                                        \
+      if (dest.byte + 16 >= dest.size)                                        \
         bit_chain_alloc (&dest);                                              \
-      if (l + 32 > 255)                                                       \
+      if (l + 16 > 255)                                                       \
         {                                                                     \
           bit_write_TF (&dest, (BITCODE_TF) "\n", 1);                         \
           LOG_TRACE ("Split overlong SAT line\n");                            \
           l = 0;                                                              \
         }                                                                     \
-      s = sprintf ((char *)&dest.chain[dest.byte], "%.17g ", f);              \
+      s = sprintf ((char *)&dest.chain[dest.byte], "%g ", f);                 \
       dest.byte += s;                                                         \
       l += s;                                                                 \
       LOG_TRACE ("%g ", f);                                                   \
@@ -2552,16 +2545,15 @@ dwg_convert_SAB_to_SAT1 (Dwg_Entity_3DSOLID *restrict _obj)
           {
             int s;
             float f = bit_read_RL (&src);
-            /* uncad local patch: "%.17g" and a 32-byte reserve -- see SAB_RD */
-            if (dest.byte + 32 >= dest.size)
+            if (dest.byte + 16 >= dest.size)
               bit_chain_alloc (&dest);
-            if (l + 32 > 255)
+            if (l + 16 > 255)
               {
                 bit_write_TF (&dest, (BITCODE_TF) "\n", 1);
                 LOG_TRACE ("Split overlong SAT line\n");
                 l = 0;
               }
-            s = sprintf ((char *)&dest.chain[dest.byte], "%.17g ", (double)f);
+            s = sprintf ((char *)&dest.chain[dest.byte], "%g ", (double)f);
             dest.byte += s;
             l += s;
             LOG_TRACE ("%g ", (double)f);

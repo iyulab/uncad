@@ -12,9 +12,8 @@
 //! The `common_entity_data.spec` one, which puts an entity's true colour and
 //! its transparency back in their own fields, is pinned below on the entity
 //! it was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`); the R13/R14
-//! linetype one in the corpus twin comparison; the `dwg.spec` one, an
-//! R2010+ ATTRIB's text style, below; the `out_dxf.c` one, a binary ACIS
-//! body's coordinates to full precision, in `tests/acis_sab.rs`.
+//! linetype one in the corpus twin comparison; and the `dwg.spec` one, an
+//! R2010+ ATTRIB's text style, below.
 
 use std::fs;
 use std::path::{Path, PathBuf};

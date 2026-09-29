@@ -130,36 +130,6 @@ unsigned int uncad_multileader_get_lines(void *entity,
 void uncad_multileader_free_lines(uncad_multileader_line_t *lines,
                                    unsigned int num_lines);
 
-/* Converts a 3DSOLID/REGION/BODY entity's ACIS payload from SAB ("ACIS
- * BinaryFile", `version == 2`) to SAT v1 text and returns it as one
- * malloc'd, NUL-terminated buffer (its byte length in *out_len), or NULL
- * if `entity` is NULL, the payload is not SAB, or the conversion fails.
- * Free with uncad_free_sat_text. `entity` is the type-specific struct
- * pointer (Dwg_Entity_3DSOLID*, passed as const void* for the same reason
- * uncad_object_entity_ptr returns void*).
- *
- * This exists because LibreDWG's own dwg_convert_SAB_to_SAT1 converts *in
- * place*: it rewrites version/num_blocks/block_size/encr_sat_data (and
- * sab_size/acis_empty/_dxf_sab_converted) on the entity it is handed, while
- * leaving acis_data as the original SAB bytes. uncad reads every solid
- * twice during parse() (once for the top-level entity list, once for the
- * owning block record), so a first in-place conversion left the second
- * read looking at a `version == 1` entity whose acis_data is still binary
- * SAB -- which it then parsed as SAT text and got nothing out of. (Before
- * the write API was removed, the same mutation also corrupted every later
- * DXF/DWG write of the drawing.) This shim runs the conversion on a
- * shallow stack copy of the entity (with the three output pointers cleared
- * so nothing aliases the original), copies the SAT text out, frees what
- * the conversion allocated on the copy, and leaves the entity
- * byte-for-byte untouched, so parse() has no side effect on the Dwg_Data.
- * The copy's `parent` still points at the real Dwg_Object_Entity, which is
- * all the conversion reads through it (the drawing's header.version, for
- * the target ACIS version).
- */
-char *uncad_3dsolid_sab_to_sat_text(const void *entity, size_t *out_len);
-
-void uncad_free_sat_text(char *text);
-
 /* 1 when the drawing was read from a pre-R13 source (DWG R1.4 .. R12, or a
  * DXF stamped so), 0 otherwise or when `dwg` is NULL.
  *

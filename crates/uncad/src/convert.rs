@@ -1739,14 +1739,19 @@ unsafe fn convert_entity(
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE__3DSOLID => {
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity__3DSOLID*
-            // (checked above), matching fixedtype.
-            let (wireframe_edges, skipped_edges) =
-                unsafe { crate::acis::extract_wireframe(entity_ptr, "3DSOLID") };
-            Entity::Solid3D(Solid3DEntity {
-                common,
-                wireframe_edges,
-                skipped_edges,
-            })
+            // (checked above), matching fixedtype. A body this read could
+            // not reach or decode keeps the entity unread, not empty.
+            match unsafe { crate::acis::extract_wireframe(entity_ptr, "3DSOLID") } {
+                Some((wireframe_edges, skipped_edges)) => Entity::Solid3D(Solid3DEntity {
+                    common,
+                    wireframe_edges,
+                    skipped_edges,
+                }),
+                None => Entity::Unknown {
+                    common,
+                    type_name: "3DSOLID".to_string(),
+                },
+            }
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_REGION => {
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_REGION*
@@ -1754,13 +1759,17 @@ unsafe fn convert_entity(
             // Dwg_Entity__3DSOLID -- layout-identical, so the cast
             // extract_wireframe does internally is sound. Its real dxfname has
             // to be passed through: dynapi refuses a name mismatch (acis.rs).
-            let (wireframe_edges, skipped_edges) =
-                unsafe { crate::acis::extract_wireframe(entity_ptr, "REGION") };
-            Entity::Region(Solid3DEntity {
-                common,
-                wireframe_edges,
-                skipped_edges,
-            })
+            match unsafe { crate::acis::extract_wireframe(entity_ptr, "REGION") } {
+                Some((wireframe_edges, skipped_edges)) => Entity::Region(Solid3DEntity {
+                    common,
+                    wireframe_edges,
+                    skipped_edges,
+                }),
+                None => Entity::Unknown {
+                    common,
+                    type_name: "REGION".to_string(),
+                },
+            }
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_POLYLINE_PFACE => {
             // SAFETY: obj is a valid, non-null POLYLINE_PFACE object of dwg

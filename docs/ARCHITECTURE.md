@@ -14,9 +14,7 @@ crates/
                          bindings with bindgen.
     shim/                uncad_shim.c -- accessors that reach entity pointers behind
                          opaque types, a walker that flattens nested structs dynapi
-                         cannot reach (MULTILEADER leader lines), a 3DSOLID SAB->SAT
-                         conversion that runs on a copy rather than the original,
-                         a reader that decodes a DWG from a memory buffer rather
+                         cannot reach (MULTILEADER leader lines), a reader that decodes a DWG from a memory buffer rather
                          than a path, and the file-header fields (version, codepage,
                          string width, a pre-R13 header's length, whether the Template
                          section was read) that decoding a drawing's text and header
@@ -225,8 +223,8 @@ The C build still includes the encoder sources and defines `USE_WRITE`, because 
 sources this crate needs reference them: with `USE_WRITE`, `dwg.c` defines
 `dxf_read_file()`, which calls `in_dxf.c`'s DXF reader, which uses `encode.c`'s handle
 post-processing helpers -- so both are compiled, although nothing in this crate calls that
-reader -- and `out_dxf.c` hosts `dwg_convert_SAB_to_SAT1`, which the 3DSOLID wireframe
-extraction needs. No write entry point is bound to Rust: `dwg_write_file` is left out of
+reader -- and `out_dxf.c` stays compiled with them, though nothing here calls into it any
+more. No write entry point is bound to Rust: `dwg_write_file` is left out of
 the bindgen allowlist.
 
 ## The entity model and block-based traversal
@@ -255,24 +253,19 @@ the block owns, reached through `BLOCK_HEADER`'s `block_entity` handle field.
 
 ## 3DSOLID/REGION ACIS wireframes (`acis.rs`)
 
-The SAT reading is not in this crate: `uncad_model::acis::wireframe` takes the SAT (v1,
-ASCII) text of a body and returns one straight segment per `edge` record, plus the count of
-edges it could not resolve. It is not a general ACIS/B-rep parser -- curved edges are
-approximated as chords, and faces and surfaces are not interpreted at all, so the result is
-always a wireframe, never a filled solid. `crates/uncad/src/acis.rs` is the part that needs
-LibreDWG: it reads the entity's ACIS fields through dynapi and, for a binary body, converts
-it to SAT text first. A DXF's SAT text is read by undxf and goes to the same function.
-
-A solid stored as SAB (v2, binary) has to be converted to SAT text first, and LibreDWG's
-`dwg_convert_SAB_to_SAT1` converts **in place**: it sets `version` to 1, fills
-`encr_sat_data` with plaintext SAT, and leaves `acis_data` as the original SAB bytes.
-`parse()` reads every solid twice (`convert_entities` for model space, then
-`convert_tables` for block records), so calling it on the live entity made the second read
-take the `version == 1` branch, parse binary SAB as text, and lose the wireframe. (While
-the removed write path existed, the same mutation corrupted written files too.) The
-`uncad_3dsolid_sab_to_sat_text` shim in `libredwg-sys` therefore runs the conversion on a
-shallow copy and returns only the text, leaving `parse()` with no side effect on the
-`Dwg_Data` at all.
+The ACIS reading is not in this crate: `uncad_model::acis::wireframe` takes the SAT (v1,
+ASCII) text of a body, and `uncad_model::acis::wireframe_sab` its SAB (v2, binary) bytes;
+both return one straight segment per `edge` record, plus the count of edges they could not
+resolve. They are not a general ACIS/B-rep parser -- curved edges are approximated as
+chords, and faces and surfaces are not interpreted at all, so the result is always a
+wireframe, never a filled solid. `crates/uncad/src/acis.rs` is the part that needs
+LibreDWG: it reads the entity's ACIS fields through dynapi and hands the text or the bytes
+over, only reading them -- `parse()` reads every solid twice (`convert_entities` for model
+space, then `convert_tables` for block records), and both reads see the same body. It also
+tells an empty body from an unread one: an entity with no body of its own that says it has
+a data-storage record (R2013 on) kept its body where LibreDWG did not attach it, and is
+reported as `Entity::Unknown`, as is a SAB body that does not decode. A DXF's text or bytes
+are read by undxf and go to the same functions.
 
 `extract_wireframe(entity_ptr, dxfname)` takes `dxfname` as an argument because REGION is
 a `typedef` of `Dwg_Entity__3DSOLID` in `dwg.h` and shares its dynapi field table, yet

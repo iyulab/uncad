@@ -255,14 +255,16 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     assert!(s.duplicate_ids.is_empty(), "{:?}", s.duplicate_ids);
     println!("handle-less entities (index-derived IDs): {}", s.handleless);
 
-    // --- ACIS edges that could not be read (the SAB-to-SAT texts whose
-    // pointers run past their records) and block references that drew nothing.
-    // The empty-block count is six higher than it was before pre-R13 block
-    // references resolved: a reference that could not be looked up was never
-    // reported as empty, so resolving it made the empty definitions visible. ---
-    // example_r14.dxf's three bodies (4 + 18 + 4 edges) are among them: like
-    // its DWG twin's, their R14-era vertices do not resolve.
-    assert_eq!(s.skipped_edges, 1_060);
+    // --- ACIS edges that could not be read, and block references that drew
+    // nothing. The empty-block count is six higher than it was before pre-R13
+    // block references resolved: a reference that could not be looked up was
+    // never reported as empty, so resolving it made the empty definitions
+    // visible. ---
+    // Every skipped edge is in the R13/R14 examples (DWG and DXF, 4 files):
+    // three SAT bodies each (4 + 18 + 4 edges), counted in the entity list and
+    // in the block record, whose R13/R14-era vertices do not resolve. Every
+    // binary (SAB) body in the corpus reads in full.
+    assert_eq!(s.skipped_edges, 208);
     // Every DXF on the list has its DWG twin on it, with the same empty block.
     assert_eq!(s.files_with_empty_blocks, 17);
 }

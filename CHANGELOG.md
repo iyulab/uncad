@@ -6,6 +6,25 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A 3DSOLID or REGION stored as binary ACIS (SAB) is read from its bytes by
+  `uncad_model::acis::wireframe_sab` instead of through LibreDWG's SAB-to-SAT conversion,
+  which dropped records without renumbering the rest: every SAB body of the bundled corpus
+  now reads in full (the skipped ACIS edges across it went from 1,060 to 208, all in
+  R13/R14 SAT bodies).
+- A 3DSOLID or REGION whose body could not be read is `Entity::Unknown` under its own name
+  instead of a solid with no edges: a SAB body that does not decode, and every R2013+ body
+  kept in the file's data storage. LibreDWG attaches those bodies to solids in the order it
+  finds them, not by handle -- in a drawing with several solids a body could land on the
+  wrong one -- and misses R2018 bodies altogether.
+
+### Removed
+
+- The local patch to the vendored `out_dxf.c` (full precision in the SAB-to-SAT
+  conversion), and `libredwg-sys`'s `uncad_3dsolid_sab_to_sat_text` /
+  `uncad_free_sat_text`: nothing calls the conversion any more.
+
 ## [0.3.0] - 2026-09-29
 
 ### Security
