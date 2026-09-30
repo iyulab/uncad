@@ -240,6 +240,53 @@ impl Drop for Mcp {
     }
 }
 
+/// A client on protocol version 2026-07-28 opens no session: it asks
+/// `server/discover`, then names the version in every request's `_meta`.
+/// That version requires every list result to say how long it stays fresh
+/// (`ttlMs`) and who may cache it (`cacheScope`) -- a client validating
+/// the schema drops a list without them, and with it every tool.
+#[test]
+fn mcp_lists_the_verbs_to_a_client_on_the_stateless_protocol() {
+    let mut child = Command::new(EXE)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .expect("the test binary should be runnable");
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut mcp = Mcp {
+        child,
+        stdin,
+        stdout,
+        next_id: 1,
+    };
+    let meta = json!({
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+        "io.modelcontextprotocol/clientCapabilities": {}
+    });
+    let discover = mcp.request("server/discover", json!({"_meta": meta}));
+    let versions = discover["result"]["supportedVersions"]
+        .as_array()
+        .expect("supportedVersions");
+    assert!(versions.contains(&json!("2026-07-28")), "{discover}");
+
+    let list = mcp.request("tools/list", json!({"_meta": meta}));
+    let result = &list["result"];
+    assert!(result["ttlMs"].is_u64(), "ttlMs is a number: {list}");
+    assert!(
+        result["cacheScope"] == "public" || result["cacheScope"] == "private",
+        "cacheScope is public or private: {list}"
+    );
+    assert_eq!(
+        result["tools"].as_array().expect("tools").len(),
+        5,
+        "{list}"
+    );
+}
+
 #[test]
 fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
     let mut mcp = Mcp::start();

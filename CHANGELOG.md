@@ -25,6 +25,10 @@ Notable changes to this project are recorded here. The format follows
   its record names (a local patch to the vendored `acds.spec`). LibreDWG handed those bodies
   to solids in the order its signature search found them, which put bodies on the wrong
   solids, and missed every R2018 body.
+- `uncad mcp` lists its tools to a client on MCP protocol version 2026-07-28. That
+  version requires a list result to state how long it stays fresh (`ttlMs`) and who may
+  cache it (`cacheScope`); without them a client validating the schema dropped the list,
+  and with it every tool, while the connection itself succeeded.
 
 ### Removed
 

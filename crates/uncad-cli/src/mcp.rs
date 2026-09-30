@@ -13,9 +13,9 @@
 
 use crate::verbs::VERBS;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
-    ToolAnnotations,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+    Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
+    Tool, ToolAnnotations,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
@@ -61,7 +61,14 @@ impl ServerHandler for Server {
                     ))
             })
             .collect();
-        Ok(ListToolsResult::with_all_items(tools))
+        // Protocol version 2026-07-28 requires every list result to say how
+        // long it stays fresh and who may cache it, and a client validating
+        // the schema drops a list without them. The same as `server/discover`
+        // answers: fresh for no time, cached by this client only -- this
+        // server promises nothing beyond the call.
+        Ok(ListToolsResult::with_all_items(tools)
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private))
     }
 
     async fn call_tool(
