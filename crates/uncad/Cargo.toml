@@ -1,6 +1,6 @@
 [package]
 name = "uncad"
-version = "0.3.0"
+version = "0.4.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -15,12 +15,12 @@ categories = ["graphics", "parser-implementations"]
 workspace = true
 
 [dependencies]
-libredwg-sys = { path = "../libredwg-sys", version = "0.3.0" }
+libredwg-sys = { path = "../libredwg-sys", version = "0.4.0" }
 # The entity model this crate fills. A version dependency, never a path:
 # this crate must build from a standalone checkout.
-uncad-model = "0.2.0"
+uncad-model = "0.2.1"
 # The DXF reader (MIT): every DXF, ASCII or binary, is read through it.
-undxf = "0.1.0"
+undxf = "0.1.1"
 libc = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

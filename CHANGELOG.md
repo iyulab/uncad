@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-30
+
 ### Changed
 
 - A 3DSOLID or REGION stored as binary ACIS (SAB) is read from its bytes by
