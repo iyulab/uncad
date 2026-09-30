@@ -151,7 +151,7 @@ fn a_bad_call_fails_with_a_message() {
         vec!["diff", CORPUS_DXF],
         vec!["diff", CORPUS_DXF, CORPUS_DXF, "--matching", "nearest"],
         vec!["diff", CORPUS_DXF, CORPUS_DXF, "--length-tolerance", "-1"],
-        vec!["summarize", CORPUS_DXF, "--pretty"],
+        vec!["summarize", CORPUS_DXF, "--no-such-option"],
         vec!["summarize", CORPUS_DXF, CORPUS_DXF],
         vec!["summarize", "no-such-file.dwg"],
     ] {
@@ -1065,4 +1065,84 @@ fn a_limited_hit_test_keeps_the_nearest_and_counts_the_rest() {
     ]);
     assert_eq!(none["hits"], json!([]));
     assert_eq!(none["hits_total"], hits);
+}
+
+/// The JSON text with the whitespace outside strings taken out.
+fn compact(json: &str) -> String {
+    let (mut out, mut in_string, mut escaped) = (String::new(), false, false);
+    for c in json.chars() {
+        if in_string {
+            let was_escaped = escaped;
+            escaped = !was_escaped && c == '\\';
+            in_string = was_escaped || c != '"';
+            out.push(c);
+        } else if c == '"' {
+            in_string = true;
+            out.push(c);
+        } else if !c.is_whitespace() {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `--pretty`, which the help lists for every command that answers with
+/// JSON, lays the same answer out over lines: nothing but whitespace
+/// outside strings is added, so keys keep their order.
+#[test]
+fn every_json_answer_takes_pretty() {
+    let (cx, cy, r) = circle();
+    let (x, y, tolerance) = (cx.to_string(), cy.to_string(), r.to_string());
+    let calls: Vec<Vec<&str>> = vec![
+        vec!["summarize", CORPUS_DWG],
+        vec!["summarize", CORPUS_DWG, "--type", "circle"],
+        vec![
+            "hit-test",
+            CORPUS_DWG,
+            "--x",
+            &x,
+            "--y",
+            &y,
+            "--tolerance",
+            &tolerance,
+        ],
+        vec!["diff", CORPUS_DWG, CORPUS_DXF, "--matching", "geometry"],
+    ];
+    for argv in calls {
+        let (line, _) = answer(&argv);
+        let mut with = argv.clone();
+        with.push("--pretty");
+        let out = run(&with);
+        assert!(out.status.success(), "{with:?}");
+        let text = String::from_utf8(out.stdout).unwrap();
+        assert!(text.lines().count() > 1, "{with:?} is laid out over lines");
+        assert_eq!(compact(&text), line, "{with:?} is the same answer");
+    }
+    // `set` answers with JSON too.
+    let dir = std::env::temp_dir().join(format!("uncad-cli-pretty-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out_file = dir.join("set.json");
+    let _ = std::fs::remove_file(&out_file);
+    let (_, summary) = answer(&["summarize", CORPUS_DWG, "--type", "circle", "--limit", "1"]);
+    let id = summary["selection"]["entities"][0]["id"].to_string();
+    let out = run(&[
+        "set",
+        CORPUS_DWG,
+        "--id",
+        &id,
+        "--path",
+        "radius",
+        "--value",
+        "1",
+        "-o",
+        out_file.to_str().unwrap(),
+        "--pretty",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8(out.stdout).unwrap().lines().count() > 1);
+    let _ = std::fs::remove_dir_all(&dir);
 }

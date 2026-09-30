@@ -15,6 +15,13 @@ Notable changes to this project are recorded here. The format follows
   the paths `set` takes. The MCP tool takes the same arguments.
 - `hit-test --limit N` keeps the N nearest hits; `hits_total` then says how many there were.
 
+### Fixed
+
+- `--pretty`, which the help lists as a JSON option, is taken by every command that answers
+  with JSON (`summarize`, `hit-test`, `diff`, `set`, `redline`), not only by `-o <file.json>`:
+  the same answer laid out over lines, keys in the same order. The MCP tools answer on one line
+  as before.
+
 ## [0.4.0] - 2026-09-30
 
 ### Changed

@@ -64,7 +64,7 @@ Usage:
   what `-o <output.json>` and `set` write -- so edits chain, and the last
   state renders like any drawing.
 
-JSON options:
+JSON options (every command that answers with JSON, and -o <output.json>):
   --pretty                    indented, multi-line JSON (default: one line)
 
 SVG/PNG options:
@@ -362,6 +362,63 @@ fn read_warning(input: &str, db: &CadDatabase) -> String {
     )
 }
 
+/// One line of JSON laid out as `serde_json`'s pretty printer lays it out
+/// (two spaces, `": "`), working on the text: the keys keep their order and
+/// every number and string keeps its bytes -- only whitespace is added
+/// outside strings.
+fn indented(json: &str) -> String {
+    let mut out = String::with_capacity(json.len() * 2);
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = json.chars().peekable();
+    let newline = |out: &mut String, depth: usize| {
+        out.push('\n');
+        out.push_str(&"  ".repeat(depth));
+    };
+    while let Some(c) = chars.next() {
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '{' | '[' => {
+                out.push(c);
+                // An empty object or array stays on its line.
+                if matches!(chars.peek(), Some('}' | ']')) {
+                    out.push(chars.next().expect("peeked"));
+                } else {
+                    depth += 1;
+                    newline(&mut out, depth);
+                }
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                newline(&mut out, depth);
+                out.push(c);
+            }
+            ',' => {
+                out.push(c);
+                newline(&mut out, depth);
+            }
+            ':' => out.push_str(": "),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 /// `uncad <verb> ...`: the answer on stdout as one line of JSON, warnings on
 /// stderr -- the same answer `uncad mcp` gives for the same arguments.
 fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
@@ -369,9 +426,17 @@ fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
         println!("{}\n\n{}", verb.usage(), verb.description);
         return ExitCode::SUCCESS;
     }
-    match verb.parse_cli(argv).and_then(|args| verb.call(&args)) {
+    // `--pretty` is how the answer is printed, not an argument of the verb:
+    // the MCP tool, which has no terminal to print to, never takes it.
+    let pretty = argv.iter().any(|a| a == "--pretty");
+    let argv: Vec<String> = argv.iter().filter(|a| *a != "--pretty").cloned().collect();
+    match verb.parse_cli(&argv).and_then(|args| verb.call(&args)) {
         Ok(answer) => {
-            println!("{}", answer.json);
+            if pretty {
+                println!("{}", indented(&answer.json));
+            } else {
+                println!("{}", answer.json);
+            }
             for warning in &answer.warnings {
                 eprintln!("warning: {warning}");
             }
