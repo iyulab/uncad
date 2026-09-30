@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-01
+
 ### Added
 
 - `summarize` selects entities when given `--type`, `--layer`, `--within x0,y0,x1,y1` (a
@@ -15,17 +17,14 @@ Notable changes to this project are recorded here. The format follows
   the paths `set` takes. The MCP tool takes the same arguments.
 - `hit-test --limit N` keeps the N nearest hits; `hits_total` then says how many there were.
 
-### Fixed
-
-- `--pretty`, which the help lists as a JSON option, is taken by every command that answers
-  with JSON (`summarize`, `hit-test`, `diff`, `set`, `redline`), not only by `-o <file.json>`:
-  the same answer laid out over lines, keys in the same order. The MCP tools answer on one line
-  as before.
-
-## [0.4.0] - 2026-09-30
-
 ### Changed
 
+- `summarize` and `hit-test` answer with `iron-scout-cad` 0.3.0: a hit test measures
+  construction lines, 3D polylines, viewport and raster image frames, lights, hatches (by
+  their boundary), MLINEs and bodies whose edges lie at one height, where it listed their
+  types in `unsupported`; a summary's extents and window selections take the same points;
+  an entity the model gives nothing to measure is in `not_searched` (`NO_GEOMETRY`) instead of
+  its type in `unsupported`; and each dimension carries the `length_factor` in force for it.
 - A 3DSOLID or REGION stored as binary ACIS (SAB) is read from its bytes by
   `uncad_model::acis::wireframe_sab` instead of through LibreDWG's SAB-to-SAT conversion,
   which dropped records without renumbering the rest: every SAB body of the bundled corpus
@@ -45,6 +44,10 @@ Notable changes to this project are recorded here. The format follows
   version requires a list result to state how long it stays fresh (`ttlMs`) and who may
   cache it (`cacheScope`); without them a client validating the schema dropped the list,
   and with it every tool, while the connection itself succeeded.
+- `--pretty`, which the help lists as a JSON option, is taken by every command that answers
+  with JSON (`summarize`, `hit-test`, `diff`, `set`, `redline`), not only by `-o <file.json>`:
+  the same answer laid out over lines, keys in the same order. The MCP tools answer on one line
+  as before.
 
 ### Removed
 

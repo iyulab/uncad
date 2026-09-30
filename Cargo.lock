@@ -620,9 +620,9 @@ dependencies = [
 
 [[package]]
 name = "iron-scout-cad"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37a5278f8ad0ca4707358ee667d6de1d9edda8a461e103532b9a72f1404ed769"
+checksum = "0cd8d9659990ce427ee46f3842dfc1af429afa43f06a41a38bb7e35d07e8f7a5"
 dependencies = [
  "serde",
  "uncad-model",

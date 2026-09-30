@@ -28,7 +28,7 @@ iron-render-cad = "0.2.0"
 iron-pack-cad = "0.1.0"
 # The verbs (`summarize`, `hit-test`, `diff`, `set`), answered with these
 # crates' own result structures. Version dependencies, never paths.
-iron-scout-cad = "0.2.0"
+iron-scout-cad = "0.3.0"
 iron-diff-cad = "0.2.0"
 iron-hand-cad = "0.2.0"
 # Carries the header from uncad's type to iron-pack-cad's (see main.rs), and
