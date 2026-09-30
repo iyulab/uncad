@@ -20,13 +20,13 @@ use crate::text::TextDecoder;
 use std::ffi::CStr;
 use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
-    DimensionEntity, DimensionKind, DimensionPoints, EllipseEntity, Entity, EntityCommon, EntityId,
-    Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient, HatchPatternLine,
-    ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath, LightEntity, LightType,
-    LineEntity, LwPolylineEntity, MLineEntity, MLineVertex, MTextAttachment, MTextEntity,
-    MultiLeaderEntity, OrdinateAxis, Origin, PointEntity, PolylineEntity, RayEntity, Ref,
-    Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride, ToleranceEntity,
-    ViewportEntity, ViewportView, WipeoutEntity,
+    DimensionEntity, DimensionKind, DimensionPoints, Dogleg, EllipseEntity, Entity, EntityCommon,
+    EntityId, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient,
+    HatchPatternLine, ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath,
+    LeaderRoot, LightEntity, LightType, LineEntity, LwPolylineEntity, MLineEntity, MLineVertex,
+    MTextAttachment, MTextEntity, MultiLeaderEntity, OrdinateAxis, Origin, PointEntity,
+    PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
+    TextOverride, ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, EntityLinetype, HorizontalJustification, OverrideValue, Point2D, Point3D,
@@ -1903,8 +1903,8 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MULTILEADER => Entity::MultiLeader({
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_MULTILEADER*
             // (checked above), matching fixedtype.
-            let lines = unsafe { multileader_lines(entity_ptr) };
-            MultiLeaderEntity { common, lines }
+            let leaders = unsafe { multileader_leaders(entity_ptr) };
+            MultiLeaderEntity { common, leaders }
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
             let vertices: Vec<Point3D> =
@@ -2033,25 +2033,54 @@ unsafe fn style_overrides(
     overrides
 }
 
-/// Reads a MULTILEADER's leader lines through the `uncad_multileader_get_lines`
-/// shim, which flattens the three struct levels dynapi cannot reach
-/// (`ctx.leaders[].lines[].points[]`) into plain `(x, y, z)` arrays.
+/// Reads a MULTILEADER's leader roots through the `uncad_multileader_get_roots`
+/// and `uncad_multileader_get_lines` shims, which walk the struct levels
+/// dynapi cannot reach (`ctx.leaders[]` and their `lines[].points[]`): each
+/// root's last leader line point and dogleg, as its flags state them, and
+/// the lines that belong to it, in order.
 ///
 /// # Safety
 /// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*`.
-unsafe fn multileader_lines(entity_ptr: *mut std::ffi::c_void) -> Vec<Vec<Point3D>> {
-    let mut lines_ptr: *mut libredwg_sys::uncad_multileader_line_t = std::ptr::null_mut();
+unsafe fn multileader_leaders(entity_ptr: *mut std::ffi::c_void) -> Vec<LeaderRoot> {
+    let point = |p: [f64; 3]| Point3D {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    };
+    let mut roots_ptr: *mut libredwg_sys::uncad_multileader_root_t = std::ptr::null_mut();
     // SAFETY: entity_ptr is valid per this function's contract; on success the
-    // shim mallocs *lines_ptr (num_lines entries, each owning its own points
-    // buffer), freed below before returning.
+    // shim mallocs *roots_ptr (num_roots entries), freed below.
+    let num_roots =
+        unsafe { libredwg_sys::uncad_multileader_get_roots(entity_ptr, &mut roots_ptr) };
+    let mut leaders: Vec<LeaderRoot> = if roots_ptr.is_null() {
+        Vec::new()
+    } else {
+        // SAFETY: roots_ptr holds num_roots initialised entries.
+        let raw = unsafe { std::slice::from_raw_parts(roots_ptr, num_roots as usize) };
+        let leaders = raw
+            .iter()
+            .map(|r| LeaderRoot {
+                lines: Vec::new(),
+                last_point: (r.has_last_point != 0).then(|| point(r.last_point)),
+                dogleg: (r.has_dogleg != 0).then(|| Dogleg {
+                    direction: point(r.dogleg_vector),
+                    length: r.dogleg_length,
+                }),
+            })
+            .collect();
+        unsafe { libredwg_sys::uncad_multileader_free_roots(roots_ptr) };
+        leaders
+    };
+
+    let mut lines_ptr: *mut libredwg_sys::uncad_multileader_line_t = std::ptr::null_mut();
+    // SAFETY: as above; the shim mallocs *lines_ptr (num_lines entries, each
+    // owning its own points buffer), freed below before returning.
     let num_lines =
         unsafe { libredwg_sys::uncad_multileader_get_lines(entity_ptr, &mut lines_ptr) };
     if lines_ptr.is_null() {
-        return Vec::new();
+        return leaders;
     }
-
     let raw_lines = unsafe { std::slice::from_raw_parts(lines_ptr, num_lines as usize) };
-    let mut lines = Vec::with_capacity(num_lines as usize);
     for line in raw_lines {
         if line.points.is_null() || line.num_points == 0 {
             continue;
@@ -2059,16 +2088,20 @@ unsafe fn multileader_lines(entity_ptr: *mut std::ffi::c_void) -> Vec<Vec<Point3
         // SAFETY: points is a flat (x,y,z) triple array of num_points*3
         // doubles, per uncad_multileader_get_lines' contract.
         let flat = unsafe { std::slice::from_raw_parts(line.points, line.num_points as usize * 3) };
-        lines.push(
-            flat.as_chunks::<3>()
-                .0
-                .iter()
-                .map(|&[x, y, z]| Point3D { x, y, z })
-                .collect(),
-        );
+        let points = flat
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&xyz| point(xyz))
+            .collect();
+        // Every line's root is one of the roots listed above; the shim
+        // takes both from the same `ctx.leaders[]`.
+        if let Some(root) = leaders.get_mut(line.root as usize) {
+            root.lines.push(points);
+        }
     }
     unsafe { libredwg_sys::uncad_multileader_free_lines(lines_ptr, num_lines) };
-    lines
+    leaders
 }
 
 /// Reads a raw `(ptr, count)` pair from a *nested* struct field (not reachable

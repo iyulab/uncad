@@ -26,7 +26,9 @@ fn a_multileader_keeps_its_leader_line_before_r2010_too() {
             .entities
             .iter()
             .filter_map(|e| match e {
-                Entity::MultiLeader(m) => Some(m.lines.iter().map(Vec::len).sum()),
+                Entity::MultiLeader(m) => {
+                    Some(m.leaders.iter().flat_map(|r| &r.lines).map(Vec::len).sum())
+                }
                 _ => None,
             })
             .collect();

@@ -94,9 +94,33 @@ int uncad_dwg_template_read(const Dwg_Data *dwg);
  * malloc'd (x,y,z) array -- see uncad_multileader_get_lines. */
 typedef struct uncad_multileader_line
 {
+  unsigned int root; /* index of the leader node (root) the line belongs to */
   unsigned int num_points;
   double *points; /* x0,y0,z0, x1,y1,z1, ... -- length 3*num_points */
 } uncad_multileader_line_t;
+
+/* One leader node (root) of a MULTILEADER: where its lines end and its
+ * dogleg -- see uncad_multileader_get_roots. A flag of 0 means the file
+ * states no such value; the value fields are then 0. */
+typedef struct uncad_multileader_root
+{
+  int has_last_point;     /* DXF 290 */
+  double last_point[3];   /* DXF 10 */
+  int has_dogleg;         /* DXF 291 */
+  double dogleg_vector[3]; /* DXF 11 */
+  double dogleg_length;   /* DXF 40 */
+} uncad_multileader_root_t;
+
+/* A MULTILEADER's leader nodes, ctx.leaders[], in order: each node's last
+ * leader line point and dogleg, with the flags that say whether the file
+ * states them. Returns the number of nodes and mallocs *out_roots to that
+ * length; 0 with *out_roots NULL for a NULL entity or one with no node.
+ * Free with uncad_multileader_free_roots. A line's `root` from
+ * uncad_multileader_get_lines indexes this array. */
+unsigned int uncad_multileader_get_roots(void *entity,
+                                          uncad_multileader_root_t **out_roots);
+
+void uncad_multileader_free_roots(uncad_multileader_root_t *roots);
 
 /* Flattens a MULTILEADER entity's ctx.leaders[].lines[] (every leader node
  * can own several lines/splines) into one array of polylines -- every line

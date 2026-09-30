@@ -36,6 +36,10 @@ Notable changes to this project are recorded here. The format follows
 
 ### Fixed
 
+- A MULTILEADER read from a DWG carries its leader roots -- each root's lines, last leader
+  line point and dogleg, as the file's flags state them -- through a shim of the vendored
+  LibreDWG's `Dwg_LEADER_Node`. Its lines were read without the point they run to, so a
+  line of one vertex had nothing to draw.
 - An R2013+ solid's body, kept in the file's data storage, reaches the entity whose handle
   its record names (a local patch to the vendored `acds.spec`). LibreDWG handed those bodies
   to solids in the order its signature search found them, which put bodies on the wrong

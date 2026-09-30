@@ -206,6 +206,7 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
               pts[p * 3 + 1] = line->points[p].y;
               pts[p * 3 + 2] = line->points[p].z;
             }
+          lines[k].root = i;
           lines[k].num_points = line->num_points;
           lines[k].points = pts;
           k++;
@@ -224,6 +225,43 @@ uncad_multileader_free_lines (uncad_multileader_line_t *lines, unsigned int num_
   for (unsigned int i = 0; i < num_lines; i++)
     free (lines[i].points);
   free (lines);
+}
+
+unsigned int
+uncad_multileader_get_roots (void *entity, uncad_multileader_root_t **out_roots)
+{
+  *out_roots = NULL;
+  if (!entity)
+    return 0;
+  Dwg_Entity_MULTILEADER *mleader = (Dwg_Entity_MULTILEADER *)entity;
+  Dwg_MLEADER_AnnotContext *ctx = &mleader->ctx;
+  if (ctx->num_leaders == 0 || !ctx->leaders)
+    return 0;
+  uncad_multileader_root_t *roots
+      = calloc (ctx->num_leaders, sizeof (uncad_multileader_root_t));
+  if (!roots)
+    return 0;
+  for (BITCODE_BL i = 0; i < ctx->num_leaders; i++)
+    {
+      Dwg_LEADER_Node *node = &ctx->leaders[i];
+      roots[i].has_last_point = node->has_lastleaderlinepoint ? 1 : 0;
+      roots[i].last_point[0] = node->lastleaderlinepoint.x;
+      roots[i].last_point[1] = node->lastleaderlinepoint.y;
+      roots[i].last_point[2] = node->lastleaderlinepoint.z;
+      roots[i].has_dogleg = node->has_dogleg ? 1 : 0;
+      roots[i].dogleg_vector[0] = node->dogleg_vector.x;
+      roots[i].dogleg_vector[1] = node->dogleg_vector.y;
+      roots[i].dogleg_vector[2] = node->dogleg_vector.z;
+      roots[i].dogleg_length = node->dogleg_length;
+    }
+  *out_roots = roots;
+  return ctx->num_leaders;
+}
+
+void
+uncad_multileader_free_roots (uncad_multileader_root_t *roots)
+{
+  free (roots);
 }
 
 /* --- version bands, codepage and string width ---------------------------- */
