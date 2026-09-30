@@ -977,3 +977,92 @@ fn a_redline_color_is_six_hex_digits_after_a_hash() {
         "^#[0-9A-Fa-f]{6}$"
     );
 }
+
+/// A summary asked for a selection picks the entities by what they are,
+/// and the tool and the command line agree on it byte for byte; a record
+/// asked for is the model's own form, whose fields `set` takes.
+#[test]
+fn a_summary_selects_entities_and_reads_them() {
+    let (_, plain) = answer(&["summarize", CORPUS_DWG]);
+    assert!(
+        plain.get("selection").is_none(),
+        "no selection unless asked"
+    );
+    let circles = plain["by_type"]["CIRCLE"]
+        .as_u64()
+        .expect("the fixture has circles");
+
+    let (cli, value) = answer(&["summarize", CORPUS_DWG, "--type", "circle", "--detail"]);
+    let selection = &value["selection"];
+    assert_eq!(selection["total"], circles, "{selection}");
+    let first = &selection["entities"][0];
+    assert_eq!(first["entity_type"], "CIRCLE");
+    assert!(first["bounds"]["min"]["x"].is_number(), "{first}");
+    let record = &first["record"];
+    assert_eq!(record["type"], "CIRCLE");
+    assert_eq!(record["common"]["id"], first["id"]);
+    let (_, _, r) = circle();
+    assert_eq!(
+        record["radius"], r,
+        "the record carries the field `set` edits"
+    );
+
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "summarize",
+        json!({"input": CORPUS_DWG, "type": "circle", "detail": true}),
+    );
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+
+    // One entity by its ID; a limit keeps the first, the total counts all.
+    let id = first["id"].to_string();
+    let (_, one) = answer(&["summarize", CORPUS_DWG, "--id", &id]);
+    assert_eq!(one["selection"]["total"], 1);
+    assert!(one["selection"]["entities"][0].get("record").is_none());
+    let (_, limited) = answer(&["summarize", CORPUS_DXF, "--limit", "1"]);
+    assert_eq!(limited["selection"]["total"], limited["entity_count"]);
+    assert_eq!(
+        limited["selection"]["entities"].as_array().unwrap().len(),
+        1
+    );
+
+    // A box must be four numbers, the smaller corner first.
+    for bad in ["1,2,3", "5,0,1,1", "a,b,c,d"] {
+        let out = run(&["summarize", CORPUS_DWG, "--within", bad]);
+        assert!(!out.status.success(), "--within {bad} is refused");
+    }
+}
+
+#[test]
+fn a_limited_hit_test_keeps_the_nearest_and_counts_the_rest() {
+    let (cx, cy, r) = circle();
+    let (x, y) = (cx.to_string(), cy.to_string());
+    let tolerance = (r * 1000.0).to_string();
+    let (_, all) = answer(&[
+        "hit-test",
+        CORPUS_DWG,
+        "--x",
+        &x,
+        "--y",
+        &y,
+        "--tolerance",
+        &tolerance,
+    ]);
+    let hits = all["hits"].as_array().unwrap().len();
+    assert!(hits > 0, "{all}");
+    assert!(all.get("hits_total").is_none());
+    let (_, none) = answer(&[
+        "hit-test",
+        CORPUS_DWG,
+        "--x",
+        &x,
+        "--y",
+        &y,
+        "--tolerance",
+        &tolerance,
+        "--limit",
+        "0",
+    ]);
+    assert_eq!(none["hits"], json!([]));
+    assert_eq!(none["hits_total"], hits);
+}

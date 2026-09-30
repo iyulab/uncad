@@ -59,6 +59,8 @@ structure of [`iron-scout-cad`](https://github.com/iyulab/iron-scout-cad) or
 
 ```bash
 uncad summarize drawing.dwg                                   # what the drawing contains
+uncad summarize drawing.dwg --type circle --layer pipes       # ... and the circles on a layer, each with its box
+uncad summarize drawing.dwg --id 812 --detail                 # ... and one entity's model record (the fields `set` takes)
 uncad hit-test drawing.dwg --x 120 --y 45 --tolerance 0.5     # the entities at a point
 uncad diff rev-a.dwg rev-b.dwg                                # exact numeric difference (by reference ID)
 uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01

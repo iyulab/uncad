@@ -51,6 +51,11 @@ pub enum Kind {
     Choices(&'static [&'static str]),
     /// A color as `#rrggbb`: six hexadecimal digits after a `#`.
     Color,
+    /// A box as four finite numbers `[x0, y0, x1, y1]`, `x0 <= x1` and
+    /// `y0 <= y1`. The command line takes them comma-separated.
+    Window,
+    /// On or off. The command line takes the bare flag for on.
+    Flag,
 }
 
 pub struct Param {
@@ -78,14 +83,79 @@ pub const VERBS: &[Verb] = &[
         description: "What a drawing contains: the entity count per type, every layer and block \
             definition, the attribute values on block references, loose texts that read as \
             label and value, and the lowest confidence of anything summarized. A value that \
-            several places give differently is listed with every value, never one of them.",
-        params: &[Param {
-            name: "input",
-            kind: Kind::Path,
-            required: true,
-            positional: true,
-            description: DRAWING,
-        }],
+            several places give differently is listed with every value, never one of them. \
+            Given a type, a layer, a box, a space or an ID, it also selects entities -- to find \
+            them by what they are rather than where -- and with `detail` gives each one's \
+            model record, the fields `set` addresses.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "type",
+                kind: Kind::Text,
+                required: false,
+                positional: false,
+                description: "Select the entities of this type (CIRCLE, LINE ...), matched \
+                    without regard to case. Any selection argument adds `selection` to the \
+                    answer: the entities every given filter keeps, each with its layer, space \
+                    and box, and `total` counting them all.",
+            },
+            Param {
+                name: "layer",
+                kind: Kind::Text,
+                required: false,
+                positional: false,
+                description: "Select the entities on this layer, matched without regard to \
+                    case.",
+            },
+            Param {
+                name: "within",
+                kind: Kind::Window,
+                required: false,
+                positional: false,
+                description: "Select the entities that reach into this box, [x0, y0, x1, y1] \
+                    in drawing units (a crossing selection). An entity whose extent is not \
+                    measured cannot be judged: it is left out and its type named in \
+                    `not_measured`.",
+            },
+            Param {
+                name: "space",
+                kind: Kind::Choice(&["model", "paper"]),
+                required: false,
+                positional: false,
+                description: "Select the entities of model space, or of the paper-space \
+                    sheets.",
+            },
+            Param {
+                name: "id",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "Select the entity with this reference ID -- with `detail`, to \
+                    read it.",
+            },
+            Param {
+                name: "limit",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "Select at most this many entities, the first by reference ID \
+                    (default 100); `total` still counts all of them.",
+            },
+            Param {
+                name: "detail",
+                kind: Kind::Flag,
+                required: false,
+                positional: false,
+                description: "Give each selected entity's model record too: its fields as \
+                    the model JSON names them, which are the `path`s `set` takes.",
+            },
+        ],
         writes: false,
         run: summarize,
     },
@@ -126,6 +196,15 @@ pub const VERBS: &[Verb] = &[
                 description: "How far from the point an entity's geometry may pass and still \
                     be a hit, in drawing units. There is no default: the right value depends \
                     on the drawing's scale.",
+            },
+            Param {
+                name: "limit",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "Keep at most this many hits, the nearest; `hits_total` then \
+                    says how many there were. A wide search in a dense drawing otherwise \
+                    answers with most of it.",
             },
         ],
         writes: false,
@@ -366,6 +445,8 @@ impl Verb {
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
                 Kind::Choice(words) => value.as_str().is_some_and(|s| words.contains(&s)),
                 Kind::Color => value.as_str().and_then(color).is_some(),
+                Kind::Window => window(value).is_some(),
+                Kind::Flag => value.is_boolean(),
                 Kind::Choices(words) => value.as_array().is_some_and(|items| {
                     items
                         .iter()
@@ -419,6 +500,17 @@ impl Verb {
                     schema.insert("type".into(), "string".into());
                     schema.insert("pattern".into(), "^#[0-9A-Fa-f]{6}$".into());
                 }
+                Kind::Window => {
+                    let mut item = Map::new();
+                    item.insert("type".into(), "number".into());
+                    schema.insert("type".into(), "array".into());
+                    schema.insert("items".into(), item.into());
+                    schema.insert("minItems".into(), 4.into());
+                    schema.insert("maxItems".into(), 4.into());
+                }
+                Kind::Flag => {
+                    schema.insert("type".into(), "boolean".into());
+                }
                 Kind::Choices(words) => {
                     let mut item = Map::new();
                     item.insert("type".into(), "string".into());
@@ -465,6 +557,11 @@ impl Verb {
                     .iter()
                     .find(|p| !p.positional && cli_spelling(p.name) == flag)
                     .ok_or_else(|| format!("unknown option '{word}' for uncad {verb}"))?;
+                if matches!(param.kind, Kind::Flag) {
+                    args.insert(param.name.into(), Value::Bool(true));
+                    i += 1;
+                    continue;
+                }
                 i += 1;
                 let raw = argv.get(i).ok_or_else(|| format!("{word} needs a value"))?;
                 let value = match param.kind {
@@ -479,6 +576,23 @@ impl Verb {
                     Kind::Json => serde_json::from_str(raw).map_err(|e| {
                         format!("{word} must be JSON -- a string in quotes (got '{raw}': {e})")
                     })?,
+                    Kind::Window => Value::Array(
+                        raw.split(',')
+                            .map(|n| {
+                                n.trim()
+                                    .parse::<f64>()
+                                    .ok()
+                                    .and_then(serde_json::Number::from_f64)
+                                    .map(Value::Number)
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "{word} must be four numbers x0,y0,x1,y1 (got '{raw}')"
+                                        )
+                                    })
+                            })
+                            .collect::<Result<_, _>>()?,
+                    ),
+                    Kind::Flag => unreachable!("a flag takes no value"),
                     Kind::Choices(_) => Value::Array(
                         raw.split(',')
                             .map(|w| Value::String(w.trim().to_string()))
@@ -508,6 +622,8 @@ impl Verb {
         for param in self.params {
             let word = if param.positional {
                 format!("<{}>", param.name)
+            } else if matches!(param.kind, Kind::Flag) {
+                format!("--{}", cli_spelling(param.name))
             } else {
                 format!(
                     "--{} <{}>",
@@ -537,6 +653,8 @@ impl Kind {
             Kind::Choice(words) => format!("one of {}", words.join(", ")),
             Kind::Choices(words) => format!("a list of distinct words from {}", words.join(", ")),
             Kind::Color => "a color as #rrggbb".into(),
+            Kind::Window => "four finite numbers [x0, y0, x1, y1], x0 <= x1 and y0 <= y1".into(),
+            Kind::Flag => "true or false".into(),
         }
     }
 
@@ -549,8 +667,26 @@ impl Kind {
             Kind::Choice(words) => words.join("|"),
             Kind::Choices(words) => format!("{}[,...]", words.join("|")),
             Kind::Color => "#rrggbb".into(),
+            Kind::Window => "x0,y0,x1,y1".into(),
+            Kind::Flag => String::new(),
         }
     }
+}
+
+/// The box of a `Kind::Window` value, or `None` for anything else.
+fn window(value: &Value) -> Option<iron_scout_cad::Bounds> {
+    let n: Vec<f64> = value
+        .as_array()?
+        .iter()
+        .map(|v| v.as_f64().filter(|x| x.is_finite()))
+        .collect::<Option<_>>()?;
+    let [x0, y0, x1, y1] = n[..] else {
+        return None;
+    };
+    (x0 <= x1 && y0 <= y1).then_some(iron_scout_cad::Bounds {
+        min: uncad::model::Point2D { x: x0, y: y0 },
+        max: uncad::model::Point2D { x: x1, y: y1 },
+    })
 }
 
 /// The red, green and blue of a `#rrggbb` color, or `None` for anything else.
@@ -632,10 +768,47 @@ fn answer(result: &impl serde::Serialize, warnings: Vec<String>) -> Result<Answe
     Ok(Answer { json, warnings })
 }
 
+/// How many entities a selection shows when the call does not say.
+const SELECTION_LIMIT: u64 = 100;
+
 fn summarize(args: &Map<String, Value>) -> Result<Answer, String> {
     let mut warnings = Vec::new();
     let db = read(&path(args, "input"), &mut warnings)?;
-    answer(&iron_scout_cad::summarize(&db), warnings)
+    let selecting = ["type", "layer", "within", "space", "id", "limit", "detail"]
+        .iter()
+        .any(|name| args.contains_key(*name));
+    if !selecting {
+        return answer(&iron_scout_cad::summarize(&db), warnings);
+    }
+    let text = |name: &str| args.get(name).and_then(Value::as_str);
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(SELECTION_LIMIT);
+    let mut selection = iron_scout_cad::Selection::new().limit(limit as usize);
+    if let Some(t) = text("type") {
+        selection = selection.of_type(t);
+    }
+    if let Some(l) = text("layer") {
+        selection = selection.on_layer(l);
+    }
+    if let Some(w) = args.get("within") {
+        selection = selection.crossing(window(w).expect("checked by Verb::call"));
+    }
+    match text("space") {
+        Some("model") => selection = selection.in_space(iron_scout_cad::SpaceFilter::Model),
+        Some("paper") => selection = selection.in_space(iron_scout_cad::SpaceFilter::Paper),
+        _ => {}
+    }
+    if let Some(id) = args.get("id").and_then(Value::as_u64) {
+        let id: uncad::model::EntityId =
+            serde_json::from_value(Value::from(id)).expect("a reference ID is an integer");
+        selection = selection.with_ids([id]);
+    }
+    if args.get("detail").and_then(Value::as_bool) == Some(true) {
+        selection = selection.with_detail();
+    }
+    answer(&iron_scout_cad::summarize_with(&db, &selection), warnings)
 }
 
 fn hit_test(args: &Map<String, Value>) -> Result<Answer, String> {
@@ -646,7 +819,11 @@ fn hit_test(args: &Map<String, Value>) -> Result<Answer, String> {
         y: number(args, "y").expect("required"),
     };
     let tolerance = number(args, "tolerance").expect("required");
-    answer(&iron_scout_cad::hit_test(&db, point, tolerance), warnings)
+    let mut found = iron_scout_cad::hit_test(&db, point, tolerance);
+    if let Some(n) = args.get("limit").and_then(Value::as_u64) {
+        found = found.limited(n as usize);
+    }
+    answer(&found, warnings)
 }
 
 fn diff(args: &Map<String, Value>) -> Result<Answer, String> {

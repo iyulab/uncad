@@ -28,8 +28,16 @@ Usage:
   uncad <input> -o <output.svg>     render to SVG
   uncad <input> -o <output.png>     render to PNG (rasterized from the SVG)
   uncad export <input> -o <dir>     write the LLM/VLM package (images + JSON)
-  uncad summarize <input>           what the drawing contains, as JSON
-  uncad hit-test <input> --x <n> --y <n> --tolerance <n>
+  uncad summarize <input> [--type <name>] [--layer <name>]
+                  [--within <x0,y0,x1,y1>] [--space <model|paper>]
+                  [--id <n>] [--limit <n>] [--detail]
+                                    what the drawing contains, as JSON; any
+                                      of the options also selects entities
+                                      (every one given must hold), each
+                                      with its box -- and with --detail its
+                                      model record, whose fields are the
+                                      paths `set` takes
+  uncad hit-test <input> --x <n> --y <n> --tolerance <n> [--limit <n>]
                                     the entities at a point, as JSON
   uncad diff <before> <after> [--matching <reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]

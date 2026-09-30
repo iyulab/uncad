@@ -6,6 +6,15 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `summarize` selects entities when given `--type`, `--layer`, `--within x0,y0,x1,y1` (a
+  crossing box), `--space model|paper`, `--id` or `--limit` (default 100): the answer gains
+  `selection`, the entities every given filter keeps -- each with its layer, space and box --
+  and `total` counting them all. `--detail` adds each entity's model record, whose fields are
+  the paths `set` takes. The MCP tool takes the same arguments.
+- `hit-test --limit N` keeps the N nearest hits; `hits_total` then says how many there were.
+
 ## [0.4.0] - 2026-09-30
 
 ### Changed
