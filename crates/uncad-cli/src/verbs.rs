@@ -80,10 +80,11 @@ pub struct Verb {
 pub const VERBS: &[Verb] = &[
     Verb {
         name: "summarize",
-        description: "What a drawing contains: the entity count per type, every layer and block \
-            definition, the attribute values on block references, loose texts that read as \
-            label and value, and the lowest confidence of anything summarized. A value that \
-            several places give differently is listed with every value, never one of them. \
+        description: "What a drawing contains: the unit its header states (null when it states \
+            none), the entity count per type, every layer and block definition, the \
+            attribute values on block references, loose texts that read as label and value, \
+            and the lowest confidence of anything summarized. A value that several places \
+            give differently is listed with every value, never one of them. \
             Given a type, a layer, a box, a space or an ID, it also selects entities -- to find \
             them by what they are rather than where -- and with `detail` gives each one's \
             model record, the fields `set` addresses.",

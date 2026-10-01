@@ -49,10 +49,9 @@ fn answer(args: &[&str]) -> (String, Value) {
     (line.to_string(), value)
 }
 
-/// The one circle of the DWG fixture, read from the model export: the
-/// point tests aim at it without copying its numbers here. Each call writes
-/// its own file -- the tests of this binary run in parallel in one process.
-fn circle() -> (f64, f64, f64) {
+/// The DWG fixture's model export, as JSON. Each call writes its own file --
+/// the tests of this binary run in parallel in one process.
+fn exported_model() -> Value {
     static CALLS: AtomicUsize = AtomicUsize::new(0);
     let model = std::env::temp_dir().join(format!(
         "uncad-cli-verbs-{}-{}.json",
@@ -63,7 +62,13 @@ fn circle() -> (f64, f64, f64) {
     assert!(run(&[CORPUS_DWG, "-o", model_arg]).status.success());
     let text = std::fs::read_to_string(&model).expect("the export was written");
     let _ = std::fs::remove_file(&model);
-    let db: Value = serde_json::from_str(&text).expect("the export is JSON");
+    serde_json::from_str(&text).expect("the export is JSON")
+}
+
+/// The one circle of the DWG fixture, read from the model export: the
+/// point tests aim at it without copying its numbers here.
+fn circle() -> (f64, f64, f64) {
+    let db = exported_model();
     let circle = db["entities"]
         .as_array()
         .expect("entities")
@@ -83,6 +88,21 @@ fn summarize_answers_with_the_summary() {
     assert!(summary["entity_count"].as_u64().unwrap() > 0, "{summary}");
     assert!(summary["by_type"].is_object(), "{summary}");
     assert!(summary["layers"].is_array(), "{summary}");
+}
+
+#[test]
+fn a_summary_states_the_units_the_model_carries() {
+    let db = exported_model();
+    let stated = &db["header"]["insunits"];
+    assert!(
+        stated.is_u64(),
+        "an R2000 DWG states $INSUNITS: {}",
+        db["header"]
+    );
+
+    let (_, summary) = answer(&["summarize", CORPUS_DWG]);
+    assert_eq!(&summary["units"]["code"], stated, "{summary}");
+    assert!(summary["units"]["name"].is_string(), "{summary}");
 }
 
 #[test]
