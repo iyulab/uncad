@@ -1,6 +1,6 @@
 [package]
 name = "uncad"
-version = "0.4.0"
+version = "0.5.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -15,12 +15,12 @@ categories = ["graphics", "parser-implementations"]
 workspace = true
 
 [dependencies]
-libredwg-sys = { path = "../libredwg-sys", version = "0.4.0" }
+libredwg-sys = { path = "../libredwg-sys", version = "0.5.0" }
 # The entity model this crate fills. A version dependency, never a path:
 # this crate must build from a standalone checkout.
-uncad-model = "0.2.1"
+uncad-model = "0.3.0"
 # The DXF reader (MIT): every DXF, ASCII or binary, is read through it.
-undxf = "0.1.1"
+undxf = "0.2.0"
 libc = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -29,7 +29,7 @@ serde_json = "1.0.151"
 # The tests that check what a parsed drawing *draws* (an empty block reported,
 # unsupported types listed in order, byte-identical output) render it through
 # the renderer crate. A version dependency, never a path.
-iron-render-cad = "0.2.0"
+iron-render-cad = "0.3.0"
 # A second, independent DWG reader, used by tests only -- it is how this
 # crate's own output gets an oracle that does not share its engine. A
 # *development* dependency on purpose: nothing a consumer builds or links

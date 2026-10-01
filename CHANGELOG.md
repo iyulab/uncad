@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-02
+
 ### Added
 
 - The model a DWG reads into carries the header's `$INSUNITS` code in `header.insunits` (from
@@ -13,6 +15,17 @@ Notable changes to this project are recorded here. The format follows
   model JSON every verb reads and writes carries it the same way.
 - `summarize` (and the MCP tool) answers with the unit the header states: `units` is
   `{"code", "name"}`, or `null` when the drawing states none.
+
+### Changed
+
+- A DWG multileader is read as its leader roots (`uncad-model`'s `LeaderRoot`): each root's
+  lines, its last leader line point and its dogleg, so `render`, `export` and `hit-test` draw
+  and measure a leader line on to its root -- a line of a single vertex drew nothing before.
+- **Breaking:** built on `uncad-model` 0.3.0, `undxf` 0.2.0, `iron-render-cad` 0.3.0,
+  `iron-pack-cad` 0.2.0, `iron-scout-cad` 0.4.0, `iron-diff-cad` 0.3.0 and `iron-hand-cad`
+  0.3.0. A package's units now come from the model; `summarize` gains `units`.
+- The vendored LibreDWG is updated to upstream commit `93b89d33` (2026-10-01): two changes
+  to its DXF importer, which this crate compiles but does not call.
 
 ## [0.4.0] - 2026-10-01
 
