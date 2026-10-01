@@ -70,6 +70,7 @@ fn the_three_states_serialize_distinguishably_and_round_trip() {
             line(Ref::Unresolved("2A".to_string())),
         ],
         tables: Default::default(),
+        header: Default::default(),
         read_diagnostics: Default::default(),
     };
     let json = db

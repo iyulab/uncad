@@ -205,6 +205,9 @@
     "layouts": {},
     "image_definitions": {}
   },
+  "header": {
+    "insunits": null
+  },
   "read_diagnostics": {
     "warnings": []
   }

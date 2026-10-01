@@ -21,7 +21,9 @@ use std::sync::Mutex;
 // The model this crate fills lives in `uncad-model`; it is re-exported whole
 // so `uncad::model::...` / `uncad::tables::...` keep naming the same types.
 pub use uncad_model::{json, model, tables};
-pub use uncad_model::{CadDatabase, Entity, JsonError, ReadDiagnostics, Tables, ToJsonOptions};
+pub use uncad_model::{
+    CadDatabase, Entity, HeaderVariables, JsonError, ReadDiagnostics, Tables, ToJsonOptions,
+};
 
 pub use header::{Header, Units};
 
@@ -308,6 +310,9 @@ fn parse_dwg(bytes: &[u8]) -> Result<(CadDatabase, Header), ParseError> {
         CadDatabase {
             entities,
             tables,
+            header: HeaderVariables {
+                insunits: header.insunits,
+            },
             read_diagnostics,
         },
         header,

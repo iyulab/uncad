@@ -6,6 +6,12 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The model a DWG reads into carries the header's `$INSUNITS` code in `header.insunits` (from
+  R2000, the first version that stores it; `None` before). A DXF's comes from `undxf`. The
+  model JSON every verb reads and writes carries it the same way.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added
