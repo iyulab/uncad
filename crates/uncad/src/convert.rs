@@ -22,11 +22,11 @@ use uncad_model::model::{
     AcadTableEntity, ArcEntity, AttdefEntity, AttribEntity, CircleEntity, Confidence,
     DimensionEntity, DimensionKind, DimensionPoints, Dogleg, EllipseEntity, Entity, EntityCommon,
     EntityId, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient,
-    HatchPatternLine, ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderPath,
-    LeaderRoot, LightEntity, LightType, LineEntity, LwPolylineEntity, MLineEntity, MLineVertex,
-    MTextAttachment, MTextEntity, MultiLeaderEntity, OrdinateAxis, Origin, PointEntity,
-    PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity,
-    TextOverride, ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
+    HatchPatternLine, ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderLineType,
+    LeaderPath, LeaderRoot, LightEntity, LightType, LineEntity, LwPolylineEntity, MLineEntity,
+    MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity, OrdinateAxis, Origin,
+    PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
+    TextEntity, TextOverride, ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, EntityLinetype, HorizontalJustification, OverrideValue, Point2D, Point3D,
@@ -1903,8 +1903,22 @@ unsafe fn convert_entity(
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MULTILEADER => Entity::MultiLeader({
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_MULTILEADER*
             // (checked above), matching fixedtype.
-            let leaders = unsafe { multileader_leaders(entity_ptr) };
-            MultiLeaderEntity { common, leaders }
+            let (leaders, lines) = unsafe { multileader_leaders(entity_ptr) };
+            let line_type = LeaderLineType::resolve(
+                get_field::<u32>(entity_ptr, "MULTILEADER", "flags"),
+                get_field::<u16>(entity_ptr, "MULTILEADER", "type").map(i64::from),
+                mleader_style_line_type(get_field::<*mut libredwg_sys::Dwg_Object_Ref>(
+                    entity_ptr,
+                    "MULTILEADER",
+                    "mleaderstyle",
+                )),
+                lines,
+            );
+            MultiLeaderEntity {
+                common,
+                leaders,
+                line_type,
+            }
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
             let vertices: Vec<Point3D> =
@@ -2033,15 +2047,45 @@ unsafe fn style_overrides(
     overrides
 }
 
+/// A multileader line's own override flags (DXF 93) and type (170).
+type LineOverride = (Option<u32>, Option<i64>);
+
+/// The line type (173) of the MLEADERSTYLE a multileader's handle points
+/// at; `None` when it points at nothing, or at an object that is not one.
+fn mleader_style_line_type(style: Option<*mut libredwg_sys::Dwg_Object_Ref>) -> Option<i64> {
+    let style = style.filter(|r| !r.is_null())?;
+    // SAFETY: a non-null Dwg_Object_Ref populated by the reader; its `obj`
+    // is the object the handle resolved to, or null.
+    let obj = unsafe { (*style).obj };
+    if obj.is_null() {
+        return None;
+    }
+    // SAFETY: obj is a live object of the drawing being converted. The
+    // pointer cast is the one `block_record_name` explains.
+    let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(obj.cast()) }
+        as libredwg_sys::DWG_OBJECT_TYPE;
+    if fixedtype != libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_MLEADERSTYLE {
+        return None;
+    }
+    let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj.cast()) };
+    if object_ptr.is_null() {
+        return None;
+    }
+    get_field::<u16>(object_ptr, "MLEADERSTYLE", "type").map(i64::from)
+}
+
 /// Reads a MULTILEADER's leader roots through the `uncad_multileader_get_roots`
 /// and `uncad_multileader_get_lines` shims, which walk the struct levels
 /// dynapi cannot reach (`ctx.leaders[]` and their `lines[].points[]`): each
 /// root's last leader line point and dogleg, as its flags state them, and
-/// the lines that belong to it, in order.
+/// the lines that belong to it, in order. Beside them, each kept line's own
+/// override flags and type, for [`LeaderLineType::resolve`].
 ///
 /// # Safety
 /// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*`.
-unsafe fn multileader_leaders(entity_ptr: *mut std::ffi::c_void) -> Vec<LeaderRoot> {
+unsafe fn multileader_leaders(
+    entity_ptr: *mut std::ffi::c_void,
+) -> (Vec<LeaderRoot>, Vec<LineOverride>) {
     let point = |p: [f64; 3]| Point3D {
         x: p[0],
         y: p[1],
@@ -2077,8 +2121,9 @@ unsafe fn multileader_leaders(entity_ptr: *mut std::ffi::c_void) -> Vec<LeaderRo
     // owning its own points buffer), freed below before returning.
     let num_lines =
         unsafe { libredwg_sys::uncad_multileader_get_lines(entity_ptr, &mut lines_ptr) };
+    let mut own = Vec::new();
     if lines_ptr.is_null() {
-        return leaders;
+        return (leaders, own);
     }
     let raw_lines = unsafe { std::slice::from_raw_parts(lines_ptr, num_lines as usize) };
     for line in raw_lines {
@@ -2098,10 +2143,11 @@ unsafe fn multileader_leaders(entity_ptr: *mut std::ffi::c_void) -> Vec<LeaderRo
         // takes both from the same `ctx.leaders[]`.
         if let Some(root) = leaders.get_mut(line.root as usize) {
             root.lines.push(points);
+            own.push((Some(line.flags), Some(i64::from(line.type_))));
         }
     }
     unsafe { libredwg_sys::uncad_multileader_free_lines(lines_ptr, num_lines) };
-    leaders
+    (leaders, own)
 }
 
 /// Reads a raw `(ptr, count)` pair from a *nested* struct field (not reachable

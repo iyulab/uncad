@@ -97,6 +97,11 @@ typedef struct uncad_multileader_line
   unsigned int root; /* index of the leader node (root) the line belongs to */
   unsigned int num_points;
   double *points; /* x0,y0,z0, x1,y1,z1, ... -- length 3*num_points */
+  /* The line's own type (DXF 170: 0 invisible, 1 straight, 2 spline) and
+   * override flags (DXF 93: bit 0x1 = the type is the line's own). Stored
+   * from R2010; an older drawing reads 0 for both, which overrides nothing. */
+  int type;
+  unsigned int flags;
 } uncad_multileader_line_t;
 
 /* One leader node (root) of a MULTILEADER: where its lines end and its

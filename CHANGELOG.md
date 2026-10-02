@@ -6,6 +6,13 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A multileader read from a DWG carries its `line_type`, settled from the entity's override
+  flags and type, the line type of the MLEADERSTYLE it names, and each leader line's own
+  override (R2010 on).
+
+
 ## [0.6.0] - 2026-10-02
 
 ### Added

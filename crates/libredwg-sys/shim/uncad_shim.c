@@ -209,6 +209,8 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
           lines[k].root = i;
           lines[k].num_points = line->num_points;
           lines[k].points = pts;
+          lines[k].type = line->type;
+          lines[k].flags = line->flags;
           k++;
         }
     }

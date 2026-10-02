@@ -20,7 +20,7 @@ use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 17] = [
+const CASES: [(&str, &[u8], &str); 18] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -106,6 +106,11 @@ const CASES: [(&str, &[u8], &str); 17] = [
         include_bytes!("golden/g19.dxf"),
         include_str!("golden/g19.expected.json"),
     ),
+    (
+        "g20",
+        include_bytes!("golden/g20.dxf"),
+        include_str!("golden/g20.expected.json"),
+    ),
 ];
 
 /// Removes its file on drop, so a failing assertion leaves nothing behind.
@@ -169,15 +174,17 @@ fn every_golden_case_reads_back_exactly_as_its_spec_says() {
 }
 
 #[test]
-fn the_fixtures_are_the_r2000_dxfs_the_writer_produces() {
+fn the_fixtures_are_the_dxfs_the_writer_produces() {
     // The fixtures are copies; the umbrella's verify script regenerates them
     // and fails when a copy has drifted from the writer. Here only the shape
-    // a reader depends on is pinned.
+    // a reader depends on is pinned: R2000, or R2010 for the case with
+    // multileaders, which R2000 has no record for.
     for (name, dxf, expected) in CASES {
         let text = String::from_utf8_lossy(dxf);
+        let version = if name == "g20" { "AC1024" } else { "AC1015" };
         assert!(
-            text.contains("  9\n$ACADVER\n  1\nAC1015\n"),
-            "{name} is R2000"
+            text.contains(&format!("  9\n$ACADVER\n  1\n{version}\n")),
+            "{name} is {version}"
         );
         assert!(text.ends_with("  0\nEOF\n"), "{name} ends with EOF");
         assert!(expected.starts_with('{'), "{name} has a JSON model");
