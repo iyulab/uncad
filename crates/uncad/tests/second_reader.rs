@@ -217,65 +217,80 @@ fn what_the_second_reader_says_about_a_reference_to_a_missing_block() {
     );
 }
 
-/// Where the two readers stand on layer references, per version.
+/// The same layer reference on every entity both readers hold, in all three
+/// states.
 ///
-/// This crate carries a layer reference as three states. The second reader
-/// carries it as a name, and its DWG path fills a name it could not resolve
-/// with the literal `"0"` -- a layer name every drawing really has. So a
-/// failed resolution and a genuine layer 0 are the same value there, and the
-/// handle that would tell them apart is not kept on the entity (its linetype
-/// handle is, which is what makes the omission visible rather than a matter
-/// of taste).
-///
-/// The corpus is clean, so the collapse is latent here, not active: this
-/// pins that both readers agree on every drawing in it. A disagreement
-/// appearing later is either a real defect or the latent case arriving.
+/// This crate carries a layer reference as three states: resolved to a
+/// name, absent, or unresolved with the handle the file wrote. The second
+/// reader fills a name it could not resolve with the literal `"0"` -- a
+/// layer name every drawing really has -- and keeps the handle beside it, so
+/// its three states are recovered here from that handle and its layer table.
+/// Comparing names alone would read a failed resolution as layer 0.
 #[test]
-fn the_two_readers_agree_on_every_layer_name_in_the_corpus() {
+fn the_two_readers_agree_on_every_layer_reference_in_the_corpus() {
+    use std::collections::{BTreeMap, BTreeSet};
+    use uncad::model::Ref;
+
     let mut disagreements: Vec<String> = Vec::new();
     let mut compared = 0usize;
     for version in VERSIONS {
         for path in drawings_for(version) {
-            let (Ok(ours), Some(theirs)) = (uncad::parse(&path), second_reader_layers(&path))
-            else {
+            let Ok(ours) = uncad::parse(&path) else {
                 continue;
             };
-            let mut our_names: Vec<String> = ours
-                .all_entities()
-                .filter_map(|e| e.common().layer.resolved().cloned())
+            let Ok(mut reader) = acadrust::DwgReader::from_file(&path) else {
+                continue;
+            };
+            let Ok(document) = reader.read() else {
+                continue;
+            };
+            let layers: BTreeMap<u64, &str> = document
+                .layers
+                .iter()
+                .map(|l| (l.handle.value(), l.name.as_str()))
                 .collect();
-            our_names.sort_unstable();
-            our_names.dedup();
-            let mut their_names = theirs;
-            their_names.sort_unstable();
-            their_names.dedup();
-            compared += 1;
-            if our_names != their_names {
-                disagreements.push(format!(
-                    "{}: ours {our_names:?} vs theirs {their_names:?}",
-                    path.display()
-                ));
+            let theirs: BTreeMap<u64, Ref<String>> = document
+                .entities()
+                .map(|e| {
+                    let common = e.common();
+                    let state = match common.layer_handle {
+                        None => Ref::Absent,
+                        Some(h) => match layers.get(&h.value()) {
+                            Some(name) => Ref::Resolved((*name).to_string()),
+                            None => Ref::Unresolved(format!("{:X}", h.value())),
+                        },
+                    };
+                    (common.handle.value(), state)
+                })
+                .collect();
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let mut seen = BTreeSet::new();
+            for entity in ours.all_entities() {
+                let id = entity.common().id;
+                if !seen.insert(id) {
+                    continue;
+                }
+                let Some(their_layer) = theirs.get(&id.value()) else {
+                    continue;
+                };
+                compared += 1;
+                let our_layer = &entity.common().layer;
+                if our_layer != their_layer {
+                    disagreements.push(format!(
+                        "{version}/{name} {:X}: ours {our_layer:?}, theirs {their_layer:?}",
+                        id.value()
+                    ));
+                }
             }
         }
     }
-    assert!(compared > 0, "no drawing was read by both");
+    assert!(compared > 0, "no entity was read by both");
     assert!(
         disagreements.is_empty(),
-        "{} of {compared} drawings disagree on the set of layer names:\n{}",
+        "{} of {compared} entities disagree on their layer reference:\n{}",
         disagreements.len(),
         disagreements.join("\n")
     );
-}
-
-fn second_reader_layers(path: &Path) -> Option<Vec<String>> {
-    let mut reader = acadrust::DwgReader::from_file(path).ok()?;
-    let document = reader.read().ok()?;
-    Some(
-        document
-            .entities()
-            .map(|entity| entity.common().layer.clone())
-            .collect(),
-    )
 }
 
 /// What each reader finds, entity type by entity type.
@@ -939,13 +954,15 @@ fn the_two_readers_agree_on_every_mtext_insert_and_dimension_field() {
     // one was checked against the drawing's text twin where it has one, and
     // in each such case this crate states what the twin states:
     //
-    // - block names of anonymous blocks (`*D…`, `*U…`): the second reader
-    //   renames them with its own counters (`*D`, `*D0`, `*U`, …), and for a
-    //   dimension without a block it gives `*U0` where the twin writes no
-    //   block at all. For `*U…` references this crate's names are the
-    //   twin's. For `*D…` the twin itself numbers them differently from the
-    //   binary drawing -- anonymous names are not stable across a save --
-    //   so those lines are recorded, not judged.
+    // - block names of anonymous blocks (`*D…`): this crate keeps the name
+    //   the block's BLOCK entity states; the second reader numbers the bare
+    //   name its block header carries (`*D`) in BLOCK_CONTROL order, which
+    //   is also the name the drawing's text twin gives. The two coincide on
+    //   every drawing but one here, whose stored suffixes differ from that
+    //   order -- anonymous names are not stable across a save -- so those
+    //   lines are recorded, not judged.
+    // - a dimension without a block: the second reader gives `*U0` where the
+    //   twin writes no block at all.
     // - one dimension's definition point, where the twin agrees with this
     //   crate.
     //
@@ -1184,6 +1201,20 @@ fn the_two_readers_agree_on_every_spline_field() {
                 };
                 compared += 1;
                 let flag = |b: Option<bool>| b.map_or("unstated".to_string(), |b| b.to_string());
+                // The second reader fills a bit the record does not state
+                // with a default, and says which bits those are through the
+                // storage form: a fit-point record (scenario 2) states no
+                // periodic bit, and no closed bit before R2013.
+                let fit_points = t.dwg_scenario == Some(2);
+                let their_flag = |stated: bool, b: bool| {
+                    if stated {
+                        b.to_string()
+                    } else {
+                        "unstated".to_string()
+                    }
+                };
+                let closed_stated =
+                    !fit_points || document.version >= acadrust::types::DxfVersion::AC1027;
                 let fields: Vec<(&str, String, String)> = vec![
                     ("degree", o.degree.to_string(), t.degree.to_string()),
                     (
@@ -1202,8 +1233,16 @@ fn the_two_readers_agree_on_every_spline_field() {
                         format!("{:?}", o.weights),
                         format!("{:?}", t.weights),
                     ),
-                    ("closed", flag(o.closed), t.flags.closed.to_string()),
-                    ("periodic", flag(o.periodic), t.flags.periodic.to_string()),
+                    (
+                        "closed",
+                        flag(o.closed),
+                        their_flag(closed_stated, t.flags.closed),
+                    ),
+                    (
+                        "periodic",
+                        flag(o.periodic),
+                        their_flag(!fit_points, t.flags.periodic),
+                    ),
                 ];
                 for (field, o, t) in fields {
                     if o != t {
@@ -1217,18 +1256,11 @@ fn the_two_readers_agree_on_every_spline_field() {
         }
     }
     assert!(compared > 0, "nothing was read by both");
-    // Every remaining line is a fit-point spline whose record states no
-    // periodic bit in any version, and no closed bit before R2013: this
-    // reader reports those as unstated, the other reader as false. Degree,
-    // knots, weights, control points and fit points agree exactly on every
-    // spline both read.
+    // Degree, knots, weights, control points, fit points and the two bits --
+    // stated or not -- agree exactly on every spline both read.
     let report = format!(
-        "compared {compared} unmatched {unmatched}
-{}",
-        disagreements.join(
-            "
-"
-        )
+        "compared {compared} unmatched {unmatched}\n{}",
+        disagreements.join("\n")
     );
     let pinned = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -1238,9 +1270,7 @@ fn the_two_readers_agree_on_every_spline_field() {
     assert_eq!(
         report.trim(),
         pinned.trim(),
-        "
-the two readers' agreement on splines moved; measured now:
-{report}"
+        "\nthe two readers' agreement on splines moved; measured now:\n{report}"
     );
 }
 

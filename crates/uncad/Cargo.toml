@@ -39,4 +39,4 @@ iron-render-cad = "0.4.0"
 # Weak (file-scope) copyleft, so it is allowed by name in `deny.toml` rather
 # than folded into the permissive list, and it is named in
 # `docs/THIRD_PARTY_NOTICES.md` with where its source can be obtained.
-acadrust = "0.5.5"
+acadrust = "0.6.0"
