@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-02
+
 ### Added
 
 - `--paper <light|dark>` for a render (`-o` .svg or .png) and for `redline` (MCP: `paper`):
@@ -19,6 +21,11 @@ Notable changes to this project are recorded here. The format follows
 - `--stroke <px>` for `redline` (MCP: `stroke`): every line that many pixels wide in the
   PNG, framing the whole drawing or only the changes. Refused for an SVG, which has no
   pixels.
+
+### Changed
+
+- Built on `iron-render-cad` 0.4.0 and `iron-pack-cad` 0.3.0: the page a render or a redline
+  is drawn on. `export` is drawn on the light page, as before.
 
 ## [0.5.0] - 2026-10-02
 
