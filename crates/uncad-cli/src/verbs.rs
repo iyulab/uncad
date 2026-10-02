@@ -44,6 +44,8 @@ pub enum Kind {
     Number,
     /// A finite number, 0 or more.
     NonNegative,
+    /// A finite number greater than 0.
+    Positive,
     /// One of the listed words.
     Choice(&'static [&'static str]),
     /// Some of the listed words, each once. The command line takes them
@@ -338,6 +340,24 @@ pub const VERBS: &[Verb] = &[
                     drawing unit is a pixel, which a large drawing exceeds.",
             },
             Param {
+                name: "stroke",
+                kind: Kind::Positive,
+                required: false,
+                positional: false,
+                description: "For a PNG: draw every line this many pixels wide. Without it the \
+                    lines are about 1/6000 of the picture's diagonal, under a pixel at most \
+                    sizes. An SVG has no pixels, so it does not take this.",
+            },
+            Param {
+                name: "paper",
+                kind: Kind::Choice(&["light", "dark"]),
+                required: false,
+                positional: false,
+                description: "The page: light (default; pure white drawn black) or dark (a black \
+                    page; pure white kept white, pure black drawn white). Every other color, \
+                    the changes' included, is drawn as it is.",
+            },
+            Param {
                 name: "frame",
                 kind: Kind::Choice(&["drawing", "changes"]),
                 required: false,
@@ -444,6 +464,7 @@ impl Verb {
                 Kind::Json => true,
                 Kind::Number => value.as_f64().is_some_and(f64::is_finite),
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
+                Kind::Positive => value.as_f64().is_some_and(|v| v.is_finite() && v > 0.0),
                 Kind::Choice(words) => value.as_str().is_some_and(|s| words.contains(&s)),
                 Kind::Color => value.as_str().and_then(color).is_some(),
                 Kind::Window => window(value).is_some(),
@@ -492,6 +513,10 @@ impl Verb {
                 Kind::NonNegative => {
                     schema.insert("type".into(), "number".into());
                     schema.insert("minimum".into(), 0.into());
+                }
+                Kind::Positive => {
+                    schema.insert("type".into(), "number".into());
+                    schema.insert("exclusiveMinimum".into(), 0.into());
                 }
                 Kind::Choice(words) => {
                     schema.insert("type".into(), "string".into());
@@ -566,7 +591,7 @@ impl Verb {
                 i += 1;
                 let raw = argv.get(i).ok_or_else(|| format!("{word} needs a value"))?;
                 let value = match param.kind {
-                    Kind::Number | Kind::NonNegative => raw
+                    Kind::Number | Kind::NonNegative | Kind::Positive => raw
                         .parse::<f64>()
                         .ok()
                         .and_then(|v| serde_json::Number::from_f64(v).map(Value::Number))
@@ -651,6 +676,7 @@ impl Kind {
             Kind::Json => "a JSON value".into(),
             Kind::Number => "a finite number".into(),
             Kind::NonNegative => "a finite number, 0 or more".into(),
+            Kind::Positive => "a finite number greater than 0".into(),
             Kind::Choice(words) => format!("one of {}", words.join(", ")),
             Kind::Choices(words) => format!("a list of distinct words from {}", words.join(", ")),
             Kind::Color => "a color as #rrggbb".into(),
@@ -662,7 +688,7 @@ impl Kind {
     fn placeholder(&self) -> String {
         match self {
             Kind::Path => "path".into(),
-            Kind::Integer | Kind::Number | Kind::NonNegative => "n".into(),
+            Kind::Integer | Kind::Number | Kind::NonNegative | Kind::Positive => "n".into(),
             Kind::Text => "text".into(),
             Kind::Json => "json".into(),
             Kind::Choice(words) => words.join("|"),
@@ -883,12 +909,20 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
             ))
         }
     };
+    let stroke_px = args.get("stroke").and_then(Value::as_f64);
     // Checked before anything is read, so a refused call costs nothing.
+    if stroke_px.is_some() && !png {
+        return Err(format!(
+            "--stroke is a width in pixels, and an SVG has none: write a .png to set it, or \
+             leave it out for '{output}' (MCP: stroke)"
+        ));
+    }
     if std::path::Path::new(&output).exists() {
         return Err(format!(
             "'{output}' already exists -- redline never writes over a file; give a new path"
         ));
     }
+    let fit = args.get("fit").and_then(Value::as_u64);
     let mut warnings = Vec::new();
     let before = read(&path(args, "before"), &mut warnings)?;
     let after = read(&path(args, "after"), &mut warnings)?;
@@ -900,7 +934,26 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
     if let Some(given) = args.get("proposal_color").and_then(Value::as_str) {
         options.proposal_color = color(given).expect("checked by Verb::call");
     }
-    let overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
+    if args.get("paper").and_then(Value::as_str) == Some("dark") {
+        options.svg.paper = iron_render_cad::Paper::Dark;
+    }
+    let mut overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
+    if let Some(px) = stroke_px {
+        // The overlay is drawn at a stroke width in drawing units, and the
+        // picture's pixels per unit follow from the window it frames -- which
+        // grows with the stroke when a revision cloud reaches past the
+        // drawing (a cloud's margin is a multiple of the stroke). Draw at
+        // the width the pixels ask for until the window stops moving: once
+        // when no cloud reaches out, a few times at most otherwise.
+        for _ in 0..STROKE_ROUNDS {
+            let units = px / px_per_unit(&overlay, fit)?;
+            if (overlay.stroke_width - units).abs() <= units * 1e-9 {
+                break;
+            }
+            options.svg.stroke_width = Some(units);
+            overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
+        }
+    }
     if !overlay.proposal_color_conflicts.is_empty() {
         let colors: Vec<String> = overlay
             .proposal_color_conflicts
@@ -929,19 +982,7 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         ));
     }
     if png {
-        // Pixels per drawing unit: the longer side at `fit` pixels, or one.
-        let scale = match args.get("fit").and_then(Value::as_u64) {
-            Some(fit) => {
-                let longer = overlay.view_box.width().max(overlay.view_box.height());
-                if !(longer.is_finite() && longer > 0.0) || fit == 0 {
-                    return Err(format!(
-                        "cannot fit a picture of size {longer} into {fit} px"
-                    ));
-                }
-                fit as f64 / longer
-            }
-            None => 1.0,
-        };
+        let scale = px_per_unit(&overlay, fit)?;
         let bytes = iron_render_cad::svg_to_png(&overlay.svg, scale as f32)
             .map_err(|e| format!("{e} -- ask for a smaller picture with --fit <px> (MCP: fit)"))?;
         create_new(&output, &bytes)?;
@@ -949,6 +990,26 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         create_new(&output, overlay.svg.as_bytes())?;
     }
     answer(&overlay, warnings)
+}
+
+/// How many times redline draws the overlay again to settle a stroke given
+/// in pixels. The window grows by twenty strokes at most (a cloud's margin
+/// on both sides), so each round moves the width by that over the picture's
+/// size in pixels -- a few percent for a thick line in a small picture --
+/// and a handful of rounds settles it far below a pixel.
+const STROKE_ROUNDS: usize = 8;
+
+/// A redline picture's pixels per drawing unit: the longer side of its
+/// window at `fit` pixels, or one.
+fn px_per_unit(overlay: &iron_render_cad::OverlayResult, fit: Option<u64>) -> Result<f64, String> {
+    let Some(fit) = fit else { return Ok(1.0) };
+    let longer = overlay.view_box.width().max(overlay.view_box.height());
+    if !(longer.is_finite() && longer > 0.0) || fit == 0 {
+        return Err(format!(
+            "cannot fit a picture of size {longer} into {fit} px"
+        ));
+    }
+    Ok(fit as f64 / longer)
 }
 
 fn set(args: &Map<String, Value>) -> Result<Answer, String> {

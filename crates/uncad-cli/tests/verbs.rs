@@ -998,6 +998,180 @@ fn a_redline_color_is_six_hex_digits_after_a_hash() {
     );
 }
 
+/// G1 with one hole made smaller, as model JSON in `dir`: a redline's
+/// second state.
+fn g1_edited(dir: &std::path::Path) -> (&'static str, std::path::PathBuf) {
+    let g1 = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uncad/tests/golden/g1.expected.json"
+    );
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        g1,
+        "--id",
+        "289",
+        "--path",
+        "radius",
+        "--value",
+        "4",
+        "-o",
+        arg(&edited),
+    ]);
+    (g1, edited)
+}
+
+/// A redline's stroke is given in pixels of the picture: the answer's
+/// stroke width, in drawing units, times the picture's pixels per unit (the
+/// longer side of its view box at `--fit` pixels) is the width asked for --
+/// framing the whole drawing or only the changes.
+#[test]
+fn a_redline_stroke_is_in_pixels_of_the_picture() {
+    let dir = scratch("redline-stroke");
+    let (g1, edited) = g1_edited(&dir);
+    let longer = |v: &Value| {
+        let b = &v["view_box"];
+        let w = b["max_x"].as_f64().unwrap() - b["min_x"].as_f64().unwrap();
+        let h = b["max_y"].as_f64().unwrap() - b["min_y"].as_f64().unwrap();
+        w.max(h)
+    };
+    for frame in ["drawing", "changes"] {
+        let thin = dir.join(format!("{frame}-thin.png"));
+        let thick = dir.join(format!("{frame}-thick.png"));
+        let common = ["--fit", "600", "--frame", frame];
+        let (_, plain) = answer(
+            &[
+                &["redline", g1, arg(&edited), "-o", arg(&thin)][..],
+                &common,
+            ]
+            .concat(),
+        );
+        let (_, stroked) = answer(
+            &[
+                &[
+                    "redline",
+                    g1,
+                    arg(&edited),
+                    "-o",
+                    arg(&thick),
+                    "--stroke",
+                    "3",
+                ][..],
+                &common,
+            ]
+            .concat(),
+        );
+        let px = stroked["stroke_width"].as_f64().unwrap() * 600.0 / longer(&stroked);
+        assert!((px - 3.0).abs() < 1e-9, "{frame}: {px} px");
+        assert!(
+            plain["stroke_width"].as_f64().unwrap() < stroked["stroke_width"].as_f64().unwrap(),
+            "{frame}: {plain} {stroked}"
+        );
+        assert_ne!(
+            std::fs::read(&thin).unwrap(),
+            std::fs::read(&thick).unwrap(),
+            "{frame}"
+        );
+    }
+}
+
+/// An SVG has no pixels: a stroke in pixels is refused for one, before
+/// anything is read or written.
+#[test]
+fn a_redline_stroke_needs_a_png() {
+    let dir = scratch("redline-stroke-svg");
+    let picture = dir.join("never.svg");
+    let out = run(&[
+        "redline",
+        CORPUS_DWG,
+        CORPUS_DWG,
+        "-o",
+        arg(&picture),
+        "--stroke",
+        "3",
+    ]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("an SVG has none"), "{stderr}");
+    assert!(!picture.exists());
+    for bad in ["0", "-1", "nan"] {
+        let picture = dir.join("never.png");
+        let out = run(&[
+            "redline",
+            CORPUS_DWG,
+            CORPUS_DWG,
+            "-o",
+            arg(&picture),
+            "--stroke",
+            bad,
+        ]);
+        assert!(!out.status.success(), "{bad}");
+        assert!(!picture.exists(), "{bad}");
+    }
+}
+
+/// On a dark page the redline starts with a black rectangle covering its
+/// view, the original's white is kept white, and the tool draws the same
+/// picture as the command line.
+#[test]
+fn a_redline_on_a_dark_page_starts_with_the_page() {
+    let dir = scratch("redline-dark");
+    let (g1, edited) = g1_edited(&dir);
+    let (by_cli, by_tool) = (dir.join("cli.svg"), dir.join("tool.svg"));
+    let (cli, _) = answer(&[
+        "redline",
+        g1,
+        arg(&edited),
+        "-o",
+        arg(&by_cli),
+        "--paper",
+        "dark",
+    ]);
+    let svg = std::fs::read_to_string(&by_cli).unwrap();
+    let attribute = |element: &str, name: &str| -> f64 {
+        let key = format!(" {name}=\"");
+        let start = element.find(&key).unwrap() + key.len();
+        let len = element[start..].find('"').unwrap();
+        element[start..start + len].parse().unwrap_or(f64::NAN)
+    };
+    let root = svg.lines().next().unwrap();
+    let start = root.find("viewBox=\"").unwrap() + "viewBox=\"".len();
+    let len = root[start..].find('"').unwrap();
+    let view_box: Vec<f64> = root[start..start + len]
+        .split(' ')
+        .map(|n| n.parse().unwrap())
+        .collect();
+    let first = svg
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .find(|l| !l.starts_with("<style") && !l.starts_with("<defs"))
+        .unwrap();
+    assert!(
+        first.starts_with("<rect") && first.contains("fill=\"#000000\""),
+        "{first}"
+    );
+    let rect: Vec<f64> = ["x", "y", "width", "height"]
+        .iter()
+        .map(|n| attribute(first, n))
+        .collect();
+    assert_eq!(rect, view_box);
+    // G1's outline is ACI 7: white on the dark page.
+    let original =
+        &svg[svg.find("<g id=\"original\">").unwrap()..svg.find("<g id=\"changes\">").unwrap()];
+    assert!(original.contains("stroke=\"#ffffff\""), "{original}");
+    assert!(!original.contains("\"#000000\""), "{original}");
+
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "redline",
+        json!({"before": g1, "after": arg(&edited), "output": arg(&by_tool), "paper": "dark"}),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+    assert_eq!(svg.as_bytes(), std::fs::read(&by_tool).unwrap());
+}
+
 /// A summary asked for a selection picks the entities by what they are,
 /// and the tool and the command line agree on it byte for byte; a record
 /// asked for is the model's own form, whose fields `set` takes.

@@ -6,6 +6,20 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `--paper <light|dark>` for a render (`-o` .svg or .png) and for `redline` (MCP: `paper`):
+  the page the drawing is drawn on. `light`, the default, is the output so far; `dark` is a
+  black page on which pure white stays white and pure black is drawn white -- every other
+  color is the file's. A PNG of a dark page is black wherever the drawing does not touch,
+  whatever `--background` says.
+- `--window <x0,y0,x1,y1>` for a render: frame exactly that rectangle of the drawing, in
+  drawing units, with `--padding` around it. Four finite numbers with `x0 < x1` and
+  `y0 < y1`; not with `--no-trim`, which chooses the frame too.
+- `--stroke <px>` for `redline` (MCP: `stroke`): every line that many pixels wide in the
+  PNG, framing the whole drawing or only the changes. Refused for an SVG, which has no
+  pixels.
+
 ## [0.5.0] - 2026-10-02
 
 ### Added

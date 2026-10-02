@@ -11,7 +11,7 @@ mod mcp;
 mod verbs;
 
 use iron_render_cad::{
-    to_png, to_svg, Background, Crop, LeftOut, PngError, PngSize, Space, ToPngOptions,
+    to_png, to_svg, Background, Crop, LeftOut, Paper, PngError, PngSize, Rect, Space, ToPngOptions,
     ToSvgOptions, DEFAULT_MAX_EDGE,
 };
 use std::collections::BTreeMap;
@@ -48,6 +48,7 @@ Usage:
                                       result as model JSON (never over an
                                       existing file), answer with the diff
   uncad redline <before> <after> -o <out.svg|out.png> [--fit <px>]
+                [--stroke <px>] [--paper <light|dark>]
                 [--frame <drawing|changes>] [--proposal-color <#rrggbb>]
                 [--matching ...] [--length-tolerance <n>]
                 [--angle-tolerance <n>] [--omit <within,unstated>]
@@ -78,6 +79,16 @@ SVG/PNG options:
                                 aside the few far larger or farther than the
                                 rest of the drawing (named in a warning)
   --padding <units>           margin around the drawing, in drawing units
+  --window <x0,y0,x1,y1>      frame exactly this rectangle of the drawing, in
+                                drawing units (x0 < x1, y0 < y1), instead of
+                                its extent; --padding is still added around
+                                it (not with --no-trim)
+  --paper <light|dark>        the page the drawing is drawn on (default: light)
+                                light = no background, pure white drawn black
+                                dark  = a black page, pure white kept white and
+                                        pure black drawn white; a PNG is black
+                                        wherever the drawing does not touch,
+                                        whatever --background says
 
 PNG options:
   --scale <factor>            pixels per drawing unit (default: 1.0, e.g. 2.0
@@ -109,7 +120,9 @@ Examples:
   uncad drawing.dwg -o drawing.svg
   uncad drawing.dwg -o drawing.svg --space paper
   uncad drawing.dwg -o drawing.png --scale 2
-  uncad drawing.dwg -o drawing.png --fit 4000";
+  uncad drawing.dwg -o drawing.png --fit 4000
+  uncad drawing.dwg -o detail.png --fit 2000 --window 0,0,500,300
+  uncad drawing.dwg -o drawing.png --fit 4000 --stroke 2 --paper dark";
 
 struct Args {
     input: Option<String>,
@@ -122,6 +135,8 @@ struct Args {
     stroke: Option<String>,
     background: String,
     padding: Option<String>,
+    window: Option<String>,
+    paper: String,
     pretty: bool,
     include_hidden: bool,
     help: bool,
@@ -139,6 +154,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         stroke: None,
         background: "white".to_string(),
         padding: None,
+        window: None,
+        paper: "light".to_string(),
         pretty: false,
         include_hidden: false,
         help: false,
@@ -147,7 +164,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     while i < argv.len() {
         match argv[i].as_str() {
             "-o" | "--output" | "--space" | "--scale" | "--fit" | "--max-edge" | "--stroke"
-            | "--background" | "--padding" => {
+            | "--background" | "--padding" | "--window" | "--paper" => {
                 let flag = argv[i].as_str();
                 i += 1;
                 let value = argv
@@ -162,6 +179,8 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     "--stroke" => args.stroke = Some(value),
                     "--background" => args.background = value,
                     "--padding" => args.padding = Some(value),
+                    "--window" => args.window = Some(value),
+                    "--paper" => args.paper = value,
                     _ => args.output = Some(value),
                 }
             }
@@ -478,14 +497,21 @@ fn write_output(path: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
+    let crop = match (&args.window, args.outlier_trim) {
+        (Some(_), false) => {
+            return Err(
+                "--window and --no-trim both choose what the picture frames; give one".into(),
+            )
+        }
+        (Some(window), true) => Crop::Window(parse_window(window)?),
+        (None, true) => Crop::default(),
+        (None, false) => Crop::Everything,
+    };
     let mut options = ToSvgOptions {
         space: parse_space(&args.space)?,
-        crop: if args.outlier_trim {
-            Crop::default()
-        } else {
-            Crop::Everything
-        },
+        crop,
         include_hidden: args.include_hidden,
+        paper: parse_paper(&args.paper)?,
         ..Default::default()
     };
     if let Some(padding) = &args.padding {
@@ -564,6 +590,34 @@ fn parse_pixels(value: &str, flag: &str) -> Result<u32, String> {
         Ok(px) if px > 0 => Ok(px),
         _ => Err(format!(
             "{flag} must be a whole number of pixels, 1 or more (got '{value}')"
+        )),
+    }
+}
+
+/// `x0,y0,x1,y1`: four finite numbers, a rectangle with an area.
+fn parse_window(value: &str) -> Result<Rect, String> {
+    let numbers: Option<Vec<f64>> = value
+        .split(',')
+        .map(|n| n.trim().parse::<f64>().ok().filter(|v| v.is_finite()))
+        .collect();
+    match numbers.as_deref() {
+        Some(&[x0, y0, x1, y1]) if x0 < x1 && y0 < y1 => Ok(Rect::new(x0, y0, x1, y1)),
+        Some(&[_, _, _, _]) => Err(format!(
+            "--window must be a rectangle with x0 < x1 and y0 < y1 (got '{value}')"
+        )),
+        _ => Err(format!(
+            "--window must be four finite numbers x0,y0,x1,y1 (got '{value}')"
+        )),
+    }
+}
+
+/// `light` or `dark`, as `--paper` takes it.
+fn parse_paper(value: &str) -> Result<Paper, String> {
+    match value {
+        "light" => Ok(Paper::Light),
+        "dark" => Ok(Paper::Dark),
+        other => Err(format!(
+            "unsupported --paper value '{other}' (one of light, dark)"
         )),
     }
 }

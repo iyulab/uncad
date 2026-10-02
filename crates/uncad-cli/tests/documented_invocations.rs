@@ -425,6 +425,8 @@ fn help_exits_successfully_and_lists_the_options() {
         "--max-edge",
         "--stroke",
         "--background",
+        "--window",
+        "--paper",
     ] {
         assert!(text.contains(flag), "usage should document {flag}: {text}");
     }
@@ -728,4 +730,98 @@ fn export_writes_a_package_and_refuses_unknown_options() {
         String::from_utf8_lossy(&version.stdout).trim(),
         format!("uncad {}", env!("CARGO_PKG_VERSION"))
     );
+}
+
+/// A model whose coordinates are written as they are (its origin is the
+/// world's): the golden G1 plate, as model JSON.
+const G1: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../uncad/tests/golden/g1.expected.json"
+);
+
+/// The four numbers of an SVG's viewBox.
+fn view_box_numbers(svg: &[u8]) -> Vec<f64> {
+    view_box(svg)
+        .split(' ')
+        .map(|n| n.parse().expect("a viewBox number"))
+        .collect()
+}
+
+#[test]
+fn window_frames_exactly_the_rectangle_asked_for_with_the_padding() {
+    let svg = TempFile::new("window.svg");
+    let out = run(&[
+        G1,
+        "-o",
+        svg.arg(),
+        "--window",
+        "10,15,60,40",
+        "--padding",
+        "2",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // x0 - padding, -(y1 + padding) (the document's y runs down), and the
+    // window's size with the padding on both sides.
+    assert_eq!(
+        view_box_numbers(&svg.bytes()),
+        [10.0 - 2.0, -(40.0 + 2.0), 50.0 + 4.0, 25.0 + 4.0]
+    );
+}
+
+#[test]
+fn rejects_a_window_that_is_not_a_rectangle_and_a_paper_it_does_not_know() {
+    for args in [
+        &["--window", "1,2,3"][..],
+        &["--window", "1,2,3,4,5"],
+        &["--window", "0,0,10,nan"],
+        &["--window", "0,0,inf,10"],
+        &["--window", "10,0,5,10"],
+        &["--window", "0,0,0,10"],
+        &["--window", "0,10,10,10"],
+        &["--window", "0,0,10,10", "--no-trim"],
+        &["--paper", "grey"],
+    ] {
+        let svg = TempFile::new("bad.svg");
+        let mut all = vec![G1, "-o", svg.arg()];
+        all.extend_from_slice(args);
+        let out = run(&all);
+        assert!(!out.status.success(), "{args:?} should be refused");
+        assert!(!svg.path().exists(), "{args:?} wrote a file");
+    }
+}
+
+#[test]
+fn a_dark_paper_starts_the_document_with_a_black_page() {
+    let light = TempFile::new("light.svg");
+    let dark = TempFile::new("dark.svg");
+    assert!(run(&[G1, "-o", light.arg()]).status.success());
+    assert!(run(&[G1, "-o", dark.arg(), "--paper", "dark"])
+        .status
+        .success());
+    let text = String::from_utf8(dark.bytes()).unwrap();
+    let first = text.lines().nth(1).unwrap().trim();
+    let expected: Vec<String> = view_box_numbers(&dark.bytes())
+        .iter()
+        .map(|n| n.to_string())
+        .collect();
+    assert_eq!(
+        first,
+        format!(
+            "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#000000\" stroke=\"none\"/>",
+            expected[0], expected[1], expected[2], expected[3]
+        )
+    );
+    assert!(!String::from_utf8(light.bytes()).unwrap().contains("<rect"));
+
+    let light_png = TempFile::new("light.png");
+    let dark_png = TempFile::new("dark.png");
+    assert!(run(&[G1, "-o", light_png.arg()]).status.success());
+    assert!(run(&[G1, "-o", dark_png.arg(), "--paper", "dark"])
+        .status
+        .success());
+    assert_ne!(light_png.bytes(), dark_png.bytes(), "--paper had no effect");
 }
