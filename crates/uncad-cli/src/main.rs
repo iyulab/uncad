@@ -290,42 +290,45 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let (unsupported, empty_blocks, undefined_arcs, left_out) = match extension.as_str() {
-        "json" => {
-            let json = db
-                .to_json(ToJsonOptions {
-                    pretty: args.pretty,
-                })
-                .map_err(|e| e.to_string())?;
-            write_output(output, json.as_bytes())?;
-            (Vec::new(), Vec::new(), Vec::new(), Vec::new())
-        }
-        "svg" => {
-            let result = to_svg(&db, svg_options(args)?);
-            write_output(output, result.svg.as_bytes())?;
-            (
-                result.unsupported_types,
-                result.empty_blocks,
-                result.undefined_arcs,
-                result.crop.left_out,
-            )
-        }
-        "png" => {
-            let result = to_png(&db, png_options(args)?).map_err(png_error)?;
-            write_output(output, &result.png)?;
-            (
-                result.unsupported_types,
-                result.empty_blocks,
-                result.undefined_arcs,
-                result.crop.left_out,
-            )
-        }
-        other => {
-            return Err(format!(
-                "unsupported output extension '.{other}' (only .json, .svg, .png)"
-            ))
-        }
-    };
+    let (unsupported, empty_blocks, undefined_arcs, undefined_leaders, left_out) =
+        match extension.as_str() {
+            "json" => {
+                let json = db
+                    .to_json(ToJsonOptions {
+                        pretty: args.pretty,
+                    })
+                    .map_err(|e| e.to_string())?;
+                write_output(output, json.as_bytes())?;
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            }
+            "svg" => {
+                let result = to_svg(&db, svg_options(args)?);
+                write_output(output, result.svg.as_bytes())?;
+                (
+                    result.unsupported_types,
+                    result.empty_blocks,
+                    result.undefined_arcs,
+                    result.undefined_leaders,
+                    result.crop.left_out,
+                )
+            }
+            "png" => {
+                let result = to_png(&db, png_options(args)?).map_err(png_error)?;
+                write_output(output, &result.png)?;
+                (
+                    result.unsupported_types,
+                    result.empty_blocks,
+                    result.undefined_arcs,
+                    result.undefined_leaders,
+                    result.crop.left_out,
+                )
+            }
+            other => {
+                return Err(format!(
+                    "unsupported output extension '.{other}' (only .json, .svg, .png)"
+                ))
+            }
+        };
 
     println!("wrote: {output}");
     if !unsupported.is_empty() {
@@ -347,6 +350,17 @@ fn run(args: &Args) -> Result<(), String> {
             .collect();
         eprintln!(
             "warning: arcs not drawn, their start and end angles being equal: {}",
+            ids.join(", ")
+        );
+    }
+    if !undefined_leaders.is_empty() {
+        let ids: Vec<String> = undefined_leaders
+            .iter()
+            .map(|id| id.value().to_string())
+            .collect();
+        eprintln!(
+            "warning: leaders not drawn, the file not defining their curve (a spline, or a path \
+             it does not state): {}",
             ids.join(", ")
         );
     }

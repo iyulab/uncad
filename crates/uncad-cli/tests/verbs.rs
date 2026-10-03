@@ -417,6 +417,42 @@ fn a_bad_tool_call_is_an_error_result_the_caller_can_read() {
     assert!(response["error"].is_object(), "{response}");
 }
 
+#[test]
+fn a_render_names_the_leaders_it_could_not_draw() {
+    // The drawing has a LEADER whose path is a spline: the file states no
+    // curve, so the render leaves it out and says which one.
+    let leaders = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/2010/Leader.dwg"
+    );
+    let dir = scratch("undefined-leaders");
+    let model = dir.join("model.json");
+    assert!(run(&[leaders, "-o", arg(&model)]).status.success());
+    let db: Value = serde_json::from_str(&std::fs::read_to_string(&model).unwrap()).unwrap();
+    let splines: Vec<String> = db["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "LEADER" && e["path_type"] == "SPLINE")
+        .map(|e| e["common"]["id"].to_string())
+        .collect();
+    assert!(
+        !splines.is_empty(),
+        "the drawing should have a spline leader"
+    );
+
+    let out = run(&[leaders, "-o", arg(&dir.join("drawing.svg"))]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let line = stderr
+        .lines()
+        .find(|l| l.starts_with("warning: leaders not drawn"))
+        .unwrap_or_else(|| panic!("no warning names them: {stderr}"));
+    for id in &splines {
+        assert!(line.contains(id.as_str()), "{line} should name {id}");
+    }
+}
+
 /// A directory of its own for one test's files, empty.
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("uncad-cli-set-{}-{name}", std::process::id()));
