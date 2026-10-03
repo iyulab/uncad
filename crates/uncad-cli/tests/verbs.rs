@@ -207,6 +207,43 @@ fn auto_matching_pairs_by_reference_only_drawings_the_files_show_to_be_one() {
 }
 
 #[test]
+fn one_drawing_saved_in_a_newer_format_differs_only_in_what_the_files_state_differently() {
+    // The corpus holds one drawing saved in six formats. Leaving out what the
+    // older format had no place for (`unstated`) and what moved within
+    // tolerance, the change set is empty -- but for one name the files
+    // themselves state differently: from R2007 on, the system lights layer
+    // is written `*ADSK_SYSTEM_LIGHTS` (each version's DXF twin states the
+    // same).
+    let base = corpus("example_2000.dwg");
+    for version in ["2004", "2007", "2010", "2013", "2018"] {
+        let other = corpus(&format!("example_{version}.dwg"));
+        let (_, set) = answer(&["diff", &base, &other, "--omit", "within,unstated"]);
+        assert_eq!(set["lineage"]["verdict"], "SAME", "{version}");
+        assert_eq!(set["matching"], "REFERENCE", "{version}");
+        assert!(
+            set["omitted"]["unstated_fields"].as_u64() > Some(0),
+            "{version}: the newer format states what the older could not"
+        );
+        let changes = set["changes"].as_array().unwrap();
+        if version == "2004" {
+            assert!(changes.is_empty(), "{version}: {changes:?}");
+            continue;
+        }
+        assert_eq!(changes.len(), 1, "{version}: {changes:?}");
+        let modified = &changes[0]["data"];
+        assert_eq!(changes[0]["type"], "MODIFIED");
+        assert_eq!(modified["entity_type"], "LIGHT");
+        let fields = modified["fields"].as_array().unwrap();
+        assert_eq!(fields.len(), 1, "{version}: {fields:?}");
+        assert_eq!(fields[0]["path"], "common.layer.data");
+        assert_eq!(
+            (&fields[0]["before"], &fields[0]["after"]),
+            (&json!("ADSK_SYSTEM_LIGHTS"), &json!("*ADSK_SYSTEM_LIGHTS"))
+        );
+    }
+}
+
+#[test]
 fn a_bad_call_fails_with_a_message() {
     for args in [
         vec!["diff", CORPUS_DXF],
