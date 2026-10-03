@@ -226,9 +226,11 @@ pub const VERBS: &[Verb] = &[
             drawing (SAME, DIFFERENT or UNKNOWN, from the header's fingerprint GUID and the \
             reference IDs both hold) and on what facts. `reference` matching pairs entities by \
             their reference IDs (two saves of the same drawing); `geometry` pairs them by type \
-            and shape, only where the pairing is certain, and reports the rest as unknown with \
-            the candidates; `auto`, the default, takes `reference` only when the lineage is \
-            SAME. The answer's `matching` is the mode used.",
+            and shape -- equal shapes where the pairing is certain both ways, then changed \
+            shapes where their similarity singles a pair out (each such pair says why in \
+            `matched_by`) -- and reports the rest as unknown with the candidates; `auto`, the \
+            default, takes `reference` only when the lineage is SAME. The answer's `matching` \
+            is the mode used.",
         params: &[
             Param {
                 name: "before",
@@ -247,6 +249,9 @@ pub const VERBS: &[Verb] = &[
             MATCHING,
             LENGTH_TOLERANCE,
             ANGLE_TOLERANCE,
+            MIN_SIMILARITY,
+            MIN_MARGIN,
+            MAX_PAIRS,
             OMIT,
         ],
         writes: false,
@@ -386,6 +391,9 @@ pub const VERBS: &[Verb] = &[
             MATCHING,
             LENGTH_TOLERANCE,
             ANGLE_TOLERANCE,
+            MIN_SIMILARITY,
+            MIN_MARGIN,
+            MAX_PAIRS,
             OMIT,
         ],
         writes: true,
@@ -420,6 +428,35 @@ const ANGLE_TOLERANCE: Param = Param {
     required: false,
     positional: false,
     description: "Tolerance for angles, in radians (default: 1e-9).",
+};
+
+/// When geometric matching pairs two entities whose shapes differ.
+const MIN_SIMILARITY: Param = Param {
+    name: "min_similarity",
+    kind: Kind::NonNegative,
+    required: false,
+    positional: false,
+    description: "Under geometry matching, the least share of two changed entities' telling \
+        fields that must agree for them to be paired (default: 0.5; above 1 pairs only equal \
+        shapes).",
+};
+
+const MIN_MARGIN: Param = Param {
+    name: "min_margin",
+    kind: Kind::NonNegative,
+    required: false,
+    positional: false,
+    description: "Under geometry matching, how far a pair's similarity must stand above the \
+        next highest of either entity (default: 0.1).",
+};
+
+const MAX_PAIRS: Param = Param {
+    name: "max_pairs",
+    kind: Kind::Integer,
+    required: false,
+    positional: false,
+    description: "Under geometry matching, the most pairs of changed entities scored (default: \
+        10000000). A type that does not fit is listed in the answer's `unscored`.",
 };
 
 /// The projection a change-set answer may ask for.
@@ -870,7 +907,8 @@ fn diff(args: &Map<String, Value>) -> Result<Answer, String> {
 }
 
 /// The change set from `before` to `after` under the comparison arguments
-/// (`matching`, the tolerances), projected as `omit` asks.
+/// (`matching`, the tolerances, the pairing thresholds), projected as
+/// `omit` asks.
 fn compare(
     before: &CadDatabase,
     after: &CadDatabase,
@@ -890,6 +928,15 @@ fn compare(
     }
     if let Some(angle) = number(args, "angle_tolerance") {
         options.tolerance.angle = angle;
+    }
+    if let Some(similarity) = number(args, "min_similarity") {
+        options.pairing.min_similarity = similarity;
+    }
+    if let Some(margin) = number(args, "min_margin") {
+        options.pairing.min_margin = margin;
+    }
+    if let Some(pairs) = args.get("max_pairs") {
+        options.pairing.max_pairs = pairs.as_u64().expect("checked by Verb::call");
     }
     projected(iron_diff_cad::diff(before, after, options), args)
 }

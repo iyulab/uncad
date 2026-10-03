@@ -160,9 +160,21 @@ fn diff_of_a_drawing_with_itself_is_empty_and_carries_its_tolerance() {
         "geometry",
         "--length-tolerance",
         "0.5",
+        "--min-similarity",
+        "0.75",
+        "--min-margin",
+        "0.25",
+        "--max-pairs",
+        "5",
     ]);
     assert_eq!(given["matching"], "GEOMETRY");
     assert_eq!(given["tolerance"]["length"], 0.5);
+    assert_eq!(
+        given["pairing"],
+        json!({"min_similarity": 0.75, "min_margin": 0.25, "max_pairs": 5})
+    );
+    // Under reference matching nothing is paired by similarity.
+    assert!(same.get("pairing").is_none(), "{same}");
 }
 
 /// A drawing of the test corpus, by its path under the corpus's root.

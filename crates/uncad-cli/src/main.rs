@@ -41,6 +41,7 @@ Usage:
                                     the entities at a point, as JSON
   uncad diff <before> <after> [--matching <auto|reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
+             [--min-similarity <n>] [--min-margin <n>] [--max-pairs <n>]
              [--omit <within,unstated>]
                                     the numeric difference, as JSON
   uncad set <input> --id <n> --path <field> --value <json> -o <new.json>
@@ -51,7 +52,9 @@ Usage:
                 [--stroke <px>] [--paper <light|dark>]
                 [--frame <drawing|changes>] [--proposal-color <#rrggbb>]
                 [--matching ...] [--length-tolerance <n>]
-                [--angle-tolerance <n>] [--omit <within,unstated>]
+                [--angle-tolerance <n>] [--min-similarity <n>]
+                [--min-margin <n>] [--max-pairs <n>]
+                [--omit <within,unstated>]
                                     draw the difference on top of <before>:
                                       the original unchanged, the changes in
                                       red (or --proposal-color) with a
