@@ -376,6 +376,51 @@ fn padding_widens_the_picture() {
 }
 
 #[test]
+fn an_option_the_output_has_no_use_for_is_refused_by_name() {
+    // A width in pixels on an SVG, a picture option on model JSON or on the
+    // summary: each would do nothing, and silently doing nothing reads as
+    // done. Nothing is written.
+    for (output, args, named) in [
+        ("x.svg", &["--stroke", "2"][..], "--stroke"),
+        (
+            "x.svg",
+            &["--fit", "300", "--background", "white"],
+            "--fit, --background",
+        ),
+        ("x.json", &["--space", "paper"], "--space"),
+        ("x.png", &["--pretty"], "--pretty"),
+    ] {
+        let file = TempFile::new(output);
+        let mut all = vec![CORPUS_DXF, "-o", file.arg()];
+        all.extend_from_slice(args);
+        let out = run(&all);
+        assert!(!out.status.success(), "{output} {args:?} should be refused");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(named), "{output} {args:?}: {stderr}");
+        assert!(
+            !std::path::Path::new(file.arg()).exists(),
+            "{output} written"
+        );
+    }
+    let summary = run(&[CORPUS_DXF, "--stroke", "2"]);
+    assert!(!summary.status.success());
+    assert!(String::from_utf8_lossy(&summary.stderr).contains("the summary"));
+    // The same options where they apply are taken.
+    let png = TempFile::new("ok.png");
+    assert!(run(&[
+        CORPUS_DXF,
+        "-o",
+        png.arg(),
+        "--stroke",
+        "2",
+        "--paper",
+        "dark"
+    ])
+    .status
+    .success());
+}
+
+#[test]
 fn rejects_scale_and_fit_together_and_bad_values() {
     for args in [
         &["--scale", "2", "--fit", "300"][..],

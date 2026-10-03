@@ -143,6 +143,9 @@ struct Args {
     pretty: bool,
     include_hidden: bool,
     help: bool,
+    /// Every option given, as typed (`--fit`), in order -- what
+    /// [`refuse_unused_options`] checks against the output.
+    given: Vec<String>,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
@@ -162,6 +165,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         pretty: false,
         include_hidden: false,
         help: false,
+        given: Vec::new(),
     };
     let mut i = 0;
     while i < argv.len() {
@@ -169,6 +173,7 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "-o" | "--output" | "--space" | "--scale" | "--fit" | "--max-edge" | "--stroke"
             | "--background" | "--padding" | "--window" | "--paper" => {
                 let flag = argv[i].as_str();
+                args.given.push(flag.to_string());
                 i += 1;
                 let value = argv
                     .get(i)
@@ -187,9 +192,14 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                     _ => args.output = Some(value),
                 }
             }
-            "--no-trim" => args.outlier_trim = false,
-            "--pretty" => args.pretty = true,
-            "--include-hidden" => args.include_hidden = true,
+            "--no-trim" | "--pretty" | "--include-hidden" => {
+                args.given.push(argv[i].clone());
+                match argv[i].as_str() {
+                    "--no-trim" => args.outlier_trim = false,
+                    "--pretty" => args.pretty = true,
+                    _ => args.include_hidden = true,
+                }
+            }
             "-h" | "--help" => args.help = true,
             // Answered by `main` before any parsing.
             "-V" | "--version" => {}
@@ -274,6 +284,7 @@ fn main() -> ExitCode {
 /// `error:` prefix.
 fn run(args: &Args) -> Result<(), String> {
     let input = args.input.as_deref().expect("checked by the caller");
+    refuse_unused_options(args)?;
     // A drawing or model JSON: rendering and the summary need the model
     // alone, not the header only a drawing carries.
     let mut warnings = Vec::new();
@@ -542,6 +553,61 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
         };
     }
     Ok(options)
+}
+
+/// Options that shape the picture, SVG or PNG.
+const IMAGE_OPTIONS: [&str; 6] = [
+    "--space",
+    "--no-trim",
+    "--window",
+    "--padding",
+    "--paper",
+    "--include-hidden",
+];
+/// Options in pixels, which only a PNG has.
+const PNG_OPTIONS: [&str; 5] = ["--scale", "--fit", "--max-edge", "--stroke", "--background"];
+
+/// An option the requested output has no use for is an error, named, before
+/// anything is read: a width that silently does nothing reads as a width
+/// that was applied.
+fn refuse_unused_options(args: &Args) -> Result<(), String> {
+    let extension = args.output.as_deref().map(|o| {
+        Path::new(o)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase()
+    });
+    let (usable, what): (Vec<&str>, &str) = match extension.as_deref() {
+        None => (Vec::new(), "the summary (no -o)"),
+        Some("json") => (vec!["--pretty"], "model JSON"),
+        Some("svg") => (
+            IMAGE_OPTIONS.to_vec(),
+            "an SVG, which has no pixels -- write a .png for sizes, strokes and backgrounds",
+        ),
+        Some("png") => (
+            IMAGE_OPTIONS.iter().chain(&PNG_OPTIONS).copied().collect(),
+            "a PNG",
+        ),
+        // Refused with its own message when the output is written.
+        Some(_) => return Ok(()),
+    };
+    let mut unused: Vec<&str> = Vec::new();
+    for flag in args.given.iter().map(String::as_str) {
+        if !matches!(flag, "-o" | "--output") && !usable.contains(&flag) && !unused.contains(&flag)
+        {
+            unused.push(flag);
+        }
+    }
+    if unused.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{} {} nothing for {what}; leave {} out",
+        unused.join(", "),
+        if unused.len() == 1 { "does" } else { "do" },
+        if unused.len() == 1 { "it" } else { "them" }
+    ))
 }
 
 fn png_options(args: &Args) -> Result<ToPngOptions, String> {
