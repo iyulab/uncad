@@ -1980,7 +1980,9 @@
     "image_definitions": {}
   },
   "header": {
-    "insunits": null
+    "insunits": null,
+    "fingerprintguid": null,
+    "versionguid": null
   },
   "read_diagnostics": {
     "warnings": []

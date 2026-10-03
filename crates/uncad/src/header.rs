@@ -1,13 +1,14 @@
 //! The drawing's header variables (`$INSUNITS`, `$EXTMIN`, `$DIMSCALE`, ...)
 //! and the file-level facts that give the model's numbers their meaning --
-//! version, code page, format -- as a type of this crate, outside the model.
+//! version, code page, format -- as a type of this crate, beside the model.
 //!
-//! [`uncad_model::CadDatabase`] deliberately carries no header variables: the
-//! model is format-shaped and states what the drawing *draws*. What a
-//! consumer needs to read those numbers -- the unit a coordinate is in, the
-//! extents the file claims, the dimension variables a DIMENSION falls back
-//! on -- is here instead, read in the same pass and returned beside the
-//! database by [`crate::parse_with_header`] / [`crate::parse_bytes_with_header`].
+//! [`uncad_model::CadDatabase`] carries only the few header variables its
+//! [`HeaderVariables`](uncad_model::HeaderVariables) defines (`$INSUNITS`,
+//! `$FINGERPRINTGUID`, `$VERSIONGUID`), which this crate fills from the same
+//! read. The rest a consumer may need -- the extents the file claims, the
+//! dimension variables a DIMENSION falls back on, the version and code page
+//! -- is here, read in the same pass and returned beside the database by
+//! [`crate::parse_with_header`] / [`crate::parse_bytes_with_header`].
 //!
 //! # Unknown is `None`
 //!
@@ -127,6 +128,12 @@ pub struct Header {
     /// `$CLAYER`: the current layer. `Absent` when not stated; `Unresolved`
     /// (the handle, hex) when it names a layer the table does not have.
     pub clayer: Ref<String>,
+    /// `$FINGERPRINTGUID`: the identifier the drawing was given when it was
+    /// created, as stated -- see [`uncad_model::HeaderVariables::fingerprintguid`].
+    pub fingerprintguid: Option<String>,
+    /// `$VERSIONGUID`: the identifier of the drawing's state as of a save, as
+    /// stated -- see [`uncad_model::HeaderVariables::versionguid`].
+    pub versionguid: Option<String>,
 }
 
 impl Header {
@@ -165,7 +172,7 @@ fn dwg_layout_has(name: &str, version: i32, numheader_vars: u16, template_read: 
     }
     if at_least(sys::DWG_VERSION_TYPE_R_13b1) {
         return match name {
-            "INSUNITS" | "DIMADEC" | "DIMFRAC" | "DIMLUNIT" => {
+            "INSUNITS" | "DIMADEC" | "DIMFRAC" | "DIMLUNIT" | "FINGERPRINTGUID" | "VERSIONGUID" => {
                 at_least(sys::DWG_VERSION_TYPE_R_2000b)
             }
             _ => true,
@@ -186,7 +193,8 @@ fn dwg_layout_has(name: &str, version: i32, numheader_vars: u16, template_read: 
         "DIMPOST" => r2_0 && numheader_vars > 114,
         "DIMLFAC" => r2_0 && numheader_vars > 120,
         "PEXTMIN" | "PEXTMAX" | "PLIMMIN" | "PLIMMAX" => r2_0 && numheader_vars > 160,
-        // INSUNITS, DIMDEC, DIMAUNIT, DIMADEC, DIMFRAC, DIMLUNIT: R13 and later.
+        // INSUNITS, DIMDEC, DIMAUNIT, DIMADEC, DIMFRAC, DIMLUNIT, FINGERPRINTGUID,
+        // VERSIONGUID: R13 and later.
         _ => false,
     }
 }
@@ -261,6 +269,12 @@ pub(crate) unsafe fn read_header(
             .then(|| dynapi::get_header_field::<RawPoint2D>(dwg, name).map(Point2D::from))
             .flatten()
     };
+    let text_var = |name: &str| {
+        stated
+            .has(name)
+            .then(|| text.header_text(dwg, name))
+            .flatten()
+    };
     let dimpost = stated
         .has("DIMPOST")
         .then(|| text.header_text(dwg, "DIMPOST").unwrap_or_default());
@@ -306,6 +320,8 @@ pub(crate) unsafe fn read_header(
         ltscale: f64_var("LTSCALE"),
         textsize: f64_var("TEXTSIZE"),
         clayer,
+        fingerprintguid: text_var("FINGERPRINTGUID"),
+        versionguid: text_var("VERSIONGUID"),
     }
 }
 
@@ -384,6 +400,8 @@ pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> 
         ltscale: stated.real("LTSCALE"),
         textsize: stated.real("TEXTSIZE"),
         clayer,
+        fingerprintguid: stated.text("FINGERPRINTGUID"),
+        versionguid: stated.text("VERSIONGUID"),
     }
 }
 
@@ -521,7 +539,14 @@ mod tests {
             sys::DWG_VERSION_TYPE_R_14 as i32,
             sys::DWG_VERSION_TYPE_R_2000 as i32,
         );
-        for name in ["INSUNITS", "DIMADEC", "DIMFRAC", "DIMLUNIT"] {
+        for name in [
+            "INSUNITS",
+            "DIMADEC",
+            "DIMFRAC",
+            "DIMLUNIT",
+            "FINGERPRINTGUID",
+            "VERSIONGUID",
+        ] {
             assert!(!dwg_layout_has(name, r14, 0, true), "{name}");
             assert!(dwg_layout_has(name, r2000, 0, true), "{name}");
         }

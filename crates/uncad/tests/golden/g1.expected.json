@@ -2417,7 +2417,9 @@
     "image_definitions": {}
   },
   "header": {
-    "insunits": 4
+    "insunits": 4,
+    "fingerprintguid": null,
+    "versionguid": null
   },
   "read_diagnostics": {
     "warnings": []

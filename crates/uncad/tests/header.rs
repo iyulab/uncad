@@ -337,3 +337,34 @@ fn parse_bytes_reads_the_same_header() {
     let (db, _) = uncad::parse_with_header(EXAMPLE_2000_DWG).expect("parses");
     assert_eq!(db, uncad::parse(EXAMPLE_2000_DWG).expect("parses"));
 }
+
+#[test]
+fn the_drawing_identifiers_are_read_as_stated_in_every_version_that_has_them() {
+    // The same drawing saved as R2000 (main header), R2007 and R2018 (string
+    // stream), and as DXF: one creation identifier throughout. The R2010
+    // copy was saved with a change, so its save identifier differs.
+    const FINGERPRINT: &str = "{6C96C536-CF21-D941-AC58-7362E8972727}";
+    const VERSION: &str = "{767951EC-63F0-6146-B9D9-BB0EE2CB5AEF}";
+    for name in [
+        "2000/Leader.dwg",
+        "2007/Leader.dwg",
+        "2018/Leader.dwg",
+        "2000/Leader.dxf",
+        "2018/Leader.dxf",
+    ] {
+        let path = format!("{TEST_DATA}{name}");
+        let (db, h) =
+            uncad::parse_with_header(&path).unwrap_or_else(|e| panic!("{path} must parse: {e}"));
+        assert_eq!(h.fingerprintguid.as_deref(), Some(FINGERPRINT), "{name}");
+        assert_eq!(h.versionguid.as_deref(), Some(VERSION), "{name}");
+        assert_eq!(db.header.fingerprintguid, h.fingerprintguid, "{name}");
+        assert_eq!(db.header.versionguid, h.versionguid, "{name}");
+    }
+    let h = header_of(&format!("{TEST_DATA}2010/Leader.dwg"));
+    assert_eq!(h.fingerprintguid.as_deref(), Some(FINGERPRINT));
+    assert_ne!(h.versionguid.as_deref(), Some(VERSION));
+    // An R14 header has no place for either.
+    let (db, h) = uncad::parse_with_header(EXAMPLE_R14_DWG).expect("parses");
+    assert_eq!((h.fingerprintguid, h.versionguid), (None, None));
+    assert_eq!(db.header.fingerprintguid, None);
+}
