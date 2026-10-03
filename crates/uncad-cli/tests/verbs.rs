@@ -165,6 +165,47 @@ fn diff_of_a_drawing_with_itself_is_empty_and_carries_its_tolerance() {
     assert_eq!(given["tolerance"]["length"], 0.5);
 }
 
+/// A drawing of the test corpus, by its path under the corpus's root.
+fn corpus(path: &str) -> String {
+    format!(
+        "{}/../../lib/libredwg/test/test-data/{path}",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+#[test]
+fn auto_matching_pairs_by_reference_only_drawings_the_files_show_to_be_one() {
+    // One drawing saved in two formats: one fingerprint, every ID kept.
+    let (_, same) = answer(&[
+        "diff",
+        &corpus("example_2000.dwg"),
+        &corpus("example_2004.dwg"),
+    ]);
+    assert_eq!(same["matching"], "REFERENCE");
+    assert_eq!(same["lineage"]["verdict"], "SAME");
+    assert_eq!(same["lineage"]["fingerprint_equal"], true);
+    assert_eq!(same["lineage"]["shared"], same["lineage"]["smaller"]);
+
+    // Two unrelated drawings made from one template: the fingerprint is the
+    // same, but IDs both hold name entities of different types.
+    let unrelated = [
+        "diff".to_string(),
+        corpus("example_2000.dwg"),
+        corpus("sample_2000.dwg"),
+    ];
+    let args: Vec<&str> = unrelated.iter().map(String::as_str).collect();
+    let (_, other) = answer(&args);
+    assert_eq!(other["matching"], "GEOMETRY");
+    assert_eq!(other["lineage"]["verdict"], "DIFFERENT");
+    assert_eq!(other["lineage"]["fingerprint_equal"], true);
+    assert!(other["lineage"]["cross_type"].as_u64() > Some(0), "{other}");
+
+    // A mode given is kept, and the lineage still says what the files show.
+    let (_, forced) = answer(&[args.as_slice(), &["--matching", "reference"]].concat());
+    assert_eq!(forced["matching"], "REFERENCE");
+    assert_eq!(forced["lineage"]["verdict"], "DIFFERENT");
+}
+
 #[test]
 fn a_bad_call_fails_with_a_message() {
     for args in [

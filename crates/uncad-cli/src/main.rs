@@ -39,7 +39,7 @@ Usage:
                                       paths `set` takes
   uncad hit-test <input> --x <n> --y <n> --tolerance <n> [--limit <n>]
                                     the entities at a point, as JSON
-  uncad diff <before> <after> [--matching <reference|geometry>]
+  uncad diff <before> <after> [--matching <auto|reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
              [--omit <within,unstated>]
                                     the numeric difference, as JSON

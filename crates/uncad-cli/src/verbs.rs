@@ -218,9 +218,13 @@ pub const VERBS: &[Verb] = &[
         description: "The exact numeric difference between two drawing states: which entities \
             were added, removed or modified, and for a modified one every field that differs, \
             by how much, and whether that is within or beyond the tolerance, which is written \
-            into the answer. `reference` matching pairs entities by their reference IDs (two \
-            saves of the same drawing); `geometry` pairs them by type and shape, only where \
-            the pairing is certain, and reports the rest as unknown with the candidates.",
+            into the answer. The answer's `lineage` says whether the two files show one \
+            drawing (SAME, DIFFERENT or UNKNOWN, from the header's fingerprint GUID and the \
+            reference IDs both hold) and on what facts. `reference` matching pairs entities by \
+            their reference IDs (two saves of the same drawing); `geometry` pairs them by type \
+            and shape, only where the pairing is certain, and reports the rest as unknown with \
+            the candidates; `auto`, the default, takes `reference` only when the lineage is \
+            SAME. The answer's `matching` is the mode used.",
         params: &[
             Param {
                 name: "before",
@@ -390,10 +394,11 @@ const DRAWING: &str = "The drawing (.dwg, .dxf, or model JSON .json).";
 /// How the two drawings of a comparison are paired.
 const MATCHING: Param = Param {
     name: "matching",
-    kind: Kind::Choice(&["reference", "geometry"]),
+    kind: Kind::Choice(&["auto", "reference", "geometry"]),
     required: false,
     positional: false,
-    description: "How entities of the two drawings are paired (default: reference).",
+    description: "How entities of the two drawings are paired (default: auto -- by reference \
+        ID when the two files show one drawing, by shape otherwise).",
 };
 
 const LENGTH_TOLERANCE: Param = Param {
@@ -869,9 +874,11 @@ fn compare(
 ) -> iron_diff_cad::ChangeSet {
     let mut options = iron_diff_cad::DiffOptions::default();
     if let Some(matching) = args.get("matching").and_then(Value::as_str) {
+        // The argument is one of MATCHING's choices; checked before a verb runs.
         options.matching = match matching {
+            "reference" => iron_diff_cad::Matching::Reference,
             "geometry" => iron_diff_cad::Matching::Geometry,
-            _ => iron_diff_cad::Matching::Reference,
+            _ => iron_diff_cad::Matching::Auto,
         };
     }
     if let Some(length) = number(args, "length_tolerance") {
@@ -1046,7 +1053,15 @@ fn set(args: &Map<String, Value>) -> Result<Answer, String> {
     create_new(&output, json.as_bytes())?;
     answer(
         &projected(
-            iron_diff_cad::diff(&before, &after, iron_diff_cad::DiffOptions::default()),
+            // The edit made the second state from the first: one drawing.
+            iron_diff_cad::diff(
+                &before,
+                &after,
+                iron_diff_cad::DiffOptions {
+                    matching: iron_diff_cad::Matching::Reference,
+                    ..iron_diff_cad::DiffOptions::default()
+                },
+            ),
             args,
         ),
         warnings,

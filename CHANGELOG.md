@@ -6,6 +6,18 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`diff` and `redline` pair the two drawings by `--matching auto` by default** (MCP: `matching`
+  `auto`), no longer by reference: by reference ID only when the two files show one drawing (the
+  same `$FINGERPRINTGUID`, at least half the IDs shared, none of them naming entities of two
+  types), by shape otherwise. Two unrelated drawings whose IDs coincided were paired into
+  confident field changes. The answer carries `lineage` -- `SAME`, `DIFFERENT` or `UNKNOWN`, and
+  the facts behind it -- and `matching` is the mode used. The previous behaviour is
+  `--matching reference`.
+- A dimension's anonymous block, which a save renumbers, is no longer a difference: the same
+  drawing saved again no longer reports its dimensions as modified (or removed and added).
+
 ### Added
 
 - `$FINGERPRINTGUID` and `$VERSIONGUID`, as stated, in the model's `header` and in `Header`
