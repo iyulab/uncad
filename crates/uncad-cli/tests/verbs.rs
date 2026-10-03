@@ -1641,3 +1641,27 @@ fn every_verb_description_names_every_field_of_its_answer() {
         }
     }
 }
+
+#[test]
+fn a_verbs_help_explains_every_argument_its_tool_schema_does() {
+    // The command line and the MCP tool are one table: whatever the schema
+    // tells an agent about an argument, `--help` tells a person.
+    let mut mcp = Mcp::start();
+    let list = mcp.request("tools/list", json!({}));
+    let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    for tool in list["result"]["tools"].as_array().expect("tools") {
+        let name = tool["name"].as_str().unwrap();
+        let out = run(&[&name.replace('_', "-"), "--help"]);
+        assert!(out.status.success(), "{name} --help");
+        let help = flat(&String::from_utf8_lossy(&out.stdout));
+        assert!(help.contains("Arguments:"), "{name}: {help}");
+        let properties = tool["inputSchema"]["properties"].as_object().unwrap();
+        for (arg, schema) in properties {
+            let description = flat(schema["description"].as_str().unwrap());
+            assert!(
+                help.contains(&description),
+                "{name} --help does not explain `{arg}`: {description}"
+            );
+        }
+    }
+}

@@ -703,21 +703,34 @@ impl Verb {
         Ok(args)
     }
 
+    /// What `uncad <verb> --help` prints: the usage line, the description,
+    /// and every argument with what it takes and what it means -- the same
+    /// descriptions the MCP tool's schema carries.
+    pub fn help(&self) -> String {
+        let mut out = format!(
+            "{}\n\n{}\nArguments:\n",
+            self.usage(),
+            wrap(self.description, 0)
+        );
+        for param in self.params {
+            let required = if param.required { " (required)" } else { "" };
+            out.push_str(&format!("  {}{required}\n", param.word()));
+            out.push_str(&wrap(param.description, 6));
+            out.push('\n');
+        }
+        out.push_str("  --pretty\n");
+        out.push_str(&wrap(
+            "Print the answer indented over several lines instead of as one line of JSON.",
+            6,
+        ));
+        out
+    }
+
     /// One usage line, as `--help` shows it.
     pub fn usage(&self) -> String {
         let mut line = format!("uncad {}", cli_spelling(self.name));
         for param in self.params {
-            let word = if param.positional {
-                format!("<{}>", param.name)
-            } else if matches!(param.kind, Kind::Flag) {
-                format!("--{}", cli_spelling(param.name))
-            } else {
-                format!(
-                    "--{} <{}>",
-                    cli_spelling(param.name),
-                    param.kind.placeholder()
-                )
-            };
+            let word = param.word();
             if param.required {
                 line.push_str(&format!(" {word}"));
             } else {
@@ -726,6 +739,48 @@ impl Verb {
         }
         line
     }
+}
+
+impl Param {
+    /// How the argument is written on the command line: `<before>`,
+    /// `--detail`, `--matching <auto|reference|geometry>`.
+    fn word(&self) -> String {
+        if self.positional {
+            format!("<{}>", self.name)
+        } else if matches!(self.kind, Kind::Flag) {
+            format!("--{}", cli_spelling(self.name))
+        } else {
+            format!(
+                "--{} <{}>",
+                cli_spelling(self.name),
+                self.kind.placeholder()
+            )
+        }
+    }
+}
+
+/// `text` wrapped to 80 columns, every line indented by `indent` spaces.
+fn wrap(text: &str, indent: usize) -> String {
+    let mut out = String::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && indent + line.len() + 1 + word.len() > 80 {
+            out.push_str(&" ".repeat(indent));
+            out.push_str(&line);
+            out.push('\n');
+            line.clear();
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        out.push_str(&" ".repeat(indent));
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
 }
 
 impl Kind {

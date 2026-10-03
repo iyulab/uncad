@@ -470,7 +470,7 @@ fn indented(json: &str) -> String {
 /// stderr -- the same answer `uncad mcp` gives for the same arguments.
 fn run_verb(verb: &verbs::Verb, argv: &[String]) -> ExitCode {
     if argv.iter().any(|a| a == "-h" || a == "--help") {
-        println!("{}\n\n{}", verb.usage(), verb.description);
+        print!("{}", verb.help());
         return ExitCode::SUCCESS;
     }
     // `--pretty` is how the answer is printed, not an argument of the verb:
