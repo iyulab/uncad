@@ -20,6 +20,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `summarize` answers with `drawing_ids` -- the fingerprint and version GUIDs the header states
+  -- and its tool description names them and the shape signature.
 - `$FINGERPRINTGUID` and `$VERSIONGUID`, as stated, in the model's `header` and in `Header`
   (`fingerprintguid`, `versionguid`): from a DWG of R2000 or later (the main header up to R2004,
   the string stream from R2007) and from a DXF that states them.

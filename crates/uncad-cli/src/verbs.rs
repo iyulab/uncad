@@ -83,9 +83,13 @@ pub const VERBS: &[Verb] = &[
     Verb {
         name: "summarize",
         description: "What a drawing contains: the unit its header states (null when it states \
-            none), the entity count per type, every layer and block definition, the \
-            attribute values on block references, loose texts that read as label and value, \
-            and the lowest confidence of anything summarized. A value that several places \
+            none), the identifiers it states for where it came from and which saved state it \
+            is (`drawing_ids` -- the fingerprint is shared by copies and drawings made from one \
+            template, so it says where a drawing came from, not which drawing it is), the \
+            entity count per type, every layer and block definition, the attribute values on \
+            block references, loose texts that read as label and value, its shape signature \
+            (model space counted into integers whose every place has a meaning), and the \
+            lowest confidence of anything summarized. A value that several places \
             give differently is listed with every value, never one of them. \
             Given a type, a layer, a box, a space or an ID, it also selects entities -- to find \
             them by what they are rather than where -- and with `detail` gives each one's \
