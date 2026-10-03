@@ -82,18 +82,23 @@ pub struct Verb {
 pub const VERBS: &[Verb] = &[
     Verb {
         name: "summarize",
-        description: "What a drawing contains: the unit its header states (null when it states \
-            none), the identifiers it states for where it came from and which saved state it \
-            is (`drawing_ids` -- the fingerprint is shared by copies and drawings made from one \
-            template, so it says where a drawing came from, not which drawing it is), the \
-            entity count per type, every layer and block definition, the attribute values on \
-            block references, loose texts that read as label and value, its shape signature \
-            (model space counted into integers whose every place has a meaning), and the \
-            lowest confidence of anything summarized. A value that several places \
-            give differently is listed with every value, never one of them. \
-            Given a type, a layer, a box, a space or an ID, it also selects entities -- to find \
-            them by what they are rather than where -- and with `detail` gives each one's \
-            model record, the fields `set` addresses.",
+        description: "What a drawing contains: the unit its header states (`units`, null when \
+            it states none), the identifiers it states for where it came from and which saved \
+            state it is (`drawing_ids` -- the fingerprint is shared by copies and drawings made \
+            from one template, so it says where a drawing came from, not which drawing it is), \
+            the entity count in all and per type (`entity_count`, `by_type`), every layer and \
+            block definition (`layers`, `blocks`) and every block reference whose block is \
+            missing (`unresolved_inserts`), the attribute values on block references \
+            (`attributes`), loose texts that read as label and value (`labelled_texts`) and \
+            those on a tilted plane left out of that (`unplaced_texts`), every dimension \
+            (`dimensions`) and feature control frame (`tolerance_frames`), where each space \
+            lies (`extents`), its shape signature (`signature` -- model space counted into \
+            integers whose every place has a meaning), the lowest confidence of anything \
+            summarized (`confidence`) and the reader's diagnostics (`warnings`). A value that \
+            several places give differently is listed with every value, never one of them. \
+            Given a type, a layer, a box, a space or an ID, it also selects entities \
+            (`selection`) -- to find them by what they are rather than where -- and with \
+            `detail` gives each one's model record, the fields `set` addresses.",
         params: &[
             Param {
                 name: "input",
@@ -169,10 +174,12 @@ pub const VERBS: &[Verb] = &[
     Verb {
         name: "hit_test",
         description: "The entities at a point of a drawing: every entity whose geometry passes \
-            within the tolerance (nearest first, none preferred over another), closed shapes \
-            that enclose the point, what block references draw there with the chain of \
-            references it was reached through, and what could not be searched and why. \
-            Coordinates are in the drawing's own units.",
+            within the tolerance (`hits`, nearest first, none preferred over another -- \
+            `hits_total` says how many there were when `limit` kept fewer), closed shapes that \
+            enclose the point (`enclosing`), what block references draw there with the chain \
+            of references it was reached through, and what could not be searched: entity types \
+            not measured yet (`unsupported`) and entities passed over, each with why \
+            (`not_searched`). Coordinates are in the drawing's own units.",
         params: &[
             Param {
                 name: "input",
@@ -219,18 +226,20 @@ pub const VERBS: &[Verb] = &[
     },
     Verb {
         name: "diff",
-        description: "The exact numeric difference between two drawing states: which entities \
-            were added, removed or modified, and for a modified one every field that differs, \
-            by how much, and whether that is within or beyond the tolerance, which is written \
-            into the answer. The answer's `lineage` says whether the two files show one \
+        description: "The exact numeric difference between two drawing states (`changes`): \
+            which entities were added, removed or modified, and for a modified one every field \
+            that differs, by how much, and whether that is within or beyond the tolerance, which \
+            is written into the answer (`tolerance`). What `omit` left out is counted in \
+            `omitted`. The answer's `lineage` says whether the two files show one \
             drawing (SAME, DIFFERENT or UNKNOWN, from the header's fingerprint GUID and the \
             reference IDs both hold) and on what facts. `reference` matching pairs entities by \
             their reference IDs (two saves of the same drawing); `geometry` pairs them by type \
             and shape -- equal shapes where the pairing is certain both ways, then changed \
             shapes where their similarity singles a pair out (each such pair says why in \
-            `matched_by`) -- and reports the rest as unknown with the candidates; `auto`, the \
-            default, takes `reference` only when the lineage is SAME. The answer's `matching` \
-            is the mode used.",
+            `matched_by`, under the thresholds in `pairing`; a type with too many pairs to \
+            score is listed in `unscored`) -- and reports the rest as unknown with the \
+            candidates; `auto`, the default, takes `reference` only when the lineage is SAME. \
+            The answer's `matching` is the mode used.",
         params: &[
             Param {
                 name: "before",
@@ -262,8 +271,9 @@ pub const VERBS: &[Verb] = &[
         description: "Sets one field of one entity to a value and writes the edited drawing as \
             a new model JSON file, which every verb reads as a drawing -- so edits chain, each \
             call starting from the last one's output. The answer is the numeric difference from \
-            the input to what was written (as `diff` answers it), which shows that the one field \
-            changed and nothing else. The input is never changed and an existing file is never \
+            the input to what was written, as `diff` answers it (`changes`, `matching`, \
+            `tolerance`, `lineage`, `omitted`), which shows that the one field changed and \
+            nothing else. The input is never changed and an existing file is never \
             written over. An edit the drawing does not allow is refused with the reason, and \
             nothing is written.",
         params: &[
@@ -317,8 +327,13 @@ pub const VERBS: &[Verb] = &[
             changed entity became, what was removed (dashed), and a revision cloud around every change. \
             A change whose counterpart is uncertain gets a dashed cloud and no geometry. Writes \
             an SVG or PNG file -- never over an existing one -- and answers with what it marked \
-            and what it could not (inside a block definition, or nothing drawn), each with the \
-            change's index in the change set `diff` gives for the same arguments.",
+            (`marked`) and what it could not (`not_marked` -- inside a block definition, or \
+            nothing drawn), each with the change's index in the change set `diff` gives for the \
+            same arguments; the world rectangle shown and the point its coordinates are relative \
+            to (`view_box`, `origin`) and the stroke width in drawing units (`stroke_width`), \
+            for marks of your own; original colors too close to the proposal color \
+            (`proposal_color_conflicts`); and entities the picture left out as outliers \
+            (`left_out`).",
         params: &[
             Param {
                 name: "before",

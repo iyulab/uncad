@@ -1466,3 +1466,178 @@ fn every_json_answer_takes_pretty() {
     assert!(String::from_utf8(out.stdout).unwrap().lines().count() > 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The top-level fields of each verb's answer. A verb's description names
+/// every one, so that a caller reading only the tool list knows where in
+/// the answer to look; a field an answer carries that is not here fails the
+/// test below, and the description is updated with it.
+const ANSWER_FIELDS: [(&str, &[&str]); 5] = [
+    (
+        "summarize",
+        &[
+            "units",
+            "drawing_ids",
+            "entity_count",
+            "by_type",
+            "layers",
+            "blocks",
+            "unresolved_inserts",
+            "attributes",
+            "labelled_texts",
+            "unplaced_texts",
+            "dimensions",
+            "tolerance_frames",
+            "extents",
+            "signature",
+            "selection",
+            "confidence",
+            "warnings",
+        ],
+    ),
+    (
+        "hit_test",
+        &[
+            "hits",
+            "enclosing",
+            "unsupported",
+            "not_searched",
+            "hits_total",
+        ],
+    ),
+    (
+        "diff",
+        &[
+            "matching",
+            "tolerance",
+            "pairing",
+            "unscored",
+            "lineage",
+            "changes",
+            "omitted",
+        ],
+    ),
+    (
+        "set",
+        &["matching", "tolerance", "lineage", "changes", "omitted"],
+    ),
+    (
+        "redline",
+        &[
+            "marked",
+            "not_marked",
+            "view_box",
+            "origin",
+            "stroke_width",
+            "proposal_color_conflicts",
+            "left_out",
+        ],
+    ),
+];
+
+#[test]
+fn every_verb_description_names_every_field_of_its_answer() {
+    let mut mcp = Mcp::start();
+    let list = mcp.request("tools/list", json!({}));
+    let tools = list["result"]["tools"].as_array().expect("tools");
+    for (verb, fields) in ANSWER_FIELDS {
+        let tool = tools
+            .iter()
+            .find(|t| t["name"] == verb)
+            .unwrap_or_else(|| panic!("{verb} is listed"));
+        let description = tool["description"].as_str().unwrap();
+        for field in fields {
+            assert!(
+                description.contains(&format!("`{field}`")),
+                "{verb}'s description does not name `{field}`: {description}"
+            );
+        }
+    }
+
+    // What the answers carry is in the table: every top-level field of
+    // answers that reach the optional ones too.
+    let dir = scratch("fields");
+    let (model, red) = (dir.join("set.json"), dir.join("red.svg"));
+    let (model_arg, red_arg) = (arg(&model), arg(&red));
+    let id = circle_id(&dir);
+    let (cx, cy, r) = circle();
+    let calls: Vec<(&str, Vec<String>)> = vec![
+        ("summarize", vec!["summarize".into(), CORPUS_DWG.into()]),
+        (
+            "summarize",
+            vec![
+                "summarize".into(),
+                CORPUS_DWG.into(),
+                "--type".into(),
+                "circle".into(),
+                "--detail".into(),
+            ],
+        ),
+        (
+            "hit_test",
+            vec![
+                "hit-test".into(),
+                CORPUS_DWG.into(),
+                "--x".into(),
+                (cx + r).to_string(),
+                "--y".into(),
+                cy.to_string(),
+                "--tolerance".into(),
+                (r * 3.0).to_string(),
+                "--limit".into(),
+                "1".into(),
+            ],
+        ),
+        (
+            "diff",
+            vec![
+                "diff".into(),
+                CORPUS_DWG.into(),
+                CORPUS_DXF.into(),
+                "--matching".into(),
+                "geometry".into(),
+                "--max-pairs".into(),
+                "0".into(),
+                "--omit".into(),
+                "within".into(),
+            ],
+        ),
+        (
+            "set",
+            vec![
+                "set".into(),
+                CORPUS_DWG.into(),
+                "--id".into(),
+                id.clone(),
+                "--path".into(),
+                "radius".into(),
+                "--value".into(),
+                (r * 2.0).to_string(),
+                "-o".into(),
+                model_arg.into(),
+            ],
+        ),
+        (
+            "redline",
+            vec![
+                "redline".into(),
+                CORPUS_DWG.into(),
+                model_arg.into(),
+                "--matching".into(),
+                "reference".into(),
+                "-o".into(),
+                red_arg.into(),
+            ],
+        ),
+    ];
+    for (verb, args) in calls {
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (_, value) = answer(&args);
+        let fields = ANSWER_FIELDS.iter().find(|(v, _)| *v == verb).unwrap().1;
+        for key in value.as_object().expect("an object").keys() {
+            assert!(
+                fields.contains(&key.as_str()),
+                "{verb} answers `{key}`, which ANSWER_FIELDS (and the description) lack"
+            );
+        }
+    }
+}
