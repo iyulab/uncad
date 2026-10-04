@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-05
+
 ### Changed
 
 - `uncad mcp` keeps the models of the last four drawings it read and reuses one when a call names
