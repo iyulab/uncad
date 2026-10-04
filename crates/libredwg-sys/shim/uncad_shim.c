@@ -293,6 +293,7 @@ uncad_multileader_get_content (void *entity, uncad_multileader_content_t *out)
       out->direction[2] = t->direction.z;
       out->rotation = t->rotation;
       out->width = t->width;
+      out->line_spacing_factor = t->line_spacing_factor;
       out->alignment = t->alignment;
     }
   else if (ctx->has_content_blk)

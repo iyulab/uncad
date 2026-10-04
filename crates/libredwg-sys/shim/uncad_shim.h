@@ -135,6 +135,7 @@ typedef struct uncad_multileader_content
   int kind;              /* 0 none, 1 a text (290), 2 a block (296) */
   double scale;          /* ctx.scale_factor, DXF 40 */
   double text_height;    /* ctx.text_height, DXF 41 */
+  double line_spacing_factor; /* DXF 45 (text) */
   char *text;            /* DXF 304, as the library stores it */
   void *style;           /* the text style's Dwg_Object_Ref*, DXF 340 */
   void *block;           /* the block's Dwg_Object_Ref*, DXF 341 */

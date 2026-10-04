@@ -2106,6 +2106,7 @@ unsafe fn multileader_content(
                 direction: point(c.direction),
                 extrusion: point(c.normal),
                 height: c.text_height,
+                line_spacing_factor: c.line_spacing_factor,
                 rotation: c.rotation,
                 width: c.width,
                 scale: c.scale,

@@ -43,7 +43,8 @@ fn a_multileader_keeps_its_leader_line_before_r2010_too() {
 
 /// The text a MULTILEADER points out, read from the DWG record's context
 /// data the way the DXF twin states it: its text in MTEXT codes, its style
-/// by name, where it is and how high.
+/// by name, where it is, how high and how its lines are spaced (each
+/// twin states 1).
 #[test]
 fn a_multileader_carries_its_text() {
     for (file, text) in [
@@ -71,6 +72,7 @@ fn a_multileader_carries_its_text() {
             "{file}"
         );
         assert!(t.height > 0.0, "{file}: {}", t.height);
+        assert_eq!(t.line_spacing_factor, 1.0, "{file}");
         assert!(t.attachment.is_some(), "{file}");
     }
 }
