@@ -285,7 +285,8 @@ struct Mcp {
 }
 
 impl Mcp {
-    fn start() -> Self {
+    /// A server that has not been spoken to yet.
+    fn spawn() -> Self {
         let mut child = Command::new(EXE)
             .arg("mcp")
             .stdin(Stdio::piped())
@@ -295,23 +296,35 @@ impl Mcp {
             .expect("the test binary should be runnable");
         let stdin = child.stdin.take().unwrap();
         let stdout = BufReader::new(child.stdout.take().unwrap());
-        let mut mcp = Mcp {
+        Mcp {
             child,
             stdin,
             stdout,
             next_id: 1,
-        };
-        let init = mcp.request(
+        }
+    }
+
+    /// A server in a session on protocol version 2025-06-18.
+    fn start() -> Self {
+        let mut mcp = Mcp::spawn();
+        let init = mcp.initialize("2025-06-18");
+        assert_eq!(init["result"]["serverInfo"]["name"], "uncad", "{init}");
+        mcp
+    }
+
+    /// Opens a session on `version` (a version before 2026-07-28, which
+    /// has sessions) and returns the `initialize` response.
+    fn initialize(&mut self, version: &str) -> Value {
+        let init = self.request(
             "initialize",
             json!({
-                "protocolVersion": "2025-06-18",
+                "protocolVersion": version,
                 "capabilities": {},
                 "clientInfo": {"name": "test", "version": "0"}
             }),
         );
-        assert_eq!(init["result"]["serverInfo"]["name"], "uncad", "{init}");
-        mcp.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
-        mcp
+        self.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+        init
     }
 
     fn send(&mut self, message: Value) {
@@ -350,51 +363,101 @@ impl Drop for Mcp {
     }
 }
 
-/// A client on protocol version 2026-07-28 opens no session: it asks
+/// The first protocol version without sessions: a client asks
 /// `server/discover`, then names the version in every request's `_meta`.
-/// That version requires every list result to say how long it stays fresh
-/// (`ttlMs`) and who may cache it (`cacheScope`) -- a client validating
-/// the schema drops a list without them, and with it every tool.
-#[test]
-fn mcp_lists_the_verbs_to_a_client_on_the_stateless_protocol() {
-    let mut child = Command::new(EXE)
-        .arg("mcp")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("the test binary should be runnable");
-    let stdin = child.stdin.take().unwrap();
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    let mut mcp = Mcp {
-        child,
-        stdin,
-        stdout,
-        next_id: 1,
-    };
-    let meta = json!({
-        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-        "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
-        "io.modelcontextprotocol/clientCapabilities": {}
-    });
-    let discover = mcp.request("server/discover", json!({"_meta": meta}));
-    let versions = discover["result"]["supportedVersions"]
-        .as_array()
-        .expect("supportedVersions");
-    assert!(versions.contains(&json!("2026-07-28")), "{discover}");
+const STATELESS: &str = "2026-07-28";
 
-    let list = mcp.request("tools/list", json!({"_meta": meta}));
-    let result = &list["result"];
-    assert!(result["ttlMs"].is_u64(), "ttlMs is a number: {list}");
+/// Every protocol version the server advertises, spoken the way that
+/// version is spoken: each negotiates as itself, lists the same five
+/// tools, and answers a call with the same bytes -- what a tool says does
+/// not depend on the protocol it is asked over. From 2026-07-28 a list
+/// result must also say how long it stays fresh (`ttlMs`) and who may
+/// cache it (`cacheScope`): a client validating the schema drops a list
+/// without them, and with it every tool.
+#[test]
+fn every_advertised_protocol_version_lists_and_answers_alike() {
+    let stateless_meta = |version: &str| {
+        json!({
+            "io.modelcontextprotocol/protocolVersion": version,
+            "io.modelcontextprotocol/clientInfo": {"name": "test", "version": "0"},
+            "io.modelcontextprotocol/clientCapabilities": {}
+        })
+    };
+    let discover = Mcp::spawn().request(
+        "server/discover",
+        json!({"_meta": stateless_meta(STATELESS)}),
+    );
+    let versions: Vec<String> = discover["result"]["supportedVersions"]
+        .as_array()
+        .expect("supportedVersions")
+        .iter()
+        .map(|v| v.as_str().expect("a version string").to_string())
+        .collect();
+    assert!(versions.iter().any(|v| v == STATELESS), "{discover}");
     assert!(
-        result["cacheScope"] == "public" || result["cacheScope"] == "private",
-        "cacheScope is public or private: {list}"
+        versions.iter().any(|v| v.as_str() < STATELESS),
+        "{discover}"
     );
-    assert_eq!(
-        result["tools"].as_array().expect("tools").len(),
-        5,
-        "{list}"
-    );
+
+    let mut answers = Vec::new();
+    for version in &versions {
+        let mut mcp = Mcp::spawn();
+        let params = |extra: Value| -> Value {
+            let mut p = extra;
+            if version.as_str() >= STATELESS {
+                p["_meta"] = stateless_meta(version);
+            }
+            p
+        };
+        if version.as_str() < STATELESS {
+            let init = mcp.initialize(version);
+            assert_eq!(init["result"]["protocolVersion"], *version, "{init}");
+        }
+        let list = mcp.request("tools/list", params(json!({})));
+        let result = &list["result"];
+        let names: Vec<&str> = result["tools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{version}: {list}"))
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            ["summarize", "hit_test", "diff", "set", "redline"],
+            "{version}"
+        );
+        if version.as_str() >= STATELESS {
+            assert!(
+                result["ttlMs"].is_u64(),
+                "{version}: ttlMs is a number, not {}",
+                result["ttlMs"]
+            );
+            assert!(
+                result["cacheScope"] == "public" || result["cacheScope"] == "private",
+                "{version}: cacheScope is public or private, not {}",
+                result["cacheScope"]
+            );
+        }
+        let call = mcp.request(
+            "tools/call",
+            params(json!({"name": "summarize", "arguments": {"input": CORPUS_DXF}})),
+        );
+        let result = &call["result"];
+        assert_ne!(result["isError"], true, "{version}: {call}");
+        let text = result["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{version}: {call}"))
+            .to_string();
+        serde_json::from_str::<Value>(&text).expect("the answer is JSON");
+        answers.push((version.clone(), text));
+    }
+    for (version, text) in &answers[1..] {
+        assert_eq!(
+            text, &answers[0].1,
+            "{version} answers like {}",
+            answers[0].0
+        );
+    }
 }
 
 #[test]
