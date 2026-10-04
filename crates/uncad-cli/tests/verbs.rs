@@ -570,6 +570,44 @@ fn a_bad_tool_call_is_an_error_result_the_caller_can_read() {
     assert!(response["error"].is_object(), "{response}");
 }
 
+/// The server keeps the drawings it has read and reuses one only for the
+/// same bytes: asked again about an unchanged file it answers as before,
+/// and asked about a file whose content has changed it answers from the
+/// content as it is now -- what the command line prints for it -- never
+/// from the drawing it held.
+#[test]
+fn a_server_answers_from_a_file_as_it_is_now() {
+    fn ask(mcp: &mut Mcp, input: &str) -> String {
+        let result = mcp.call("summarize", json!({ "input": input }));
+        assert_eq!(result["isError"], false, "{result}");
+        result["content"][0]["text"]
+            .as_str()
+            .expect("a text block")
+            .to_string()
+    }
+    let other = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../lib/libredwg/test/test-data/2000/Line.dwg"
+    );
+    let dir = scratch("held-drawing");
+    let drawing = dir.join("drawing.dwg");
+    std::fs::copy(CORPUS_DWG, &drawing).expect("the fixture is copied");
+
+    let mut mcp = Mcp::start();
+    let first = ask(&mut mcp, arg(&drawing));
+    assert_eq!(first, answer(&["summarize", arg(&drawing)]).0);
+    assert_eq!(ask(&mut mcp, arg(&drawing)), first);
+
+    // Another drawing under the same name.
+    std::fs::copy(other, &drawing).expect("the other drawing is copied");
+    let now = ask(&mut mcp, arg(&drawing));
+    assert_ne!(
+        now, first,
+        "the answer should follow the file's new content"
+    );
+    assert_eq!(now, answer(&["summarize", arg(&drawing)]).0);
+}
+
 #[test]
 fn a_render_names_the_leaders_it_could_not_draw() {
     // The drawing has a LEADER whose path is a spline: the file states no

@@ -5,8 +5,11 @@
 //! both answer from here, through [`Verb::call`], so a verb's answer is the
 //! same bytes whichever way it was asked. An answer is the result structure
 //! of the library that computes it, serialized as it is -- this table adds
-//! no schema of its own, and holds no state between calls: every call reads
-//! its files again.
+//! no schema of its own, and holds no state an answer depends on: every call
+//! reads its files again. The MCP server keeps the models of the last few
+//! drawings it read and reuses one only when a file's bytes are the same
+//! ([`hold_reads`]) -- reading is what a call costs, and the same bytes give
+//! the same model.
 //!
 //! A drawing argument is a DWG or DXF file, or the model JSON this tool
 //! writes (`uncad <drawing> -o <state.json>`, or `set`'s output) -- which is
@@ -18,6 +21,7 @@
 //! line writes them as `--kebab-case` flags.
 
 use serde_json::{Map, Value};
+use std::sync::{Arc, Mutex};
 use uncad::CadDatabase;
 
 /// What a verb answers: the result structure as JSON text (one line), and
@@ -861,21 +865,90 @@ pub fn is_model_json(path: &str) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("json"))
 }
 
+/// How a file's bytes are read into a model: as model JSON, or as a drawing
+/// of the format its extension names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    ModelJson,
+    Drawing(uncad::Format),
+}
+
+/// Models already read, kept for a server that answers many calls about the
+/// same drawings. Reading the drawing, not answering the question, is what a
+/// call costs -- a quarter of a second, every call, for a block-heavy 2 MB
+/// drawing. An entry is reused only for the same bytes read the same way, so
+/// no answer depends on whether a model was held: the same content gives the
+/// same model either way, and a changed file is read again.
+struct Held {
+    capacity: usize,
+    /// Least recently used first.
+    entries: std::collections::VecDeque<(Reading, Vec<u8>, Arc<CadDatabase>)>,
+}
+
+impl Held {
+    fn get(&mut self, reading: Reading, bytes: &[u8]) -> Option<Arc<CadDatabase>> {
+        let at = self
+            .entries
+            .iter()
+            .position(|(r, b, _)| *r == reading && b.as_slice() == bytes)?;
+        let entry = self.entries.remove(at)?;
+        let db = Arc::clone(&entry.2);
+        self.entries.push_back(entry);
+        Some(db)
+    }
+
+    fn put(&mut self, reading: Reading, bytes: Vec<u8>, db: &Arc<CadDatabase>) {
+        if self.capacity == 0 {
+            return;
+        }
+        while self.entries.len() >= self.capacity {
+            self.entries.pop_front();
+        }
+        self.entries.push_back((reading, bytes, Arc::clone(db)));
+    }
+}
+
+static HELD: Mutex<Held> = Mutex::new(Held {
+    capacity: 0,
+    entries: std::collections::VecDeque::new(),
+});
+
+/// Keeps up to `drawings` models read by [`read`] for later calls with the
+/// same bytes. Off (0) unless turned on: a one-shot command reads each of its
+/// inputs once, and holding them would only cost memory.
+pub fn hold_reads(drawings: usize) {
+    let mut held = HELD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    held.capacity = drawings;
+    held.entries.truncate(drawings);
+}
+
 /// Reads a drawing -- a DWG or DXF file, or model JSON -- with the reader's
 /// non-fatal problems as warnings. Model JSON carries the problems of the
 /// read that produced it, and they are reported the same way.
-pub fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, String> {
-    let db = if is_model_json(input) {
-        let text = std::fs::read_to_string(input)
-            .map_err(|e| format!("cannot open input file '{input}': {e}"))?;
-        serde_json::from_str::<CadDatabase>(&text).map_err(|e| {
-            format!(
-                "cannot read '{input}' as model JSON ({e}) -- write it again from the drawing \
-                 with `uncad <drawing> -o <file.json>`"
-            )
-        })?
+pub fn read(input: &str, warnings: &mut Vec<String>) -> Result<Arc<CadDatabase>, String> {
+    let reading = if is_model_json(input) {
+        Reading::ModelJson
     } else {
-        crate::parse_input(input)?.0
+        Reading::Drawing(uncad::Format::from_path(input))
+    };
+    if std::fs::metadata(input).is_ok_and(|meta| meta.is_dir()) {
+        return Err(format!("input path is a directory, not a file: '{input}'"));
+    }
+    let bytes =
+        std::fs::read(input).map_err(|e| format!("cannot open input file '{input}': {e}"))?;
+    let held = HELD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(reading, &bytes);
+    let db = match held {
+        Some(db) => db,
+        None => {
+            let db = Arc::new(decode(input, reading, &bytes)?);
+            HELD.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .put(reading, bytes, &db);
+            db
+        }
     };
     if !db.read_diagnostics.is_clean() {
         warnings.push(if is_model_json(input) {
@@ -889,6 +962,24 @@ pub fn read(input: &str, warnings: &mut Vec<String>) -> Result<CadDatabase, Stri
         });
     }
     Ok(db)
+}
+
+/// The model `bytes` hold, read as `reading` says.
+fn decode(input: &str, reading: Reading, bytes: &[u8]) -> Result<CadDatabase, String> {
+    match reading {
+        Reading::ModelJson => {
+            let text = std::str::from_utf8(bytes)
+                .map_err(|e| format!("cannot open input file '{input}': {e}"))?;
+            serde_json::from_str::<CadDatabase>(text).map_err(|e| {
+                format!(
+                    "cannot read '{input}' as model JSON ({e}) -- write it again from the \
+                     drawing with `uncad <drawing> -o <file.json>`"
+                )
+            })
+        }
+        Reading::Drawing(format) => uncad::parse_bytes(bytes, format)
+            .map_err(|e| format!("could not parse '{input}' ({e}) -- is it a valid DWG/DXF file?")),
+    }
 }
 
 /// `changes` projected as the `omit` argument asks, or as it is.
@@ -1187,4 +1278,57 @@ fn set(args: &Map<String, Value>) -> Result<Answer, String> {
         ),
         warnings,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn held(capacity: usize) -> Held {
+        Held {
+            capacity,
+            entries: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// A model of its own (an empty drawing) -- held entries are told apart
+    /// by pointer.
+    fn model() -> Arc<CadDatabase> {
+        let empty = b"  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n";
+        Arc::new(uncad::parse_bytes(empty, uncad::Format::Dxf).expect("an empty DXF reads"))
+    }
+
+    const DWG: Reading = Reading::Drawing(uncad::Format::Dwg);
+    const DXF: Reading = Reading::Drawing(uncad::Format::Dxf);
+
+    #[test]
+    fn a_held_model_is_reused_only_for_the_same_bytes_read_the_same_way() {
+        let mut h = held(4);
+        let db = model();
+        h.put(DWG, b"one".to_vec(), &db);
+        assert!(Arc::ptr_eq(&h.get(DWG, b"one").expect("held"), &db));
+        assert!(h.get(DWG, b"two").is_none());
+        assert!(h.get(DXF, b"one").is_none());
+        assert!(h.get(Reading::ModelJson, b"one").is_none());
+    }
+
+    #[test]
+    fn the_least_recently_used_model_goes_first() {
+        let mut h = held(2);
+        h.put(DWG, b"a".to_vec(), &model());
+        h.put(DWG, b"b".to_vec(), &model());
+        // Using `a` makes `b` the least recently used.
+        assert!(h.get(DWG, b"a").is_some());
+        h.put(DWG, b"c".to_vec(), &model());
+        assert!(h.get(DWG, b"b").is_none());
+        assert!(h.get(DWG, b"a").is_some());
+        assert!(h.get(DWG, b"c").is_some());
+    }
+
+    #[test]
+    fn nothing_is_held_when_holding_is_off() {
+        let mut h = held(0);
+        h.put(DWG, b"a".to_vec(), &model());
+        assert!(h.get(DWG, b"a").is_none());
+    }
 }

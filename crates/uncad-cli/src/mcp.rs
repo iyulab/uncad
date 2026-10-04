@@ -102,8 +102,15 @@ impl ServerHandler for Server {
     }
 }
 
+/// How many drawings a server keeps read: two for a comparison (`diff`,
+/// `redline`) and room for the one being edited and its result.
+const HELD_DRAWINGS: usize = 4;
+
 /// Serves until the client closes stdin.
 pub fn serve() -> Result<(), String> {
+    // A session asks many questions about the same few drawings; reading a
+    // drawing is what a call costs. Reused only for the same bytes.
+    crate::verbs::hold_reads(HELD_DRAWINGS);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

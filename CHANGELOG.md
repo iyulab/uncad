@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `uncad mcp` keeps the models of the last four drawings it read and reuses one when a call names
+  a file whose bytes are the same, read the same way. Reading the drawing, not answering the
+  question, is what a call costs -- a block-heavy 2 MB drawing took about a quarter of a second
+  on every call, and now takes that once. Answers do not change: a file whose content changed
+  is read again. The command line reads each input once, as before.
+
 ## [0.7.0] - 2026-10-04
 
 ### Added
