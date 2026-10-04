@@ -9,7 +9,7 @@ AC1024
   9
 $HANDSEED
   5
-10D
+110
   0
 ENDSEC
   0
@@ -83,19 +83,59 @@ ENDTAB
   0
 TABLE
   2
-BLOCK_RECORD
+STYLE
   5
 5
 100
 AcDbSymbolTable
  70
-2
+1
   0
-BLOCK_RECORD
+STYLE
   5
 6
 330
 5
+100
+AcDbSymbolTableRecord
+100
+AcDbTextStyleTableRecord
+  2
+Standard
+ 70
+0
+ 40
+0.0
+ 41
+1.0
+ 50
+0.0
+ 71
+0
+ 42
+2.5
+  3
+txt
+  4
+
+  0
+ENDTAB
+  0
+TABLE
+  2
+BLOCK_RECORD
+  5
+7
+100
+AcDbSymbolTable
+ 70
+3
+  0
+BLOCK_RECORD
+  5
+8
+330
+7
 100
 AcDbSymbolTableRecord
 100
@@ -105,15 +145,27 @@ AcDbBlockTableRecord
   0
 BLOCK_RECORD
   5
-7
+9
 330
-5
+7
 100
 AcDbSymbolTableRecord
 100
 AcDbBlockTableRecord
   2
 *Paper_Space
+  0
+BLOCK_RECORD
+  5
+A
+330
+7
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+MARK
   0
 ENDTAB
   0
@@ -127,7 +179,7 @@ BLOCK
   5
 100
 330
-6
+8
 100
 AcDbEntity
   8
@@ -153,7 +205,7 @@ ENDBLK
   5
 101
 330
-6
+8
 100
 AcDbEntity
   8
@@ -165,7 +217,7 @@ BLOCK
   5
 102
 330
-7
+9
 100
 AcDbEntity
   8
@@ -191,7 +243,69 @@ ENDBLK
   5
 103
 330
-7
+9
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+104
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+MARK
+ 70
+0
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+MARK
+  1
+
+  0
+LINE
+  5
+105
+330
+A
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+ 11
+1.0
+ 21
+1.0
+ 31
+0.0
+  0
+ENDBLK
+  5
+106
+330
+A
 100
 AcDbEntity
   8
@@ -207,9 +321,9 @@ ENTITIES
   0
 MULTILEADER
   5
-104
+107
 330
-6
+8
 100
 AcDbEntity
   8
@@ -222,6 +336,50 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+ 10
+6.0
+ 20
+1.0
+ 30
+0.0
+ 41
+2.5
+290
+1
+304
+\A1;%%c10 THRU
+ 11
+0.0
+ 21
+0.0
+ 31
+1.0
+340
+6
+ 12
+6.0
+ 22
+1.0
+ 32
+0.0
+ 13
+1.0
+ 23
+0.0
+ 33
+0.0
+ 42
+0.0
+ 43
+0.0
+ 44
+0.0
+ 45
+1.0
+171
+1
+296
+0
 170
 2
  90
@@ -265,7 +423,7 @@ LEADER_LINE{
 301
 }
 340
-8
+B
  90
 279552
 170
@@ -273,9 +431,9 @@ LEADER_LINE{
   0
 MULTILEADER
   5
-105
+108
 330
-6
+8
 100
 AcDbEntity
   8
@@ -288,6 +446,38 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+ 10
+26.0
+ 20
+0.0
+ 30
+0.0
+290
+0
+296
+1
+341
+A
+ 14
+0.0
+ 24
+0.0
+ 34
+1.0
+ 15
+26.0
+ 25
+0.0
+ 35
+0.0
+ 16
+2.0
+ 26
+2.0
+ 36
+2.0
+ 46
+0.0
 170
 2
  90
@@ -331,7 +521,7 @@ LEADER_LINE{
 301
 }
 340
-9
+C
  90
 279552
 170
@@ -339,9 +529,9 @@ LEADER_LINE{
   0
 MULTILEADER
   5
-106
+109
 330
-6
+8
 100
 AcDbEntity
   8
@@ -397,7 +587,7 @@ LEADER_LINE{
 301
 }
 340
-8
+B
  90
 279553
 170
@@ -405,9 +595,9 @@ LEADER_LINE{
   0
 MULTILEADER
   5
-107
+10A
 330
-6
+8
 100
 AcDbEntity
   8
@@ -463,7 +653,7 @@ LEADER_LINE{
 301
 }
 340
-8
+B
  90
 279553
 170
@@ -471,9 +661,9 @@ LEADER_LINE{
   0
 MULTILEADER
   5
-108
+10B
 330
-6
+8
 100
 AcDbEntity
   8
@@ -529,7 +719,7 @@ LEADER_LINE{
 301
 }
 340
-A
+D
  90
 279552
 170
@@ -537,9 +727,9 @@ A
   0
 MULTILEADER
   5
-109
+10C
 330
-6
+8
 100
 AcDbEntity
   8
@@ -621,7 +811,7 @@ LEADER_LINE{
 301
 }
 340
-8
+B
  90
 279552
 170
@@ -629,9 +819,9 @@ LEADER_LINE{
   0
 MULTILEADER
   5
-10A
+10D
 330
-6
+8
 100
 AcDbEntity
   8
@@ -709,7 +899,7 @@ LEADER_LINE{
 301
 }
 340
-8
+B
  90
 279552
 170
@@ -723,7 +913,7 @@ OBJECTS
   0
 DICTIONARY
   5
-10B
+10E
 330
 0
 100
@@ -733,13 +923,13 @@ AcDbDictionary
   3
 ACAD_MLEADERSTYLE
 350
-10C
+10F
   0
 DICTIONARY
   5
-10C
+10F
 330
-10B
+10E
 100
 AcDbDictionary
 281
@@ -747,17 +937,17 @@ AcDbDictionary
   3
 Straight
 350
-8
+B
   3
 Spline
 350
-9
+C
   0
 MLEADERSTYLE
   5
-8
+B
 330
-10C
+10F
 100
 AcDbMLeaderStyle
 179
@@ -771,9 +961,9 @@ Straight
   0
 MLEADERSTYLE
   5
-9
+C
 330
-10C
+10F
 100
 AcDbMLeaderStyle
 179

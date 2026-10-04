@@ -3,12 +3,12 @@
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 260,
+        "id": 263,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "104"
+          "data": "107"
         },
         "layer": {
           "type": "RESOLVED",
@@ -48,17 +48,47 @@
           "dogleg": null
         }
       ],
-      "line_type": "STRAIGHT"
+      "line_type": "STRAIGHT",
+      "content": {
+        "type": "MTEXT",
+        "data": {
+          "text": "\\A1;%%c10 THRU",
+          "style_name": {
+            "type": "RESOLVED",
+            "data": "Standard"
+          },
+          "location": {
+            "x": 6.0,
+            "y": 1.0,
+            "z": 0.0
+          },
+          "direction": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "height": 2.5,
+          "rotation": 0.0,
+          "width": 0.0,
+          "scale": 1.0,
+          "attachment": "TOP_LEFT"
+        }
+      }
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 261,
+        "id": 264,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "105"
+          "data": "108"
         },
         "layer": {
           "type": "RESOLVED",
@@ -98,17 +128,42 @@
           "dogleg": null
         }
       ],
-      "line_type": "SPLINE"
+      "line_type": "SPLINE",
+      "content": {
+        "type": "BLOCK",
+        "data": {
+          "block_name": {
+            "type": "RESOLVED",
+            "data": "MARK"
+          },
+          "location": {
+            "x": 26.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "scale": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": 2.0
+          },
+          "rotation": 0.0,
+          "extrusion": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
+        }
+      }
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 262,
+        "id": 265,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "106"
+          "data": "109"
         },
         "layer": {
           "type": "RESOLVED",
@@ -148,17 +203,18 @@
           "dogleg": null
         }
       ],
-      "line_type": "SPLINE"
+      "line_type": "SPLINE",
+      "content": null
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 263,
+        "id": 266,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "107"
+          "data": "10A"
         },
         "layer": {
           "type": "RESOLVED",
@@ -198,17 +254,18 @@
           "dogleg": null
         }
       ],
-      "line_type": "INVISIBLE"
+      "line_type": "INVISIBLE",
+      "content": null
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 264,
+        "id": 267,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "108"
+          "data": "10B"
         },
         "layer": {
           "type": "RESOLVED",
@@ -248,17 +305,18 @@
           "dogleg": null
         }
       ],
-      "line_type": null
+      "line_type": null,
+      "content": null
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 265,
+        "id": 268,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "109"
+          "data": "10C"
         },
         "layer": {
           "type": "RESOLVED",
@@ -310,17 +368,18 @@
           "dogleg": null
         }
       ],
-      "line_type": "SPLINE"
+      "line_type": "SPLINE",
+      "content": null
     },
     {
       "type": "MULTILEADER",
       "common": {
-        "id": 266,
+        "id": 269,
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
           "type": "RESOLVED",
-          "data": "10A"
+          "data": "10D"
         },
         "layer": {
           "type": "RESOLVED",
@@ -372,7 +431,8 @@
           "dogleg": null
         }
       ],
-      "line_type": null
+      "line_type": null,
+      "content": null
     }
   ],
   "tables": {
@@ -398,12 +458,12 @@
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 260,
+              "id": 263,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "104"
+                "data": "107"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -443,17 +503,47 @@
                 "dogleg": null
               }
             ],
-            "line_type": "STRAIGHT"
+            "line_type": "STRAIGHT",
+            "content": {
+              "type": "MTEXT",
+              "data": {
+                "text": "\\A1;%%c10 THRU",
+                "style_name": {
+                  "type": "RESOLVED",
+                  "data": "Standard"
+                },
+                "location": {
+                  "x": 6.0,
+                  "y": 1.0,
+                  "z": 0.0
+                },
+                "direction": {
+                  "x": 1.0,
+                  "y": 0.0,
+                  "z": 0.0
+                },
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                },
+                "height": 2.5,
+                "rotation": 0.0,
+                "width": 0.0,
+                "scale": 1.0,
+                "attachment": "TOP_LEFT"
+              }
+            }
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 261,
+              "id": 264,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "105"
+                "data": "108"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -493,17 +583,42 @@
                 "dogleg": null
               }
             ],
-            "line_type": "SPLINE"
+            "line_type": "SPLINE",
+            "content": {
+              "type": "BLOCK",
+              "data": {
+                "block_name": {
+                  "type": "RESOLVED",
+                  "data": "MARK"
+                },
+                "location": {
+                  "x": 26.0,
+                  "y": 0.0,
+                  "z": 0.0
+                },
+                "scale": {
+                  "x": 2.0,
+                  "y": 2.0,
+                  "z": 2.0
+                },
+                "rotation": 0.0,
+                "extrusion": {
+                  "x": 0.0,
+                  "y": 0.0,
+                  "z": 1.0
+                }
+              }
+            }
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 262,
+              "id": 265,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "106"
+                "data": "109"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -543,17 +658,18 @@
                 "dogleg": null
               }
             ],
-            "line_type": "SPLINE"
+            "line_type": "SPLINE",
+            "content": null
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 263,
+              "id": 266,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "107"
+                "data": "10A"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -593,17 +709,18 @@
                 "dogleg": null
               }
             ],
-            "line_type": "INVISIBLE"
+            "line_type": "INVISIBLE",
+            "content": null
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 264,
+              "id": 267,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "108"
+                "data": "10B"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -643,17 +760,18 @@
                 "dogleg": null
               }
             ],
-            "line_type": null
+            "line_type": null,
+            "content": null
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 265,
+              "id": 268,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "109"
+                "data": "10C"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -705,17 +823,18 @@
                 "dogleg": null
               }
             ],
-            "line_type": "SPLINE"
+            "line_type": "SPLINE",
+            "content": null
           },
           {
             "type": "MULTILEADER",
             "common": {
-              "id": 266,
+              "id": 269,
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
                 "type": "RESOLVED",
-                "data": "10A"
+                "data": "10D"
               },
               "layer": {
                 "type": "RESOLVED",
@@ -767,7 +886,8 @@
                 "dogleg": null
               }
             ],
-            "line_type": null
+            "line_type": null,
+            "content": null
           }
         ],
         "base_point": {
@@ -779,6 +899,51 @@
       "*Paper_Space": {
         "name": "*Paper_Space",
         "entities": [],
+        "base_point": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        }
+      },
+      "MARK": {
+        "name": "MARK",
+        "entities": [
+          {
+            "type": "LINE",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "0"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": 0
+            },
+            "start_point": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "end_point": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 0.0
+            }
+          }
+        ],
         "base_point": {
           "x": 0.0,
           "y": 0.0,

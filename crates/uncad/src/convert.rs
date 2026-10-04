@@ -1918,6 +1918,9 @@ unsafe fn convert_entity(
                 common,
                 leaders,
                 line_type,
+                // TODO: the content (text or block) of the record's context
+                // data, which the DXF reader already reads.
+                content: None,
             }
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
