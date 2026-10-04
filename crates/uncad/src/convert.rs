@@ -24,9 +24,10 @@ use uncad_model::model::{
     EntityId, Face3DEntity, HatchBoundaryPath, HatchEdge, HatchEntity, HatchGradient,
     HatchPatternLine, ImageEntity, InsertEntity, LeaderAnnotation, LeaderEntity, LeaderLineType,
     LeaderPath, LeaderRoot, LightEntity, LightType, LineEntity, LwPolylineEntity, MLineEntity,
-    MLineVertex, MTextAttachment, MTextEntity, MultiLeaderEntity, OrdinateAxis, Origin,
-    PointEntity, PolylineEntity, RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity,
-    TextEntity, TextOverride, ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
+    MLineVertex, MTextAttachment, MTextEntity, MultiLeaderBlock, MultiLeaderContent,
+    MultiLeaderEntity, MultiLeaderText, OrdinateAxis, Origin, PointEntity, PolylineEntity,
+    RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride,
+    ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, EntityLinetype, HorizontalJustification, OverrideValue, Point2D, Point3D,
@@ -1480,18 +1481,8 @@ unsafe fn convert_entity(
                 .unwrap_or(1.0);
             // DXF 71, 1 to 9: which point of the text block the insertion
             // point is. Anything else is not a value this reader can state.
-            let attachment = match get_field::<u16>(entity_ptr, "MTEXT", "attachment") {
-                Some(1) => Some(MTextAttachment::TopLeft),
-                Some(2) => Some(MTextAttachment::TopCenter),
-                Some(3) => Some(MTextAttachment::TopRight),
-                Some(4) => Some(MTextAttachment::MiddleLeft),
-                Some(5) => Some(MTextAttachment::MiddleCenter),
-                Some(6) => Some(MTextAttachment::MiddleRight),
-                Some(7) => Some(MTextAttachment::BottomLeft),
-                Some(8) => Some(MTextAttachment::BottomCenter),
-                Some(9) => Some(MTextAttachment::BottomRight),
-                _ => None,
-            };
+            let attachment = get_field::<u16>(entity_ptr, "MTEXT", "attachment")
+                .and_then(|code| MTextAttachment::from_code(code.into()));
             Entity::MText(MTextEntity {
                 common,
                 insertion_point,
@@ -1918,9 +1909,8 @@ unsafe fn convert_entity(
                 common,
                 leaders,
                 line_type,
-                // TODO: the content (text or block) of the record's context
-                // data, which the DXF reader already reads.
-                content: None,
+                // SAFETY: as above.
+                content: unsafe { multileader_content(dwg, text, entity_ptr) },
             }
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
@@ -2075,6 +2065,70 @@ fn mleader_style_line_type(style: Option<*mut libredwg_sys::Dwg_Object_Ref>) -> 
         return None;
     }
     get_field::<u16>(object_ptr, "MLEADERSTYLE", "type").map(i64::from)
+}
+
+/// What a MULTILEADER points out: the text or block of its context data,
+/// with the text style and block resolved to their names. `None` for a
+/// record that states neither, and for a block content that names no
+/// block (the other reader does not guess one either).
+///
+/// # Safety
+/// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*` of the
+/// drawing `dwg` (and `text`) belong to.
+unsafe fn multileader_content(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    entity_ptr: *mut std::ffi::c_void,
+) -> Option<MultiLeaderContent> {
+    let point = |p: [f64; 3]| Point3D {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    };
+    // SAFETY: a plain C struct of numbers and pointers; zero is its empty
+    // value, and the shim overwrites it whole.
+    let mut c: libredwg_sys::uncad_multileader_content_t = unsafe { std::mem::zeroed() };
+    // SAFETY: entity_ptr is valid per this function's contract; the shim
+    // only reads it and fills `c`, whose pointers point into the entity.
+    unsafe { libredwg_sys::uncad_multileader_get_content(entity_ptr, &mut c) };
+    match c.kind {
+        1 => {
+            // SAFETY: the entity's own 304 string, live as long as it.
+            let contents = unsafe {
+                text.stored_field(c.text, "MULTILEADER", "ctx.content.txt.default_text")
+            }?;
+            Some(MultiLeaderContent::MText(MultiLeaderText {
+                text: contents,
+                style_name: reference(dwg, text, Some(c.style.cast()), c"STYLE", |handle_ptr| {
+                    text.handle_name(dwg, handle_ptr)
+                }),
+                location: point(c.location),
+                direction: point(c.direction),
+                extrusion: point(c.normal),
+                height: c.text_height,
+                rotation: c.rotation,
+                width: c.width,
+                scale: c.scale,
+                attachment: MTextAttachment::from_code(c.alignment.into()),
+            }))
+        }
+        2 => {
+            let block_name = reference(dwg, text, Some(c.block.cast()), c"BLOCK", |handle_ptr| {
+                crate::table_convert::resolve_block_name(text, handle_ptr)
+            });
+            if block_name == Ref::Absent {
+                return None;
+            }
+            Some(MultiLeaderContent::Block(MultiLeaderBlock {
+                block_name,
+                location: point(c.location),
+                scale: point(c.block_scale),
+                rotation: c.rotation,
+                extrusion: point(c.normal),
+            }))
+        }
+        _ => None,
+    }
 }
 
 /// Reads a MULTILEADER's leader roots through the `uncad_multileader_get_roots`

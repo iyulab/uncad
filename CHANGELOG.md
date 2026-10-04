@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A MULTILEADER's content, read from a DWG as from a DXF: the text it points out (in MTEXT format
+  codes, with its style by name, location, direction, plane, character height, rotation, column
+  width, content scale and attachment point) or its block (by name, with location, scale,
+  rotation and plane). A leader note such as a hole callout was not in the model at all. Every
+  verb that answers with model records carries it.
+
 ### Changed
 
 - **`diff` and `redline` pair the two drawings by `--matching auto` by default** (MCP: `matching`

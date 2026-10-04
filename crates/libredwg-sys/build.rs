@@ -239,6 +239,8 @@ fn main() {
         .allowlist_function("uncad_multileader_get_roots")
         .allowlist_function("uncad_multileader_free_roots")
         .allowlist_type("uncad_multileader_root_t")
+        .allowlist_function("uncad_multileader_get_content")
+        .allowlist_type("uncad_multileader_content_t")
         .allowlist_function("uncad_entity_style_overrides")
         .allowlist_function("uncad_free_style_overrides")
         .allowlist_type("uncad_style_override_t")

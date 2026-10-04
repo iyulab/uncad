@@ -127,6 +127,31 @@ unsigned int uncad_multileader_get_roots(void *entity,
 
 void uncad_multileader_free_roots(uncad_multileader_root_t *roots);
 
+/* What a MULTILEADER points out: its context data's content, a union the
+ * library fills by has_content_txt (DXF 290) or has_content_blk (296).
+ * Pointers point into the entity and live as long as it; nothing to free. */
+typedef struct uncad_multileader_content
+{
+  int kind;              /* 0 none, 1 a text (290), 2 a block (296) */
+  double scale;          /* ctx.scale_factor, DXF 40 */
+  double text_height;    /* ctx.text_height, DXF 41 */
+  char *text;            /* DXF 304, as the library stores it */
+  void *style;           /* the text style's Dwg_Object_Ref*, DXF 340 */
+  void *block;           /* the block's Dwg_Object_Ref*, DXF 341 */
+  double normal[3];      /* DXF 11 (text) or 14 (block) */
+  double location[3];    /* DXF 12 (text) or 15 (block) */
+  double direction[3];   /* DXF 13 (text) */
+  double rotation;       /* DXF 42 (text) or 46 (block) */
+  double width;          /* DXF 43 (text) */
+  int alignment;         /* DXF 171 (text): the attachment point, 1 to 9 */
+  double block_scale[3]; /* DXF 16 (block) */
+} uncad_multileader_content_t;
+
+/* Fills *out with a MULTILEADER's content; kind 0 for a NULL entity or one
+ * that states none. */
+void uncad_multileader_get_content(void *entity,
+                                   uncad_multileader_content_t *out);
+
 /* Flattens a MULTILEADER entity's ctx.leaders[].lines[] (every leader node
  * can own several lines/splines) into one array of polylines -- every line
  * that has a point, whatever its `type` (stored from R2010 only; how a line

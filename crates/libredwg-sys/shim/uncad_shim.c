@@ -266,6 +266,53 @@ uncad_multileader_free_roots (uncad_multileader_root_t *roots)
   free (roots);
 }
 
+void
+uncad_multileader_get_content (void *entity, uncad_multileader_content_t *out)
+{
+  memset (out, 0, sizeof (*out));
+  if (!entity)
+    return;
+  Dwg_Entity_MULTILEADER *mleader = (Dwg_Entity_MULTILEADER *)entity;
+  Dwg_MLEADER_AnnotContext *ctx = &mleader->ctx;
+  out->scale = ctx->scale_factor;
+  out->text_height = ctx->text_height;
+  if (ctx->has_content_txt)
+    {
+      Dwg_MLEADER_Content_MText *t = &ctx->content.txt;
+      out->kind = 1;
+      out->text = (char *)t->default_text;
+      out->style = t->style;
+      out->normal[0] = t->normal.x;
+      out->normal[1] = t->normal.y;
+      out->normal[2] = t->normal.z;
+      out->location[0] = t->location.x;
+      out->location[1] = t->location.y;
+      out->location[2] = t->location.z;
+      out->direction[0] = t->direction.x;
+      out->direction[1] = t->direction.y;
+      out->direction[2] = t->direction.z;
+      out->rotation = t->rotation;
+      out->width = t->width;
+      out->alignment = t->alignment;
+    }
+  else if (ctx->has_content_blk)
+    {
+      Dwg_MLEADER_Content_Block *b = &ctx->content.blk;
+      out->kind = 2;
+      out->block = b->block_table;
+      out->normal[0] = b->normal.x;
+      out->normal[1] = b->normal.y;
+      out->normal[2] = b->normal.z;
+      out->location[0] = b->location.x;
+      out->location[1] = b->location.y;
+      out->location[2] = b->location.z;
+      out->rotation = b->rotation;
+      out->block_scale[0] = b->scale.x;
+      out->block_scale[1] = b->scale.y;
+      out->block_scale[2] = b->scale.z;
+    }
+}
+
 /* --- version bands, codepage and string width ---------------------------- */
 
 int
