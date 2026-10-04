@@ -25,6 +25,14 @@ Notable changes to this project are recorded here. The format follows
   `--matching reference`.
 - A dimension's anonymous block, which a save renumbers, is no longer a difference: the same
   drawing saved again no longer reports its dimensions as modified (or removed and added).
+- **A render option the requested output has no use for is refused by name**, before the input
+  is read: an SVG ignored `--stroke`, `--fit`, `--scale`, `--max-edge` and `--background`, and
+  model JSON and the summary ignored every picture option, without a word. `redline` already
+  refused `--stroke` on an SVG this way.
+- `uncad <verb> --help` lists each argument -- how it is written, whether it is required and
+  what it means, as the MCP tool schema describes it -- after the usage line and description.
+- Each verb's description (the MCP tool list and `verbs`) names every top-level field of its
+  answer.
 
 ### Added
 
@@ -37,6 +45,9 @@ Notable changes to this project are recorded here. The format follows
 - A multileader read from a DWG carries its `line_type`, settled from the entity's override
   flags and type, the line type of the MLEADERSTYLE it names, and each leader line's own
   override (R2010 on).
+- `diff` and `redline` take `--min-similarity`, `--min-margin` and `--max-pairs` (MCP:
+  `min_similarity`, `min_margin`, `max_pairs`), the thresholds and scoring budget of geometric
+  matching's pairing of changed entities; the answer's `pairing` states the values used.
 - A render (`-o` .svg or .png) warns which leaders it did not draw because the file does not
   define their curve: a spline path, or a path the file does not state.
 
