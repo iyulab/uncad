@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-04
+
 ### Added
 
 - A MULTILEADER's content, read from a DWG as from a DXF: the text it points out (in MTEXT format
@@ -13,6 +15,19 @@ Notable changes to this project are recorded here. The format follows
   rotation, column width, content scale and attachment point) or its block (by name, with
   location, scale, rotation and plane). A leader note such as a hole callout was not in the model
   at all. Every verb that answers with model records carries it.
+- `summarize` answers with `drawing_ids` -- the fingerprint and version GUIDs the header states
+  -- and its tool description names them and the shape signature.
+- `$FINGERPRINTGUID` and `$VERSIONGUID`, as stated, in the model's `header` and in `Header`
+  (`fingerprintguid`, `versionguid`): from a DWG of R2000 or later (the main header up to R2004,
+  the string stream from R2007) and from a DXF that states them.
+- A multileader read from a DWG carries its `line_type`, settled from the entity's override
+  flags and type, the line type of the MLEADERSTYLE it names, and each leader line's own
+  override (R2010 on).
+- `diff` and `redline` take `--min-similarity`, `--min-margin` and `--max-pairs` (MCP:
+  `min_similarity`, `min_margin`, `max_pairs`), the thresholds and scoring budget of geometric
+  matching's pairing of changed entities; the answer's `pairing` states the values used.
+- A render (`-o` .svg or .png) warns which leaders it did not draw because the file does not
+  define their curve: a spline path, or a path the file does not state.
 
 ### Changed
 
@@ -33,24 +48,8 @@ Notable changes to this project are recorded here. The format follows
   what it means, as the MCP tool schema describes it -- after the usage line and description.
 - Each verb's description (the MCP tool list and `verbs`) names every top-level field of its
   answer.
-
-### Added
-
-- `summarize` answers with `drawing_ids` -- the fingerprint and version GUIDs the header states
-  -- and its tool description names them and the shape signature.
-- `$FINGERPRINTGUID` and `$VERSIONGUID`, as stated, in the model's `header` and in `Header`
-  (`fingerprintguid`, `versionguid`): from a DWG of R2000 or later (the main header up to R2004,
-  the string stream from R2007) and from a DXF that states them.
-
-- A multileader read from a DWG carries its `line_type`, settled from the entity's override
-  flags and type, the line type of the MLEADERSTYLE it names, and each leader line's own
-  override (R2010 on).
-- `diff` and `redline` take `--min-similarity`, `--min-margin` and `--max-pairs` (MCP:
-  `min_similarity`, `min_margin`, `max_pairs`), the thresholds and scoring budget of geometric
-  matching's pairing of changed entities; the answer's `pairing` states the values used.
-- A render (`-o` .svg or .png) warns which leaders it did not draw because the file does not
-  define their curve: a spline path, or a path the file does not state.
-
+- Built on `uncad-model` 0.4.0, `undxf` 0.3.0, `iron-scout-cad` 0.5.0, `iron-diff-cad` 0.4.0,
+  `iron-hand-cad` 0.4.0, `iron-render-cad` 0.5.0 and `iron-pack-cad` 0.4.0.
 
 ## [0.6.0] - 2026-10-02
 
