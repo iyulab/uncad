@@ -1677,6 +1677,10 @@ unsafe fn convert_entity(
                 insertion_point,
                 scale,
                 rotation,
+                // The cells are not read: the backend decodes them only in a
+                // build that enables its unfinished classes, which this one
+                // does not, and from R2010 not at all.
+                grid: None,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_HATCH => {
