@@ -95,7 +95,9 @@ pub const VERBS: &[Verb] = &[
             missing (`unresolved_inserts`), the attribute values on block references \
             (`attributes`), loose texts that read as label and value (`labelled_texts`) and \
             those on a tilted plane left out of that (`unplaced_texts`), every dimension \
-            (`dimensions`) and feature control frame (`tolerance_frames`), where each space \
+            (`dimensions`), feature control frame (`tolerance_frames`) and table with what \
+            its cells say by row and column (`tables` -- `cells` null when they were not \
+            read), where each space \
             lies (`extents`), its shape signature (`signature` -- model space counted into \
             integers whose every place has a meaning), the lowest confidence of anything \
             summarized (`confidence`) and the reader's diagnostics (`warnings`). A value that \
@@ -180,8 +182,8 @@ pub const VERBS: &[Verb] = &[
         description: "The entities at a point of a drawing: every entity whose geometry passes \
             within the tolerance (`hits`, nearest first, none preferred over another -- \
             `hits_total` says how many there were when `limit` kept fewer), closed shapes that \
-            enclose the point (`enclosing`), what block references draw there with the chain \
-            of references it was reached through, and what could not be searched: entity types \
+            enclose the point (`enclosing`), what block references and tables draw there with \
+            the chain of references it was reached through, and what could not be searched: entity types \
             not measured yet (`unsupported`) and entities passed over, each with why \
             (`not_searched`). Coordinates are in the drawing's own units.",
         params: &[
