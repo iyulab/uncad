@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "iron-render-cad"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc4605ed231aad58d7f8e90ca03bad983e632164714a4d63b1c129e694481334"
+checksum = "b0d132a4fcf369b0a1393feb40bcd7eee938b16c1cf843ad4a8a2e7e2aa1c3f8"
 dependencies = [
  "iron-diff-cad",
  "resvg",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "libredwg-sys"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bindgen",
  "cc",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "uncad"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "acadrust",
  "iron-render-cad",
@@ -1382,7 +1382,7 @@ dependencies = [
 
 [[package]]
 name = "uncad-cli"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "iron-diff-cad",
  "iron-hand-cad",

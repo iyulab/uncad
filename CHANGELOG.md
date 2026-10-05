@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-05
+
+### Changed
+
+- Built on `iron-render-cad` 0.6.1: the SVGs that `uncad <input> -o <output>.svg` and `redline` write
+  state on their root the drawing point their coordinates are relative to (`data-origin="x y"`), so
+  the file alone is enough to take a point of the picture back to the drawing.
+
 ## [0.8.0] - 2026-10-05
 
 ### Added
