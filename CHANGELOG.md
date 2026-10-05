@@ -6,6 +6,22 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+### Added
+
+- A DXF drawing's tables carry their grid -- rows, columns and cell texts. `uncad summarize` lists
+  every table with what its cells say by row and column (`tables`), `hit-test` finds a table at
+  its insertion point and what its block draws through it, and `export` writes a table as a block
+  instance with its cells.
+
+### Changed
+
+- A DWG table's `grid` is `None`: the backend does not decode a table's cells. Its tables still
+  arrive as `UNKNOWN`.
+- Built on `uncad-model` 0.5.0, `undxf` 0.4.0, `iron-render-cad` 0.6.0, `iron-pack-cad` 0.5.0,
+  `iron-scout-cad` 0.6.0, `iron-diff-cad` 0.5.0 and `iron-hand-cad` 0.5.0.
+
 ## [0.7.1] - 2026-10-05
 
 ### Changed
