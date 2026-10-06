@@ -304,45 +304,54 @@ fn run(args: &Args) -> Result<(), String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let (unsupported, empty_blocks, undefined_arcs, undefined_leaders, left_out) =
-        match extension.as_str() {
-            "json" => {
-                let json = db
-                    .to_json(ToJsonOptions {
-                        pretty: args.pretty,
-                    })
-                    .map_err(|e| e.to_string())?;
-                write_output(output, json.as_bytes())?;
-                (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+    let reports = match extension.as_str() {
+        "json" => {
+            let json = db
+                .to_json(ToJsonOptions {
+                    pretty: args.pretty,
+                })
+                .map_err(|e| e.to_string())?;
+            write_output(output, json.as_bytes())?;
+            Reports::default()
+        }
+        "svg" => {
+            let result = to_svg(&db, svg_options(args)?);
+            write_output(output, result.svg.as_bytes())?;
+            Reports {
+                unsupported: result.unsupported_types,
+                empty_blocks: result.empty_blocks,
+                undefined_arcs: result.undefined_arcs,
+                undefined_leaders: result.undefined_leaders,
+                unsized_arrowheads: result.unsized_arrowheads,
+                left_out: result.crop.left_out,
             }
-            "svg" => {
-                let result = to_svg(&db, svg_options(args)?);
-                write_output(output, result.svg.as_bytes())?;
-                (
-                    result.unsupported_types,
-                    result.empty_blocks,
-                    result.undefined_arcs,
-                    result.undefined_leaders,
-                    result.crop.left_out,
-                )
+        }
+        "png" => {
+            let result = to_png(&db, png_options(args)?).map_err(png_error)?;
+            write_output(output, &result.png)?;
+            Reports {
+                unsupported: result.unsupported_types,
+                empty_blocks: result.empty_blocks,
+                undefined_arcs: result.undefined_arcs,
+                undefined_leaders: result.undefined_leaders,
+                unsized_arrowheads: result.unsized_arrowheads,
+                left_out: result.crop.left_out,
             }
-            "png" => {
-                let result = to_png(&db, png_options(args)?).map_err(png_error)?;
-                write_output(output, &result.png)?;
-                (
-                    result.unsupported_types,
-                    result.empty_blocks,
-                    result.undefined_arcs,
-                    result.undefined_leaders,
-                    result.crop.left_out,
-                )
-            }
-            other => {
-                return Err(format!(
-                    "unsupported output extension '.{other}' (only .json, .svg, .png)"
-                ))
-            }
-        };
+        }
+        other => {
+            return Err(format!(
+                "unsupported output extension '.{other}' (only .json, .svg, .png)"
+            ))
+        }
+    };
+    let Reports {
+        unsupported,
+        empty_blocks,
+        undefined_arcs,
+        undefined_leaders,
+        unsized_arrowheads,
+        left_out,
+    } = reports;
 
     println!("wrote: {output}");
     if !unsupported.is_empty() {
@@ -375,6 +384,16 @@ fn run(args: &Args) -> Result<(), String> {
         eprintln!(
             "warning: leaders not drawn, the file not defining their curve (a spline, or a path \
              it does not state): {}",
+            ids.join(", ")
+        );
+    }
+    if !unsized_arrowheads.is_empty() {
+        let ids: Vec<String> = unsized_arrowheads
+            .iter()
+            .map(|id| id.value().to_string())
+            .collect();
+        eprintln!(
+            "warning: arrowheads drawn at a default size, the file not stating theirs: {}",
             ids.join(", ")
         );
     }
@@ -838,4 +857,15 @@ fn pack_header(header: &uncad::Header) -> Result<iron_pack_cad::Header, String> 
     serde_json::to_value(header)
         .and_then(serde_json::from_value)
         .map_err(|e| format!("the drawing's header does not carry over: {e}"))
+}
+
+/// What a picture left out or drew from a default, to say on standard error.
+#[derive(Default)]
+struct Reports {
+    unsupported: Vec<String>,
+    empty_blocks: Vec<String>,
+    undefined_arcs: Vec<uncad::model::EntityId>,
+    undefined_leaders: Vec<uncad::model::EntityId>,
+    unsized_arrowheads: Vec<uncad::model::EntityId>,
+    left_out: Vec<iron_render_cad::LeftOut>,
 }
