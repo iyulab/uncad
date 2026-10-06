@@ -8,6 +8,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- `hit_test`'s description names `table_cells` -- the cell of each table that holds the point --
+  which the answer now carries.
 - A DXF table carries the way its rows run (`flow`), read by `undxf`. A DWG table's `flow` is
   `None`, as its cells are: the backend does not decode them.
 

@@ -183,9 +183,12 @@ pub const VERBS: &[Verb] = &[
             within the tolerance (`hits`, nearest first, none preferred over another -- \
             `hits_total` says how many there were when `limit` kept fewer), closed shapes that \
             enclose the point (`enclosing`), what block references and tables draw there with \
-            the chain of references it was reached through, and what could not be searched: entity types \
+            the chain of references it was reached through, the cell of each table that holds \
+            the point by row and column (`table_cells` -- a merged cell by its first row and \
+            column), and what could not be searched: entity types \
             not measured yet (`unsupported`) and entities passed over, each with why \
-            (`not_searched`). Coordinates are in the drawing's own units.",
+            (`not_searched` -- a table whose cells cannot be placed among them). Coordinates are \
+            in the drawing's own units.",
         params: &[
             Param {
                 name: "input",
