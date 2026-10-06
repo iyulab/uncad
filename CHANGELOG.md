@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
 ### Changed
 
 - A picture (`.svg`, `.png`) warns of the leaders whose arrowheads are drawn at a default size,
@@ -14,6 +16,10 @@ Notable changes to this project are recorded here. The format follows
   which the answer now carries.
 - A DXF table carries the way its rows run (`flow`), read by `undxf`. A DWG table's `flow` is
   `None`, as its cells are: the backend does not decode them.
+- `summarize`'s extents and `select`'s bounds take in what block references, tables and dimension
+  blocks draw, and a block that draws itself is searched once by `hit_test` (`iron-scout-cad`
+  0.7.0).
+- Built on `uncad-model` 0.6.0, `undxf` 0.5.0, `iron-render-cad` 0.7.0, `iron-pack-cad` 0.6.0, `iron-scout-cad` 0.7.0, `iron-diff-cad` 0.6.0 and `iron-hand-cad` 0.6.0.
 
 ## [0.8.1] - 2026-10-05
 
