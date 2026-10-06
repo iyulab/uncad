@@ -49,6 +49,7 @@
         }
       ],
       "line_type": "STRAIGHT",
+      "arrow_size": 0.18,
       "content": {
         "type": "MTEXT",
         "data": {
@@ -130,6 +131,7 @@
         }
       ],
       "line_type": "SPLINE",
+      "arrow_size": 0.18,
       "content": {
         "type": "BLOCK",
         "data": {
@@ -205,6 +207,7 @@
         }
       ],
       "line_type": "SPLINE",
+      "arrow_size": 0.18,
       "content": null
     },
     {
@@ -256,6 +259,7 @@
         }
       ],
       "line_type": "INVISIBLE",
+      "arrow_size": 0.18,
       "content": null
     },
     {
@@ -307,6 +311,7 @@
         }
       ],
       "line_type": null,
+      "arrow_size": 0.18,
       "content": null
     },
     {
@@ -370,6 +375,7 @@
         }
       ],
       "line_type": "SPLINE",
+      "arrow_size": 0.18,
       "content": null
     },
     {
@@ -433,6 +439,7 @@
         }
       ],
       "line_type": null,
+      "arrow_size": 0.18,
       "content": null
     }
   ],
@@ -505,6 +512,7 @@
               }
             ],
             "line_type": "STRAIGHT",
+            "arrow_size": 0.18,
             "content": {
               "type": "MTEXT",
               "data": {
@@ -586,6 +594,7 @@
               }
             ],
             "line_type": "SPLINE",
+            "arrow_size": 0.18,
             "content": {
               "type": "BLOCK",
               "data": {
@@ -661,6 +670,7 @@
               }
             ],
             "line_type": "SPLINE",
+            "arrow_size": 0.18,
             "content": null
           },
           {
@@ -712,6 +722,7 @@
               }
             ],
             "line_type": "INVISIBLE",
+            "arrow_size": 0.18,
             "content": null
           },
           {
@@ -763,6 +774,7 @@
               }
             ],
             "line_type": null,
+            "arrow_size": 0.18,
             "content": null
           },
           {
@@ -826,6 +838,7 @@
               }
             ],
             "line_type": "SPLINE",
+            "arrow_size": 0.18,
             "content": null
           },
           {
@@ -889,6 +902,7 @@
               }
             ],
             "line_type": null,
+            "arrow_size": 0.18,
             "content": null
           }
         ],

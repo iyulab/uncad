@@ -336,6 +336,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
  10
 6.0
  20
@@ -446,6 +448,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
  10
 26.0
  20
@@ -544,6 +548,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
 170
 1
  90
@@ -610,6 +616,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
 170
 1
  90
@@ -676,6 +684,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
 170
 2
  90
@@ -742,6 +752,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
 170
 2
  90
@@ -834,6 +846,8 @@ AcDbMLeader
 CONTEXT_DATA{
  40
 1.0
+140
+0.18
 170
 2
  90

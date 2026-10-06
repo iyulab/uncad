@@ -210,6 +210,7 @@ uncad_multileader_get_lines (void *entity, uncad_multileader_line_t **out_lines)
           lines[k].num_points = line->num_points;
           lines[k].points = pts;
           lines[k].type = line->type;
+          lines[k].arrow_size = line->arrow_size;
           lines[k].flags = line->flags;
           k++;
         }
@@ -276,6 +277,7 @@ uncad_multileader_get_content (void *entity, uncad_multileader_content_t *out)
   Dwg_MLEADER_AnnotContext *ctx = &mleader->ctx;
   out->scale = ctx->scale_factor;
   out->text_height = ctx->text_height;
+  out->arrow_size = ctx->arrow_size;
   if (ctx->has_content_txt)
     {
       Dwg_MLEADER_Content_MText *t = &ctx->content.txt;

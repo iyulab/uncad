@@ -6,6 +6,12 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A DWG multileader carries the size its arrowheads are drawn at (`arrow_size`): its context data's
+  arrowhead size, or a line's own where the line overrides it. A picture draws a multileader's
+  arrowheads at that size, and warns of one only when the size is not known.
+
 ## [0.9.0] - 2026-10-07
 
 ### Changed

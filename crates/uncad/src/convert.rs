@@ -1902,6 +1902,12 @@ unsafe fn convert_entity(
             // SAFETY: entity_ptr is a valid, non-null Dwg_Entity_MULTILEADER*
             // (checked above), matching fixedtype.
             let (leaders, lines) = unsafe { multileader_leaders(entity_ptr) };
+            // SAFETY: as above.
+            let context = unsafe { multileader_context(entity_ptr) };
+            let arrow_size = MultiLeaderEntity::resolve_arrow_size(
+                Some(context.arrow_size),
+                lines.iter().map(|l| (Some(l.flags), Some(l.arrow_size))),
+            );
             let line_type = LeaderLineType::resolve(
                 get_field::<u32>(entity_ptr, "MULTILEADER", "flags"),
                 get_field::<u16>(entity_ptr, "MULTILEADER", "type").map(i64::from),
@@ -1910,14 +1916,14 @@ unsafe fn convert_entity(
                     "MULTILEADER",
                     "mleaderstyle",
                 )),
-                lines,
+                lines.iter().map(|l| (Some(l.flags), Some(l.line_type))),
             );
             MultiLeaderEntity {
                 common,
                 leaders,
                 line_type,
-                // SAFETY: as above.
-                content: unsafe { multileader_content(dwg, text, entity_ptr) },
+                arrow_size,
+                content: multileader_content(dwg, text, &context),
             }
         }),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_LEADER => {
@@ -2047,8 +2053,14 @@ unsafe fn style_overrides(
     overrides
 }
 
-/// A multileader line's own override flags (DXF 93) and type (170).
-type LineOverride = (Option<u32>, Option<i64>);
+/// What a multileader line states for itself: its override flags (DXF 93),
+/// type (170) and arrowhead size (40). All three are stored from R2010; an
+/// older drawing reads 0, which overrides nothing.
+struct LineOverride {
+    flags: u32,
+    line_type: i64,
+    arrow_size: f64,
+}
 
 /// The line type (173) of the MLEADERSTYLE a multileader's handle points
 /// at; `None` when it points at nothing, or at an object that is not one.
@@ -2074,30 +2086,40 @@ fn mleader_style_line_type(style: Option<*mut libredwg_sys::Dwg_Object_Ref>) -> 
     get_field::<u16>(object_ptr, "MLEADERSTYLE", "type").map(i64::from)
 }
 
-/// What a MULTILEADER points out: the text or block of its context data,
-/// with the text style and block resolved to their names. `None` for a
-/// record that states neither, and for a block content that names no
-/// block (the other reader does not guess one either).
+/// A MULTILEADER's context data, as the shim flattens it: its content and
+/// the scale and sizes it is drawn at.
 ///
 /// # Safety
-/// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*` of the
-/// drawing `dwg` (and `text`) belong to.
-unsafe fn multileader_content(
-    dwg: *mut libredwg_sys::Dwg_Data,
-    text: &TextDecoder,
+/// `entity_ptr` must be a valid, non-null `Dwg_Entity_MULTILEADER*`. The
+/// pointers in the result point into it, and live as long as it does.
+unsafe fn multileader_context(
     entity_ptr: *mut std::ffi::c_void,
-) -> Option<MultiLeaderContent> {
-    let point = |p: [f64; 3]| Point3D {
-        x: p[0],
-        y: p[1],
-        z: p[2],
-    };
+) -> libredwg_sys::uncad_multileader_content_t {
     // SAFETY: a plain C struct of numbers and pointers; zero is its empty
     // value, and the shim overwrites it whole.
     let mut c: libredwg_sys::uncad_multileader_content_t = unsafe { std::mem::zeroed() };
     // SAFETY: entity_ptr is valid per this function's contract; the shim
     // only reads it and fills `c`, whose pointers point into the entity.
     unsafe { libredwg_sys::uncad_multileader_get_content(entity_ptr, &mut c) };
+    c
+}
+
+/// What a MULTILEADER points out: the text or block of its context data
+/// `c` ([`multileader_context`]), with the text style and block resolved to
+/// their names. `None` for a record that states neither, and for a block
+/// content that names no block (the other reader does not guess one
+/// either). The entity `c` came from must be one of `dwg` (and `text`), and
+/// still alive.
+fn multileader_content(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    c: &libredwg_sys::uncad_multileader_content_t,
+) -> Option<MultiLeaderContent> {
+    let point = |p: [f64; 3]| Point3D {
+        x: p[0],
+        y: p[1],
+        z: p[2],
+    };
     match c.kind {
         1 => {
             // SAFETY: the entity's own 304 string, live as long as it.
@@ -2208,7 +2230,11 @@ unsafe fn multileader_leaders(
         // takes both from the same `ctx.leaders[]`.
         if let Some(root) = leaders.get_mut(line.root as usize) {
             root.lines.push(points);
-            own.push((Some(line.flags), Some(i64::from(line.type_))));
+            own.push(LineOverride {
+                flags: line.flags,
+                line_type: i64::from(line.type_),
+                arrow_size: line.arrow_size,
+            });
         }
     }
     unsafe { libredwg_sys::uncad_multileader_free_lines(lines_ptr, num_lines) };

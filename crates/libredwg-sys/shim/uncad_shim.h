@@ -97,10 +97,13 @@ typedef struct uncad_multileader_line
   unsigned int root; /* index of the leader node (root) the line belongs to */
   unsigned int num_points;
   double *points; /* x0,y0,z0, x1,y1,z1, ... -- length 3*num_points */
-  /* The line's own type (DXF 170: 0 invisible, 1 straight, 2 spline) and
-   * override flags (DXF 93: bit 0x1 = the type is the line's own). Stored
-   * from R2010; an older drawing reads 0 for both, which overrides nothing. */
+  /* The line's own type (DXF 170: 0 invisible, 1 straight, 2 spline),
+   * arrowhead size (DXF 40) and override flags (DXF 93: bit 0x1 = the type
+   * is the line's own, bit 0x10 = the arrowhead size is). Stored from
+   * R2010; an older drawing reads 0 for all three, which overrides
+   * nothing. */
   int type;
+  double arrow_size;
   unsigned int flags;
 } uncad_multileader_line_t;
 
@@ -135,6 +138,7 @@ typedef struct uncad_multileader_content
   int kind;              /* 0 none, 1 a text (290), 2 a block (296) */
   double scale;          /* ctx.scale_factor, DXF 40 */
   double text_height;    /* ctx.text_height, DXF 41 */
+  double arrow_size;     /* ctx.arrow_size, DXF 140 -- whatever the kind */
   double line_spacing_factor; /* DXF 45 (text) */
   char *text;            /* DXF 304, as the library stores it */
   void *style;           /* the text style's Dwg_Object_Ref*, DXF 340 */
