@@ -1,6 +1,6 @@
 [package]
 name = "uncad-cli"
-version = "0.9.0"
+version = "0.10.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -19,18 +19,18 @@ name = "uncad"
 path = "src/main.rs"
 
 [dependencies]
-uncad = { path = "../uncad", version = "0.9.0" }
+uncad = { path = "../uncad", version = "0.10.0" }
 # SVG/PNG output. A version dependency, never a path.
-iron-render-cad = "0.7.0"
+iron-render-cad = "0.8.0"
 # The LLM/VLM package behind `uncad export`. A version dependency, never
 # a path: the crate reads no files and knows no parser, so this CLI hands
 # it the parsed drawing and its header.
-iron-pack-cad = "0.6.0"
+iron-pack-cad = "0.7.0"
 # The verbs (`summarize`, `hit-test`, `diff`, `set`), answered with these
 # crates' own result structures. Version dependencies, never paths.
-iron-scout-cad = "0.7.0"
-iron-diff-cad = "0.6.0"
-iron-hand-cad = "0.6.0"
+iron-scout-cad = "0.8.0"
+iron-diff-cad = "0.7.0"
+iron-hand-cad = "0.7.0"
 # Carries the header from uncad's type to iron-pack-cad's (see main.rs), and
 # writes the verbs' answers.
 serde = "1.0.229"

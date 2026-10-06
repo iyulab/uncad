@@ -6,11 +6,15 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-07
+
 ### Changed
 
 - A DWG multileader carries the size its arrowheads are drawn at (`arrow_size`): its context data's
   arrowhead size, or a line's own where the line overrides it. A picture draws a multileader's
   arrowheads at that size, and warns of one only when the size is not known.
+
+- Built on `iron-diff-cad` 0.7.0, `iron-hand-cad` 0.7.0, `iron-pack-cad` 0.7.0, `iron-render-cad` 0.8.0, `iron-scout-cad` 0.8.0, `uncad-model` 0.7.0 and `undxf` 0.6.0.
 
 ## [0.9.0] - 2026-10-07
 
