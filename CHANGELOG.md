@@ -6,6 +6,11 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A DXF table carries the way its rows run (`flow`), read by `undxf`. A DWG table's `flow` is
+  `None`, as its cells are: the backend does not decode them.
+
 ## [0.8.1] - 2026-10-05
 
 ### Changed

@@ -1679,8 +1679,11 @@ unsafe fn convert_entity(
                 rotation,
                 // The cells are not read: the backend decodes them only in a
                 // build that enables its unfinished classes, which this one
-                // does not, and from R2010 not at all.
+                // does not, and from R2010 not at all. Nor is the flow
+                // direction -- the table's and its style's live in the same
+                // undecoded data, and without the cells it places nothing.
                 grid: None,
+                flow: None,
             })
         }
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_HATCH => {

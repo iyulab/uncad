@@ -123,7 +123,9 @@ DXF name `"ACAD_TABLE"` (the same class of name mismatch as REGION/3DSOLID -- se
 not drawn**: the vendored LibreDWG decodes TABLE only in a debugging build (`src/classes.inc`
 lists it as a debugging class, noting that R2010+ tables need subclassing). Its cached
 block (`*T...`) is still in the block table. A table in a DXF is read, its grid of rows,
-columns and cell texts included; a DWG table's `grid` is `None` -- its cells are not read.
+columns and cell texts included, with the way its rows run (`flow`: the table's own direction,
+or else its table style's); a DWG table's `grid` and `flow` are `None` -- its cells and flow are
+not read.
 
 **WIPEOUT** is the one type here carrying risk *beyond* "not verified against a real
 file": its `pt0 + u*uvec + v*vvec` pixel-space-to-world transform comes from general
