@@ -19,6 +19,7 @@
 //!   and `$DIMLUNIT` exist from R2000, `$DIMDEC` and `$DIMAUNIT` from R13,
 //!   and a pre-R13 header ends after however many variables its own count
 //!   says (`numheader_vars`), which cuts off `$DIMZIN`/`$DIMRND`,
+//!   `$PDMODE`/`$PDSIZE`,
 //!   `$DIMPOST`, `$DIMLFAC` and the paper-space extents and limits in the
 //!   older releases. `$MEASUREMENT` is not in the header section at all but
 //!   in the optional Template section, and is stated only when that was read.
@@ -125,6 +126,11 @@ pub struct Header {
     pub ltscale: Option<f64>,
     /// `$TEXTSIZE`: default text height.
     pub textsize: Option<f64>,
+    /// `$PDMODE`: how a POINT is shown -- see
+    /// [`uncad_model::HeaderVariables::point_display`].
+    pub pdmode: Option<i16>,
+    /// `$PDSIZE`: the size of a POINT's figure -- as for `pdmode`.
+    pub pdsize: Option<f64>,
     /// `$CLAYER`: the current layer. `Absent` when not stated; `Unresolved`
     /// (the handle, hex) when it names a layer the table does not have.
     pub clayer: Ref<String>,
@@ -190,6 +196,7 @@ fn dwg_layout_has(name: &str, version: i32, numheader_vars: u16, template_read: 
         }
         "LTSCALE" => r2_0,
         "DIMZIN" | "DIMRND" => r2_0 && numheader_vars > 83,
+        "PDMODE" | "PDSIZE" => r2_0 && numheader_vars > 101,
         "DIMPOST" => r2_0 && numheader_vars > 114,
         "DIMLFAC" => r2_0 && numheader_vars > 120,
         "PEXTMIN" | "PEXTMAX" | "PLIMMIN" | "PLIMMAX" => r2_0 && numheader_vars > 160,
@@ -319,6 +326,9 @@ pub(crate) unsafe fn read_header(
         dimasz: f64_var("DIMASZ"),
         ltscale: f64_var("LTSCALE"),
         textsize: f64_var("TEXTSIZE"),
+        // A 16-bit word: the format's codes are small and positive.
+        pdmode: u16_var("PDMODE").and_then(|v| i16::try_from(v).ok()),
+        pdsize: f64_var("PDSIZE"),
         clayer,
         fingerprintguid: text_var("FINGERPRINTGUID"),
         versionguid: text_var("VERSIONGUID"),
@@ -399,6 +409,8 @@ pub(crate) fn from_dxf(stated: &undxf::Header, tables: &uncad_model::Tables) -> 
         dimasz: stated.real("DIMASZ"),
         ltscale: stated.real("LTSCALE"),
         textsize: stated.real("TEXTSIZE"),
+        pdmode: stated.int("PDMODE").and_then(|v| i16::try_from(v).ok()),
+        pdsize: stated.real("PDSIZE"),
         clayer,
         fingerprintguid: stated.text("FINGERPRINTGUID"),
         versionguid: stated.text("VERSIONGUID"),
@@ -564,5 +576,9 @@ mod tests {
         assert!(!dwg_layout_has("INSUNITS", r11, 205, false));
         assert!(dwg_layout_has("EXTMIN", r2_10, 83, false));
         assert!(!dwg_layout_has("DIMZIN", r2_10, 83, false));
+        // $PDMODE and $PDSIZE follow the angle settings, after variable 101.
+        assert!(dwg_layout_has("PDMODE", r11, 205, false));
+        assert!(dwg_layout_has("PDSIZE", r2_10, 102, false));
+        assert!(!dwg_layout_has("PDMODE", r2_10, 101, false));
     }
 }

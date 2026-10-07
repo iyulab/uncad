@@ -6,6 +6,11 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A DWG's `$PDMODE` and `$PDSIZE` -- how its points are shown -- in the model's header and in
+  `Header`. A picture draws points as they say.
+
 ## [0.10.0] - 2026-10-07
 
 ### Changed

@@ -1285,7 +1285,9 @@
   "header": {
     "insunits": null,
     "fingerprintguid": null,
-    "versionguid": null
+    "versionguid": null,
+    "pdmode": null,
+    "pdsize": null
   },
   "read_diagnostics": {
     "warnings": []

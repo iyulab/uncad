@@ -314,6 +314,8 @@ fn parse_dwg(bytes: &[u8]) -> Result<(CadDatabase, Header), ParseError> {
                 insunits: header.insunits,
                 fingerprintguid: header.fingerprintguid.clone(),
                 versionguid: header.versionguid.clone(),
+                pdmode: header.pdmode,
+                pdsize: header.pdsize,
             },
             read_diagnostics,
         },
