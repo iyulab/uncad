@@ -319,6 +319,31 @@ uncad_multileader_get_content (void *entity, uncad_multileader_content_t *out)
 /* --- version bands, codepage and string width ---------------------------- */
 
 int
+uncad_table_entry_index (Dwg_Data *dwg, const char *table, const Dwg_Object *entry)
+{
+  if (!dwg || !table || !entry)
+    return -1;
+  Dwg_Object_Ref *ctrl = dwg_ctrl_table (dwg, table);
+  if (!ctrl)
+    return -1;
+  Dwg_Object *cobj = dwg_resolve_handle (dwg, ctrl->absolute_ref);
+  if (!cobj || !dwg_obj_is_control (cobj))
+    return -1;
+  void *_obj = cobj->tio.object->tio.APPID_CONTROL; /* any control type */
+  BITCODE_BS num_entries = 0;
+  Dwg_Object_Ref **hdlv = NULL;
+  if (!dwg_dynapi_entity_value (_obj, cobj->name, "num_entries", &num_entries, NULL)
+      || !dwg_dynapi_entity_value (_obj, cobj->name, "entries", &hdlv, NULL) || !hdlv)
+    return -1;
+  for (BITCODE_BS i = 0; i < num_entries; i++)
+    {
+      if (hdlv[i] && dwg_resolve_handle (dwg, hdlv[i]->absolute_ref) == entry)
+        return (int)i;
+    }
+  return -1;
+}
+
+int
 uncad_dwg_is_pre_r13 (const Dwg_Data *dwg)
 {
   if (!dwg)

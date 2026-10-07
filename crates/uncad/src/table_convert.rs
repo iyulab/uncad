@@ -10,8 +10,8 @@
 
 use crate::convert::{entity_identity, entity_reference, owned_entities, reference};
 use crate::dynapi::{
-    get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_r2000_or_later,
-    RawPoint2D,
+    get_array_field, get_field, get_point2d, get_point3d, get_sub_field, is_pre_r13,
+    is_r2000_or_later, RawPoint2D,
 };
 use crate::text::TextDecoder;
 use std::collections::BTreeMap;
@@ -73,6 +73,17 @@ pub(crate) unsafe fn convert_tables(
             let object_ptr = unsafe { libredwg_sys::uncad_object_object_ptr(obj) };
             if !object_ptr.is_null() {
                 if let Some(name) = block_record_name(text, object_ptr) {
+                    let name = if is_pre_r13(dwg) {
+                        // SAFETY: dwg is live and obj one of its objects.
+                        match unsafe {
+                            libredwg_sys::uncad_table_entry_index(dwg, c"BLOCK".as_ptr(), obj)
+                        } {
+                            index @ 0.. => pre_r13_block_name(name, index),
+                            _ => name,
+                        }
+                    } else {
+                        name
+                    };
                     let entities = unsafe { owned_entities(dwg, text, obj) };
                     let base_point = block_base_point(object_ptr);
                     block_records.insert(
@@ -372,6 +383,21 @@ fn block_base_point(block_header_object_ptr: *mut c_void) -> Point3D {
             z: 0.0,
         },
         None => header.unwrap_or_default(),
+    }
+}
+
+/// The name a pre-R13 drawing's block goes by in the model. Such a drawing
+/// stores every anonymous block of a kind under the same bare name -- each
+/// dimension's block is `*D`, each hatch's `*X` -- and points at blocks by
+/// their index in the block table, so the stored name does not tell them
+/// apart. An anonymous name (one starting with `*`) takes that index as its
+/// number, which is the name the drawing's DXF export writes for it
+/// (`*D0`, `*D1`, ...); a named block keeps its name.
+pub(crate) fn pre_r13_block_name(name: String, table_index: i32) -> String {
+    if name.starts_with('*') {
+        format!("{name}{table_index}")
+    } else {
+        name
     }
 }
 

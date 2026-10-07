@@ -15,7 +15,7 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
   real include graph. Autotools' generated `config.h` is stood in for by this
   crate's own `vendor-config/config.h`, a separate file rather than a patch to
   LibreDWG's sources.
-- **Modified**: **yes**, in four files. Each change carries an
+- **Modified**: **yes**, in five files. Each change carries an
   `uncad local patch` comment in the source saying what changed and why
   (GPLv3 §5(a)); `grep -rn "uncad local patch" vendor/libredwg/` finds every
   marker, and `build.rs` refuses to build when the markers per file differ
@@ -47,6 +47,11 @@ changes, and cites this list as "The two changes"; it is this one.
    record names, instead of to the drawing's solids in the order a signature
    search found the bodies (which put bodies on the wrong solids and found no
    R2018 body, whose signature differs).
+6. **`vendor/libredwg/src/decode.c`**, 2026-10-07 — a pre-R13 dimension is
+   named after the subtype it was decoded as. It kept the name of the largest
+   subtype it was first set up as, so the library's own field accessors, which
+   check the name, refused every one of its fields: definition points, block
+   and text position all read as missing.
 
 None of the changes alters LibreDWG's file formats or its API. Each changes
 what the library reads only where upstream misreads a drawing, refuses it, or

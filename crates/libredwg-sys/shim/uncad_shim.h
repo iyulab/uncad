@@ -202,6 +202,16 @@ void uncad_multileader_free_lines(uncad_multileader_line_t *lines,
  */
 int uncad_dwg_is_pre_r13(const Dwg_Data *dwg);
 
+/* The position of `entry` in the entries of `table`'s control object
+ * (`"BLOCK"`, `"LAYER"`, ...), or -1 when the table or the entry is not
+ * there or an argument is NULL. It walks the entries the way the library's
+ * own dwg_handle_name does, so for a pre-R13 drawing it is the index a
+ * reference's `r11_idx` names: such a drawing points at its tables by index,
+ * and may give several entries the same name (every anonymous block of a
+ * kind is stored as `*D`, `*U`, ...), which this index tells apart.
+ */
+int uncad_table_entry_index(Dwg_Data *dwg, const char *table, const Dwg_Object *entry);
+
 /* 1 when `dwg->header.version` is in R13 .. R2000 inclusive, 0 otherwise or
  * when `dwg` is NULL.
  *

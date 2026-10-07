@@ -6,6 +6,20 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A dimension in a DWG older than R13 carries its points, its block and its text position. The
+  vendored LibreDWG named every such dimension after the largest dimension subtype, and its field
+  accessors refused the name, so only the dimension's kind came through. A local patch to the
+  vendored copy names the object after the subtype it was decoded as (`docs/CAVEATS.md`).
+- A two-line angular dimension in a DWG older than R13 reads its definition point (DXF 10) and its
+  arc point (16) the right way round; the swap that an R13+ record needs no longer applies to it.
+- A DWG older than R13 keeps every anonymous block. Such a drawing stores each anonymous block of a
+  kind under the same bare name (`*D`, `*X`, ...) and points at blocks by table index; the blocks
+  collapsed into one record, and every dimension referred to the last. Anonymous names now take
+  their table index as a number (`*D0`, `*D1`, ...), the name the drawing's DXF export writes, in
+  the block records and in the references alike.
+
 ## [0.11.0] - 2026-10-07
 
 ### Added

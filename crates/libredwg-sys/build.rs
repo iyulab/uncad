@@ -60,6 +60,7 @@ const LOCAL_PATCHES: &[(&str, usize)] = &[
     ("src/acds.spec", 2),
     ("src/common.c", 3),
     ("src/common_entity_data.spec", 3),
+    ("src/decode.c", 2),
     ("src/dwg.spec", 1),
 ];
 
@@ -246,6 +247,7 @@ fn main() {
         .allowlist_type("uncad_style_override_t")
         .allowlist_function("dwg_free")
         .allowlist_function("uncad_dwg_is_pre_r13")
+        .allowlist_function("uncad_table_entry_index")
         .allowlist_function("uncad_dwg_is_r13_to_r2000")
         .allowlist_function("uncad_dwg_is_r2010_or_later")
         .allowlist_function("uncad_dwg_is_r2013_or_later")

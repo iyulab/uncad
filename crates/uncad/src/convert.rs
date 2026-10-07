@@ -1587,7 +1587,8 @@ unsafe fn convert_entity(
             // field name than every other subtype does. The mapping is written out
             // per subtype rather than passing this backend's field names
             // through, so one model field never holds two different points.
-            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
+            let pre_r13 = is_pre_r13(dwg);
+            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype, pre_r13);
             let point = |field: Option<&'static str>| {
                 field.and_then(|f| get_point3d(entity_ptr, dxfname, f))
             };
@@ -1612,11 +1613,12 @@ unsafe fn convert_entity(
                 text_override: dimension_text_override(
                     text.field(entity_ptr, dxfname, "user_text").as_deref(),
                 ),
-                // A two-line angular dimension decoded from a DWG keeps group
-                // 10 in the record's last point, which this library names
-                // `xline2end_pt` (its `def_pt` holds group 16) -- see
-                // `dimension_point_fields`.
-                definition_point: if kind == Some(DimensionKind::Angular2Line) {
+                // A two-line angular dimension decoded from an R13+ DWG keeps
+                // group 10 in the record's last point, which this library
+                // names `xline2end_pt` (its `def_pt` holds group 16) -- see
+                // `dimension_point_fields`. A pre-R13 one reads group 10 into
+                // `def_pt`, as every other subtype does.
+                definition_point: if kind == Some(DimensionKind::Angular2Line) && !pre_r13 {
                     get_point3d(entity_ptr, dxfname, "xline2end_pt")
                 } else {
                     get_point3d(entity_ptr, dxfname, "def_pt")
@@ -2715,6 +2717,8 @@ pub(crate) fn entity_reference(
 ///   such as `MLINESTYLE` has no such table and simply does not resolve this
 ///   way, which is moot before R13). An index the table does not answer to is
 ///   `Unresolved("idx:<n>")` -- the index is kept the way a handle would be.
+///   A block found this way is named by [`crate::table_convert::pre_r13_block_name`],
+///   as its record is.
 /// - From R13 on, a handle whose value is zero is a reference the file does
 ///   not carry (a DIMENSION without a block, for instance): `Absent`.
 pub(crate) fn reference(
@@ -2745,6 +2749,9 @@ pub(crate) fn reference(
     };
     if is_pre_r13(dwg) {
         return match text.table_entry_name(dwg, handle_ptr, table) {
+            Some(name) if table == c"BLOCK" => Ref::Resolved(
+                crate::table_convert::pre_r13_block_name(name, r11_idx.into()),
+            ),
             Some(name) => Ref::Resolved(name),
             None => Ref::Unresolved(format!("idx:{r11_idx}")),
         };
@@ -2803,8 +2810,11 @@ fn ordinate_axis(
 /// `xline1start_pt` and its group 16 `xline2end_pt` by name -- but the DWG
 /// decoder fills that record in stream order: the leading 2RD, `def_pt`, is
 /// the arc point, group 16, and `xline2end_pt` the last point, group 10.
+/// Before R13 the record is read field by field after the common part, which
+/// puts group 10 in `def_pt` and group 16 in `xline2end_pt`, as the names say.
 fn dimension_point_fields(
     fixedtype: libredwg_sys::Dwg_Object_Type,
+    pre_r13: bool,
 ) -> (
     Option<&'static str>,
     Option<&'static str>,
@@ -2834,7 +2844,7 @@ fn dimension_point_fields(
             Some("xline1start_pt"),
             Some("xline1end_pt"),
             Some("xline2start_pt"),
-            Some("def_pt"),
+            Some(if pre_r13 { "xline2end_pt" } else { "def_pt" }),
         ),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {

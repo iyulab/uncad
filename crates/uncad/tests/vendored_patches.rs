@@ -12,8 +12,9 @@
 //! The `common_entity_data.spec` one, which puts an entity's true colour and
 //! its transparency back in their own fields, is pinned below on the entity
 //! it was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`); the R13/R14
-//! linetype one in the corpus twin comparison; and the `dwg.spec` one, an
-//! R2010+ ATTRIB's text style, below.
+//! linetype one in the corpus twin comparison; the `dwg.spec` one, an
+//! R2010+ ATTRIB's text style, below; and the `decode.c` one, a pre-R13
+//! dimension's points, below against the DXF twins.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -144,6 +145,72 @@ fn an_r2010_attrib_keeps_its_text_style() {
         assert!(!styles.is_empty(), "{file}: attributes");
         for s in styles {
             assert_eq!(s, &Ref::Resolved(style.to_string()), "{file}");
+        }
+    }
+}
+
+/// A pre-R13 dimension's fields: the vendored decoder now names the object
+/// after the subtype it was decoded as, so the field accessors no longer
+/// refuse it. Without the patch every one of these dimensions came back with
+/// its kind and nothing else -- no definition point, no extension-line or
+/// curve points, no block. A pre-R13 drawing has no handles to pair
+/// entities by, so the dimensions are paired with their DXF twin's in file
+/// order; every point the twin states is the one the DWG reads, and each
+/// names the same block.
+#[test]
+fn a_pre_r13_dimension_keeps_its_points() {
+    for name in [
+        "r2.6/dim",
+        "r2.6/entities",
+        "r9/entities",
+        "r10/entities",
+        "r11/entities-2d",
+        "r11/entities-3d",
+    ] {
+        let dims = |ext: &str| -> Vec<uncad::model::DimensionEntity> {
+            let path = format!(
+                "{}/../../lib/libredwg/test/test-data/{name}.{ext}",
+                env!("CARGO_MANIFEST_DIR")
+            );
+            let db = uncad::parse(&path).unwrap_or_else(|e| panic!("{name}.{ext}: {e}"));
+            db.entities
+                .into_iter()
+                .filter_map(|e| match e {
+                    uncad::Entity::Dimension(d) => Some(d),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (dwg, dxf) = (dims("dwg"), dims("dxf"));
+        assert!(!dwg.is_empty(), "{name}: dimensions");
+        assert_eq!(
+            dwg.len(),
+            dxf.len(),
+            "{name}: as many dimensions as the twin"
+        );
+        for (i, (g, x)) in dwg.iter().zip(&dxf).enumerate() {
+            assert!(
+                g.definition_point.is_some(),
+                "{name} #{i}: a definition point"
+            );
+            // A pre-R13 DWG stores every dimension block as `*D`; the
+            // reader numbers it by its table index, as the twin does.
+            assert_eq!(g.block_name, x.block_name, "{name} #{i}: the block");
+            for (field, a, b) in [
+                ("definition point", g.definition_point, x.definition_point),
+                ("extension 1", g.points.extension1, x.points.extension1),
+                ("extension 2", g.points.extension2, x.points.extension2),
+                ("radial", g.points.radial, x.points.radial),
+                ("arc", g.points.arc, x.points.arc),
+            ] {
+                if let Some(b) = b {
+                    let a = a.unwrap_or_else(|| panic!("{name} #{i}: {field} missing"));
+                    assert!(
+                        (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9,
+                        "{name} #{i}: {field} {a:?} against the twin's {b:?}"
+                    );
+                }
+            }
         }
     }
 }

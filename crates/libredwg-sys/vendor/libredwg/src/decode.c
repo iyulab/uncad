@@ -6746,6 +6746,45 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       error |= DWG_ERR_VALUEOUTOFBOUNDS;
     }
 
+  /* --- uncad local patch, 2026-10-07 (NOTICE.md at the root of this crate,
+     "The changes"; the full reasoning is in the project's docs/CAVEATS.md,
+     "Local patches to the vendored LibreDWG", which is not in the published
+     tarball) ---------------------------------------------------------------
+
+     The object was set up as the largest subtype, DIMENSION_ANG2LN, which
+     named it "DIMENSION_ANG2LN"; the switch above then gave it its real
+     fixedtype but left the name. Every R13+ dimension carries its subtype's
+     name, and the dynapi accessors refuse an object whose name is not the
+     one they are asked for -- so every field of a pre-R13 dimension read as
+     missing through them: definition points, block, text position. Name the
+     object after the type it was decoded as. (Spelled out here rather than
+     through dwg_type_name(), which this file does not declare: an implicit
+     declaration returns int and cuts the pointer on a 64-bit build.)
+     --- end uncad local patch --- */
+  switch (obj->fixedtype)
+    {
+    case DWG_TYPE_DIMENSION_LINEAR:
+      obj->name = obj->dxfname = (char *)"DIMENSION_LINEAR";
+      break;
+    case DWG_TYPE_DIMENSION_ALIGNED:
+      obj->name = obj->dxfname = (char *)"DIMENSION_ALIGNED";
+      break;
+    case DWG_TYPE_DIMENSION_ANG3PT:
+      obj->name = obj->dxfname = (char *)"DIMENSION_ANG3PT";
+      break;
+    case DWG_TYPE_DIMENSION_DIAMETER:
+      obj->name = obj->dxfname = (char *)"DIMENSION_DIAMETER";
+      break;
+    case DWG_TYPE_DIMENSION_RADIUS:
+      obj->name = obj->dxfname = (char *)"DIMENSION_RADIUS";
+      break;
+    case DWG_TYPE_DIMENSION_ORDINATE:
+      obj->name = obj->dxfname = (char *)"DIMENSION_ORDINATE";
+      break;
+    default: /* DIMENSION_ANG2LN, as set up */
+      break;
+    }
+
   return error;
 }
 

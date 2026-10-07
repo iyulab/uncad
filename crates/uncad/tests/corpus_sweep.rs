@@ -240,6 +240,15 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     // `2018/Dynblocks`: 18 dimensions inside its dynamic blocks name no
     // block, read the same from the DWG and from its DXF twin.
     assert_eq!(s.refs[&("2018".to_string(), "block", "absent")], 36);
+    // And they are the only absent blocks: a pre-R13 dimension names its
+    // block too.
+    let absent_blocks: usize = s
+        .refs
+        .iter()
+        .filter(|((_, field, state), _)| *field == "block" && *state == "absent")
+        .map(|(_, n)| n)
+        .sum();
+    assert_eq!(absent_blocks, 36);
     let layers: usize = s
         .refs
         .iter()
@@ -247,8 +256,9 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
         .map(|(_, n)| n)
         .sum();
     // Every file that reads, DWG and DXF alike; 2010/gh209_1.dxf's entities
-    // sit on their layers as in its DWG twin.
-    assert_eq!(layers, 116_494);
+    // sit on their layers as in its DWG twin; a pre-R13 DWG's anonymous
+    // blocks are each their own record.
+    assert_eq!(layers, 116_528);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
     // file, and the index fallback is measured, not assumed ---
