@@ -517,7 +517,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*D2": {
         "name": "*D2",
@@ -608,7 +609,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*D3": {
         "name": "*D3",
@@ -699,7 +701,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*D4": {
         "name": "*D4",
@@ -790,7 +793,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*D5": {
         "name": "*D5",
@@ -881,7 +885,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*Model_Space": {
         "name": "*Model_Space",
@@ -1288,7 +1293,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*Paper_Space": {
         "name": "*Paper_Space",
@@ -1297,7 +1303,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       }
     },
     "dim_styles": {

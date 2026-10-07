@@ -6,6 +6,12 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A DWG block that states it is an external reference carries the referenced drawing's path and
+  whether it is an overlay, as `BlockRecord::external_reference`. Such a block holds no entities
+  unless the drawing was bound into it.
+
 ### Fixed
 
 - A dimension in a DWG older than R13 carries its points, its block and its text position. The

@@ -118,7 +118,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*Paper_Space": {
         "name": "*Paper_Space",
@@ -127,7 +128,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "A": {
         "name": "A",
@@ -183,7 +185,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "B": {
         "name": "B",
@@ -239,7 +242,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "C": {
         "name": "C",
@@ -284,7 +288,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       }
     },
     "dim_styles": {},

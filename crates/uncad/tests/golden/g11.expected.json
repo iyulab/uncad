@@ -679,7 +679,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "*Paper_Space": {
         "name": "*Paper_Space",
@@ -688,7 +689,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       },
       "MARK": {
         "name": "MARK",
@@ -769,7 +771,8 @@
           "x": 0.0,
           "y": 0.0,
           "z": 0.0
-        }
+        },
+        "external_reference": null
       }
     },
     "dim_styles": {},

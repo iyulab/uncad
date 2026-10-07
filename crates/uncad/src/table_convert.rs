@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 use std::ffi::c_void;
 use uncad_model::model::{Point2D, Point3D, Ref};
 use uncad_model::tables::{
-    AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, FractionFormat, ImageDefinition,
-    LayerRecord, LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation, PlotSettings,
-    ResolutionUnit, Tables,
+    AngularUnitFormat, ArcSymbol, BlockRecord, DimStyleRecord, ExternalReference, FractionFormat,
+    ImageDefinition, LayerRecord, LayoutRecord, LinearUnitFormat, PlotPaperUnits, PlotRotation,
+    PlotSettings, ResolutionUnit, Tables,
 };
 
 /// # Safety
@@ -86,12 +86,14 @@ pub(crate) unsafe fn convert_tables(
                     };
                     let entities = unsafe { owned_entities(dwg, text, obj) };
                     let base_point = block_base_point(object_ptr);
+                    let external_reference = block_external_reference(text, object_ptr);
                     block_records.insert(
                         name.clone(),
                         BlockRecord {
                             name,
                             entities,
                             base_point,
+                            external_reference,
                         },
                     );
                 }
@@ -359,6 +361,25 @@ fn dimunit(value: i32) -> (Option<LinearUnitFormat>, Option<FractionFormat>) {
 /// older than R13, where the library keeps it on the BLOCK entity as a 2D
 /// point and leaves the header's at the origin -- the BLOCK's. Neither
 /// stated reads as the format's default, the origin.
+/// What a block header states about being an external reference: the
+/// library splits BLOCK DXF 70 into its bits (`blkisxref` is bit 4,
+/// `xrefoverlaid` bit 8) and keeps the referenced drawing's path, DXF 1, as
+/// `xref_pname`.
+fn block_external_reference(
+    text: &TextDecoder,
+    block_header_object_ptr: *mut c_void,
+) -> Option<ExternalReference> {
+    let is = |field| {
+        get_field::<u8>(block_header_object_ptr, "BLOCK_HEADER", field).is_some_and(|b| b != 0)
+    };
+    is("blkisxref").then(|| ExternalReference {
+        path: text
+            .field(block_header_object_ptr, "BLOCK_HEADER", "xref_pname")
+            .unwrap_or_default(),
+        overlay: is("xrefoverlaid"),
+    })
+}
+
 fn block_base_point(block_header_object_ptr: *mut c_void) -> Point3D {
     let header = get_point3d(block_header_object_ptr, "BLOCK_HEADER", "base_pt");
     if let Some(p) = header.filter(|p| (p.x, p.y, p.z) != (0.0, 0.0, 0.0)) {
