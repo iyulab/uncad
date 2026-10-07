@@ -6,10 +6,16 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-07
+
 ### Added
 
 - A DWG's `$PDMODE` and `$PDSIZE` -- how its points are shown -- in the model's header and in
   `Header`. A picture draws points as they say.
+
+### Changed
+
+- Built on `iron-diff-cad` 0.8.0, `iron-hand-cad` 0.8.0, `iron-pack-cad` 0.8.0, `iron-render-cad` 0.9.0, `iron-scout-cad` 0.9.0, `uncad-model` 0.8.0 and `undxf` 0.7.0.
 
 ## [0.10.0] - 2026-10-07
 
