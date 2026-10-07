@@ -6,11 +6,17 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-07
+
 ### Added
 
 - A DWG block that states it is an external reference carries the referenced drawing's path and
   whether it is an overlay, as `BlockRecord::external_reference`. Such a block holds no entities
   unless the drawing was bound into it.
+
+### Changed
+
+- Built on `iron-diff-cad` 0.9.0, `iron-hand-cad` 0.9.0, `iron-pack-cad` 0.9.0, `iron-render-cad` 0.10.0, `iron-scout-cad` 0.10.0, `uncad-model` 0.9.0 and `undxf` 0.8.0.
 
 ### Fixed
 
