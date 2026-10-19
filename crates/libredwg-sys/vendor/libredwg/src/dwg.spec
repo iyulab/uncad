@@ -1924,13 +1924,21 @@ DWG_ENTITY (DIMENSION_ANG2LN)
       FIELD_HANDLE (dimstyle, 2, 0);
   }
   LATER_VERSIONS {
-#ifndef IS_JSON
-    FIELD_2RD (def_pt, 0);
-#endif
+#if defined(IS_DXF) || defined(IS_JSON)
     FIELD_3BD (xline1start_pt, 13);
     FIELD_3BD (xline1end_pt, 14);
     FIELD_3BD (xline2start_pt, 15);
     FIELD_3BD (xline2end_pt, 16);
+#else
+    // The DWG stream (ODA spec, 2-line angular): first the arc point, DXF 16,
+    // as a 2RD; then 13, 14, 15; last the second line's end, DXF 10. As in
+    // the pre-R13 branch above, xline2end_pt is the arc point (16).
+    FIELD_2RD (xline2end_pt, 16);
+    FIELD_3BD (xline1start_pt, 13);
+    FIELD_3BD (xline1end_pt, 14);
+    FIELD_3BD (xline2start_pt, 15);
+    FIELD_3BD (def_pt, 10);
+#endif
 
     COMMON_ENTITY_HANDLE_DATA;
     FIELD_HANDLE (dimstyle, 5, 0);
@@ -5488,7 +5496,6 @@ DWG_ENTITY (LWPOLYLINE)
         FIELD_2RD (points[rcount1], 10);
         if (FIELD_VALUE (num_widths) && FIELD_VALUE (widths) &&
             rcount1 < FIELD_VALUE (num_widths) &&
-            FIELD_VALUE (num_bulges) == FIELD_VALUE (num_points) &&
             (FIELD_VALUE (widths[rcount1].start) != 0.0 ||
              FIELD_VALUE (widths[rcount1].end) != 0.0))
           {

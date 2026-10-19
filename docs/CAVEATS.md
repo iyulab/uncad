@@ -395,22 +395,20 @@ every template starts from the same one, and as `None` where the starting value 
 the template (text height, decimal places and zero suppression among them). There a DWG
 and its DXF twin state different things, and the model follows each.
 
-**The field names of a two-line angular dimension are not the mapping.** Measured against
-the same drawing in both formats: `xline1start_pt`, `xline1end_pt` and `xline2start_pt` are
-groups 13, 14 and 15 as their names suggest; decoded from a DWG, `def_pt` is group 16 and
-`xline2end_pt` is group 10 -- the definition point every other subtype keeps in `def_pt`.
-The reader follows the measurement for each, and `tests/corpus_sweep.rs` pins all five
-points against the values the DXF twin writes for two drawings, and for the DXF itself, so
-a change in the library's field layout fails the build instead of quietly putting the wrong
-point in the model.
+**The points of a two-line angular dimension.** `xline1start_pt`, `xline1end_pt`,
+`xline2start_pt` and `xline2end_pt` are groups 13, 14, 15 and 16, and `def_pt` is group 10, as
+for every other subtype. (LibreDWG releases before upstream commit `9bcd0586` decoded an R13+
+DWG with groups 10 and 16 swapped; the vendored copy is past it.) `tests/corpus_sweep.rs` pins
+all five points against the values the DXF twin writes for two drawings, and for the DXF
+itself, so a change in the library's field layout fails the build instead of quietly putting
+the wrong point in the model. (The second drawing matters: in the first, groups 10 and 13 are
+the same point.)
 
 **An ordinate dimension's axis.** Bit 64 of group 70 says whether an ordinate dimension
 measures its feature's x (set) or y distance from the datum (`ordinate_axis`). A DXF, and a
 DWG older than R13, state it in the flag the model reads it from; from R13 on a DWG
 states it as bit 1 of a separate byte (`flag2`), from which the decoder rebuilds group 70
-wrongly (it sets bit 128 and clears bit 64), so that byte is read there instead. (The second drawing matters: in the
-first, groups 10 and 13 are the same point, and an earlier reading of it took `xline2end_pt`
-for group 13 and reported group 10 as not stated.)
+wrongly (it sets bit 128 and clears bit 64), so that byte is read there instead.
 
 An arc-length dimension is a separate entity in the format rather than a value of group 70 --
 the group says 5 on such a dimension, which would read as a three-point angular one. It is

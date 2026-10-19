@@ -1582,13 +1582,11 @@ unsafe fn convert_entity(
             );
             // Which of this backend's points is which DXF group depends on
             // the subtype: group 13 is the first extension line for a linear
-            // dimension and the feature location for an ordinate one, and a
-            // two-line angular dimension keeps its group 10 under a different
-            // field name than every other subtype does. The mapping is written out
-            // per subtype rather than passing this backend's field names
-            // through, so one model field never holds two different points.
-            let pre_r13 = is_pre_r13(dwg);
-            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype, pre_r13);
+            // dimension and the feature location for an ordinate one. The
+            // mapping is written out per subtype rather than passing this
+            // backend's field names through, so one model field never holds
+            // two different points.
+            let (p13, p14, p15, p16) = dimension_point_fields(fixedtype);
             let point = |field: Option<&'static str>| {
                 field.and_then(|f| get_point3d(entity_ptr, dxfname, f))
             };
@@ -1613,16 +1611,7 @@ unsafe fn convert_entity(
                 text_override: dimension_text_override(
                     text.field(entity_ptr, dxfname, "user_text").as_deref(),
                 ),
-                // A two-line angular dimension decoded from an R13+ DWG keeps
-                // group 10 in the record's last point, which this library
-                // names `xline2end_pt` (its `def_pt` holds group 16) -- see
-                // `dimension_point_fields`. A pre-R13 one reads group 10 into
-                // `def_pt`, as every other subtype does.
-                definition_point: if kind == Some(DimensionKind::Angular2Line) && !pre_r13 {
-                    get_point3d(entity_ptr, dxfname, "xline2end_pt")
-                } else {
-                    get_point3d(entity_ptr, dxfname, "def_pt")
-                },
+                definition_point: get_point3d(entity_ptr, dxfname, "def_pt"),
                 text_midpoint: get_point2d(entity_ptr, dxfname, "text_midpt").unwrap_or_default(),
                 points: DimensionPoints {
                     extension1: point(p13),
@@ -2807,14 +2796,9 @@ fn ordinate_axis(
 ///
 /// The library's own names are not a mapping: `xline1_pt` is group 13 for a
 /// linear dimension, while a two-line angular dimension calls its group 13
-/// `xline1start_pt` and its group 16 `xline2end_pt` by name -- but the DWG
-/// decoder fills that record in stream order: the leading 2RD, `def_pt`, is
-/// the arc point, group 16, and `xline2end_pt` the last point, group 10.
-/// Before R13 the record is read field by field after the common part, which
-/// puts group 10 in `def_pt` and group 16 in `xline2end_pt`, as the names say.
+/// `xline1start_pt` and its group 16 `xline2end_pt`.
 fn dimension_point_fields(
     fixedtype: libredwg_sys::Dwg_Object_Type,
-    pre_r13: bool,
 ) -> (
     Option<&'static str>,
     Option<&'static str>,
@@ -2832,19 +2816,11 @@ fn dimension_point_fields(
             Some("center_pt"),
             None,
         ),
-        // Measured against the same drawing in both formats: decoded from
-        // the DWG, this library's `def_pt` holds group 16 here, and
-        // `xline2end_pt` holds group 10 (the dimension's definition point)
-        // rather than 16. The mapping follows the measurement, not the field
-        // names.
-        // (An earlier measurement read `xline2end_pt` as group 13's point;
-        // that drawing has groups 10 and 13 at the same place, so it could
-        // not tell.)
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_ANG2LN => (
             Some("xline1start_pt"),
             Some("xline1end_pt"),
             Some("xline2start_pt"),
-            Some(if pre_r13 { "xline2end_pt" } else { "def_pt" }),
+            Some("xline2end_pt"),
         ),
         libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_RADIUS
         | libredwg_sys::DWG_OBJECT_TYPE_DWG_TYPE_DIMENSION_DIAMETER => {

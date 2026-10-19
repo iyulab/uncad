@@ -855,7 +855,7 @@
       {                                                                       \
         struct tm tm;                                                         \
         char _buf[60] = "";                                                   \
-        if (_obj->nam.days)                                                   \
+        if (_obj->nam.days >= 1000)                                           \
           strftime (_buf, 60, STRFTIME_DATE, cvt_TIMEBLL (&tm, _obj->nam));   \
         else                                                                  \
           strftime (_buf, 60, STRFTIME_TIME, cvt_TIMEBLL (&tm, _obj->nam));   \
@@ -1097,19 +1097,19 @@
 #define TYPE_MAXELEMSIZE(type) dwg_bits_size[BITS_##type]
 #define VECTOR_CHKCOUNT(nam, type, size, dat)                                 \
   if ((int64_t)(size) > AVAIL_BITS (dat)                                      \
-      || (int64_t)((size) * TYPE_MAXELEMSIZE (type)) > AVAIL_BITS (dat))      \
+      || (int64_t)(size) * TYPE_MAXELEMSIZE (type) > AVAIL_BITS (dat))        \
     {                                                                         \
       LOG_ERROR ("Invalid " #nam " size %" PRId64 ". Need min. %" PRId64      \
                  " bits for " #type ", have %" PRId64 " for %s.",             \
                  (int64_t)(size), (int64_t)(size) * TYPE_MAXELEMSIZE (type),  \
                  AVAIL_BITS (dat), SAFEDXFNAME);                              \
       if (_obj->nam)                                                          \
-        free (_obj->nam);                                                     \
+        free (_obj->nam), _obj->nam = NULL;                                   \
       return DWG_ERR_VALUEOUTOFBOUNDS;                                        \
     }
 #define SUB_VECTOR_CHKCOUNT(o, nam, type, size, dat)                          \
   if ((int64_t)(size) > AVAIL_BITS (dat)                                      \
-      || (int64_t)((size) * TYPE_MAXELEMSIZE (type)) > AVAIL_BITS (dat))      \
+      || (int64_t)(size) * TYPE_MAXELEMSIZE (type) > AVAIL_BITS (dat))        \
     {                                                                         \
       LOG_ERROR (                                                             \
           "Invalid " #nam " size %" PRId64 ". Need min. %" PRId64             \
@@ -1118,12 +1118,12 @@
           (int64_t)(size), (int64_t)(size) * TYPE_MAXELEMSIZE (type),         \
           AVAIL_BITS (dat), dat->byte, (unsigned)dat->bit, SAFEDXFNAME);      \
       if (_obj->o.nam)                                                        \
-        free (_obj->o.nam);                                                   \
+        free (_obj->o.nam), _obj->o.nam = NULL;                               \
       return DWG_ERR_VALUEOUTOFBOUNDS;                                        \
     }
 #define VECTOR_CHKCOUNT_LV(nam, type, size, dat)                              \
   if ((int64_t)(size) > AVAIL_BITS (dat)                                      \
-      || (int64_t)((size) * TYPE_MAXELEMSIZE (type)) > AVAIL_BITS (dat))      \
+      || (int64_t)(size) * TYPE_MAXELEMSIZE (type) > AVAIL_BITS (dat))        \
     {                                                                         \
       LOG_ERROR (                                                             \
           "Invalid " #nam " size %" PRId64 ". Need min. %" PRId64             \
@@ -1132,7 +1132,7 @@
           (int64_t)(size), (int64_t)(size) * TYPE_MAXELEMSIZE (type),         \
           AVAIL_BITS (dat), dat->byte, (unsigned)dat->bit, SAFEDXFNAME);      \
       if (_obj->nam)                                                          \
-        free (_obj->nam);                                                     \
+        free (_obj->nam), _obj->nam = NULL;                                   \
       size = 0; /* return DWG_ERR_VALUEOUTOFBOUNDS; */                                  \
     }
 // for static TFF types with a size field

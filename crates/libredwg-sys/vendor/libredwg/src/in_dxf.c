@@ -1733,7 +1733,11 @@ dxf_set_DWGCODEPAGE (Bit_Chain *dat, Dwg_Data *dwg)
   // has a 0 second byte, whereas a plain UTF-8 name does not. (Keyed on the
   // actual bytes, not from_version, since a down-convert may already have
   // re-encoded the header strings to UTF-8.)
-  if (vars->DWGCODEPAGE[0] && vars->DWGCODEPAGE[1] == 0)
+  // Only r2007+ header strings are TU (dynapi_set_helper), with at least 2
+  // wide chars incl. the terminator. A 1-char ASCII name in an older file is
+  // a 2 byte buffer, which the unbounded TU scan would overread.
+  if (hdr->version >= R_2007 && vars->DWGCODEPAGE[0]
+      && vars->DWGCODEPAGE[1] == 0)
     cp_str = cp_tmp = bit_convert_TU ((BITCODE_TU)vars->DWGCODEPAGE);
   else
     cp_str = vars->DWGCODEPAGE;
@@ -2482,7 +2486,7 @@ add_LTYPE_dashes (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
             o->strings_area = (BITCODE_TF)xcalloc (strings_size, 1);
           if (is_tu)
             {
-              needed = ((strlen (pair->value.s.ptr) * 2) + 2);
+              needed = (bit_wcs2len ((BITCODE_TU)o->dashes[j].text) * 2) + 2;
               if (dash_i + needed > strings_size)
                 {
                   LOG_WARN ("LTYPE strings_area overflow, truncating");
@@ -2494,7 +2498,7 @@ add_LTYPE_dashes (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
             }
           else
             {
-              needed = strlen (pair->value.s.ptr) + 1;
+              needed = strlen (o->dashes[j].text) + 1;
               if (dash_i + needed > strings_size)
                 {
                   LOG_WARN ("LTYPE strings_area overflow, truncating");
@@ -2758,7 +2762,8 @@ new_LWPOLYLINE (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
         }
       else if (pair->code == 40) // not const_width
         {
-          if (!j)
+          // the first 40 allocates: a vertex with no width writes none
+          if (!o->num_widths)
             {
               o->widths = (Dwg_LWPOLYLINE_width *)xcalloc (
                   num_points, sizeof (Dwg_LWPOLYLINE_width));
@@ -2767,7 +2772,7 @@ new_LWPOLYLINE (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
                   o->num_widths = 0;
                   return NULL;
                 }
-              o->flag |= 4;
+              o->flag |= 32; // has widths. 4 is const_width
               o->num_widths = num_points;
             }
           CHK_array (j, widths);
@@ -2775,7 +2780,7 @@ new_LWPOLYLINE (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           LOG_TRACE ("LWPOLYLINE.widths[%d].start = %f [BD 40]\n", j,
                      pair->value.d);
         }
-      else if (pair->code == 41 && (o->flag & 4)) // not const_width
+      else if (pair->code == 41 && (o->flag & 32)) // not const_width
         {
           CHK_array (j, widths);
           o->widths[j].end = pair->value.d;
@@ -2911,24 +2916,11 @@ add_MESH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
   o->unknown_b1 = 1;
   o->unknown_b2 = 0;
 
-  // valid entry code: 91
+  // valid entry code: 91, the subdivision level
   if (pair->code == 91)
     {
-      vector = pair->code;
-      free (o->subdiv_vertex);
-      o->subdiv_vertex = NULL;
       o->num_subdiv_vertex = pair->value.u;
       LOG_TRACE ("MESH.num_subdiv_vertex = %u [BL 91]\n", pair->value.u);
-      if (pair->value.u)
-        {
-          o->subdiv_vertex = (BITCODE_3BD *)xcalloc (o->num_subdiv_vertex,
-                                                     sizeof (BITCODE_3BD));
-          if (!o->subdiv_vertex)
-            {
-              o->num_subdiv_vertex = 0;
-              return NULL;
-            }
-        }
     }
 
   while (pair->code != 0)
@@ -3019,12 +3011,7 @@ add_MESH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
         }
       else if (pair->code == 10)
         {
-          if (vector == 91)
-            {
-              CHK_array (j, subdiv_vertex);
-              o->subdiv_vertex[j].x = pair->value.d;
-            }
-          else if (vector == 92)
+          if (vector == 92)
             {
               CHK_array (j, vertex);
               o->vertex[j].x = pair->value.d;
@@ -3034,12 +3021,7 @@ add_MESH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
         }
       else if (pair->code == 20)
         {
-          if (vector == 91)
-            {
-              CHK_array (j, subdiv_vertex);
-              o->subdiv_vertex[j].y = pair->value.d;
-            }
-          else if (vector == 92)
+          if (vector == 92)
             {
               CHK_array (j, vertex);
               o->vertex[j].y = pair->value.d;
@@ -3049,16 +3031,7 @@ add_MESH (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
         }
       else if (pair->code == 30)
         {
-          if (vector == 91)
-            {
-              CHK_array (j, subdiv_vertex);
-              o->subdiv_vertex[j].z = pair->value.d;
-              LOG_TRACE ("MESH.subdiv_vertex[%d] = (%f, %f, %f) [3BD 10]\n", j,
-                         o->subdiv_vertex[j].x, o->subdiv_vertex[j].y,
-                         o->subdiv_vertex[j].z);
-              j++;
-            }
-          else if (vector == 92)
+          if (vector == 92)
             {
               CHK_array (j, vertex);
               o->vertex[j].z = pair->value.d;
@@ -4218,7 +4191,7 @@ add_MULTILEADER_lines (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
               lline->num_breaks = k + 1;
               lline->breaks = (Dwg_LEADER_Break *)realloc (
                   lline->breaks, (k + 1) * sizeof (Dwg_LEADER_Break));
-              memset (&ctx->leaders[k], 0, sizeof (Dwg_LEADER_Break));
+              memset (&lline->breaks[k], 0, sizeof (Dwg_LEADER_Break));
               lline->breaks[k].start.x = pair->value.d;
               LOG_TRACE (
                   "%s.leaders[].lines[%d].breaks[%d].start.x = %f [3BD %d]\n",
@@ -7294,7 +7267,10 @@ add_FIELD (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
       if (pair->code == 7)
         {
           dxf_free_pair (pair);
-          goto next_field; // one more cached field
+          // one more cached field: re-use the last child, never go beyond
+          // the allocated num_childval (i == num_childval here)
+          i = o->num_childval - 1;
+          goto next_field;
         }
       else if (i + 1 == o->num_childval)
         {
@@ -8153,7 +8129,7 @@ add_SPLINE (Dwg_Entity_SPLINE *restrict o, Bit_Chain *restrict dat,
       if (j == 0)
         j = (int)o->num_ctrl_pts;
       j--;
-      if (!o->ctrl_pts || j >= (int)o->num_ctrl_pts)
+      if (!o->ctrl_pts || j < 0 || j >= (int)o->num_ctrl_pts)
         {
           LOG_ERROR ("SPLINE.ctrl_pts[%d] overflow, max %d", j,
                      o->num_ctrl_pts);
@@ -10419,7 +10395,7 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                 Dwg_Entity_VIEWPORT *_vobj;
                 obj = &dwg->object[objidx];
                 _vobj = obj->tio.entity->tio.VIEWPORT;
-                // vx->is_on = 1;
+                vx->is_on = 1; // until its 68 says otherwise (postprocess)
                 vx->viewport = dwg_add_handleref (dwg, 4, pair->value.u, NULL);
                 LOG_TRACE ("VX_TABLE_RECORD.viewport = " FORMAT_REF " [H 4]\n",
                            ARGS_REF (vx->viewport));
@@ -13819,6 +13795,26 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
     }
   else if (is_textlike (obj))
     postprocess_TEXTlike (obj);
+  else if (obj->fixedtype == DWG_TYPE_VIEWPORT && dwg->header.version < R_2004
+           && dwg->header.version > R_11)
+    {
+      // A pre-r2004 DWG keeps a viewport on or off in its VX_TABLE_RECORD,
+      // not in the entity: with is_on left 0 every viewport converted to
+      // r2000 was off for ODA and AutoCAD. DXF 68: 0 off, anything else on.
+      Dwg_Entity_VIEWPORT *o = obj->tio.entity->tio.VIEWPORT;
+      if (o->vport_entity_header)
+        {
+          Dwg_Object *vxobj = dwg_resolve_handle (
+              dwg, o->vport_entity_header->absolute_ref);
+          if (vxobj && vxobj->fixedtype == DWG_TYPE_VX_TABLE_RECORD)
+            {
+              vxobj->tio.object->tio.VX_TABLE_RECORD->is_on
+                  = o->on_off != 0;
+              LOG_TRACE ("VX_TABLE_RECORD.is_on = %d (VIEWPORT.on_off %d)\n",
+                         o->on_off != 0, (int)o->on_off);
+            }
+        }
+    }
 
   return pair;
 
