@@ -196,11 +196,24 @@ fn main() {
     // scope is an error: C then assumes it returns `int`, and a pointer it
     // really returns is cut to 32 bits on a 64-bit target -- a crash far
     // from the call, which a local patch to the vendored source can
-    // introduce by calling a function its file does not include.
+    // introduce by calling a function its file does not include. So is
+    // mixing a pointer with an integer or with a pointer to another type:
+    // the vendored copy has none, and a new one is a defect to look at when
+    // the copy is refreshed or patched.
     if build.get_compiler().is_like_msvc() {
-        build.flag("/we4013");
+        // C4013 undeclared function · C4047 levels of indirection ·
+        // C4022/C4024 argument type · C4133 incompatible pointer types.
+        for warning in ["/we4013", "/we4047", "/we4022", "/we4024", "/we4133"] {
+            build.flag(warning);
+        }
     } else {
-        build.flag_if_supported("-Werror=implicit-function-declaration");
+        for warning in [
+            "-Werror=implicit-function-declaration",
+            "-Werror=int-conversion",
+            "-Werror=incompatible-pointer-types",
+        ] {
+            build.flag_if_supported(warning);
+        }
     }
 
     // --- bindgen -----------------------------------------------------------

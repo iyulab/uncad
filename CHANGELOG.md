@@ -24,9 +24,11 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
-- `libredwg-sys` compiles the vendored C source with a call to an undeclared function as an
-  error (MSVC C4013, `-Werror=implicit-function-declaration` elsewhere). C would assume such a
-  function returns `int` and cut a returned pointer to 32 bits on a 64-bit target.
+- `libredwg-sys` compiles the vendored C source with a call to an undeclared function, and a
+  pointer mixed with an integer or with a pointer to another type, as errors (MSVC C4013 ·
+  C4047 · C4022 · C4024 · C4133; `-Werror=implicit-function-declaration`, `int-conversion`,
+  `incompatible-pointer-types` elsewhere). C would assume an undeclared function returns `int`
+  and cut a returned pointer to 32 bits on a 64-bit target. The vendored copy has none of them.
 
 - A two-line angular dimension's points are read under the vendored LibreDWG's own field
   names: upstream now decodes groups 10 and 16 of an R13+ DWG in the order the format stores
