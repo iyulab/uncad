@@ -192,6 +192,17 @@ fn main() {
         build.flag("/utf-8").flag("/std:c11");
     }
 
+    // Warnings stay off, but a call to a function with no declaration in
+    // scope is an error: C then assumes it returns `int`, and a pointer it
+    // really returns is cut to 32 bits on a 64-bit target -- a crash far
+    // from the call, which a local patch to the vendored source can
+    // introduce by calling a function its file does not include.
+    if build.get_compiler().is_like_msvc() {
+        build.flag("/we4013");
+    } else {
+        build.flag_if_supported("-Werror=implicit-function-declaration");
+    }
+
     // --- bindgen -----------------------------------------------------------
     // Runs before the C compile on purpose: a missing libclang or an
     // unusable header search path then fails within seconds instead of after
