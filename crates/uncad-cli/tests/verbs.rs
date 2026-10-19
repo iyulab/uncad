@@ -145,6 +145,56 @@ fn hit_test_has_no_default_tolerance() {
     assert!(stderr.contains("tolerance"), "{stderr}");
 }
 
+/// A drawing whose dimensions stand on lines, two blocks standing for
+/// other drawings beside them.
+const XREF_DWG: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../lib/libredwg/test/test-data/2013/gh44-error.dwg"
+);
+
+#[test]
+fn relate_names_what_each_dimension_stands_on_and_what_it_could_not_look_at() {
+    let (_, r) = answer(&["relate", XREF_DWG]);
+    let tolerance = r["tolerance"].as_f64().expect("the tolerance is stated");
+    assert!(tolerance > 0.0, "{tolerance}");
+    let external = r["external_references"]
+        .as_array()
+        .expect("external references");
+    assert_eq!(external.len(), 2, "{external:?}");
+    for x in external {
+        assert_eq!(x["entities"], 0, "{x}");
+        assert_eq!(x["inserts"].as_array().unwrap().len(), 1, "{x}");
+    }
+    let dimensions = r["dimensions"].as_array().expect("dimensions");
+    let at_point = dimensions
+        .iter()
+        .flat_map(|d| d["points"].as_array().unwrap())
+        .flat_map(|p| p["relations"].as_array().unwrap())
+        .filter(|r| r["relation"] == "AT_POINT")
+        .count();
+    assert!(at_point > 0, "some point is a point of the geometry");
+
+    // One dimension, by its ID; the rest of the answer as it was.
+    let id = dimensions[0]["id"].as_u64().unwrap().to_string();
+    let (_, one) = answer(&["relate", XREF_DWG, "--id", &id]);
+    assert_eq!(one["dimensions"].as_array().unwrap(), &dimensions[..1]);
+    assert_eq!(one["external_references"], r["external_references"]);
+
+    // A stated tolerance is the one used.
+    let (_, wide) = answer(&["relate", XREF_DWG, "--tolerance", "0.5"]);
+    assert_eq!(wide["tolerance"], 0.5);
+}
+
+#[test]
+fn relate_refuses_a_tolerance_that_is_not_positive() {
+    for bad in ["0", "-1"] {
+        let out = run(&["relate", CORPUS_DWG, "--tolerance", bad]);
+        assert!(!out.status.success(), "{bad}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains("tolerance"), "{bad}: {stderr}");
+    }
+}
+
 #[test]
 fn diff_of_a_drawing_with_itself_is_empty_and_carries_its_tolerance() {
     let (_, same) = answer(&["diff", CORPUS_DXF, CORPUS_DXF]);
@@ -423,7 +473,7 @@ fn every_advertised_protocol_version_lists_and_answers_alike() {
             .collect();
         assert_eq!(
             names,
-            ["summarize", "hit_test", "diff", "set", "redline"],
+            ["summarize", "hit_test", "relate", "diff", "set", "redline"],
             "{version}"
         );
         if version.as_str() >= STATELESS {
@@ -466,7 +516,10 @@ fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
     let list = mcp.request("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["summarize", "hit_test", "diff", "set", "redline"]);
+    assert_eq!(
+        names,
+        ["summarize", "hit_test", "relate", "diff", "set", "redline"]
+    );
     for tool in tools {
         let writes = tool["name"] == "set" || tool["name"] == "redline";
         let description = tool["description"].as_str().unwrap();
@@ -491,14 +544,22 @@ fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
         .take_while(|line| !line.trim().is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let named: Vec<&str> = ["summarize", "hit-test", "diff", "set", "redline", "export"]
-        .into_iter()
-        .filter(|verb| {
-            mcp_line
-                .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
-                .any(|word| word == *verb)
-        })
-        .collect();
+    let named: Vec<&str> = [
+        "summarize",
+        "hit-test",
+        "relate",
+        "diff",
+        "set",
+        "redline",
+        "export",
+    ]
+    .into_iter()
+    .filter(|verb| {
+        mcp_line
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .any(|word| word == *verb)
+    })
+    .collect();
     let served: Vec<String> = names.iter().map(|n| n.replace('_', "-")).collect();
     assert_eq!(named, served, "{mcp_line}");
 }
@@ -526,6 +587,11 @@ fn a_tool_answers_with_the_same_bytes_as_the_command_line() {
             ],
             "hit_test",
             json!({"input": CORPUS_DWG, "x": x, "y": y, "tolerance": tolerance}),
+        ),
+        (
+            vec!["relate".into(), XREF_DWG.into()],
+            "relate",
+            json!({"input": XREF_DWG}),
         ),
         (
             vec![

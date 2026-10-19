@@ -70,6 +70,7 @@ uncad summarize drawing.dwg                                   # what the drawing
 uncad summarize drawing.dwg --type circle --layer pipes       # ... and the circles on a layer, each with its box
 uncad summarize drawing.dwg --id 812 --detail                 # ... and one entity's model record (the fields `set` takes)
 uncad hit-test drawing.dwg --x 120 --y 45 --tolerance 0.5     # the entities at a point
+uncad relate drawing.dwg                                      # what each dimension's definition points sit on
 uncad diff rev-a.dwg rev-b.dwg                                # exact numeric difference (by reference ID when the files show one drawing)
 uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01
 uncad diff a.dxf b.dxf --matching geometry --min-similarity 1.5  # ... pairing only equal shapes
@@ -116,7 +117,7 @@ uncad redline plan.dwg step2.json -o proposal.svg --proposal-color '#0057b8'  # 
 uncad redline plan.dwg step2.json -o review.png --fit 1200 --stroke 3 --paper dark  # 3 px lines, black page
 ```
 
-`uncad mcp` serves `summarize`, `hit-test`, `diff`, `set` and `redline` as [Model Context
+`uncad mcp` serves `summarize`, `hit-test`, `relate`, `diff`, `set` and `redline` as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files

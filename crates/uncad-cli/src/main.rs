@@ -2,7 +2,7 @@
 //!
 //! Reading only -- with no `-o` it prints a summary, and the `-o` targets are
 //! the parsed model as JSON or a rendering of it as SVG/PNG. There is no
-//! DWG/DXF output. The verbs (`summarize`, `hit-test`, `diff`) answer one
+//! DWG/DXF output. The verbs (`summarize`, `hit-test`, `relate`, `diff`) answer one
 //! question each as JSON, and `set` makes one edit and writes it as model
 //! JSON, from the table in `verbs.rs`, which `uncad mcp` also serves as MCP
 //! tools. The verbs read model JSON as a drawing too.
@@ -39,6 +39,9 @@ Usage:
                                       paths `set` takes
   uncad hit-test <input> --x <n> --y <n> --tolerance <n> [--limit <n>]
                                     the entities at a point, as JSON
+  uncad relate <input> [--tolerance <n>] [--id <n>]
+                                    what each dimension's definition
+                                      points sit on, as JSON
   uncad diff <before> <after> [--matching <auto|reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
              [--min-similarity <n>] [--min-margin <n>] [--max-pairs <n>]
@@ -61,8 +64,8 @@ Usage:
                                       revision cloud (never over an
                                       existing file); answer with what
                                       was marked and what could not be
-  uncad mcp                         serve summarize, hit-test, diff, set and
-                                      redline as MCP tools over stdio
+  uncad mcp                         serve summarize, hit-test, relate, diff,
+                                      set and redline as MCP tools over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --
   what `-o <output.json>` and `set` write -- so edits chain, and the last

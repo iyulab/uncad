@@ -234,6 +234,52 @@ pub const VERBS: &[Verb] = &[
         run: hit_test,
     },
     Verb {
+        name: "relate",
+        description: "What each dimension's definition points sit on (`dimensions` -- every \
+            dimension of the drawing, those a block reference draws with the chain of \
+            references it was reached through). For each, the points it is built on that are \
+            points of the geometry it measures, by what it measures (`kind` -- none when the \
+            file does not state it), and for each point every entity of the same space it is \
+            related to (`relations`, none preferred over another): `AT_POINT` with the point \
+            the format defines for the entity (`anchor` -- a line's end, a centre, a vertex, a \
+            corner ...) or `ON_CURVE` (a line, an arc, a circle or a polyline segment), with \
+            the distance. A point related to nothing has no relations; what it may lie on that \
+            could not be looked at is named beside the dimensions: blocks standing for other \
+            drawings (`external_references`), entity types whose geometry is not known \
+            (`unmodeled`) and entities passed over, each with why (`not_searched`). The \
+            tolerance used is in the answer (`tolerance`). A block reference's insertion point \
+            is not a point of the geometry. Coordinates are in the drawing's own units.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "tolerance",
+                kind: Kind::Positive,
+                required: false,
+                positional: false,
+                description: "How close a point must be to an entity's point or curve to be \
+                    related, in drawing units. Default: a millionth of the larger side of the \
+                    box around the drawing's defined points -- the points coincide as the file \
+                    stores them, not as they look.",
+            },
+            Param {
+                name: "id",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "Answer for the dimension with this reference ID only, as \
+                    summarize gives it; what is said about the whole drawing is kept.",
+            },
+        ],
+        writes: false,
+        run: relate,
+    },
+    Verb {
         name: "diff",
         description: "The exact numeric difference between two drawing states (`changes`): \
             which entities were added, removed or modified, and for a modified one every field \
@@ -1063,6 +1109,19 @@ fn hit_test(args: &Map<String, Value>) -> Result<Answer, String> {
         found = found.limited(n as usize);
     }
     answer(&found, warnings)
+}
+
+fn relate(args: &Map<String, Value>) -> Result<Answer, String> {
+    let mut warnings = Vec::new();
+    let db = read(&path(args, "input"), &mut warnings)?;
+    let mut related =
+        iron_scout_cad::relate(&db, number(args, "tolerance")).map_err(|e| e.to_string())?;
+    if let Some(id) = args.get("id").and_then(Value::as_u64) {
+        let id: uncad::model::EntityId =
+            serde_json::from_value(Value::from(id)).expect("a reference ID is an integer");
+        related = related.of_dimension(id);
+    }
+    answer(&related, warnings)
 }
 
 fn diff(args: &Map<String, Value>) -> Result<Answer, String> {

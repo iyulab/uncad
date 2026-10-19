@@ -6,6 +6,13 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `uncad relate <input> [--tolerance <n>] [--id <n>]`, also served by `uncad mcp`: what each
+  dimension's definition points sit on -- every entity each point coincides with at a point the
+  format defines (`AT_POINT`, naming the point) or lies on the curve of (`ON_CURVE`), with what
+  could not be looked at named beside it (`iron-scout-cad` `relate`).
+
 ## [0.12.0] - 2026-10-07
 
 ### Added

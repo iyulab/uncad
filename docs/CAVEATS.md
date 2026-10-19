@@ -935,7 +935,7 @@ saying so.
 
 **The CLI**: `crates/uncad-cli/tests/documented_invocations.rs` runs every call the README
 and `--help` advertise against the real binary, and checks that each option actually
-changes the result. `tests/verbs.rs` covers `summarize`, `hit-test`, `diff`, `set` and
+changes the result. `tests/verbs.rs` covers `summarize`, `hit-test`, `relate`, `diff`, `set` and
 `uncad mcp`, including that a tool call answers with the same bytes as the command line.
 `tests/release_invariants.rs` checks what has to hold before a publish.
 
