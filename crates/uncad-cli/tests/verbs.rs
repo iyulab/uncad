@@ -1252,6 +1252,73 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
     assert_eq!(std::fs::read(&input).unwrap(), original);
 }
 
+/// A circle inside a block that the drawing places eight times: `set`
+/// edits the definition, and the redline marks the circle at each of the
+/// eight places, once per top-level reference.
+#[test]
+fn an_edit_inside_a_block_is_marked_at_every_place_the_block_is_put() {
+    let dir = scratch("inside-a-block");
+    let input = corpus("example_2000.dwg");
+    let model = dir.join("model.json");
+    answer_or_written(&[&input, "-o", arg(&model)]);
+    let model: Value = serde_json::from_str(&std::fs::read_to_string(&model).unwrap()).unwrap();
+    let block = "CIRKLO_PUNKTOJ";
+    let circle = model["tables"]["block_records"][block]["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "CIRCLE")
+        .expect("a circle in the block")["common"]["id"]
+        .as_u64()
+        .unwrap();
+    let mut references: Vec<u64> = model["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"] == "INSERT" && e["block_name"]["data"] == block)
+        .map(|e| e["common"]["id"].as_u64().unwrap())
+        .collect();
+    references.sort();
+    assert_eq!(references.len(), 8, "{references:?}");
+
+    let edited = set_step(
+        &dir,
+        std::path::Path::new(&input),
+        circle,
+        "radius",
+        &json!(0.9),
+        "edited",
+    );
+    let picture = dir.join("redline.svg");
+    let (_, report) = answer(&["redline", &input, arg(&edited), "-o", arg(&picture)]);
+    let mut via: Vec<u64> = report["marked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| {
+            assert_eq!(m["entry"], 0, "{report}");
+            assert_eq!(m["after"], circle, "{report}");
+            m["via"][0].as_u64().unwrap()
+        })
+        .collect();
+    via.sort();
+    assert_eq!(via, references, "{report}");
+    assert!(
+        report["not_marked"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+}
+
+/// Runs a command that writes a file and answers nothing on stdout.
+fn answer_or_written(args: &[&str]) {
+    let out = run(args);
+    assert!(
+        out.status.success(),
+        "{args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// A change to what a dimension states -- its tolerance, its text -- and
 /// nothing else: the stated tolerance is the dimension's own overrides with
 /// the tolerance variables added after the ones it had, the text a literal.
