@@ -1222,23 +1222,124 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
     expected.sort();
     assert_eq!(changed, expected, "{diff}");
 
-    // The redline marks the circle and both dimensions.
+    // The redline marks the circle and both dimensions. The circle is drawn
+    // as it became; a dimension's drawing is the block the file made for its
+    // old record, so it is clouded and not drawn.
     let picture = dir.join("redline.svg");
     let (_, report) = answer(&["redline", &input, arg(&step), "-o", arg(&picture)]);
-    let mut marked: Vec<u64> = report["marked"]
+    let mut marked: Vec<(u64, Value, Value)> = report["marked"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|m| m["after"].as_u64().unwrap())
+        .map(|m| {
+            let not_drawn = m.get("not_drawn").cloned().unwrap_or(Value::Null);
+            (m["before"].as_u64().unwrap(), m["after"].clone(), not_drawn)
+        })
         .collect();
-    marked.sort();
-    let mut all = measuring.clone();
-    all.push(circle);
-    all.sort();
-    assert_eq!(marked, all, "{report}");
+    marked.sort_by_key(|m| m.0);
+    let mut expected: Vec<(u64, Value, Value)> = measuring
+        .iter()
+        .map(|&d| (d, Value::Null, json!("BLOCK_OUT_OF_DATE")))
+        .chain([(circle, json!(circle), Value::Null)])
+        .collect();
+    expected.sort_by_key(|m| m.0);
+    assert_eq!(marked, expected, "{report}");
     assert!(
         report["not_marked"].as_array().unwrap().is_empty(),
         "{report}"
+    );
+
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+}
+
+/// A change to what a dimension states -- its tolerance, its text -- and
+/// nothing else: the stated tolerance is the dimension's own overrides with
+/// the tolerance variables added after the ones it had, the text a literal.
+/// One diff lists the added overrides as new elements and the text's two
+/// fields; the redline clouds both dimensions and draws neither from its
+/// old block.
+#[test]
+fn what_a_dimension_states_is_edited_and_marked_without_its_old_drawing() {
+    let dir = scratch("dimension-statement");
+    let input = corpus("2000/TS1.dxf");
+    let original = std::fs::read(&input).unwrap();
+    let (_, relate) = answer(&["relate", &input]);
+    let kinds: Vec<(u64, &str)> = relate["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| Some((d["id"].as_u64()?, d["kind"].as_str()?)))
+        .collect();
+    let diameter = kinds.iter().find(|k| k.1 == "DIAMETER").unwrap().0;
+    let radius = kinds.iter().find(|k| k.1 == "RADIUS").unwrap().0;
+
+    // DIMTOL on, DIMTP and DIMTM, after the overrides the dimension has.
+    let had = record(&input, diameter)["style_overrides"].clone();
+    let had = had.as_array().unwrap();
+    let mut overrides = had.clone();
+    overrides.extend([
+        json!({"variable": 71, "value": {"type": "INTEGER", "data": 1}}),
+        json!({"variable": 47, "value": {"type": "REAL", "data": 0.05}}),
+        json!({"variable": 48, "value": {"type": "REAL", "data": 0.02}}),
+    ]);
+    let toleranced = set_step(
+        &dir,
+        std::path::Path::new(&input),
+        diameter,
+        "style_overrides",
+        &Value::Array(overrides.clone()),
+        "toleranced",
+    );
+    let text = json!({"type": "LITERAL", "data": "R1.5"});
+    let stated = set_step(&dir, &toleranced, radius, "text_override", &text, "stated");
+
+    let (_, diff) = answer(&["diff", &input, arg(&stated)]);
+    let mut changed: Vec<(u64, Vec<(String, Value)>)> = diff["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|ch| {
+            assert_eq!(ch["type"], "MODIFIED", "{diff}");
+            let fields = ch["data"]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| (f["path"].as_str().unwrap().to_string(), f["after"].clone()))
+                .collect();
+            (ch["data"]["id"].as_u64().unwrap(), fields)
+        })
+        .collect();
+    changed.sort_by_key(|c| c.0);
+    let added: Vec<(String, Value)> = (had.len()..overrides.len())
+        .map(|i| (format!("style_overrides[{i}]"), overrides[i].clone()))
+        .collect();
+    let mut expected = vec![
+        (diameter, added),
+        (
+            radius,
+            vec![
+                ("text_override.data".to_string(), json!("R1.5")),
+                ("text_override.type".to_string(), json!("LITERAL")),
+            ],
+        ),
+    ];
+    expected.sort_by_key(|c| c.0);
+    assert_eq!(changed, expected, "{diff}");
+
+    let picture = dir.join("redline.svg");
+    let (_, report) = answer(&["redline", &input, arg(&stated), "-o", arg(&picture)]);
+    let marks = report["marked"].as_array().unwrap();
+    assert_eq!(marks.len(), 2, "{report}");
+    for m in marks {
+        assert_eq!(m["after"], Value::Null, "{report}");
+        assert_eq!(m["not_drawn"], "BLOCK_OUT_OF_DATE", "{report}");
+    }
+    let svg = std::fs::read_to_string(&picture).unwrap();
+    let changes = &svg[svg.find("<g id=\"changes\">").unwrap()..];
+    assert_eq!(changes.matches("class=\"cloud\"").count(), 2);
+    assert!(
+        !changes.contains("<text"),
+        "no old text drawn as the change"
     );
 
     assert_eq!(std::fs::read(&input).unwrap(), original);
