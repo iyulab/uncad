@@ -6,21 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-20
+
 ### Added
 
 - `uncad relate <input> [--tolerance <n>] [--id <n>]`, also served by `uncad mcp`: what each
   dimension's definition points sit on -- every entity each point coincides with at a point the
   format defines (`AT_POINT`, naming the point) or lies on the curve of (`ON_CURVE`), with what
   could not be looked at named beside it (`iron-scout-cad` `relate`).
-
-### Security
-
-- The vendored LibreDWG is updated to upstream commit `f860b0fb` (2026-10-13). On the DWG
-  decoding path this crate calls, it fixes memory-safety defects a crafted or damaged file
-  could reach: an out-of-bounds read of the cell style names when an older TABLESTYLE is
-  upgraded, a size multiplication that could wrap before a vector is allocated, a freed vector
-  left dangling, an aliased TABLESTYLE row-style handle freed twice, an R2004 section-info
-  allocation that could wrap, and an unbounded MATERIAL texture recursion.
 
 ### Changed
 
@@ -34,6 +27,17 @@ Notable changes to this project are recorded here. The format follows
   names: upstream now decodes groups 10 and 16 of an R13+ DWG in the order the format stores
   them, so the reader no longer swaps them itself. The model is unchanged -- the same points
   as before, now without the workaround.
+
+- Built on `iron-scout-cad` 0.11.0.
+
+### Security
+
+- The vendored LibreDWG is updated to upstream commit `f860b0fb` (2026-10-13). On the DWG
+  decoding path this crate calls, it fixes memory-safety defects a crafted or damaged file
+  could reach: an out-of-bounds read of the cell style names when an older TABLESTYLE is
+  upgraded, a size multiplication that could wrap before a vector is allocated, a freed vector
+  left dangling, an aliased TABLESTYLE row-style handle freed twice, an R2004 section-info
+  allocation that could wrap, and an unbounded MATERIAL texture recursion.
 
 ## [0.12.0] - 2026-10-07
 
