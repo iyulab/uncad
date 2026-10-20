@@ -1011,6 +1011,264 @@ fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
     assert_eq!(std::fs::read(CORPUS_DWG).unwrap(), original);
 }
 
+/// The record of one entity, as `summarize --id --detail` gives it.
+fn record(input: &str, id: u64) -> Value {
+    let (_, answer) = answer(&["summarize", input, "--id", &id.to_string(), "--detail"]);
+    answer["selection"]["entities"][0]["record"].clone()
+}
+
+fn xy(p: &Value) -> (f64, f64) {
+    (p["x"].as_f64().unwrap(), p["y"].as_f64().unwrap())
+}
+
+/// The entities a dimension's points are related to, by role.
+fn related(answer: &Value, dimension: u64) -> Vec<(String, Vec<u64>)> {
+    let d = answer["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == dimension)
+        .unwrap_or_else(|| panic!("dimension {dimension} in {answer}"));
+    d["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            let ids = p["relations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["entity"].as_u64().unwrap())
+                .collect();
+            (p["role"].as_str().unwrap().to_string(), ids)
+        })
+        .collect()
+}
+
+/// A circle resized on its own leaves the dimensions that measure it
+/// standing on nothing; resized together with them -- found by `relate`,
+/// edited by a chain of `set` calls -- every point is on the circle again,
+/// one diff lists every field of the chain, and the redline marks all of it.
+#[test]
+fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
+    let dir = scratch("circle-and-dimensions");
+    let input = corpus("2000/TS1.dxf");
+    let original = std::fs::read(&input).unwrap();
+
+    // The circle a diameter dimension stands on, and every dimension
+    // standing on it.
+    let (_, before) = answer(&["relate", &input]);
+    let dimensions = before["dimensions"].as_array().unwrap();
+    let circle = dimensions
+        .iter()
+        .find(|d| d["kind"] == "DIAMETER")
+        .and_then(|d| d["points"][0]["relations"][0]["entity"].as_u64())
+        .expect("a diameter dimension on a circle");
+    let measuring: Vec<u64> = dimensions
+        .iter()
+        .filter(|d| {
+            d["points"].as_array().unwrap().iter().any(|p| {
+                p["relations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["entity"] == circle)
+            })
+        })
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(measuring.len(), 2, "a diameter and a radius: {before}");
+
+    let c = record(&input, circle);
+    let (cx, cy) = xy(&c["center"]);
+    let r = c["radius"].as_f64().unwrap();
+    let grown = r * 1.25;
+
+    // The circle alone: its dimensions no longer stand on it.
+    let alone = dir.join("alone.json");
+    let circle_id = circle.to_string();
+    answer(&[
+        "set",
+        &input,
+        "--id",
+        &circle_id,
+        "--path",
+        "radius",
+        "--value",
+        &grown.to_string(),
+        "-o",
+        arg(&alone),
+    ]);
+    let (_, detached) = answer(&["relate", arg(&alone)]);
+    // A point on the curve is left standing on nothing; only a point at the
+    // centre -- a radius dimension's -- is still related to the circle.
+    let on_circle = |answer: &Value, d: u64| -> Vec<(String, String)> {
+        let dim = answer["dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == d)
+            .unwrap();
+        dim["points"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| {
+                p["relations"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r["entity"] == circle)
+                    .map(|r| {
+                        let how = format!("{}{}", r["relation"], r["anchor"]);
+                        (p["role"].as_str().unwrap().to_string(), how)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+    for &d in &measuring {
+        let kept: Vec<_> = on_circle(&before, d)
+            .into_iter()
+            .filter(|(_, how)| how == "\"AT_POINT\"\"center\"")
+            .collect();
+        assert_eq!(on_circle(&detached, d), kept, "{d}: {detached}");
+    }
+
+    // The chain: each measuring dimension's points on the curve move out
+    // with it, and its measurement follows.
+    let mut step = alone;
+    let mut edited_fields = vec![(circle, vec!["radius".to_string()])];
+    for (n, &d) in measuring.iter().enumerate() {
+        let dim = record(arg(&step), d);
+        let mut fields = Vec::new();
+        for path in ["definition_point", "points.radial"] {
+            let p = path.split('.').fold(&dim, |v, k| &v[k]);
+            let (x, y) = xy(p);
+            let off = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+            if (off - r).abs() > 1e-9 {
+                continue; // the centre, not a point on the curve
+            }
+            let moved = json!({
+                "x": cx + (x - cx) * 1.25,
+                "y": cy + (y - cy) * 1.25,
+                "z": p["z"],
+            });
+            fields.push(path.to_string());
+            step = set_step(&dir, &step, d, path, &moved, &format!("{n}-{path}"));
+        }
+        let measurement = match dim["kind"].as_str().unwrap() {
+            "DIAMETER" => grown * 2.0,
+            _ => grown,
+        };
+        step = set_step(
+            &dir,
+            &step,
+            d,
+            "measurement",
+            &json!(measurement),
+            &format!("{n}-measurement"),
+        );
+        fields.push("measurement".to_string());
+        edited_fields.push((d, fields));
+    }
+
+    // Every point is on the circle again, and each measurement is the
+    // distance its points state: across the circle, or out from its centre.
+    let (_, after) = answer(&["relate", arg(&step)]);
+    for &d in &measuring {
+        assert_eq!(related(&after, d), related(&before, d), "{d}: {after}");
+        let dim = record(arg(&step), d);
+        let (ax, ay) = xy(&dim["definition_point"]);
+        let (bx, by) = xy(&dim["points"]["radial"]);
+        let stated = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt();
+        let measurement = dim["measurement"].as_f64().unwrap();
+        assert!((stated - measurement).abs() < 1e-9, "{d}: {dim}");
+    }
+
+    // One diff lists every field of the chain, and nothing else.
+    let (_, diff) = answer(&["diff", &input, arg(&step)]);
+    let mut changed: Vec<(u64, Vec<String>)> = diff["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|ch| {
+            assert_eq!(ch["type"], "MODIFIED", "{diff}");
+            let mut paths: Vec<String> = ch["data"]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["path"].as_str().unwrap().to_string())
+                .collect();
+            paths.sort();
+            (ch["data"]["id"].as_u64().unwrap(), paths)
+        })
+        .collect();
+    changed.sort();
+    let mut expected: Vec<(u64, Vec<String>)> = edited_fields
+        .into_iter()
+        .map(|(id, fields)| {
+            let mut leaves: Vec<String> = fields
+                .iter()
+                .flat_map(|f| match f.as_str() {
+                    "radius" | "measurement" => vec![f.clone()],
+                    point => vec![format!("{point}.x"), format!("{point}.y")],
+                })
+                .collect();
+            leaves.sort();
+            (id, leaves)
+        })
+        .collect();
+    expected.sort();
+    assert_eq!(changed, expected, "{diff}");
+
+    // The redline marks the circle and both dimensions.
+    let picture = dir.join("redline.svg");
+    let (_, report) = answer(&["redline", &input, arg(&step), "-o", arg(&picture)]);
+    let mut marked: Vec<u64> = report["marked"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["after"].as_u64().unwrap())
+        .collect();
+    marked.sort();
+    let mut all = measuring.clone();
+    all.push(circle);
+    all.sort();
+    assert_eq!(marked, all, "{report}");
+    assert!(
+        report["not_marked"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+}
+
+/// One `set` of the chain, from `from` to a new file in `dir`.
+fn set_step(
+    dir: &std::path::Path,
+    from: &std::path::Path,
+    id: u64,
+    path: &str,
+    value: &Value,
+    name: &str,
+) -> std::path::PathBuf {
+    let to = dir.join(format!("{name}.json"));
+    answer(&[
+        "set",
+        arg(from),
+        "--id",
+        &id.to_string(),
+        "--path",
+        path,
+        "--value",
+        &value.to_string(),
+        "-o",
+        arg(&to),
+    ]);
+    to
+}
+
 /// A redline of a drawing with a block reference scaled 3256 times beside
 /// it frames the drawing, not the giant, and names what its original layer
 /// leaves out.
