@@ -184,6 +184,13 @@ pub unsafe fn convert_entities(
 /// walker for other versions hands back whatever its list holds, so the
 /// VERTEX kinds are skipped here too.
 ///
+/// Before R13 the library's list also holds what a DXF of the same drawing
+/// leaves out: the entities the file has erased -- among them the originals
+/// of entities moved into a block when it was made, still in the entity
+/// section beside the INSERT that now places them -- and the ATTRIBs that
+/// follow an INSERT, which are the INSERT's (see [`stream_insert_attribs`]).
+/// Both are skipped.
+///
 /// # Safety
 /// `dwg` must be the live `Dwg_Data` `block_obj` was obtained from;
 /// `block_obj` must be a valid, non-null `BLOCK_HEADER` object.
@@ -195,12 +202,15 @@ pub(crate) unsafe fn owned_entities(
     if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
         return unsafe { chained_block_entities(dwg, text, block_obj) };
     }
+    let pre_r13 = is_pre_r13(dwg);
     let mut entities = Vec::new();
     let mut owned = unsafe { libredwg_sys::get_first_owned_entity(block_obj) };
     while !owned.is_null() {
         let fixedtype = unsafe { libredwg_sys::dwg_object_get_fixedtype(owned) }
             as libredwg_sys::DWG_OBJECT_TYPE;
-        if is_polyline_vertex(fixedtype) {
+        if is_polyline_vertex(fixedtype)
+            || (pre_r13 && (is_sub_entity(fixedtype) || unsafe { is_erased_pre_r13(owned) }))
+        {
             owned = unsafe { libredwg_sys::get_next_owned_entity(block_obj, owned) };
             continue;
         }
@@ -417,6 +427,55 @@ unsafe fn owned_insert_attribs(
         sub = unsafe { libredwg_sys::get_next_owned_subentity(obj, sub) };
     }
     attribs
+}
+
+/// An INSERT's attributes before R13, where the file keeps no list of them:
+/// they are the ATTRIB records that follow the INSERT in the object stream,
+/// up to the SEQEND that closes them -- the walk [`polyline_vertex_records`]
+/// makes for a polyline's vertices. A record that is neither ends the run;
+/// one the file has erased is not an attribute. Bounded by the number of
+/// objects and by [`MAX_OWNED_SUBENTITIES`], converted at `depth + 1`.
+///
+/// # Safety
+/// `dwg` must be live and `obj` a valid INSERT object of it, converted at
+/// `depth`.
+unsafe fn stream_insert_attribs(
+    dwg: *mut libredwg_sys::Dwg_Data,
+    text: &TextDecoder,
+    obj: *mut libredwg_sys::Dwg_Object,
+    depth: u32,
+) -> Vec<AttribEntity> {
+    let mut attribs = Vec::new();
+    let max_steps = unsafe { libredwg_sys::dwg_get_num_objects(dwg) };
+    let mut steps = 0;
+    let mut sub = unsafe { libredwg_sys::dwg_next_object(obj) };
+    while !sub.is_null() && steps <= max_steps && attribs.len() < MAX_OWNED_SUBENTITIES {
+        steps += 1;
+        if !unsafe { is_attrib(sub) } {
+            break;
+        }
+        if !unsafe { is_erased_pre_r13(sub) } {
+            if let Some(Entity::Attrib(attrib)) =
+                unsafe { convert_entity(dwg, text, sub, depth + 1) }
+            {
+                attribs.push(attrib);
+            }
+        }
+        sub = unsafe { libredwg_sys::dwg_next_object(sub) };
+    }
+    attribs
+}
+
+/// Whether a record of a drawing older than R13 is one the file has erased:
+/// the high bit of its type byte, which the library keeps in the object's
+/// `type` (it decodes the record as the type the low bits name). A DXF of the
+/// drawing does not write it. Meaningless from R13 on, where `type` is a
+/// class number.
+///
+/// # Safety
+/// `obj` must be a valid, non-null `Dwg_Object`.
+unsafe fn is_erased_pre_r13(obj: *mut libredwg_sys::Dwg_Object) -> bool {
+    (unsafe { libredwg_sys::dwg_object_get_type(obj) }) > 127
 }
 
 /// # Safety
@@ -1288,8 +1347,11 @@ unsafe fn convert_entity(
             // they are an owned array the library resolves correctly, walked
             // from the INSERT's own Dwg_Object rather than from entity_ptr
             // (the type-specific struct dynapi needs, a different pointer).
+            // Before R13 the file keeps no list: they follow the INSERT.
             let attribs = if unsafe { libredwg_sys::uncad_dwg_is_r13_to_r2000(dwg) } != 0 {
                 unsafe { chained_insert_attribs(dwg, text, entity_ptr, depth) }
+            } else if is_pre_r13(dwg) {
+                unsafe { stream_insert_attribs(dwg, text, obj, depth) }
             } else {
                 unsafe { owned_insert_attribs(dwg, text, obj, depth) }
             };

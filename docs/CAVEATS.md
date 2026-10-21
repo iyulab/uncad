@@ -554,6 +554,17 @@ walkers are used. The blocks with several ATTDEFs in the corpus's R2000 and R13/
 are where the walk matters. The two gaps are reported upstream; `tests/attributes.rs` asks
 the same of a self-written R2000 DXF.
 
+Before R13 a drawing keeps no list of an INSERT's attributes: they are the ATTRIB records
+that follow it in the object stream, up to its SEQEND, and `stream_insert_attribs` reads
+them so. The library puts every entity record of the entity section in the model space's
+list, ATTRIBs included, and also the records the file has erased -- the high bit of the
+type byte, which the library keeps in the object's `type` while decoding the record as the
+type the low bits name. Making a block erases the entities that went into it, so their
+originals stay in the entity section beside the INSERT that now places them. The block
+walk skips both before R13. Every pre-R13 DWG of the test corpus with a DXF twin then
+holds the same number of entities as its twin, at the top level and in each block (nine
+pairs); the R1.4 drawing, which has no twin, loses one erased LINE.
+
 ## Reference IDs are the file's handles, with a fallback for entities that have none
 
 Every entity carries a reference ID (`common.id`) that consumers point at it by. This

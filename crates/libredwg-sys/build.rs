@@ -249,6 +249,9 @@ fn main() {
         // The object's position in the file's object table: the reference
         // ID falls back to it for an entity without a handle.
         .allowlist_function("dwg_object_get_index")
+        // The type byte as the file wrote it: before R13 its high bit marks
+        // an entity the file has erased (see uncad's `is_erased_pre_r13`).
+        .allowlist_function("dwg_object_get_type")
         .allowlist_function("get_first_owned_entity")
         .allowlist_function("get_next_owned_entity")
         .allowlist_function("get_first_owned_subentity")

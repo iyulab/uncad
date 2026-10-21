@@ -226,9 +226,11 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     assert_eq!(short_polylines, 2);
 
     // --- references: no bare zero handle; the only unresolved ones are the
-    // 22 layers of the R1.4 drawing, whose LAYER table LibreDWG does not read;
-    // a null block handle from R13 on is absent, not unresolved ---
-    assert_eq!(s.unresolved.len(), 22, "{:?}", s.unresolved);
+    // 20 layers of the R1.4 drawing, whose LAYER table LibreDWG does not read
+    // (22 while the LINE that drawing has erased was read, in the entity list
+    // and in the model-space record); a null block handle from R13 on is
+    // absent, not unresolved ---
+    assert_eq!(s.unresolved.len(), 20, "{:?}", s.unresolved);
     for (file, payload, layer_table) in &s.unresolved {
         assert!(file.contains("r1.4"), "{file}");
         assert_eq!(payload, "idx:1", "{file}");
@@ -257,8 +259,10 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
         .sum();
     // Every file that reads, DWG and DXF alike; 2010/gh209_1.dxf's entities
     // sit on their layers as in its DWG twin; a pre-R13 DWG's anonymous
-    // blocks are each their own record.
-    assert_eq!(layers, 116_528);
+    // blocks are each their own record; a pre-R13 DWG holds what its DXF twin
+    // holds -- the entities the file has erased, and the ATTRIBs that follow an
+    // INSERT, are not its own (116,528 while they were).
+    assert_eq!(layers, 116_498);
 
     // --- reference IDs: the handle-derived scheme yields no duplicate in any
     // file, and the index fallback is measured, not assumed ---

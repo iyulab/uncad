@@ -30,6 +30,10 @@ Notable changes to this project are recorded here. The format follows
   whose faces close without one, such as a whole torus -- no longer warns that the type is
   unsupported while the drawing's other solids of that type are drawn. It warns
   `solids and meshes not drawn, having no edge to draw: <ids>` instead.
+- A DWG older than R13 no longer holds the entities its file has erased -- among them the
+  originals of entities moved into a block when it was made, which showed up in model space
+  beside the INSERT that places them -- and an INSERT's ATTRIBs are its own `attribs`, not
+  separate top-level entities. Such a drawing now reads with the entities its DXF twin has.
 
 ## [0.13.0] - 2026-10-20
 
