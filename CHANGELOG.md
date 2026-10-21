@@ -13,6 +13,12 @@ Notable changes to this project are recorded here. The format follows
   shown 1600 px across -- is named in a warning that points at `--frame changes`. A picture
   already framed on the changes is not warned about.
 
+### Changed
+
+- `uncad <input> -o <out>.svg --stroke <px>` draws every line that many pixels wide on the
+  screen, whatever the zoom (`vector-effect: non-scaling-stroke`); it was refused for an SVG.
+  For a PNG `--stroke` is still pixels of the image.
+
 ## [0.13.0] - 2026-10-20
 
 ### Added

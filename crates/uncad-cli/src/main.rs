@@ -95,6 +95,10 @@ SVG/PNG options:
                                         pure black drawn white; a PNG is black
                                         wherever the drawing does not touch,
                                         whatever --background says
+  --stroke <px>               every line this many pixels wide: in a PNG,
+                                pixels of the image; in an SVG, pixels on
+                                the screen whatever the zoom (a style rule
+                                with vector-effect: non-scaling-stroke)
 
 PNG options:
   --scale <factor>            pixels per drawing unit (default: 1.0, e.g. 2.0
@@ -105,7 +109,6 @@ PNG options:
                                 (default: 8192 -- the pixels are allocated
                                 before drawing, so the bound keeps a drawing
                                 from asking for gigabytes)
-  --stroke <px>               every line this many pixels wide
   --background <white|transparent>
                               what the drawing does not cover (default: white)
 
@@ -318,7 +321,13 @@ fn run(args: &Args) -> Result<(), String> {
             Reports::default()
         }
         "svg" => {
-            let result = to_svg(&db, svg_options(args)?);
+            let result = to_svg(
+                &db,
+                ToSvgOptions {
+                    screen_stroke: parse_stroke(args)?,
+                    ..svg_options(args)?
+                },
+            );
             write_output(output, result.svg.as_bytes())?;
             Reports {
                 unsupported: result.unsupported_types,
@@ -577,17 +586,19 @@ fn svg_options(args: &Args) -> Result<ToSvgOptions, String> {
     Ok(options)
 }
 
-/// Options that shape the picture, SVG or PNG.
-const IMAGE_OPTIONS: [&str; 6] = [
+/// Options that shape the picture, SVG or PNG. `--stroke` is pixels on the
+/// screen for an SVG and pixels of the image for a PNG.
+const IMAGE_OPTIONS: [&str; 7] = [
     "--space",
     "--no-trim",
     "--window",
     "--padding",
     "--paper",
     "--include-hidden",
+    "--stroke",
 ];
-/// Options in pixels, which only a PNG has.
-const PNG_OPTIONS: [&str; 5] = ["--scale", "--fit", "--max-edge", "--stroke", "--background"];
+/// Options in pixels of the image, which only a PNG has.
+const PNG_OPTIONS: [&str; 4] = ["--scale", "--fit", "--max-edge", "--background"];
 
 /// An option the requested output has no use for is an error, named, before
 /// anything is read: a width that silently does nothing reads as a width
@@ -605,7 +616,7 @@ fn refuse_unused_options(args: &Args) -> Result<(), String> {
         Some("json") => (vec!["--pretty"], "model JSON"),
         Some("svg") => (
             IMAGE_OPTIONS.to_vec(),
-            "an SVG, which has no pixels -- write a .png for sizes, strokes and backgrounds",
+            "an SVG, which has no pixels of its own -- write a .png for sizes and backgrounds",
         ),
         Some("png") => (
             IMAGE_OPTIONS.iter().chain(&PNG_OPTIONS).copied().collect(),
@@ -632,6 +643,19 @@ fn refuse_unused_options(args: &Args) -> Result<(), String> {
     ))
 }
 
+/// `--stroke`, a width in pixels: a finite number greater than 0.
+fn parse_stroke(args: &Args) -> Result<Option<f64>, String> {
+    match &args.stroke {
+        Some(v) => match v.parse::<f64>() {
+            Ok(px) if px > 0.0 && px.is_finite() => Ok(Some(px)),
+            _ => Err(format!(
+                "--stroke must be a finite number greater than 0 (got '{v}')"
+            )),
+        },
+        None => Ok(None),
+    }
+}
+
 fn png_options(args: &Args) -> Result<ToPngOptions, String> {
     let size = match (&args.scale, &args.fit) {
         (Some(_), Some(_)) => return Err("--scale and --fit both set the size; give one".into()),
@@ -643,17 +667,7 @@ fn png_options(args: &Args) -> Result<ToPngOptions, String> {
         Some(v) => parse_pixels(v, "--max-edge")?,
         None => DEFAULT_MAX_EDGE,
     };
-    let stroke_px = match &args.stroke {
-        Some(v) => match v.parse::<f64>() {
-            Ok(px) if px > 0.0 && px.is_finite() => Some(px),
-            _ => {
-                return Err(format!(
-                    "--stroke must be a finite number greater than 0 (got '{v}')"
-                ))
-            }
-        },
-        None => None,
-    };
+    let stroke_px = parse_stroke(args)?;
     let background = match args.background.as_str() {
         "white" => Background::White,
         "transparent" => Background::Transparent,

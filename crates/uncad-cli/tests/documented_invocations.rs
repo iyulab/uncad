@@ -376,12 +376,36 @@ fn padding_widens_the_picture() {
 }
 
 #[test]
+fn an_svg_stroke_is_pixels_on_the_screen() {
+    // An SVG has no pixels of its own: `--stroke` is the width every line is
+    // shown at whatever the zoom, a style rule the viewer applies.
+    let plain = TempFile::new("stroke-plain.svg");
+    let screen = TempFile::new("stroke-screen.svg");
+    assert!(run(&[CORPUS_DXF, "-o", plain.arg()]).status.success());
+    let out = run(&[CORPUS_DXF, "-o", screen.arg(), "--stroke", "1.5"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let screen = String::from_utf8(screen.bytes()).unwrap();
+    assert!(
+        screen.contains("<style>*{vector-effect:non-scaling-stroke;stroke-width:1.5px}</style>"),
+        "{}",
+        &screen[..screen.len().min(400)]
+    );
+    assert!(!String::from_utf8(plain.bytes())
+        .unwrap()
+        .contains("<style>"));
+}
+
+#[test]
 fn an_option_the_output_has_no_use_for_is_refused_by_name() {
     // A width in pixels on an SVG, a picture option on model JSON or on the
     // summary: each would do nothing, and silently doing nothing reads as
     // done. Nothing is written.
     for (output, args, named) in [
-        ("x.svg", &["--stroke", "2"][..], "--stroke"),
+        ("x.svg", &["--scale", "2"][..], "--scale"),
         (
             "x.svg",
             &["--fit", "300", "--background", "white"],
