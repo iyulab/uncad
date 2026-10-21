@@ -1252,6 +1252,35 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
             colors.join(", ")
         ));
     }
+    // A mark a reader cannot find: its cloud under MIN_MARK_PX in the
+    // picture written -- a PNG's own pixels, or an SVG seen NOMINAL_PX
+    // across, since an SVG has no size of its own.
+    let picture_px = if png {
+        let longer = overlay.view_box.width().max(overlay.view_box.height());
+        longer * px_per_unit(&overlay, fit)?
+    } else {
+        NOMINAL_PX
+    };
+    let small: Vec<String> = overlay
+        .marked
+        .iter()
+        .filter(|m| m.share * picture_px < MIN_MARK_PX)
+        .map(|m| m.entry.to_string())
+        .collect();
+    if !small.is_empty() && options.frame != iron_render_cad::OverlayFrame::Changes {
+        let size = if png {
+            format!("in this {} px picture", picture_px.round())
+        } else {
+            format!("when the picture is shown {NOMINAL_PX} px across")
+        };
+        warnings.push(format!(
+            "{} of {} marks are under {MIN_MARK_PX} px {size} and may not be found by eye \
+             (entries {}) -- frame the changes with --frame changes (MCP: frame)",
+            small.len(),
+            overlay.marked.len(),
+            small.join(", ")
+        ));
+    }
     if !overlay.left_out.is_empty() {
         let names: Vec<String> = overlay
             .left_out
@@ -1274,6 +1303,14 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
     }
     answer(&overlay, warnings)
 }
+
+/// The size, in pixels, under which a mark's cloud is reported as hard to
+/// find by eye.
+const MIN_MARK_PX: f64 = 8.0;
+
+/// How many pixels across an SVG redline is taken to be shown at when
+/// judging whether a mark can be found: a picture on a screen.
+const NOMINAL_PX: f64 = 1600.0;
 
 /// How many times redline draws the overlay again to settle a stroke given
 /// in pixels. The window grows by twenty strokes at most (a cloud's margin

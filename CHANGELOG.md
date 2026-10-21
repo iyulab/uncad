@@ -6,6 +6,13 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `uncad redline` (and its MCP verb) warns when a mark is too small to find by eye: a mark
+  whose cloud is under 8 px in the picture written -- a PNG's own pixels, or an SVG taken as
+  shown 1600 px across -- is named in a warning that points at `--frame changes`. A picture
+  already framed on the changes is not warned about.
+
 ## [0.13.0] - 2026-10-20
 
 ### Added

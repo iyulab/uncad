@@ -1794,6 +1794,66 @@ fn a_redline_stroke_is_in_pixels_of_the_picture() {
     }
 }
 
+/// A small change in a large drawing: in a 1600 px picture of the whole
+/// drawing its mark is a few pixels, and the redline says so and names the
+/// way out; framed on the changes it is not small, and nothing is said.
+#[test]
+fn a_redline_says_when_a_mark_is_too_small_to_find() {
+    let dir = scratch("redline-small");
+    let input = corpus("2018/Dynblocks.dwg");
+    let edited = set_step(
+        &dir,
+        std::path::Path::new(&input),
+        49584,
+        "radius",
+        &json!(2.5),
+        "edited",
+    );
+    let small_warning = |frame: &str| -> (Value, Option<String>) {
+        let picture = dir.join(format!("{frame}.png"));
+        let out = run(&[
+            "redline",
+            &input,
+            arg(&edited),
+            "-o",
+            arg(&picture),
+            "--fit",
+            "1600",
+            "--frame",
+            frame,
+        ]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let report: Value = serde_json::from_slice(&out.stdout).unwrap();
+        let warning = String::from_utf8(out.stderr)
+            .unwrap()
+            .lines()
+            .find(|l| l.contains("marks are under"))
+            .map(str::to_string);
+        (report, warning)
+    };
+
+    let (whole, warning) = small_warning("drawing");
+    let share = whole["marked"][0]["share"].as_f64().unwrap();
+    assert!(share * 1600.0 < 8.0, "{whole}");
+    let warning = warning.expect("a warning for the small mark");
+    assert!(
+        warning.contains("1 of 1 marks are under 8 px in this 1600 px picture")
+            && warning.contains("--frame changes"),
+        "{warning}"
+    );
+
+    let (framed, warning) = small_warning("changes");
+    assert!(
+        framed["marked"][0]["share"].as_f64().unwrap() * 1600.0 >= 8.0,
+        "{framed}"
+    );
+    assert_eq!(warning, None);
+}
+
 /// An SVG has no pixels: a stroke in pixels is refused for one, before
 /// anything is read or written.
 #[test]
