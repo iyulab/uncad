@@ -24,6 +24,13 @@ Notable changes to this project are recorded here. The format follows
   every list result; the server no longer states them itself. The answer is the same
   (`ttlMs` 0, `cacheScope` private).
 
+### Fixed
+
+- A picture of a drawing with a 3DSOLID, REGION or mesh that has no edge to draw -- a body
+  whose faces close without one, such as a whole torus -- no longer warns that the type is
+  unsupported while the drawing's other solids of that type are drawn. It warns
+  `solids and meshes not drawn, having no edge to draw: <ids>` instead.
+
 ## [0.13.0] - 2026-10-20
 
 ### Added

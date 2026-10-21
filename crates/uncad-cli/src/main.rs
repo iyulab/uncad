@@ -333,6 +333,7 @@ fn run(args: &Args) -> Result<(), String> {
                 unsupported: result.unsupported_types,
                 empty_blocks: result.empty_blocks,
                 undefined_arcs: result.undefined_arcs,
+                edgeless: result.edgeless,
                 undefined_leaders: result.undefined_leaders,
                 unsized_arrowheads: result.unsized_arrowheads,
                 left_out: result.crop.left_out,
@@ -345,6 +346,7 @@ fn run(args: &Args) -> Result<(), String> {
                 unsupported: result.unsupported_types,
                 empty_blocks: result.empty_blocks,
                 undefined_arcs: result.undefined_arcs,
+                edgeless: result.edgeless,
                 undefined_leaders: result.undefined_leaders,
                 unsized_arrowheads: result.unsized_arrowheads,
                 left_out: result.crop.left_out,
@@ -360,6 +362,7 @@ fn run(args: &Args) -> Result<(), String> {
         unsupported,
         empty_blocks,
         undefined_arcs,
+        edgeless,
         undefined_leaders,
         unsized_arrowheads,
         left_out,
@@ -385,6 +388,13 @@ fn run(args: &Args) -> Result<(), String> {
             .collect();
         eprintln!(
             "warning: arcs not drawn, their start and end angles being equal: {}",
+            ids.join(", ")
+        );
+    }
+    if !edgeless.is_empty() {
+        let ids: Vec<String> = edgeless.iter().map(|id| id.value().to_string()).collect();
+        eprintln!(
+            "warning: solids and meshes not drawn, having no edge to draw: {}",
             ids.join(", ")
         );
     }
@@ -882,6 +892,7 @@ struct Reports {
     unsupported: Vec<String>,
     empty_blocks: Vec<String>,
     undefined_arcs: Vec<uncad::model::EntityId>,
+    edgeless: Vec<uncad::model::EntityId>,
     undefined_leaders: Vec<uncad::model::EntityId>,
     unsized_arrowheads: Vec<uncad::model::EntityId>,
     left_out: Vec<iron_render_cad::LeftOut>,

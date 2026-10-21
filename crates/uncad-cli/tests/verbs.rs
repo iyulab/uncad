@@ -2326,3 +2326,26 @@ fn a_verbs_help_explains_every_argument_its_tool_schema_does() {
         }
     }
 }
+
+/// A solid read in full that has no edge -- the one whole torus among the 58
+/// solids of `2007/ATMOS-DC22S.dwg` -- is named by its id as having nothing to
+/// draw; its type is not called unsupported, since the other 57 are drawn.
+#[test]
+fn a_picture_names_a_solid_with_no_edge_and_does_not_call_its_type_unsupported() {
+    let dir = scratch("edgeless");
+    let input = corpus("2007/ATMOS-DC22S.dwg");
+    let picture = dir.join("atmos.svg");
+    let out = run(&[&input, "-o", arg(&picture)]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(!stderr.contains("unsupported entity types"), "{stderr}");
+    let line = stderr
+        .lines()
+        .find(|l| l.contains("having no edge to draw"))
+        .unwrap_or_else(|| panic!("{stderr}"));
+    assert!(line.ends_with(": 1106"), "{line}");
+}
