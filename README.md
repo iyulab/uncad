@@ -59,7 +59,9 @@ A render is drawn on a white page by default, where pure white (ACI 7) is drawn
 black. `--paper dark` draws it on a black page instead: pure white stays white,
 pure black is drawn white, and every other color is the file's -- the light ones
 a white page washes out included. Lines are about 1/6000 of the picture's
-diagonal unless `--stroke <px>` sets their width in pixels (PNG only).
+diagonal unless `--stroke <px>` sets their width in pixels: pixels of the image
+in a PNG, pixels on the screen at any zoom in an SVG (a style rule with
+`vector-effect: non-scaling-stroke`).
 
 Questions about a drawing, each answered as one line of JSON -- the result
 structure of [`iron-scout-cad`](https://github.com/iyulab/iron-scout-cad) or
@@ -106,8 +108,8 @@ cloud and no geometry. When the drawing itself uses colors close to the one the
 changes are drawn in, the answer lists them and a warning suggests another. It
 writes an SVG or PNG file -- never over an existing one -- and answers with what
 it marked and what it could not show, and why. `--paper` and `--stroke` mean what
-they mean for a render; a stroke is in pixels of the picture, so it takes a PNG --
-an SVG, which has none, refuses it:
+they mean for a render: a stroke is pixels of the image in a PNG, and pixels on
+the screen in an SVG:
 
 ```bash
 uncad redline part.dwg step2.json -o proposal.svg
@@ -115,6 +117,7 @@ uncad redline part.dwg step2.json -o proposal.png --fit 2000 --omit within  # 20
 uncad redline plan.dwg step2.json -o detail.png --fit 1200 --frame changes  # just the changes, and around them
 uncad redline plan.dwg step2.json -o proposal.svg --proposal-color '#0057b8'  # a drawing already in red
 uncad redline plan.dwg step2.json -o review.png --fit 1200 --stroke 3 --paper dark  # 3 px lines, black page
+uncad redline plan.dwg step2.json -o review.svg --stroke 1 --paper dark  # 1 px on screen at any zoom
 ```
 
 `uncad mcp` serves `summarize`, `hit-test`, `relate`, `diff`, `set` and `redline` as [Model Context

@@ -427,9 +427,7 @@ pub const VERBS: &[Verb] = &[
                 kind: Kind::Positive,
                 required: false,
                 positional: false,
-                description: "For a PNG: draw every line this many pixels wide. Without it the \
-                    lines are about 1/6000 of the picture's diagonal, under a pixel at most \
-                    sizes. An SVG has no pixels, so it does not take this.",
+                description: "Draw every line this many pixels wide: in a PNG, pixels of the                     image; in an SVG, pixels on the screen whatever the zoom (a style rule                     with vector-effect: non-scaling-stroke). Without it the lines are about                     1/6000 of the picture's diagonal, under a pixel at most sizes.",
             },
             Param {
                 name: "paper",
@@ -1193,13 +1191,6 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         }
     };
     let stroke_px = args.get("stroke").and_then(Value::as_f64);
-    // Checked before anything is read, so a refused call costs nothing.
-    if stroke_px.is_some() && !png {
-        return Err(format!(
-            "--stroke is a width in pixels, and an SVG has none: write a .png to set it, or \
-             leave it out for '{output}' (MCP: stroke)"
-        ));
-    }
     if std::path::Path::new(&output).exists() {
         return Err(format!(
             "'{output}' already exists -- redline never writes over a file; give a new path"
@@ -1220,8 +1211,13 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
     if args.get("paper").and_then(Value::as_str) == Some("dark") {
         options.svg.paper = iron_render_cad::Paper::Dark;
     }
+    // An SVG has no pixels of its own: its stroke is pixels on the screen,
+    // whatever the zoom -- a style rule a viewer applies.
+    if !png {
+        options.svg.screen_stroke = stroke_px;
+    }
     let mut overlay = iron_render_cad::overlay_to_svg(&before, &after, &changes, options);
-    if let Some(px) = stroke_px {
+    if let Some(px) = stroke_px.filter(|_| png) {
         // The overlay is drawn at a stroke width in drawing units, and the
         // picture's pixels per unit follow from the window it frames -- which
         // grows with the stroke when a revision cloud reaches past the

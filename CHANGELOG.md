@@ -17,7 +17,8 @@ Notable changes to this project are recorded here. The format follows
 
 - `uncad <input> -o <out>.svg --stroke <px>` draws every line that many pixels wide on the
   screen, whatever the zoom (`vector-effect: non-scaling-stroke`); it was refused for an SVG.
-  For a PNG `--stroke` is still pixels of the image.
+  For a PNG `--stroke` is still pixels of the image. `uncad redline -o <out>.svg --stroke <px>`
+  (and the MCP `redline` verb's `stroke`) means the same.
 
 - `uncad mcp` builds on rmcp 3.6.0, which fills the cache hints a 2026-07-28 client needs on
   every list result; the server no longer states them itself. The answer is the same

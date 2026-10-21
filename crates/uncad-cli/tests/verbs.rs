@@ -1854,12 +1854,13 @@ fn a_redline_says_when_a_mark_is_too_small_to_find() {
     assert_eq!(warning, None);
 }
 
-/// An SVG has no pixels: a stroke in pixels is refused for one, before
+/// An SVG has no pixels of its own: its stroke is pixels on the screen, a
+/// style rule; a width that is not a positive number is refused, before
 /// anything is read or written.
 #[test]
-fn a_redline_stroke_needs_a_png() {
+fn a_redline_stroke_on_an_svg_is_pixels_on_the_screen() {
     let dir = scratch("redline-stroke-svg");
-    let picture = dir.join("never.svg");
+    let picture = dir.join("screen.svg");
     let out = run(&[
         "redline",
         CORPUS_DWG,
@@ -1869,10 +1870,17 @@ fn a_redline_stroke_needs_a_png() {
         "--stroke",
         "3",
     ]);
-    assert!(!out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("an SVG has none"), "{stderr}");
-    assert!(!picture.exists());
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let svg = std::fs::read_to_string(&picture).unwrap();
+    assert!(
+        svg.contains("<style>*{vector-effect:non-scaling-stroke;stroke-width:3px}</style>"),
+        "{}",
+        &svg[..svg.len().min(400)]
+    );
     for bad in ["0", "-1", "nan"] {
         let picture = dir.join("never.png");
         let out = run(&[
