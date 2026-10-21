@@ -37,5 +37,5 @@ serde = "1.0.229"
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 # `uncad mcp`: the verbs as MCP tools over stdio, on a single-threaded
 # runtime (see mcp.rs).
-rmcp = { version = "3.4.1", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "3.6.0", default-features = false, features = ["server", "transport-io"] }
 tokio = { version = "1", features = ["rt"] }

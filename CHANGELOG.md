@@ -19,6 +19,10 @@ Notable changes to this project are recorded here. The format follows
   screen, whatever the zoom (`vector-effect: non-scaling-stroke`); it was refused for an SVG.
   For a PNG `--stroke` is still pixels of the image.
 
+- `uncad mcp` builds on rmcp 3.6.0, which fills the cache hints a 2026-07-28 client needs on
+  every list result; the server no longer states them itself. The answer is the same
+  (`ttlMs` 0, `cacheScope` private).
+
 ## [0.13.0] - 2026-10-20
 
 ### Added
