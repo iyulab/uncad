@@ -427,7 +427,7 @@ pub const VERBS: &[Verb] = &[
                 kind: Kind::Positive,
                 required: false,
                 positional: false,
-                description: "Draw every line this many pixels wide: in a PNG, pixels of the                     image; in an SVG, pixels on the screen whatever the zoom (a style rule                     with vector-effect: non-scaling-stroke). Without it the lines are about                     1/6000 of the picture's diagonal, under a pixel at most sizes.",
+                description: "Draw every line this many pixels wide: in a PNG, pixels of the image; in an SVG, pixels on the screen whatever the zoom (a style rule with vector-effect: non-scaling-stroke). Without it the lines are about 1/6000 of the picture's diagonal, under a pixel at most sizes.",
             },
             Param {
                 name: "paper",
