@@ -101,11 +101,13 @@ uncad step2.json -o step2.svg                                 # what the edited 
 ```
 
 `redline` draws that difference on top of the first drawing: the first drawing
-exactly as it renders alone, and over it, in red (or `--proposal-color`), what
-each changed entity became, what was removed (dashed), and a revision cloud
-around every change. A change whose counterpart is uncertain gets a dashed
-cloud and no geometry. When the drawing itself uses colors close to the one the
-changes are drawn in, the answer lists them and a warning suggests another. It
+exactly as it renders alone, and over it, in one color, what each changed entity
+became, what was removed (dashed), and a revision cloud around every change. A
+change whose counterpart is uncertain gets a dashed cloud and no geometry. The
+color is the first of red, purple, blue, green and orange that the drawing
+itself does not come close to, and the answer says which (`proposal_color`);
+`--proposal-color` gives one instead, and when the drawing uses colors close to
+the one given, the answer lists them and a warning suggests another. It
 writes an SVG or PNG file -- never over an existing one -- and answers with what
 it marked and what it could not show, and why. `--paper` and `--stroke` mean what
 they mean for a render: a stroke is pixels of the image in a PNG, and pixels on
@@ -115,7 +117,7 @@ the screen in an SVG:
 uncad redline part.dwg step2.json -o proposal.svg
 uncad redline part.dwg step2.json -o proposal.png --fit 2000 --omit within  # 2000 px, beyond tolerance only
 uncad redline plan.dwg step2.json -o detail.png --fit 1200 --frame changes  # just the changes, and around them
-uncad redline plan.dwg step2.json -o proposal.svg --proposal-color '#0057b8'  # a drawing already in red
+uncad redline plan.dwg step2.json -o proposal.svg --proposal-color '#0057b8'  # a color of your own
 uncad redline plan.dwg step2.json -o review.png --fit 1200 --stroke 3 --paper dark  # 3 px lines, black page
 uncad redline plan.dwg step2.json -o review.svg --stroke 1 --paper dark  # 1 px on screen at any zoom
 ```

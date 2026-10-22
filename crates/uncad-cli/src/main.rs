@@ -60,7 +60,8 @@ Usage:
                 [--omit <within,unstated>]
                                     draw the difference on top of <before>:
                                       the original unchanged, the changes in
-                                      red (or --proposal-color) with a
+                                      a color that stands out from it (or
+                                      --proposal-color) with a
                                       revision cloud (never over an
                                       existing file); answer with what
                                       was marked and what could not be

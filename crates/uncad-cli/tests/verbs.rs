@@ -1601,13 +1601,22 @@ fn a_redline_on_a_drawing_already_in_red_says_the_changes_may_not_stand_out() {
         arg(&edited),
     ]);
     let picture = dir.join("redline.svg");
-    let out = run(&["redline", g1, arg(&edited), "-o", arg(&picture)]);
+    let out = run(&[
+        "redline",
+        g1,
+        arg(&edited),
+        "-o",
+        arg(&picture),
+        "--proposal-color",
+        "#e4002b",
+    ]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
     let report: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    assert_eq!(report["proposal_color"], "#e4002b");
     let conflicts = report["proposal_color_conflicts"].as_array().unwrap();
     assert_eq!(conflicts.len(), 1, "{report}");
     assert_eq!(conflicts[0]["color"], "#ff0000");
@@ -1616,6 +1625,72 @@ fn a_redline_on_a_drawing_already_in_red_says_the_changes_may_not_stand_out() {
     assert!(stderr.contains("close to #e4002b"), "{stderr}");
     assert!(stderr.contains("#ff0000 (4 uses)"), "{stderr}");
     assert!(stderr.contains("--proposal-color <#rrggbb>"), "{stderr}");
+}
+
+/// Left to choose, redline moves past the red G1 already uses, to the next
+/// candidate, and says nothing about a clash.
+#[test]
+fn a_redline_chooses_a_color_the_drawing_does_not_use() {
+    let g1 = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../uncad/tests/golden/g1.expected.json"
+    );
+    let dir = scratch("redline-auto");
+    let edited = dir.join("edited.json");
+    answer(&[
+        "set",
+        g1,
+        "--id",
+        "289",
+        "--path",
+        "radius",
+        "--value",
+        "4",
+        "-o",
+        arg(&edited),
+    ]);
+    let picture = dir.join("redline.svg");
+    let out = run(&["redline", g1, arg(&edited), "-o", arg(&picture)]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let report: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let [r, g, b] = iron_render_cad::PROPOSAL_CANDIDATES[1];
+    let purple = format!("#{r:02x}{g:02x}{b:02x}");
+    assert_eq!(report["proposal_color"], purple.as_str(), "{report}");
+    assert_eq!(report["proposal_color_conflicts"], json!([]), "{report}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("close to"), "{stderr}");
+    let svg = std::fs::read_to_string(&picture).unwrap();
+    assert!(
+        svg.contains(&format!("#changes *{{stroke:{purple}")),
+        "{svg}"
+    );
+
+    // The tool's description names every candidate, in order.
+    let mut mcp = Mcp::start();
+    let list = mcp.request("tools/list", json!({}));
+    let redline = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "redline")
+        .unwrap()
+        .clone();
+    let text = redline["inputSchema"]["properties"]["proposal_color"]["description"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut at = 0;
+    for [r, g, b] in iron_render_cad::PROPOSAL_CANDIDATES {
+        let hex = format!("#{r:02x}{g:02x}{b:02x}");
+        let found = text[at..]
+            .find(&hex)
+            .unwrap_or_else(|| panic!("{hex}: {text}"));
+        at += found + hex.len();
+    }
 }
 
 /// The same G1 edit drawn in blue: the changes are in the color asked for,
@@ -2189,6 +2264,7 @@ const ANSWER_FIELDS: [(&str, &[&str]); 5] = [
             "view_box",
             "origin",
             "stroke_width",
+            "proposal_color",
             "proposal_color_conflicts",
             "left_out",
         ],

@@ -378,7 +378,7 @@ pub const VERBS: &[Verb] = &[
     Verb {
         name: "redline",
         description: "Draws the difference between two drawing states on top of the first: the \
-            first drawing exactly as it renders alone, and over it, in red (or the color given), what each \
+            first drawing exactly as it renders alone, and over it, in one color, what each \
             changed entity became, what was removed (dashed), and a revision cloud around every change. \
             A change whose counterpart is uncertain gets a dashed cloud and no geometry. Writes \
             an SVG or PNG file -- never over an existing one -- and answers with what it marked \
@@ -386,8 +386,8 @@ pub const VERBS: &[Verb] = &[
             nothing drawn), each with the change's index in the change set `diff` gives for the \
             same arguments; the world rectangle shown and the point its coordinates are relative \
             to (`view_box`, `origin`) and the stroke width in drawing units (`stroke_width`), \
-            for marks of your own; original colors too close to the proposal color \
-            (`proposal_color_conflicts`); and entities the picture left out as outliers \
+            for marks of your own; the color the changes are drawn in (`proposal_color`) and \
+            original colors too close to it (`proposal_color_conflicts`); and entities the picture left out as outliers \
             (`left_out`).",
         params: &[
             Param {
@@ -452,9 +452,12 @@ pub const VERBS: &[Verb] = &[
                 kind: Kind::Color,
                 required: false,
                 positional: false,
-                description: "The color the changes are drawn in (default #e4002b, a red). \
-                    Give another when the drawing itself uses colors close to it -- the answer \
-                    lists those as proposal_color_conflicts.",
+                description: "The color the changes are drawn in. Without it, redline takes \
+                    the first of red #e4002b, purple #c000ff, blue #0060ff, green #00a040 and \
+                    orange #ff8000 that no color of the drawing comes close to (or, when every \
+                    one does, the one the drawing uses least). Given, the changes are drawn in \
+                    it whatever the drawing uses, and the answer lists the colors close to it \
+                    as proposal_color_conflicts.",
             },
             MATCHING,
             LENGTH_TOLERANCE,
@@ -1206,7 +1209,8 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         options.frame = iron_render_cad::OverlayFrame::Changes;
     }
     if let Some(given) = args.get("proposal_color").and_then(Value::as_str) {
-        options.proposal_color = color(given).expect("checked by Verb::call");
+        options.proposal_color =
+            iron_render_cad::ProposalColor::Given(color(given).expect("checked by Verb::call"));
     }
     if args.get("paper").and_then(Value::as_str) == Some("dark") {
         options.svg.paper = iron_render_cad::Paper::Dark;
@@ -1239,12 +1243,20 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
             .iter()
             .map(|c| format!("{} ({} uses)", c.color, c.uses))
             .collect();
-        let [r, g, b] = options.proposal_color;
+        let advice = match options.proposal_color {
+            iron_render_cad::ProposalColor::Given(_) => {
+                "draw the changes in another color with --proposal-color <#rrggbb> \
+                 (MCP: proposal_color)"
+            }
+            _ => {
+                "every color redline chooses from clashes with the drawing and this one \
+                 clashes least -- give one with --proposal-color <#rrggbb> (MCP: proposal_color)"
+            }
+        };
         warnings.push(format!(
-            "the original is drawn in colors close to #{r:02x}{g:02x}{b:02x}, the color the \
-             changes are drawn in ({}): a change may not stand out from the lines around it \
-             -- draw the changes in another color with --proposal-color <#rrggbb> \
-             (MCP: proposal_color)",
+            "the original is drawn in colors close to {}, the color the changes are drawn in \
+             ({}): a change may not stand out from the lines around it -- {advice}",
+            overlay.proposal_color,
             colors.join(", ")
         ));
     }

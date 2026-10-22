@@ -24,6 +24,12 @@ Notable changes to this project are recorded here. The format follows
   For a PNG `--stroke` is still pixels of the image. `uncad redline -o <out>.svg --stroke <px>`
   (and the MCP `redline` verb's `stroke`) means the same.
 
+- `uncad redline` without `--proposal-color` (and the MCP verb without `proposal_color`) no
+  longer always draws the changes in red: it takes the first of red, purple, blue, green and
+  orange that no color of the drawing comes close to -- the red as before when nothing is --
+  and, when every one clashes, the one the drawing uses least, with a warning. The answer
+  says which in the new `proposal_color` (`#rrggbb`). A color given is drawn as before.
+
 - `uncad mcp` builds on rmcp 3.6.0, which fills the cache hints a 2026-07-28 client needs on
   every list result; the server no longer states them itself. The answer is the same
   (`ttlMs` 0, `cacheScope` private).
