@@ -572,9 +572,9 @@ dependencies = [
 
 [[package]]
 name = "iron-diff-cad"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c906f9cfd93b3d554e1eef64c69e2d1782417b13958b764736c929289b55bb10"
+checksum = "9e3cf1ef1dee082ed9fe5b01ce32235a60e97aeedb96698a25a4285b4234fe2e"
 dependencies = [
  "serde",
  "serde_json",
@@ -594,9 +594,9 @@ dependencies = [
 
 [[package]]
 name = "iron-pack-cad"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22c94595cda4f0208473e293fb77d740c8fca086e435ef0bb5ddb72740776c2f"
+checksum = "0f80023b0f4a6351fbb15869222fa84717a1683d0c7b5814bb250d2758ecd398"
 dependencies = [
  "iron-render-cad",
  "png",
@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "iron-render-cad"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdffc06bd9e2cbc697096ace0281aaf04adb237d1b31fd26c7b3890462909f32"
+checksum = "72df82272e71b83028feeae6bac487381c59908647306b924154c0fcb34553d0"
 dependencies = [
  "iron-diff-cad",
  "resvg",
@@ -620,9 +620,9 @@ dependencies = [
 
 [[package]]
 name = "iron-scout-cad"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c502b5edeee84d9b541e8e411a69a7b5c3043b75b2eeb4ab9d7b41be14b588f"
+checksum = "297bb4f0ecacee089e726eae0c204b3fa6020fad755b57d728952f5d4d7a3cd7"
 dependencies = [
  "serde",
  "uncad-model",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "libredwg-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "uncad"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "acadrust",
  "iron-render-cad",
@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "uncad-cli"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "iron-diff-cad",
  "iron-hand-cad",
@@ -1434,9 +1434,9 @@ dependencies = [
 
 [[package]]
 name = "undxf"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22b59b75114b7591fdb52ece0873956ecbcdccfcc4475f7aedbc9f2dd16649b8"
+checksum = "716efd1ecc4669fcc0506a9b588c3ad38ca52e6903c098ff3399c02a74d427ac"
 dependencies = [
  "encoding_rs",
  "serde",

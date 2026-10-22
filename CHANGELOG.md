@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-22
+
 ### Added
 
 - `uncad redline` (and its MCP verb) warns when a mark is too small to find by eye: a mark
@@ -33,6 +35,8 @@ Notable changes to this project are recorded here. The format follows
 - `uncad mcp` builds on rmcp 3.6.0, which fills the cache hints a 2026-07-28 client needs on
   every list result; the server no longer states them itself. The answer is the same
   (`ttlMs` 0, `cacheScope` private).
+
+- Built on `iron-diff-cad` 0.9.1, `iron-pack-cad` 0.10.0, `iron-render-cad` 0.11.0, `iron-scout-cad` 0.12.0 and `undxf` 0.8.1.
 
 ### Fixed
 
