@@ -13,6 +13,10 @@ Notable changes to this project are recorded here. The format follows
   shown 1600 px across -- is named in a warning that points at `--frame changes`. A picture
   already framed on the changes is not warned about.
 
+- `uncad summarize` (and its MCP verb) says where each text it lists starts and in which space:
+  `start_point` (world coordinates) and `space` on every attribute value, on both sides of every
+  label-value pair and on each unplaced text. A text on a tilted plane has no `start_point`.
+
 ### Changed
 
 - `uncad <input> -o <out>.svg --stroke <px>` draws every line that many pixels wide on the
