@@ -364,6 +364,20 @@ pub enum StoredWidth {
     Wide,
 }
 
+/// Copies `len` UTF-16 units starting at `ptr`. Strings inside packed
+/// records (extended data) sit at any alignment, so every unit is read
+/// unaligned rather than through a `&[u16]`.
+///
+/// # Safety
+/// `ptr` must be non-null with `len` 16-bit units readable from it for the
+/// duration of the call.
+pub unsafe fn read_wide_units(ptr: *const u16, len: usize) -> Vec<u16> {
+    // SAFETY: each unit is within the `len` the caller vouches for.
+    (0..len)
+        .map(|i| unsafe { ptr.add(i).read_unaligned() })
+        .collect()
+}
+
 /// Copies an unconverted string out of the parsed `Dwg_Data`, in the width
 /// the caller says it is stored in.
 ///
@@ -737,4 +751,18 @@ pub fn get_array_field<C: DwgRaw + TryInto<usize>, T: DwgRaw>(
     // dwg.h), and the memory stays valid until dwg_free -- we copy out
     // before returning, so no lifetime is smuggled past this call.
     unsafe { std::slice::from_raw_parts(ptr, count) }.to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_wide_units;
+
+    #[test]
+    fn wide_units_are_read_at_an_odd_address() {
+        // "AB" as UTF-16LE one byte into the buffer, so the units are not
+        // 2-aligned -- the layout of a string in a packed extended-data record.
+        let bytes = [0u8, b'A', 0, b'B', 0];
+        let units = unsafe { read_wide_units(bytes.as_ptr().add(1).cast::<u16>(), 2) };
+        assert_eq!(String::from_utf16_lossy(&units), "AB");
+    }
 }

@@ -2078,11 +2078,12 @@ unsafe fn style_overrides(
                 1 => OverrideValue::Integer(o.integer),
                 2 if o.text.is_null() => OverrideValue::Text(String::new()),
                 2 if o.text_is_wide != 0 => {
-                    // SAFETY: text_len UTF-16 units at text, per the shim.
+                    // SAFETY: text_len UTF-16 units at text, per the shim --
+                    // at whatever alignment the packed record left them.
                     let units = unsafe {
-                        std::slice::from_raw_parts(o.text.cast::<u16>(), o.text_len as usize)
+                        crate::dynapi::read_wide_units(o.text.cast::<u16>(), o.text_len as usize)
                     };
-                    OverrideValue::Text(String::from_utf16_lossy(units))
+                    OverrideValue::Text(String::from_utf16_lossy(&units))
                 }
                 2 => {
                     // SAFETY: text_len bytes at text, per the shim.

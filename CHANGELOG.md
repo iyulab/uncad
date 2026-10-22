@@ -44,6 +44,10 @@ Notable changes to this project are recorded here. The format follows
   originals of entities moved into a block when it was made, which showed up in model space
   beside the INSERT that places them -- and an INSERT's ATTRIBs are its own `attribs`, not
   separate top-level entities. Such a drawing now reads with the entities its DXF twin has.
+- A DWG (R2007 or later) whose entity sets a dimension-style text variable in its own extended
+  data no longer aborts the read: the UTF-16 value sits in a packed record at an odd address
+  and was viewed as an aligned slice, which a debug build stopped on and a release build left
+  undefined. It is now copied unit by unit.
 
 ## [0.13.0] - 2026-10-20
 
