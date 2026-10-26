@@ -8161,8 +8161,13 @@ dwg_set_dataflags (Dwg_Object *obj)
   _obj->dataflags = 0xff;                                                     \
   if (_obj->elevation != 0.0)                                                 \
     _obj->dataflags &= ~1;                                                    \
+  /* a non-left alignment places the text by its alignment point, even  \
+     when it equals the insertion point (as DXF writers that do not       \
+     compute the left baseline point write it): left out, it reads back   \
+     as 0,0 and the text jumps to the origin */                           \
   if (_obj->alignment_pt.x != _obj->ins_pt.x                                  \
-      || _obj->alignment_pt.y != _obj->ins_pt.y)                              \
+      || _obj->alignment_pt.y != _obj->ins_pt.y                               \
+      || _obj->horiz_alignment != 0 || _obj->vert_alignment != 0)             \
     _obj->dataflags &= ~2;                                                    \
   if (_obj->oblique_angle != 0.0)                                             \
     _obj->dataflags &= ~4;                                                    \
@@ -8366,6 +8371,8 @@ downconvert_TABLESTYLE (Dwg_Object *restrict obj)
         {
           for (unsigned i = 0; i < _obj->rowstyles[2].num_borders; i++)
             {
+              if (i >= _obj->ovr.cellstyle.num_borders)
+                break;
               _obj->rowstyles[2].borders[i].linewt
                   = _obj->ovr.cellstyle.borders[i].linewt;
               _obj->rowstyles[2].borders[i].visible
@@ -8525,6 +8532,7 @@ downconvert_MLEADERSTYLE (Dwg_Object *restrict obj)
     oo->eed = (Dwg_Eed *)calloc (2, sizeof (Dwg_Eed));
   dwg_add_handle (&oo->eed[idx].handle, 5, eedhdl, NULL);
   oo->eed[idx].size = 3;
+  oo->eed[idx].raw = NULL;
 #define EED_SZ(n) MAX(n, sizeof(Dwg_Eed_Data))
   oo->eed[idx].data = (Dwg_Eed_Data *)calloc (EED_SZ (3), 1);
   oo->eed[idx].data->code = 70;

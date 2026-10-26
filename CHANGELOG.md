@@ -6,6 +6,23 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The vendored LibreDWG is updated to upstream commit `a8ccb1f3` (2026-10-22; eleven commits
+  after `f860b0fb`). Of these, the DWG decoder now accepts a compressed section larger than
+  `num_sections * max_decomp_size`, which upstream reports dropping the whole ACIS data section
+  of large R2013+ drawings. The remaining commits are in the DXF reader (a HATCH boundary line
+  ending at Y = 0; view-style colors from any DXF version) and in the writers (the alignment
+  point of justified TEXT, LAYOUT handles, BLOCK_HEADERs after a block).
+
+### Security
+
+- The same update carries upstream's bounds and ownership fixes outside the decoder: the SAB
+  header string reads, the TABLESTYLE border copy, and an invalid free of uninitialized extended
+  data in the MLEADERSTYLE downconversion. The ACIS scan bound is moot in this copy: the local
+  patch to `acds.spec` replaces that scan with its own bounded walk, and the patch is rebased
+  onto the new upstream text.
+
 ## [0.14.0] - 2026-10-22
 
 ### Added

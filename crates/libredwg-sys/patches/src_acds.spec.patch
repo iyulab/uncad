@@ -1,6 +1,6 @@
 --- a/src/acds.spec
 +++ b/src/acds.spec
-@@ -330,88 +330,85 @@
+@@ -330,89 +330,85 @@
  
  #ifdef IS_DECODER
    DECODER {
@@ -31,8 +31,9 @@
 -    const char end[] = "\016\003End\016\002of\016\003ASM\r\004data";
 -    LOG_TRACE ("\nSearch for ACIS BinaryFile data:\n");
 -    num_acis_sab_data = 0;
--    while ((s = (char *)memmem (&dat->chain[i], dat->size - i, start,
--                                strlen (start))))
+-    while (i < dat->size
+-           && (s = (char *)memmem (&dat->chain[i], dat->size - i, start,
+-                                   strlen (start))))
 +    const size_t seg_hdr_size = 0x30;
 +    const size_t rec_hdr_size = 20;
 +    size_t i = 0;
