@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-27
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `a8ccb1f3` (2026-10-22; eleven commits
@@ -14,6 +16,8 @@ Notable changes to this project are recorded here. The format follows
   of large R2013+ drawings. The remaining commits are in the DXF reader (a HATCH boundary line
   ending at Y = 0; view-style colors from any DXF version) and in the writers (the alignment
   point of justified TEXT, LAYOUT handles, BLOCK_HEADERs after a block).
+
+- Built on `iron-diff-cad` 0.10.0, `iron-render-cad` 0.12.0 and `iron-pack-cad` 0.11.0. The entries of a `diff` answer carry `undrawn` (the change sits only in block definitions nothing draws) and `format_only` (a text field that differs only in formatting codes).
 
 ### Security
 
