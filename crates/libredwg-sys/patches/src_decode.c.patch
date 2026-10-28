@@ -1,6 +1,6 @@
 --- a/src/decode.c
 +++ b/src/decode.c
-@@ -6771,6 +6771,45 @@
+@@ -6780,6 +6780,45 @@
        error |= DWG_ERR_VALUEOUTOFBOUNDS;
      }
  

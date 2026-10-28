@@ -723,7 +723,11 @@ dxf_read_string (Bit_Chain *dat, char **string)
             buf[i++] = *s;
         }
       if (dat->byte >= dat->size || i >= 4096)
-        return;
+        {
+          // callers with string == NULL read buf directly
+          buf[i < 4096 ? i : 4095] = '\0';
+          return;
+        }
       if (i && buf[i - 1] == '\r')
         buf[i - 1] = '\0';
       else
@@ -4186,10 +4190,19 @@ add_MULTILEADER_lines (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
               break;
             case 11:
               CHK_points;
+              {
+                Dwg_LEADER_Break *breaks = (Dwg_LEADER_Break *)realloc (
+                    lline->breaks, (k + 2) * sizeof (Dwg_LEADER_Break));
+                if (!breaks)
+                  {
+                    LOG_ERROR ("MULTILEADER.leaders[].lines[].breaks");
+                    dxf_free_pair (pair);
+                    return NULL;
+                  }
+                lline->breaks = breaks;
+              }
               k++;
               lline->num_breaks = k + 1;
-              lline->breaks = (Dwg_LEADER_Break *)realloc (
-                  lline->breaks, (k + 1) * sizeof (Dwg_LEADER_Break));
               memset (&lline->breaks[k], 0, sizeof (Dwg_LEADER_Break));
               lline->breaks[k].start.x = pair->value.d;
               LOG_TRACE (
@@ -8957,7 +8970,7 @@ add_AcDbBlockVisibilityParameter (Dwg_Object *restrict obj,
               if (!o->states[i].blocks)
                 {
                   o->states[i].num_blocks = 0;
-                  return pair;
+                  return dxf_read_pair (dat); // pair is already freed
                 }
               for (unsigned j = 0; j < o->states[i].num_blocks; j++)
                 {
@@ -8986,7 +8999,7 @@ add_AcDbBlockVisibilityParameter (Dwg_Object *restrict obj,
               if (!o->states[i].params)
                 {
                   o->states[i].num_params = 0;
-                  return pair;
+                  return dxf_read_pair (dat); // pair is already freed
                 }
               for (unsigned j = 0; j < o->states[i].num_params; j++)
                 {
@@ -9029,7 +9042,7 @@ add_BlockParam_PropInfo (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
       if (!prop->connections)
         {
           prop->num_connections = 0;
-          return pair;
+          return dxf_read_pair (dat); // the pair above is already freed
         }
       for (unsigned j = 0; j < prop->num_connections; j++)
         {
@@ -10618,7 +10631,39 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
               else if (strEQc (obj->name, "INSERT")
                        && strEQc (subclass, "AcDbMInsertBlock"))
                 {
+                  Dwg_Entity_INSERT *ins = (Dwg_Entity_INSERT *)_obj;
+                  // The layouts differ (GHSA-hh9f-2fpf-p5w6): the INSERT
+                  // buffer must not be reinterpreted as MINSERT. Move the
+                  // fields to a fresh object.
+                  Dwg_Entity_MINSERT *mins = (Dwg_Entity_MINSERT *)calloc (
+                      1, sizeof (Dwg_Entity_MINSERT));
+                  if (!mins)
+                    {
+                      LOG_ERROR ("Out of memory");
+                      goto invalid_dxf;
+                    }
                   UPGRADE_ENTITY (INSERT, MINSERT)
+                  mins->parent = ins->parent;
+                  mins->ins_pt = ins->ins_pt;
+                  mins->scale_flag = ins->scale_flag;
+                  mins->scale = ins->scale;
+                  mins->rotation = ins->rotation;
+                  mins->extrusion = ins->extrusion;
+                  mins->has_attribs = ins->has_attribs;
+                  mins->num_owned = ins->num_owned;
+                  mins->num_cols = ins->num_cols;
+                  mins->num_rows = ins->num_rows;
+                  mins->col_spacing = ins->col_spacing;
+                  mins->row_spacing = ins->row_spacing;
+                  mins->block_header = ins->block_header;
+                  mins->first_attrib = ins->first_attrib;
+                  mins->last_attrib = ins->last_attrib;
+                  mins->attribs = ins->attribs;
+                  mins->seqend = ins->seqend;
+                  free (ins->block_name);
+                  free (ins);
+                  obj->tio.entity->tio.MINSERT = mins;
+                  _obj = (void *)mins;
                 }
 
               // When we have all proper types, check proper subclasses.

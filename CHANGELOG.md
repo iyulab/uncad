@@ -6,6 +6,20 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The vendored LibreDWG is updated to upstream commit `4fa78a09` (2026-10-27; sixteen commits
+  after `a8ccb1f3`). Most of them harden the readers against malformed input: the DWG decoder
+  checks R2004 section addresses and copy-size sums without 32-bit truncation, the allocation
+  guard in the decoder no longer overflows on large element counts, a SPLINE that claims more than
+  10000 knots is refused, and a cached object reference is trusted only while it points into the
+  current object array. Freeing a table style no longer frees border colors it shares with its
+  override twice. The DXF reader terminates an over-long string line, checks a failed
+  reallocation, and moves an INSERT that is upgraded to a MINSERT into a fresh object instead of
+  reinterpreting its buffer. The DXF writers no longer read single-byte strings that came from a
+  DXF or JSON import as wide strings, and the line-type string area is no longer converted for
+  DXF input. The local patches are re-exported against the new vendored copy.
+
 ## [0.14.1] - 2026-10-27
 
 ### Changed
