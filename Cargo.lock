@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "libredwg-sys"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "bindgen",
  "cc",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "uncad"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "acadrust",
  "iron-render-cad",
@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "uncad-cli"
-version = "0.14.1"
+version = "0.14.2"
 dependencies = [
  "iron-diff-cad",
  "iron-hand-cad",

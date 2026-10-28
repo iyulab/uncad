@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-10-28
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `4fa78a09` (2026-10-27; sixteen commits
