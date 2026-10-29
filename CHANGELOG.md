@@ -6,13 +6,16 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.14.3] - 2026-10-30
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `6f3f82b9` (2026-10-29; twenty-nine commits
-  after `4fa78a09`). The DWG decoder's R2004 section page bounds checks, the section address and
-  the element-count products of its vector checks are done in 64 bit, so crafted values can no
-  longer wrap a size sum and send a copy past the end of the buffer (GHSA-rhh7-9m95-rh87,
-  GHSA-fv59-9w8h-6p5x, GHSA-6xx6-g44h-929j). The decoder also names a pre-R13 dimension after the
+  after `4fa78a09`). The DWG decoder finishes the 64-bit arithmetic begun in 0.14.2: the R2004
+  section page bounds checks, the section address and the element-count products of its vector
+  checks no longer wrap in 32 bit, so crafted values cannot pass a size check and send a copy
+  past the end of the buffer (GHSA-rhh7-9m95-rh87, GHSA-fv59-9w8h-6p5x, GHSA-6xx6-g44h-929j). The
+  decoder also names a pre-R13 dimension after the
   subtype it decodes as, which makes the local patch that did so unnecessary: it is removed.
   Further changes are in the table, object and association specifications.
 

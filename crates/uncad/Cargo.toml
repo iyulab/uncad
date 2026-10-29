@@ -1,6 +1,6 @@
 [package]
 name = "uncad"
-version = "0.14.2"
+version = "0.14.3"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -15,7 +15,7 @@ categories = ["graphics", "parser-implementations"]
 workspace = true
 
 [dependencies]
-libredwg-sys = { path = "../libredwg-sys", version = "0.14.2" }
+libredwg-sys = { path = "../libredwg-sys", version = "0.14.3" }
 # The entity model this crate fills. A version dependency, never a path:
 # this crate must build from a standalone checkout.
 uncad-model = "0.9.0"
