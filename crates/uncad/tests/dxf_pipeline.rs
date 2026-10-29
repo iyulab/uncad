@@ -227,6 +227,23 @@ fn acadver_by_search(path: &Path) -> Option<String> {
     rest.next().map(str::to_string)
 }
 
+/// Whether a DXF's ENTITIES section holds anything: the first group after
+/// the section's name is not the end of the section.
+fn states_entities(path: &Path) -> bool {
+    let text = String::from_utf8_lossy(&fs::read(path).expect("the corpus DXF should be readable"))
+        .into_owned();
+    let mut lines = text.lines().map(str::trim);
+    while let Some(line) = lines.next() {
+        if line == "ENTITIES" {
+            // The name is group 2's value; the next group's code is 0 and
+            // its value says what follows.
+            let _code = lines.next();
+            return lines.next().is_some_and(|value| value != "ENDSEC");
+        }
+    }
+    false
+}
+
 fn dxf_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(dir).expect("corpus directory should be readable") {
         let path = entry.expect("corpus entry should be readable").path();
@@ -295,7 +312,7 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin() {
     //   the DWG does not have (groups 8 at lines 1836 and 2606 of the file).
     let deviations = ["2018/Leader.dxf"];
 
-    let (mut read, mut twins) = (Vec::new(), 0usize);
+    let (mut read, mut object_only, mut twins) = (Vec::new(), Vec::new(), 0usize);
     for path in &files {
         let is_r2007_plus = acadver_by_search(path)
             .as_deref()
@@ -310,7 +327,14 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin() {
             .to_string_lossy()
             .replace('\\', "/");
         let db = uncad::parse(path).unwrap_or_else(|e| panic!("{rel}: {e}"));
-        assert!(!db.entities.is_empty(), "{rel} read as an empty drawing");
+        if db.entities.is_empty() {
+            // A drawing of objects alone (a dictionary entry, a table, a
+            // setting) has an empty ENTITIES section; anything else that
+            // reads as empty has lost its entities.
+            assert!(!states_entities(path), "{rel} read as an empty drawing");
+            object_only.push(rel);
+            continue;
+        }
         read.push(rel.clone());
 
         let twin = path.with_extension("dwg");
@@ -334,11 +358,13 @@ fn every_r2007_plus_corpus_dxf_reads_like_its_dwg_twin() {
         );
     }
     eprintln!(
-        "R2007+ corpus DXF: {} read ({twins} against a DWG twin)",
-        read.len()
+        "R2007+ corpus DXF: {} read ({twins} against a DWG twin), {} of objects alone",
+        read.len(),
+        object_only.len()
     );
-    // Every one reads: 32, 28 of them against a DWG twin.
-    assert_eq!((read.len(), twins), (32, 28));
+    // Every one reads: 44 with entities, 28 of them against a DWG twin, and
+    // 35 that state objects only.
+    assert_eq!((read.len(), twins, object_only.len()), (44, 28, 35));
 }
 
 /// The corpus R2000 drawing with its `$ACADVER` value line rewritten -- the
