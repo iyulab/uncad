@@ -1,7 +1,7 @@
 /*****************************************************************************/
 /*  LibreDWG - free implementation of the DWG file format                    */
 /*                                                                           */
-/*  Copyright (C) 2013,2018-2020 Free Software Foundation, Inc.              */
+/*  Copyright (C) 2013,2018-2026 Free Software Foundation, Inc.              */
 /*                                                                           */
 /*  This library is free software, licensed under the terms of the GNU       */
 /*  General Public License as published by the Free Software Foundation,     */
@@ -677,8 +677,10 @@ extern "C"
   typedef struct _dwg_object_ACSH_SPHERE_CLASS		dwg_obj_acsh_sphere_class;
   typedef struct _dwg_object_ACSH_TORUS_CLASS		dwg_obj_acsh_torus_class;
   typedef struct _dwg_object_ACSH_WEDGE_CLASS		dwg_obj_acsh_wedge_class;
+  typedef struct _dwg_object_ALDIMOBJECTCONTEXTDATA		dwg_obj_aldimobjectcontextdata;
   typedef struct _dwg_object_ASSOCGEOMDEPENDENCY		dwg_obj_assocgeomdependency;
   typedef struct _dwg_object_ASSOCNETWORK		dwg_obj_assocnetwork;
+  typedef struct _dwg_object_BLKREFOBJECTCONTEXTDATA		dwg_obj_blkrefobjectcontextdata;
   typedef struct _dwg_object_BLOCKALIGNMENTGRIP		dwg_obj_blockalignmentgrip;
   typedef struct _dwg_object_BLOCKALIGNMENTPARAMETER		dwg_obj_blockalignmentparameter;
   typedef struct _dwg_object_BLOCKBASEPOINTPARAMETER		dwg_obj_blockbasepointparameter;
@@ -706,10 +708,12 @@ extern "C"
   typedef struct _dwg_object_IMAGEDEF		dwg_obj_imagedef;
   typedef struct _dwg_object_IMAGEDEF_REACTOR		dwg_obj_imagedef_reactor;
   typedef struct _dwg_object_INDEX		dwg_obj_index;
-  typedef struct _dwg_object_LAYERFILTER		dwg_obj_layerfilter;
+  typedef struct _dwg_object_LAYER_FILTER		dwg_obj_layer_filter;
   typedef struct _dwg_object_LAYER_INDEX		dwg_obj_layer_index;
   typedef struct _dwg_object_LAYOUT		dwg_obj_layout;
+  typedef struct _dwg_object_LEADEROBJECTCONTEXTDATA		dwg_obj_leaderobjectcontextdata;
   typedef struct _dwg_object_MLEADERSTYLE		dwg_obj_mleaderstyle;
+  typedef struct _dwg_object_MTEXTOBJECTCONTEXTDATA		dwg_obj_mtextobjectcontextdata;
   typedef struct _dwg_object_PLACEHOLDER		dwg_obj_placeholder;
   typedef struct _dwg_object_PLOTSETTINGS		dwg_obj_plotsettings;
   typedef struct _dwg_object_RASTERVARIABLES		dwg_obj_rastervariables;
@@ -721,6 +725,7 @@ extern "C"
   typedef struct _dwg_object_SPATIAL_FILTER		dwg_obj_spatial_filter;
   typedef struct _dwg_object_SUN		dwg_obj_sun;
   typedef struct _dwg_object_TABLEGEOMETRY		dwg_obj_tablegeometry;
+  typedef struct _dwg_object_TEXTOBJECTCONTEXTDATA		dwg_obj_textobjectcontextdata;
   typedef struct _dwg_object_VBA_PROJECT		dwg_obj_vba_project;
   typedef struct _dwg_object_VISUALSTYLE		dwg_obj_visualstyle;
   typedef struct _dwg_object_WIPEOUTVARIABLES		dwg_obj_wipeoutvariables;
@@ -732,7 +737,6 @@ extern "C"
   typedef struct _dwg_object_ACSH_BREP_CLASS		dwg_obj_acsh_brep_class;
   typedef struct _dwg_object_ACSH_CHAMFER_CLASS		dwg_obj_acsh_chamfer_class;
   typedef struct _dwg_object_ACSH_PYRAMID_CLASS		dwg_obj_acsh_pyramid_class;
-  typedef struct _dwg_object_ALDIMOBJECTCONTEXTDATA		dwg_obj_aldimobjectcontextdata;
   typedef struct _dwg_object_ASSOC2DCONSTRAINTGROUP		dwg_obj_assoc2dconstraintgroup;
   typedef struct _dwg_object_ASSOCACTION		dwg_obj_assocaction;
   typedef struct _dwg_object_ASSOCACTIONPARAM		dwg_obj_assocactionparam;
@@ -760,7 +764,6 @@ extern "C"
   typedef struct _dwg_object_ASSOCVALUEDEPENDENCY		dwg_obj_assocvaluedependency;
   typedef struct _dwg_object_ASSOCVARIABLE		dwg_obj_assocvariable;
   typedef struct _dwg_object_ASSOCVERTEXACTIONPARAM		dwg_obj_assocvertexactionparam;
-  typedef struct _dwg_object_BLKREFOBJECTCONTEXTDATA		dwg_obj_blkrefobjectcontextdata;
   typedef struct _dwg_object_BLOCKALIGNEDCONSTRAINTPARAMETER		dwg_obj_blockalignedconstraintparameter;
   typedef struct _dwg_object_BLOCKANGULARCONSTRAINTPARAMETER		dwg_obj_blockangularconstraintparameter;
   typedef struct _dwg_object_BLOCKARRAYACTION		dwg_obj_blockarrayaction;
@@ -793,11 +796,9 @@ extern "C"
   typedef struct _dwg_object_GROUND_PLANE_BACKGROUND		dwg_obj_ground_plane_background;
   typedef struct _dwg_object_IBL_BACKGROUND		dwg_obj_ibl_background;
   typedef struct _dwg_object_IMAGE_BACKGROUND		dwg_obj_image_background;
-  typedef struct _dwg_object_LEADEROBJECTCONTEXTDATA		dwg_obj_leaderobjectcontextdata;
   typedef struct _dwg_object_LIGHTLIST		dwg_obj_lightlist;
   typedef struct _dwg_object_MATERIAL		dwg_obj_material;
   typedef struct _dwg_object_MENTALRAYRENDERSETTINGS		dwg_obj_mentalrayrendersettings;
-  typedef struct _dwg_object_MTEXTOBJECTCONTEXTDATA		dwg_obj_mtextobjectcontextdata;
   typedef struct _dwg_object_OBJECT_PTR		dwg_obj_object_ptr;
   typedef struct _dwg_object_PARTIAL_VIEWING_INDEX		dwg_obj_partial_viewing_index;
   typedef struct _dwg_object_POINTCLOUDCOLORMAP		dwg_obj_pointcloudcolormap;
@@ -815,7 +816,6 @@ extern "C"
   typedef struct _dwg_object_SOLID_BACKGROUND		dwg_obj_solid_background;
   typedef struct _dwg_object_SPATIAL_INDEX		dwg_obj_spatial_index;
   typedef struct _dwg_object_TABLESTYLE		dwg_obj_tablestyle;
-  typedef struct _dwg_object_TEXTOBJECTCONTEXTDATA		dwg_obj_textobjectcontextdata;
   typedef struct _dwg_abstractobject_ASSOCARRAYPARAMETERS		dwg_obj_assocarraymodifyparameters;
   typedef struct _dwg_abstractobject_ASSOCARRAYPARAMETERS		dwg_obj_assocarraypathparameters;
   typedef struct _dwg_abstractobject_ASSOCARRAYPARAMETERS		dwg_obj_assocarraypolarparameters;
@@ -1645,7 +1645,6 @@ extern "C"
 //  typedef struct _dwg_object_PARAMMGR		dwg_obj_parammgr;
 //  typedef struct _dwg_object_PARAMSCOPE		dwg_obj_paramscope;
 //  typedef struct _dwg_object_PILLAR		dwg_obj_pillar;
-//  typedef struct _dwg_object_RAPIDRTRENDERENVIRONMENT		dwg_obj_rapidrtrenderenvironment;
 //  typedef struct _dwg_object_ROTATEACTIONENTITY		dwg_obj_rotateactionentity;
 //  typedef struct _dwg_object_SCALEACTIONENTITY		dwg_obj_scaleactionentity;
 //  typedef struct _dwg_object_STDPART2D		dwg_obj_stdpart2d;
@@ -1803,8 +1802,10 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_acsh_sphere_class, ACSH_SPHERE_CLASS);
   dwg_get_OBJECT_DECL (obj_acsh_torus_class, ACSH_TORUS_CLASS);
   dwg_get_OBJECT_DECL (obj_acsh_wedge_class, ACSH_WEDGE_CLASS);
+  dwg_get_OBJECT_DECL (obj_aldimobjectcontextdata, ALDIMOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_assocgeomdependency, ASSOCGEOMDEPENDENCY);
   dwg_get_OBJECT_DECL (obj_assocnetwork, ASSOCNETWORK);
+  dwg_get_OBJECT_DECL (obj_blkrefobjectcontextdata, BLKREFOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_blockalignmentgrip, BLOCKALIGNMENTGRIP);
   dwg_get_OBJECT_DECL (obj_blockalignmentparameter, BLOCKALIGNMENTPARAMETER);
   dwg_get_OBJECT_DECL (obj_blockbasepointparameter, BLOCKBASEPOINTPARAMETER);
@@ -1832,10 +1833,12 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_imagedef, IMAGEDEF);
   dwg_get_OBJECT_DECL (obj_imagedef_reactor, IMAGEDEF_REACTOR);
   dwg_get_OBJECT_DECL (obj_index, INDEX);
-  dwg_get_OBJECT_DECL (obj_layerfilter, LAYERFILTER);
+  dwg_get_OBJECT_DECL (obj_layer_filter, LAYER_FILTER);
   dwg_get_OBJECT_DECL (obj_layer_index, LAYER_INDEX);
   dwg_get_OBJECT_DECL (obj_layout, LAYOUT);
+  dwg_get_OBJECT_DECL (obj_leaderobjectcontextdata, LEADEROBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_mleaderstyle, MLEADERSTYLE);
+  dwg_get_OBJECT_DECL (obj_mtextobjectcontextdata, MTEXTOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_placeholder, PLACEHOLDER);
   dwg_get_OBJECT_DECL (obj_plotsettings, PLOTSETTINGS);
   dwg_get_OBJECT_DECL (obj_rastervariables, RASTERVARIABLES);
@@ -1847,6 +1850,7 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_spatial_filter, SPATIAL_FILTER);
   dwg_get_OBJECT_DECL (obj_sun, SUN);
   dwg_get_OBJECT_DECL (obj_tablegeometry, TABLEGEOMETRY);
+  dwg_get_OBJECT_DECL (obj_textobjectcontextdata, TEXTOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_vba_project, VBA_PROJECT);
   dwg_get_OBJECT_DECL (obj_visualstyle, VISUALSTYLE);
   dwg_get_OBJECT_DECL (obj_wipeoutvariables, WIPEOUTVARIABLES);
@@ -1858,7 +1862,6 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_acsh_brep_class, ACSH_BREP_CLASS);
   dwg_get_OBJECT_DECL (obj_acsh_chamfer_class, ACSH_CHAMFER_CLASS);
   dwg_get_OBJECT_DECL (obj_acsh_pyramid_class, ACSH_PYRAMID_CLASS);
-  dwg_get_OBJECT_DECL (obj_aldimobjectcontextdata, ALDIMOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_assoc2dconstraintgroup, ASSOC2DCONSTRAINTGROUP);
   dwg_get_OBJECT_DECL (obj_assocaction, ASSOCACTION);
   dwg_get_OBJECT_DECL (obj_assocactionparam, ASSOCACTIONPARAM);
@@ -1886,7 +1889,6 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_assocvaluedependency, ASSOCVALUEDEPENDENCY);
   dwg_get_OBJECT_DECL (obj_assocvariable, ASSOCVARIABLE);
   dwg_get_OBJECT_DECL (obj_assocvertexactionparam, ASSOCVERTEXACTIONPARAM);
-  dwg_get_OBJECT_DECL (obj_blkrefobjectcontextdata, BLKREFOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_blockalignedconstraintparameter, BLOCKALIGNEDCONSTRAINTPARAMETER);
   dwg_get_OBJECT_DECL (obj_blockangularconstraintparameter, BLOCKANGULARCONSTRAINTPARAMETER);
   dwg_get_OBJECT_DECL (obj_blockarrayaction, BLOCKARRAYACTION);
@@ -1919,11 +1921,9 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_ground_plane_background, GROUND_PLANE_BACKGROUND);
   dwg_get_OBJECT_DECL (obj_ibl_background, IBL_BACKGROUND);
   dwg_get_OBJECT_DECL (obj_image_background, IMAGE_BACKGROUND);
-  dwg_get_OBJECT_DECL (obj_leaderobjectcontextdata, LEADEROBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_lightlist, LIGHTLIST);
   dwg_get_OBJECT_DECL (obj_material, MATERIAL);
   dwg_get_OBJECT_DECL (obj_mentalrayrendersettings, MENTALRAYRENDERSETTINGS);
-  dwg_get_OBJECT_DECL (obj_mtextobjectcontextdata, MTEXTOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_object_ptr, OBJECT_PTR);
   dwg_get_OBJECT_DECL (obj_partial_viewing_index, PARTIAL_VIEWING_INDEX);
   dwg_get_OBJECT_DECL (obj_pointcloudcolormap, POINTCLOUDCOLORMAP);
@@ -1941,7 +1941,6 @@ extern "C"
   dwg_get_OBJECT_DECL (obj_solid_background, SOLID_BACKGROUND);
   dwg_get_OBJECT_DECL (obj_spatial_index, SPATIAL_INDEX);
   dwg_get_OBJECT_DECL (obj_tablestyle, TABLESTYLE);
-  dwg_get_OBJECT_DECL (obj_textobjectcontextdata, TEXTOBJECTCONTEXTDATA);
   dwg_get_OBJECT_DECL (obj_assocarraymodifyparameters, ASSOCARRAYMODIFYPARAMETERS);
   dwg_get_OBJECT_DECL (obj_assocarraypathparameters, ASSOCARRAYPATHPARAMETERS);
   dwg_get_OBJECT_DECL (obj_assocarraypolarparameters, ASSOCARRAYPOLARPARAMETERS);
@@ -2771,7 +2770,6 @@ extern "C"
 //     dwg_get_OBJECT_DECL (obj_parammgr, PARAMMGR);
 //     dwg_get_OBJECT_DECL (obj_paramscope, PARAMSCOPE);
 //     dwg_get_OBJECT_DECL (obj_pillar, PILLAR);
-//     dwg_get_OBJECT_DECL (obj_rapidrtrenderenvironment, RAPIDRTRENDERENVIRONMENT);
 //     dwg_get_OBJECT_DECL (obj_rotateactionentity, ROTATEACTIONENTITY);
 //     dwg_get_OBJECT_DECL (obj_scaleactionentity, SCALEACTIONENTITY);
 //     dwg_get_OBJECT_DECL (obj_stdpart2d, STDPART2D);
@@ -2948,8 +2946,10 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (ACSH_SPHERE_CLASS);
   DWG_GETALL_OBJECT_DECL (ACSH_TORUS_CLASS);
   DWG_GETALL_OBJECT_DECL (ACSH_WEDGE_CLASS);
+  DWG_GETALL_OBJECT_DECL (ALDIMOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (ASSOCGEOMDEPENDENCY);
   DWG_GETALL_OBJECT_DECL (ASSOCNETWORK);
+  DWG_GETALL_OBJECT_DECL (BLKREFOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (BLOCKALIGNMENTGRIP);
   DWG_GETALL_OBJECT_DECL (BLOCKALIGNMENTPARAMETER);
   DWG_GETALL_OBJECT_DECL (BLOCKBASEPOINTPARAMETER);
@@ -2977,10 +2977,12 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (IMAGEDEF);
   DWG_GETALL_OBJECT_DECL (IMAGEDEF_REACTOR);
   DWG_GETALL_OBJECT_DECL (INDEX);
-  DWG_GETALL_OBJECT_DECL (LAYERFILTER);
+  DWG_GETALL_OBJECT_DECL (LAYER_FILTER);
   DWG_GETALL_OBJECT_DECL (LAYER_INDEX);
   DWG_GETALL_OBJECT_DECL (LAYOUT);
+  DWG_GETALL_OBJECT_DECL (LEADEROBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (MLEADERSTYLE);
+  DWG_GETALL_OBJECT_DECL (MTEXTOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (PLACEHOLDER);
   DWG_GETALL_OBJECT_DECL (PLOTSETTINGS);
   DWG_GETALL_OBJECT_DECL (RASTERVARIABLES);
@@ -2992,6 +2994,7 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (SPATIAL_FILTER);
   DWG_GETALL_OBJECT_DECL (SUN);
   DWG_GETALL_OBJECT_DECL (TABLEGEOMETRY);
+  DWG_GETALL_OBJECT_DECL (TEXTOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (VBA_PROJECT);
   DWG_GETALL_OBJECT_DECL (VISUALSTYLE);
   DWG_GETALL_OBJECT_DECL (WIPEOUTVARIABLES);
@@ -3003,7 +3006,6 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (ACSH_BREP_CLASS);
   DWG_GETALL_OBJECT_DECL (ACSH_CHAMFER_CLASS);
   DWG_GETALL_OBJECT_DECL (ACSH_PYRAMID_CLASS);
-  DWG_GETALL_OBJECT_DECL (ALDIMOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (ASSOC2DCONSTRAINTGROUP);
   DWG_GETALL_OBJECT_DECL (ASSOCACTION);
   DWG_GETALL_OBJECT_DECL (ASSOCACTIONPARAM);
@@ -3031,7 +3033,6 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (ASSOCVALUEDEPENDENCY);
   DWG_GETALL_OBJECT_DECL (ASSOCVARIABLE);
   DWG_GETALL_OBJECT_DECL (ASSOCVERTEXACTIONPARAM);
-  DWG_GETALL_OBJECT_DECL (BLKREFOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (BLOCKALIGNEDCONSTRAINTPARAMETER);
   DWG_GETALL_OBJECT_DECL (BLOCKANGULARCONSTRAINTPARAMETER);
   DWG_GETALL_OBJECT_DECL (BLOCKARRAYACTION);
@@ -3064,11 +3065,9 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (GROUND_PLANE_BACKGROUND);
   DWG_GETALL_OBJECT_DECL (IBL_BACKGROUND);
   DWG_GETALL_OBJECT_DECL (IMAGE_BACKGROUND);
-  DWG_GETALL_OBJECT_DECL (LEADEROBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (LIGHTLIST);
   DWG_GETALL_OBJECT_DECL (MATERIAL);
   DWG_GETALL_OBJECT_DECL (MENTALRAYRENDERSETTINGS);
-  DWG_GETALL_OBJECT_DECL (MTEXTOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (OBJECT_PTR);
   DWG_GETALL_OBJECT_DECL (PARTIAL_VIEWING_INDEX);
   DWG_GETALL_OBJECT_DECL (POINTCLOUDCOLORMAP);
@@ -3086,7 +3085,6 @@ extern "C"
   DWG_GETALL_OBJECT_DECL (SOLID_BACKGROUND);
   DWG_GETALL_OBJECT_DECL (SPATIAL_INDEX);
   DWG_GETALL_OBJECT_DECL (TABLESTYLE);
-  DWG_GETALL_OBJECT_DECL (TEXTOBJECTCONTEXTDATA);
   DWG_GETALL_OBJECT_DECL (ASSOCARRAYMODIFYPARAMETERS);
   DWG_GETALL_OBJECT_DECL (ASSOCARRAYPATHPARAMETERS);
   DWG_GETALL_OBJECT_DECL (ASSOCARRAYPOLARPARAMETERS);
@@ -3916,7 +3914,6 @@ extern "C"
 //  DWG_GETALL_OBJECT_DECL (PARAMMGR);
 //  DWG_GETALL_OBJECT_DECL (PARAMSCOPE);
 //  DWG_GETALL_OBJECT_DECL (PILLAR);
-//  DWG_GETALL_OBJECT_DECL (RAPIDRTRENDERENVIRONMENT);
 //  DWG_GETALL_OBJECT_DECL (ROTATEACTIONENTITY);
 //  DWG_GETALL_OBJECT_DECL (SCALEACTIONENTITY);
 //  DWG_GETALL_OBJECT_DECL (STDPART2D);
@@ -4099,8 +4096,10 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_SPHERE_CLASS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_TORUS_CLASS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_WEDGE_CLASS);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (ALDIMOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCGEOMDEPENDENCY);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCNETWORK);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (BLKREFOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKALIGNMENTGRIP);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKALIGNMENTPARAMETER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKBASEPOINTPARAMETER);
@@ -4128,10 +4127,12 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (IMAGEDEF);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (IMAGEDEF_REACTOR);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (INDEX);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (LAYERFILTER);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (LAYER_FILTER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (LAYER_INDEX);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (LAYOUT);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (LEADEROBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (MLEADERSTYLE);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (MTEXTOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (PLACEHOLDER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (PLOTSETTINGS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (RASTERVARIABLES);
@@ -4143,6 +4144,7 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (SPATIAL_FILTER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (SUN);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (TABLEGEOMETRY);
+  CAST_DWG_OBJECT_TO_OBJECT_DECL (TEXTOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (VBA_PROJECT);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (VISUALSTYLE);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (WIPEOUTVARIABLES);
@@ -4154,7 +4156,6 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_BREP_CLASS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_CHAMFER_CLASS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ACSH_PYRAMID_CLASS);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (ALDIMOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOC2DCONSTRAINTGROUP);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCACTION);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCACTIONPARAM);
@@ -4182,7 +4183,6 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCVALUEDEPENDENCY);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCVARIABLE);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCVERTEXACTIONPARAM);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (BLKREFOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKALIGNEDCONSTRAINTPARAMETER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKANGULARCONSTRAINTPARAMETER);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (BLOCKARRAYACTION);
@@ -4215,11 +4215,9 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (GROUND_PLANE_BACKGROUND);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (IBL_BACKGROUND);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (IMAGE_BACKGROUND);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (LEADEROBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (LIGHTLIST);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (MATERIAL);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (MENTALRAYRENDERSETTINGS);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (MTEXTOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (OBJECT_PTR);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (PARTIAL_VIEWING_INDEX);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (POINTCLOUDCOLORMAP);
@@ -4237,7 +4235,6 @@ extern "C"
   CAST_DWG_OBJECT_TO_OBJECT_DECL (SOLID_BACKGROUND);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (SPATIAL_INDEX);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (TABLESTYLE);
-  CAST_DWG_OBJECT_TO_OBJECT_DECL (TEXTOBJECTCONTEXTDATA);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCARRAYMODIFYPARAMETERS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCARRAYPATHPARAMETERS);
   CAST_DWG_OBJECT_TO_OBJECT_DECL (ASSOCARRAYPOLARPARAMETERS);
@@ -5067,7 +5064,6 @@ extern "C"
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (PARAMMGR);
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (PARAMSCOPE);
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (PILLAR);
-  //  CAST_DWG_OBJECT_TO_OBJECT_DECL (RAPIDRTRENDERENVIRONMENT);
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (ROTATEACTIONENTITY);
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (SCALEACTIONENTITY);
   //  CAST_DWG_OBJECT_TO_OBJECT_DECL (STDPART2D);
@@ -10033,8 +10029,8 @@ extern "C"
                         /*, size, data */) __nonnull_all;
   EXPORT Dwg_Entity_PROXY_ENTITY *dwg_add_PROXY_ENTITY (
       Dwg_Object_BLOCK_HEADER *restrict blkhdr /* ... */) __nonnull_all;
-  EXPORT Dwg_Object_LAYERFILTER *
-  dwg_add_LAYERFILTER (Dwg_Data *restrict dwg /* ... */) __nonnull_all;
+  EXPORT Dwg_Object_LAYER_FILTER *
+  dwg_add_LAYER_FILTER (Dwg_Data *restrict dwg /* ... */) __nonnull_all;
   EXPORT Dwg_Object_LAYER_INDEX *
   dwg_add_LAYER_INDEX (Dwg_Data *restrict dwg /* ... */) __nonnull_all;
   EXPORT Dwg_Object_SPATIAL_FILTER *dwg_add_SPATIAL_FILTER (
@@ -10276,7 +10272,7 @@ extern "C"
 #define HAVE_NO_DWG_ADD_WIPEOUTVARIABLES
 #define HAVE_NO_DWG_ADD_XYPARAMETERENTITY
 
-#define HAVE_NO_DWG_ADD_LAYERFILTER
+#define HAVE_NO_DWG_ADD_LAYER_FILTER
 #define HAVE_NO_DWG_ADD_LAYER_INDEX
 #define HAVE_NO_DWG_ADD_SPATIAL_FILTER
 #define HAVE_NO_DWG_ADD_SPATIAL_INDEX

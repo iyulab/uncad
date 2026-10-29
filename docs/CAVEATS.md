@@ -781,7 +781,7 @@ walks get the same wireframe for every solid and that none has an edge skipped.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries six local patches, in five files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches, in four files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -795,7 +795,7 @@ the files and the copy disagree. `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
 a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file
-(line endings aside), the two trees differ in exactly these five files.
+(line endings aside), the two trees differ in exactly these four files.
 
 - **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
   and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
@@ -861,18 +861,6 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   headers and gives each body whose bytes open with either signature to the solid its handle
   names; the sizes and handles match the drawings' DXF twins (`ACDSDATA` groups 320 and 94).
   `tests/acis_sab.rs` is the regression: every solid of both drawings reads its twin's edges.
-- **`src/decode.c`** -- a pre-R13 drawing has one DIMENSION record for every subtype, told
-  apart by its flags. The decoder sets the object up as the largest subtype,
-  `DIMENSION_ANG2LN` (which names it so), reads the common part, and then gives it the
-  `fixedtype` its flags say -- but leaves the name. The library's field accessors
-  (`dwg_dynapi_entity_value` and the rest) refuse an object whose name is not the type they
-  are asked about, so every field of such a dimension read as missing: no definition point,
-  no extension-line points, no block, the text position at the origin. Only the dimension's
-  kind came through. The patch names the object after its `fixedtype` once the flags have
-  been read, as every R13+ dimension already is. Measured on the corpus's pre-R13 drawings
-  (`r2.6/dim`, and the `entities` drawings of r2.6, r9, r10 and r11): their dimensions now
-  read the points their DXF twins state. `tests/vendored_patches.rs` is the regression.
-
 **An entity lineweight the format leaves undefined.** A DWG stores an entity's lineweight as
 an index: 0 to 23 the standard weights, 29 BYLAYER, 30 BYBLOCK, 31 the default. Some
 corpus drawings (R2013, R2018) store 28, which the format's table leaves reserved; their DXF

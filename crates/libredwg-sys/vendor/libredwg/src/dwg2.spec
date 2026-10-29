@@ -267,26 +267,26 @@ DWG_OBJECT_END
 	}								\
       FIELD_BL (sty.num_borders, 94); /* 0-6 */			\
       VALUEOUTOFBOUNDS (sty.num_borders, 6);				\
-      REPEAT2 (sty.num_borders, sty.borders, Dwg_GridFormat)		\
+      REPEAT4 (sty.num_borders, sty.borders, Dwg_GridFormat)		\
       REPEAT_BLOCK							\
 	DXF {								\
-	  if (FIELD_VALUE (sty.borders[rcount2].index_mask))		\
+	  if (FIELD_VALUE (sty.borders[rcount4].index_mask))		\
 	    {								\
-	      SUB_FIELD_BL (sty.borders[rcount2],index_mask, 95);	\
+	      SUB_FIELD_BL (sty.borders[rcount4],index_mask, 95);	\
 	      VALUE_TFF ("GRIDFORMAT", 302);				\
 	      VALUE_TFF ("GRIDFORMAT_BEGIN", 1);			\
 	    }								\
 	}								\
-	SUB_FIELD_BLx (sty.borders[rcount2],index_mask, 0);		\
-	if (FIELD_VALUE (sty.borders[rcount2].index_mask))		\
+	SUB_FIELD_BLx (sty.borders[rcount4],index_mask, 0);		\
+	if (FIELD_VALUE (sty.borders[rcount4].index_mask))		\
 	  {								\
-	    SUB_FIELD_BL (sty.borders[rcount2],border_overrides, 90);	\
-	    SUB_FIELD_BL (sty.borders[rcount2],border_type, 91);	\
-	    SUB_FIELD_CMTC (sty.borders[rcount2],color, 62);		\
-	    SUB_FIELD_BLd (sty.borders[rcount2],linewt, 92);		\
-	    SUB_FIELD_HANDLE (sty.borders[rcount2],ltype, 3, 340);	\
-	    SUB_FIELD_BL (sty.borders[rcount2],visible, 93);		\
-	    SUB_FIELD_BD (sty.borders[rcount2],double_line_spacing, 40);\
+	    SUB_FIELD_BL (sty.borders[rcount4],border_overrides, 90);	\
+	    SUB_FIELD_BL (sty.borders[rcount4],border_type, 91);	\
+	    SUB_FIELD_CMTC (sty.borders[rcount4],color, 62);		\
+	    SUB_FIELD_BLd (sty.borders[rcount4],linewt, 92);		\
+	    SUB_FIELD_HANDLE (sty.borders[rcount4],ltype, 3, 340);	\
+	    SUB_FIELD_BL (sty.borders[rcount4],visible, 93);		\
+	    SUB_FIELD_BD (sty.borders[rcount4],double_line_spacing, 40);\
 	  }								\
 	DXF { VALUE_TFF ("GRIDFORMAT_END", 309) }			\
       END_REPEAT_BLOCK							\
@@ -300,7 +300,7 @@ DWG_OBJECT_END
 #define row tdata.rows[rcount1]
 #define cell row.cells[rcount2]
 #define content cell.cell_contents[rcount3]
-#define geom cell.geometry[0]
+#define geom cell.geometry[rcount4]
 #define attr content.attrs[rcount4]
 #define merged fdata.merged_cells[rcount1]
 
@@ -316,8 +316,24 @@ DWG_OBJECT_END
       SUB_FIELD_T (tdata.cols[rcount1],name, 300);		\
       DXF { VALUE_TFF ("LINKEDTABLEDATACOLUMN_BEGIN", 1) }      \
       SUB_FIELD_BL (tdata.cols[rcount1],custom_data, 91);	\
+      SUB_FIELD_BL (tdata.cols[rcount1],num_customdata_items, 90);	\
+      REPEAT3 (tdata.cols[rcount1].num_customdata_items, tdata.cols[rcount1].customdata_items, Dwg_TABLE_CustomDataItem) \
+      REPEAT_BLOCK						\
+          SUB_FIELD_T (tdata.cols[rcount1].customdata_items[rcount3],name, 300); \
+          TABLE_value_fields (tdata.cols[rcount1].customdata_items[rcount3].value); \
+          if (error & DWG_ERR_INVALIDTYPE)			\
+            {							\
+              JSON_END_REPEAT (tdata.cols[rcount1].customdata_items); \
+              JSON_END_REPEAT (tdata.cols);			\
+              return error;					\
+            }							\
+          SET_PARENT_FIELD (tdata.cols[rcount1].customdata_items[rcount3], col_parent, &_obj->tdata.cols[rcount1]); \
+      END_REPEAT_BLOCK						\
+      END_REPEAT (tdata.cols[rcount1].customdata_items);	\
       DXF { VALUE_TFF ("DATAMAP_BEGIN", 1) }                    \
       CellStyle_fields (tdata.cols[rcount1].cellstyle);		\
+      SUB_FIELD_BL (tdata.cols[rcount1],cellstyle_id, 90);	\
+      SUB_FIELD_BD (tdata.cols[rcount1],width, 40);		\
       DXF { VALUE_TFF ("DATAMAP_END", 309) }                    \
       DXF { VALUE_TFF ("LINKEDTABLEDATACOLUMN_END", 309) }      \
       SET_PARENT (tdata.cols[rcount1], &_obj->tdata);		\
@@ -400,6 +416,7 @@ DWG_OBJECT_END
               SET_PARENT (content, &_obj->cell);                \
           END_REPEAT_BLOCK					\
           END_REPEAT (cell.cell_contents);			\
+          CellStyle_fields (cell.cellstyle);			\
           SUB_FIELD_BL (cell, style_id, 90);			\
           SUB_FIELD_BL (cell, has_geom_data, 91);		\
           if (FIELD_VALUE (cell.has_geom_data))			\
@@ -409,7 +426,7 @@ DWG_OBJECT_END
               SUB_FIELD_BD (cell,height_w_gap, 41);		\
               SUB_FIELD_BL (cell,num_geometry, 94);		\
               SUB_FIELD_HANDLE (cell,tablegeometry, 4, 330);	\
-              REPEAT (cell.num_geometry, cell.geometry, Dwg_CellContentGeometry) \
+              REPEAT4 (cell.num_geometry, cell.geometry, Dwg_CellContentGeometry) \
               REPEAT_BLOCK					\
                   SUB_FIELD_3BD (geom,dist_top_left, 10);	\
                   SUB_FIELD_3BD (geom,dist_center, 11);		\
@@ -417,7 +434,7 @@ DWG_OBJECT_END
                   SUB_FIELD_BD (geom,content_height, 44);	\
                   SUB_FIELD_BD (geom,width, 45);		\
                   SUB_FIELD_BD (geom,height, 46);		\
-                  SUB_FIELD_BL (geom,unknown, 95);		\
+                  SUB_FIELD_BL (geom,flags, 95);		\
                   SET_PARENT_FIELD (geom, cell_parent, &_obj->cell); \
               END_REPEAT_BLOCK					\
               END_REPEAT (cell.geometry);			\
@@ -443,13 +460,14 @@ DWG_OBJECT_END
       {								\
         CellStyle_fields (row.cellstyle);			\
         SUB_FIELD_BL (row,style_id, 90);			\
-        SUB_FIELD_BL (row,height, 40);				\
+        SUB_FIELD_BD (row,height, 40);				\
       }								\
       SET_PARENT (row, &_obj->tdata);				\
   END_REPEAT_BLOCK						\
   END_REPEAT (tdata.rows);					\
   FIELD_BL (tdata.num_field_refs, 0);				\
   HANDLE_VECTOR (tdata.field_refs, tdata.num_field_refs, 3, 0);	\
+  CellStyle_fields (fdata.cellstyle);				\
   FIELD_BL (fdata.num_merged_cells, 90);			\
   REPEAT (fdata.num_merged_cells, fdata.merged_cells, Dwg_FormattedTableMerged)	\
   REPEAT_BLOCK							\
@@ -477,29 +495,6 @@ DWG_OBJECT_END
 DWG_ENTITY (TABLE)
 
   HANDLE_UNKNOWN_BITS;
-  SINCE (R_2010b) //AC1024
-    {
-      FIELD_RC (unknown_rc, 0);
-      FIELD_HANDLE (tablestyle, 5, 342);
-      //FIELD_HANDLE (unknown_h, 5, 0);
-      FIELD_BL (unknown_bl, 0);
-      VERSIONS (R_2010b, R_2010)
-        FIELD_B (unknown_b, 0); // default 1
-      VERSIONS (R_2013b, R_2013)
-        FIELD_BL (unknown_bl1, 0);
-      // i.e. TABLECONTENT: 20.4.96.2 AcDbTableContent subclass: 20.4.97
-      // FIXME: same offset as TABLECONTENT, or subclass
-      TABLECONTENTs_fields;
-
-#undef row
-#undef cell
-#undef content
-#undef geom
-#undef attr
-#undef merged
-
-    }
-  else {
     SUBCLASS (AcDbBlockReference)
     FIELD_3BD (ins_pt, 10);
     VERSIONS (R_13b1, R_14) {
@@ -558,7 +553,8 @@ DWG_ENTITY (TABLE)
     FIELD_B (has_attribs, 66);
 
     SINCE (R_2004a) {
-      FIELD_BL (num_owned, 0);
+      if (FIELD_VALUE (has_attribs))
+        FIELD_BL (num_owned, 0);
       VALUEOUTOFBOUNDS (num_owned, 10000)
     }
     FIELD_HANDLE (block_header, 5, 2);
@@ -582,6 +578,28 @@ DWG_ENTITY (TABLE)
     if (FIELD_VALUE (has_attribs)) {
       FIELD_HANDLE (seqend, 3, 0);
     }
+  SINCE (R_2010b) //AC1024
+    {
+      FIELD_RC (unknown_rc, 0);
+      FIELD_HANDLE (unknown_h, 5, 0);
+      FIELD_BL (unknown_bl, 0);
+      VERSIONS (R_2010b, R_2010)
+        FIELD_B (unknown_b, 0); // default 1
+      SINCE (R_2013)
+        FIELD_BL (unknown_bl1, 0);
+      // i.e. TABLECONTENT: 20.4.96.2 AcDbTableContent subclass: 20.4.97
+      // FIXME: same offset as TABLECONTENT, or subclass
+      TABLECONTENTs_fields;
+
+#undef row
+#undef cell
+#undef content
+#undef geom
+#undef attr
+#undef merged
+
+    }
+  else {
 
     SUBCLASS (AcDbTable)
     FIELD_HANDLE (tablestyle, 5, 342);
@@ -1101,7 +1119,7 @@ DWG_OBJECT (TABLEGEOMETRY)
           SUB_FIELD_BD (geom,content_height, 44);
           SUB_FIELD_BD (geom,width, 45);
           SUB_FIELD_BD (geom,height, 46);
-          SUB_FIELD_BL (geom,unknown, 95);
+          SUB_FIELD_BL (geom,flags, 95);
           SET_PARENT_FIELD (geom, geom_parent, &_obj->cell);
           #undef geom
       END_REPEAT_BLOCK
@@ -2506,11 +2524,8 @@ DWG_ENTITY_END
 
 #define AcDbAssocAnnotationActionBody_fields      \
   UNTIL (R_2010) {                                \
-    if (FIELD_VALUE (actionbody))                 \
-    {                                             \
-      AcDbAssocActionBody_fields;                 \
-      AcDbAssocParamBasedActionBody_fields (pab); \
-    }                                             \
+    AcDbAssocActionBody_fields;                   \
+    AcDbAssocParamBasedActionBody_fields (pab);   \
   }                                               \
   LATER_VERSIONS {                                \
     FIELD_BS (aaab_version, 90);                  \
@@ -2585,7 +2600,7 @@ DWG_OBJECT_END
 
 #define AcDbRenderSettings_fields                                             \
     SUBCLASS (AcDbRenderSettings)                                             \
-    VERSION (R_2013) { /* version 0x1f */                                     \
+    SINCE (R_2013) { /* version 0x1f */                                       \
       VALUE_BL (_obj->class_version + 1, 90)                                  \
     } else {                                                                  \
       FIELD_BL (class_version, 90);                                           \
@@ -2597,13 +2612,13 @@ DWG_OBJECT_END
     FIELD_B (environ_image_enabled, 290);                                     \
     FIELD_T (environ_image_filename, 1);                                      \
     FIELD_T (description, 1);                                                 \
-    FIELD_BL (display_index, 90);                                             \
-    VERSION (R_2013) {                                                        \
-      FIELD_B (has_predefined, 290);                                          \
-    }
+    FIELD_BL (display_index, 90);
 
 DWG_OBJECT (RENDERSETTINGS)
   AcDbRenderSettings_fields;
+  SINCE (R_2013) {
+    FIELD_B (has_predefined, 290);
+  }
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -2611,8 +2626,8 @@ DWG_OBJECT (MENTALRAYRENDERSETTINGS)
   AcDbRenderSettings_fields;
   SUBCLASS (AcDbMentalRayRenderSettings);
   FIELD_BL (mr_version, 90); /* = 2 */
-  FIELD_BL (sampling1, 90);
-  FIELD_BL (sampling2, 90);
+  FIELD_BL (sampling_min, 90);
+  FIELD_BL (sampling_max, 90);
   FIELD_BS (sampling_mr_filter, 70);
   FIELD_BD (sampling_filter1, 40);
   FIELD_BD (sampling_filter2, 40);
@@ -2668,10 +2683,7 @@ DWG_OBJECT (RAPIDRTRENDERSETTINGS)
   FIELD_BL (filter_type, 70);
   FIELD_BD (filter_width, 40);
   FIELD_BD (filter_height, 40);
-  VERSION (R_2013)
-    {}
-  else
-    FIELD_B (has_predefined, 290); // when RENDERSETTINGS does not handle it
+  FIELD_B (has_predefined, 290);
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -2809,30 +2821,9 @@ DWG_OBJECT (MATERIAL)
     FIELD_BL0 (mode, 282);
   }
 
-#if 0
-  // missing:
-  FIELD_BD (indirect_bump_scale, 461);
-  FIELD_BD (reflectance_scale, 462);
-  FIELD_BD (transmittance_scale, 463);
-  FIELD_B (two_sided_material, 290);
-  FIELD_BD (luminance, 464);
-  FIELD_BS (luminance_mode, 270);
-  FIELD_BS (normalmap_method, 271);
-  FIELD_BD (normalmap_strength, 465); //def: 1.0
-  MAT_MAP (normalmap, 42, 72, 3, 73, 74, 75, 43);
-  FIELD_B (is_anonymous, 293);
-  FIELD_BS (global_illumination, 272); // 0 none, 1 cast, 2 receive, 3 cast&receive
-  FIELD_BS (final_gather, 273);        // 0 none, 1 cast, 2 receive, 3 cast&receive
-  FIELD_BD (color_bleed_scale, 460);
-
-  // saveas: ADVMATERIAL into xdic
-  //FIELD_B (genproctableend, 292); // always 1
-  //78
-  //172
-  //176
-  //270
-  //274
-#endif
+  // The advanced material properties (DXF 460-465, 270-273, 290, 293) are
+  // not part of the DWG object. They are stored in an ADVMATERIAL XRECORD
+  // in the extension dictionary of the material.
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -2858,7 +2849,7 @@ DWG_ENTITY (ARC_DIMENSION)
 DWG_ENTITY_END
 
 // as ACAD_LAYERFILTERS in the NOD
-DWG_OBJECT (LAYERFILTER)
+DWG_OBJECT (LAYER_FILTER)
   SUBCLASS (AcDbLayerFilter)
   FIELD_BL (num_names, 0);
   FIELD_VECTOR_T (names, T, num_names, 8);
@@ -3154,9 +3145,39 @@ DWG_OBJECT_END
   FIELD_BL (subent_index, 90);         \
   FIELD_B (dependent_on_compound_object, 290)
 
-#define AcDbAssocPersSubentId_fields            \
-  SUBCLASS (AcDbAssocPersSubentId);             \
-  FIELD_T (classname, 1);                       \
+#ifdef IS_DXF
+#  define AcDbAssocPersSubentId_dxf_classname                         \
+    if (FIELD_VALUE (classname)) {                                    \
+      FIELD_T (classname, 1);                                         \
+    } else if (FIELD_VALUE (class_code) == 1) {                       \
+      VALUE_TVc ("AcDbAssocSingleEdgePersSubentId", 1);               \
+    } else if (FIELD_VALUE (class_code) == 3) {                       \
+      VALUE_TVc ("AcDbAssocEdgePersSubentId", 1);                     \
+    } else if (FIELD_VALUE (class_code) == 5) {                       \
+      VALUE_TVc ("AcDbAssocAsmBasedEntityPersSubentId", 1);           \
+    }
+#else
+#  define AcDbAssocPersSubentId_dxf_classname FIELD_T (classname, 1);
+#endif
+
+#define AcDbAssocPersSubentId_fields                                  \
+  SUBCLASS (AcDbAssocPersSubentId);                                   \
+  DXF {                                                               \
+    AcDbAssocPersSubentId_dxf_classname                               \
+  }                                                                   \
+  else {                                                              \
+    PRE (R_2013) {                                                    \
+      FIELD_T (classname, 1);                                         \
+    } LATER_VERSIONS {                                                \
+      FIELD_B (has_classname, 0);                                     \
+      FIELD_BL (class_code, 0);                                       \
+      DECODER {                                                       \
+        FIELD_VALUE (num_values)                                      \
+            = FIELD_VALUE (class_code) == 3 ? 3 : 0;                  \
+      }                                                               \
+      FIELD_VECTOR (values, BL, num_values, 0);                       \
+    }                                                                 \
+  }                                                                   \
   FIELD_B (dependent_on_compound_object, 290)
 
 #define AcDbAssocEdgePersSubentId_fields \
@@ -3177,6 +3198,10 @@ DWG_OBJECT_END
 DWG_OBJECT (ASSOCVALUEDEPENDENCY)
   HANDLE_UNKNOWN_BITS;
   AcDbAssocDependency_fields; // lgtm[cpp/use-after-free] codeql[cpp/use-after-free]
+  SUBCLASS (AcDbAssocValueDependency);
+  FIELD_BL (class_version, 90);
+  FIELD_T (name, 1);
+  AcDbEvalVariant_fields (value);
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -3358,10 +3383,9 @@ DWG_OBJECT_END
   } */
 
 #define AcDbBlockAction_doubles_fields            \
-  FIELD_BD (action_offset_x, 140);                \
-  FIELD_BD (action_offset_y, 141);                \
-  FIELD_BD (angle_offset, 0);                     \
-  DXF { VALUE_RC ((BITCODE_RC)1, 280); } /* Action XY type. 1? */
+  FIELD_BD (distance_multiplier, 140);            \
+  FIELD_BD (angle_offset, 141);                   \
+  FIELD_RC (action_xy_type, 280)
 
 #define AcDbBlockConstraintParameter_fields                \
   AcDbBlock2PtParameter_fields;                            \
@@ -3585,9 +3609,9 @@ DWG_OBJECT (EVALUATION_GRAPH)
   REPEAT_BLOCK
       SUB_FIELD_BL (edges[rcount1], id, 92); // starting with 0
       SUB_FIELD_BLd (edges[rcount1], nextid, 93); //
-      SUB_FIELD_BLd (edges[rcount1], e1, 94); // incoming edges
-      SUB_FIELD_BLd (edges[rcount1], e2, 91); //
-      SUB_FIELD_BLd (edges[rcount1], e3, 91); //
+      SUB_FIELD_BLd (edges[rcount1], incoming_edge, 94); // incoming edges
+      SUB_FIELD_BLd (edges[rcount1], source_node, 91); //
+      SUB_FIELD_BLd (edges[rcount1], destination_node, 91); //
       SUB_FIELD_BLd (edges[rcount1], out_edge[0], 92); //
       SUB_FIELD_BLd (edges[rcount1], out_edge[1], 92); //
       SUB_FIELD_BLd (edges[rcount1], out_edge[2], 92); //
@@ -3683,7 +3707,9 @@ DWG_OBJECT (DIMASSOC)
       SUB_FIELD_BL (ref[rcount1], num_xrefs, 0);
       SUB_HANDLE_VECTOR (ref[rcount1], xrefs, num_xrefs, 4, 331);
 
-      if (FIELD_VALUE (ref[rcount1].osnap_type) != 0)
+      /* An _End last-point reference without any xrefs has no main subent. */
+      if (FIELD_VALUE (ref[rcount1].osnap_type) != 0
+          && FIELD_VALUE (ref[rcount1].num_xrefs) > 0)
         {
           SUB_FIELD_BL (ref[rcount1], main_subent_type, 73);
           SUB_FIELD_BL (ref[rcount1], main_gsmarker, 91);
@@ -3779,10 +3805,10 @@ DWG_OBJECT (ASSOCALIGNEDDIMACTIONBODY)
   SUBCLASS (ACDBASSOCALIGNEDDIMACTIONBODY);
   //SUBCLASS (AcDbAssocAlignedDimActionBody);
   FIELD_BL (class_version, 90);
-  //or status, 90 //has d_node or r_node?
+  //or status, 90 //has dimension_node or read_node?
   START_OBJECT_HANDLE_STREAM;
-  FIELD_HANDLE (r_node, 4, 330);
-  FIELD_HANDLE (d_node, 4, 330);
+  FIELD_HANDLE (read_node, 4, 330);
+  FIELD_HANDLE (dimension_node, 4, 330);
 DWG_OBJECT_END
 
 DWG_OBJECT (ASSOC3POINTANGULARDIMACTIONBODY)
@@ -3791,8 +3817,8 @@ DWG_OBJECT (ASSOC3POINTANGULARDIMACTIONBODY)
   SUBCLASS (Assoc3PointAngularDimActionBody);
   FIELD_BS (class_version, 90);
   START_OBJECT_HANDLE_STREAM;
-  FIELD_HANDLE (r_node, 4, 330);
-  FIELD_HANDLE (d_node, 4, 330);
+  FIELD_HANDLE (read_node, 4, 330);
+  FIELD_HANDLE (dimension_node, 4, 330);
   FIELD_HANDLE (assocdep, 5, 330);
 DWG_OBJECT_END
 
@@ -3802,8 +3828,8 @@ DWG_OBJECT (ASSOCORDINATEDIMACTIONBODY)
   SUBCLASS (AssocOrdinatedDimActionBody);
   FIELD_BL (class_version, 90);
   START_OBJECT_HANDLE_STREAM;
-  FIELD_HANDLE (r_node, 5, 330);
-  FIELD_HANDLE (d_node, 5, 330);
+  FIELD_HANDLE (read_node, 5, 330);
+  FIELD_HANDLE (dimension_node, 5, 330);
 DWG_OBJECT_END
 
 DWG_OBJECT (ASSOCROTATEDDIMACTIONBODY)
@@ -3812,8 +3838,8 @@ DWG_OBJECT (ASSOCROTATEDDIMACTIONBODY)
   SUBCLASS (AssocRotatedDimActionBody);
   FIELD_BS (class_version, 90);
   START_OBJECT_HANDLE_STREAM;
-  FIELD_HANDLE (r_node, 5, 330);
-  FIELD_HANDLE (d_node, 5, 330);
+  FIELD_HANDLE (read_node, 5, 330);
+  FIELD_HANDLE (dimension_node, 5, 330);
 DWG_OBJECT_END
 
 // subclass only
@@ -4501,13 +4527,29 @@ DWG_OBJECT (DATATABLE)
 
       REPEAT2 (num_rows, cols[rcount1].rows, Dwg_DATATABLE_row) //CellType?
       REPEAT_BLOCK
-          // almost like Dwg_TABLE_value
-          //switch case 1:
-          SUB_FIELD_BL (cols[rcount1].rows[rcount2],value.data_long, 93);
-          //switch case 2:
-          SUB_FIELD_BD (cols[rcount1].rows[rcount2],value.data_double, 40);
-          //switch case 3:
-          SUB_FIELD_T (cols[rcount1].rows[rcount2],value.data_string, 3);
+          // the column type selects the cell payload
+          switch (_obj->cols[rcount1].type)
+            {
+            case 1: // integer
+              SUB_FIELD_BL (cols[rcount1].rows[rcount2],value.data_long, 93);
+              break;
+            case 2: // double
+              SUB_FIELD_BD (cols[rcount1].rows[rcount2],value.data_double, 40);
+              break;
+            case 3: // text
+              SUB_FIELD_T (cols[rcount1].rows[rcount2],value.data_string, 3);
+              break;
+            case 4: // point
+              SUB_FIELD_3BD (cols[rcount1].rows[rcount2],value.data_3dpoint, 10);
+              break;
+            case 5: // object id
+              SUB_FIELD_HANDLE (cols[rcount1].rows[rcount2],value.data_handle, 5, 331);
+              break;
+            default:
+              LOG_ERROR ("Unhandled DATATABLE column type %u",
+                         (unsigned)_obj->cols[rcount1].type);
+              break;
+            }
           SET_PARENT (cols[rcount1].rows[rcount2], &_obj->cols[rcount1]);
       END_REPEAT_BLOCK
       END_REPEAT (cols[rcount1].rows)
@@ -4528,7 +4570,7 @@ DWG_OBJECT (DATALINK)
   FIELD_T (connection_string, 302);
   FIELD_BL (option, 90); // 2
   FIELD_BL (update_option, 91); // 1179649
-  FIELD_BL (bl92, 92); // 1
+  FIELD_BL (flags, 92); // 1
   FIELD_BS (year, 170);
   FIELD_BS (month, 171);
   FIELD_BS (day, 172);
@@ -4537,7 +4579,7 @@ DWG_OBJECT (DATALINK)
   FIELD_BS (seconds, 175);
   FIELD_BS (msec, 176);
   FIELD_BS (path_option, 177); // 1
-  FIELD_BL (bl93, 93); // 0
+  FIELD_BL (status_flags, 93); // 0
   FIELD_T (update_status, 304);
   FIELD_BL (num_customdata, 94); // 2
   DXF { VALUE_TFF ("CUSTOMDATA", 305); }
@@ -4883,9 +4925,17 @@ DWG_OBJECT (RENDERENTRY)
   FIELD_BS (start_year, 70);
   FIELD_BS (start_month, 70);
   FIELD_BS (start_day, 70);
+  FIELD_BS (start_hour, 70);
   FIELD_BS (start_minute, 70);
   FIELD_BS (start_second, 70);
   FIELD_BS (start_msec, 70);
+  FIELD_BS (end_year, 70);
+  FIELD_BS (end_month, 70);
+  FIELD_BS (end_day, 70);
+  FIELD_BS (end_hour, 70);
+  FIELD_BS (end_minute, 70);
+  FIELD_BS (end_second, 70);
+  FIELD_BS (end_msec, 70);
   FIELD_BD (render_time, 40);
   FIELD_BL (memory_amount, 90);
   FIELD_BL (material_count, 90);
@@ -5003,7 +5053,7 @@ DWG_OBJECT (TVDEVICEPROPERTIES)
   FIELD_BL (blending_mode, 0);
   //ver 2 or >4:
   FIELD_BD (antialiasing_level, 0);
-  FIELD_BD (bd2, 0);
+  FIELD_BD (reserved_double, 0);
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -5076,14 +5126,14 @@ DWG_ENTITY_END
 // r2000+ expresstools. Remote Text
 DWG_ENTITY (RTEXT)
   HANDLE_UNKNOWN_BITS;
-  SUBCLASS (AcDbRText);
+  SUBCLASS (RText);
   FIELD_3BD (pt, 10);
   DXF  {
     FIELD_BE (extrusion, 210);
   }
   else { FIELD_3DPOINT (extrusion, 210); }
   FIELD_BD (rotation, 50);
-  FIELD_BD (height, 50);
+  FIELD_BD (height, 40);
   DXF {
     FIELD_HANDLE (style, 5, 7);
   }
@@ -5103,6 +5153,8 @@ DWG_OBJECT (ASSOCEDGEACTIONPARAM)
   FIELD_BL (class_version, 90);
   FIELD_HANDLE (param, 3, 330);
   FIELD_B (has_action, 290);
+  /* action_type: 11 arc, 17 ellipse, 19 line, 23 3d line segment,
+     27 generic 3d curve, 42 3d nurbs curve */
   FIELD_BL (action_type, 90);
   switch (_obj->action_type)
     {
@@ -5275,7 +5327,7 @@ DWG_ENTITY (POINTCLOUD)
       SINCE (R_2013b) {
         FIELD_HANDLE (pointclouddef, 5, 330);
         FIELD_HANDLE (reactor, 3, 360);
-        FIELD_B (show_intensity, 0);
+        FIELD_B (show_intensity, 290);
         FIELD_BS (intensity_scheme, 71);
         SUB_FIELD_BD (intensity_style, min_intensity, 40);
         SUB_FIELD_BD (intensity_style, max_intensity, 41);
@@ -5310,7 +5362,7 @@ DWG_ENTITY_END
 
 DWG_ENTITY (POINTCLOUDEX)
   HANDLE_UNKNOWN_BITS;
-  SUBCLASS (AcDbPointCloud);
+  SUBCLASS (AcDbPointCloudEx);
   FIELD_BS (class_version, 70); // 1
   FIELD_3BD (extents_min, 10);
   FIELD_3BD (extents_max, 11);
@@ -5320,7 +5372,7 @@ DWG_ENTITY (POINTCLOUDEX)
   FIELD_3BD (ucs_z_dir, 212);
 
   FIELD_B (is_locked, 290);
-  FIELD_HANDLE (pointclouddefex, 5, 330);
+  FIELD_HANDLE (pointclouddefex, 5, 340);
   FIELD_HANDLE (reactor, 3, 360);
   FIELD_T (name, 1);
   FIELD_B (show_intensity, 291);
@@ -5680,13 +5732,32 @@ DWG_OBJECT (ASSOC2DCONSTRAINTGROUP)
   VALUEOUTOFBOUNDS (num_actions, 100);
   HANDLE_VECTOR (actions, num_actions, 4, 360);
 
-  FIELD_BL (num_nodes, 90); // 9
-  REPEAT (num_nodes, nodes, Dwg_CONSTRAINTGROUPNODE)
-  REPEAT_BLOCK
-      AcConstraintGroupNode_fields (nodes[rcount1]);
-      SET_PARENT_OBJ (nodes[rcount1]);
-  END_REPEAT_BLOCK
-  END_REPEAT (nodes)
+  FIELD_BL (next_node_id, 90); // 9
+  SINCE (R_2013) {
+    FIELD_BL (root_id, 90);
+    FIELD_BL (num_root_connections, 90);
+    VALUEOUTOFBOUNDS (num_root_connections, 1000);
+    FIELD_VECTOR (root_connections, BL, num_root_connections, 90);
+    FIELD_B (root_status, 70);
+    FIELD_BL (num_class_types, 90);
+    VALUEOUTOFBOUNDS (num_class_types, 100);
+    REPEAT (num_class_types, class_types, Dwg_CONSTRAINTGROUP_ClassType)
+    REPEAT_BLOCK
+        SUB_FIELD_T (class_types[rcount1], name, 1);
+        SET_PARENT_OBJ (class_types[rcount1]);
+    END_REPEAT_BLOCK
+    END_REPEAT (class_types)
+    FIELD_BL (num_registered, 90);
+    VALUEOUTOFBOUNDS (num_registered, 10000);
+    REPEAT (num_registered, registered, Dwg_CONSTRAINTGROUP_Registered)
+    REPEAT_BLOCK
+        SUB_FIELD_B (registered[rcount1], flag, 290);
+        SUB_FIELD_BL (registered[rcount1], class_index, 90);
+        SUB_FIELD_BL (registered[rcount1], nodeid, 90);
+        SET_PARENT_OBJ (registered[rcount1]);
+    END_REPEAT_BLOCK
+    END_REPEAT (registered)
+  }
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -5696,13 +5767,23 @@ DWG_OBJECT (ASSOCVARIABLE)
   SUBCLASS (AcDbAssocVariable);
   FIELD_BL (av_class_version, 90); /* 2 */
   FIELD_T (name, 1);
-  FIELD_T (t58, 1);
+  FIELD_T (expression, 1);
   FIELD_T (evaluator, 1);
   FIELD_T (desc, 1);
   AcDbEvalVariant_fields(value); // lgtm[cpp/use-after-free] codeql[cpp/use-after-free]
-  FIELD_B (has_t78, 290);
-  FIELD_T (t78, 1);
-  FIELD_B (b290, 290);
+  FIELD_B (has_cached_value, 290);
+  if (FIELD_VALUE (has_cached_value))
+    FIELD_T (cached_value, 1);
+  FIELD_B (flag, 290);
+  FIELD_BL (num_var_deps, 90);
+  VALUEOUTOFBOUNDS (num_var_deps, 1000);
+  REPEAT (num_var_deps, var_deps, Dwg_ASSOCVARIABLE_Dep)
+  REPEAT_BLOCK
+      SUB_FIELD_HANDLE (var_deps[rcount1], dependency, 4, 330);
+      SUB_FIELD_BL (var_deps[rcount1], flags, 90);
+      SET_PARENT_OBJ (var_deps[rcount1]);
+  END_REPEAT_BLOCK
+  END_REPEAT (var_deps)
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
@@ -5714,16 +5795,17 @@ DWG_OBJECT_END
 
 #define AcDbAssocCompoundActionParam_fields \
   SUBCLASS (AcDbAssocCompoundActionParam); \
-  FIELD_BS (class_version, 90); \
+  FIELD_BS (acap_version, 90); \
   FIELD_BS (bs1, 90); \
   FIELD_BL (num_params, 90); \
-  HANDLE_VECTOR (params, num_params, 4, 360); \
-  if (FIELD_VALUE (has_child_param)) /* FIXME */ \
-    { \
-      FIELD_BS (child_status, 90); \
-      FIELD_BL (child_id, 90); \
-      FIELD_HANDLE (child_param, 3, 330); \
-    } \
+  HANDLE_VECTOR (params, num_params, 4, 360)
+
+/* The child parameter block exists only for the AcDbAssocPointRefActionParam
+   and AcDbAssocOsnapPointRefActionParam subclasses (has_child = 1). */
+#define AcDbAssocCompoundActionParamChild_fields  \
+  FIELD_BS (child_status, 90); \
+  FIELD_BL (child_id, 90); \
+  FIELD_HANDLE (child_param, 3, 330); \
   if (FIELD_VALUE (child_id)) \
     { \
       FIELD_HANDLE (h330_2, 3, 330); \
@@ -5751,6 +5833,7 @@ DWG_OBJECT (ASSOCOSNAPPOINTREFACTIONPARAM)
   HANDLE_UNKNOWN_BITS;
   AcDbAssocActionParam_fields;
   AcDbAssocCompoundActionParam_fields;
+  AcDbAssocCompoundActionParamChild_fields;
   SUBCLASS (AcDbAssocPathActionParam);
   SUBCLASS (ACDBASSOCOSNAPPOINTREFACTIONPARAM);
   FIELD_BS (status, 90);
@@ -5759,16 +5842,7 @@ DWG_OBJECT (ASSOCOSNAPPOINTREFACTIONPARAM)
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 
-// not enough coverage
-DWG_OBJECT (ASSOCPOINTREFACTIONPARAM)
-  HANDLE_UNKNOWN_BITS;
-  AcDbAssocActionParam_fields;
-  AcDbAssocCompoundActionParam_fields;
-  SUBCLASS (AcDbAssocPointRefActionParam);
-  START_OBJECT_HANDLE_STREAM;
-DWG_OBJECT_END
-
-// unused
+// yet unused. we use a SUBCLASS
 #define AcDbAssocPathActionParam_fields(pap)              \
   SUBCLASS (AcDbAssocPathActionParam);                    \
   SUB_FIELD_BL (pap,status, 90);                          \
@@ -5776,7 +5850,7 @@ DWG_OBJECT_END
   SUB_FIELD_BS (pap,bs1, 90);                             \
   SUB_FIELD_BL (pap,num_params, 90);                      \
   SUB_HANDLE_VECTOR (pap, params, num_params, 4, 360);    \
-  if (FIELD_VALUE (pap.has_child_param)) {                \
+  if (FIELD_VALUE (pap.has_child)) {                      \
     SUB_FIELD_BS (pap,child_status, 90);                  \
     SUB_FIELD_BL (pap,child_id, 90);                      \
     SUB_FIELD_HANDLE (pap,child_param, 3, 330);           \
@@ -5786,6 +5860,16 @@ DWG_OBJECT_END
     SUB_FIELD_BL (pap,bl2, 90);                           \
     SUB_FIELD_HANDLE (pap,h330_3, 3, 330);                \
   }
+
+// not enough coverage
+DWG_OBJECT (ASSOCPOINTREFACTIONPARAM)
+  HANDLE_UNKNOWN_BITS;
+  AcDbAssocActionParam_fields;
+  AcDbAssocCompoundActionParam_fields;
+  AcDbAssocCompoundActionParamChild_fields;
+  SUBCLASS (AcDbAssocPointRefActionParam);
+  START_OBJECT_HANDLE_STREAM;
+DWG_OBJECT_END
 
 // not enough coverage
 DWG_OBJECT (ASSOCOBJECTACTIONPARAM)
@@ -5804,7 +5888,7 @@ DWG_OBJECT (ASSOCPATHACTIONPARAM)
   AcDbAssocActionParam_fields;
   AcDbAssocCompoundActionParam_fields;
   SUBCLASS (AcDbAssocPathActionParam);
-  FIELD_BL (version, 90);
+  FIELD_BL (apap_version, 90);
   START_OBJECT_HANDLE_STREAM;
 DWG_OBJECT_END
 

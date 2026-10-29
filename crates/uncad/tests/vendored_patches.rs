@@ -13,8 +13,9 @@
 //! its transparency back in their own fields, is pinned below on the entity
 //! it was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`); the R13/R14
 //! linetype one in the corpus twin comparison; the `dwg.spec` one, an
-//! R2010+ ATTRIB's text style, below; and the `decode.c` one, a pre-R13
-//! dimension's points, below against the DXF twins.
+//! R2010+ ATTRIB's text style, below. A pre-R13 dimension's points, which an
+//! earlier local patch to `decode.c` restored and upstream now does, stay
+//! pinned below against the DXF twins.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -149,9 +150,9 @@ fn an_r2010_attrib_keeps_its_text_style() {
     }
 }
 
-/// A pre-R13 dimension's fields: the vendored decoder now names the object
-/// after the subtype it was decoded as, so the field accessors no longer
-/// refuse it. Without the patch every one of these dimensions came back with
+/// A pre-R13 dimension's fields: the vendored decoder names the object
+/// after the subtype it was decoded as, so the field accessors do not
+/// refuse it. Without that every one of these dimensions came back with
 /// its kind and nothing else -- no definition point, no extension-line or
 /// curve points, no block. A pre-R13 drawing has no handles to pair
 /// entities by, so the dimensions are paired with their DXF twin's in file

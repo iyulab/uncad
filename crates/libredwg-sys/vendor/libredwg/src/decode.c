@@ -2126,7 +2126,8 @@ read_2004_compressed_section (Bit_Chain *dat, Dwg_Data *restrict dwg,
 
   for (i = j = 0; i < info->num_sections; ++i, ++j)
     {
-      uint32_t address, sec_mask;
+      uint64_t address; // the section map keeps it 64bit, do not truncate
+      uint32_t sec_mask;
       if (!info->sections[i])
         {
           LOG_WARN ("Skip empty section %u %s", i, info->name);
@@ -2139,20 +2140,11 @@ read_2004_compressed_section (Bit_Chain *dat, Dwg_Data *restrict dwg,
           j--; // index for writing info->max_decomp_size chunks
           continue;
         }
-      if (info->sections[i]->address
-          > 0xffffffffUL - 32) // no 32bit truncation
+      address = info->sections[i]->address;
+      if (address > dat->size || dat->size - address < 32)
         {
-          LOG_ERROR ("Section %s address %" PRIu64 " out of bounds",
-                     info->name, (uint64_t)info->sections[i]->address);
-          free (dec.chain);
-          sec_dat->chain = NULL;
-          return DWG_ERR_VALUEOUTOFBOUNDS;
-        }
-      address = (uint32_t)info->sections[i]->address;
-      if ((size_t)address + 32 > dat->size)
-        {
-          LOG_ERROR ("Section %s address %u + 32 > %" PRIuSIZE, info->name,
-                     address, dat->size);
+          LOG_ERROR ("Section %s address %" PRIu64 " + 32 > %" PRIuSIZE,
+                     info->name, address, dat->size);
           free (dec.chain);
           sec_dat->chain = NULL;
           return DWG_ERR_VALUEOUTOFBOUNDS;
@@ -2162,13 +2154,14 @@ read_2004_compressed_section (Bit_Chain *dat, Dwg_Data *restrict dwg,
       // bit_read_fixed (dat, es.char_data, 32);
 
       //? if encrypted properties: security_type & 2 ??
-      sec_mask = htole32 (0x4164536b ^ address);
+      sec_mask = htole32 (0x4164536b ^ (uint32_t)address);
       {
         for (int k = 0; k < 8; ++k)
           es.long_data[k] = le32toh (es.long_data[k] ^ sec_mask);
       }
 
-      LOG_INFO ("=== Section %s (%u) @%u ===\n", info->name, i, address);
+      LOG_INFO ("=== Section %s (%u) @%" PRIu64 " ===\n", info->name, i,
+                address);
       if (es.fields.page_type != 0x4163043b)
         LOG_WARN ("page_type:      0x%x  (should be 0x4163043b)",
                   (unsigned)es.fields.page_type);
@@ -2251,15 +2244,19 @@ read_2004_compressed_section (Bit_Chain *dat, Dwg_Data *restrict dwg,
         }
       else
         {
-          const size_t offset = (size_t)address + 32;
-          const BITCODE_RL size
-              = MIN ((BITCODE_RL)(info->size - es.fields.address),
-                     es.fields.page_size);
+          const size_t offset = address + 32;
+          // 64 bit: address, size and page_size come from the file, their
+          // 32 bit sums wrap and pass the checks below
+          const uint64_t size
+              = es.fields.address > info->size
+                    ? es.fields.page_size
+                    : MIN ((uint64_t)(info->size - es.fields.address),
+                           (uint64_t)es.fields.page_size);
           if (info->compressed == 2 || bytes_left < 0
               || es.fields.address > max_decomp_size
               || (uint64_t)es.fields.address + size > max_decomp_size
               || (uint64_t)es.fields.address + size > dec.size
-              || offset + size > dat->size)
+              || (uint64_t)offset + size > dat->size)
             {
               LOG_ERROR ("Some section size or address out of bounds");
               free (dec.chain);
@@ -6585,6 +6582,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_LINEAR *_obj = _ent->tio.DIMENSION_LINEAR;
         obj->fixedtype = DWG_TYPE_DIMENSION_LINEAR;
+        obj->name = obj->dxfname = (char *)"DIMENSION_LINEAR";
         LOG_TRACE ("=> Entity DIMENSION_LINEAR\n");
         if (R11OPTS (8))
           {
@@ -6616,6 +6614,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_ALIGNED *_obj = _ent->tio.DIMENSION_ALIGNED;
         obj->fixedtype = DWG_TYPE_DIMENSION_ALIGNED;
+        obj->name = obj->dxfname = (char *)"DIMENSION_ALIGNED";
         LOG_TRACE ("=> Entity DIMENSION_ALIGNED\n");
         if (R11OPTS (8))
           {
@@ -6643,6 +6642,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_ANG2LN *_obj = _ent->tio.DIMENSION_ANG2LN;
         obj->fixedtype = DWG_TYPE_DIMENSION_ANG2LN;
+        obj->name = obj->dxfname = (char *)"DIMENSION_ANG2LN";
         if (R11OPTS (8))
           {
             if (dat->version >= R_10)
@@ -6676,6 +6676,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_DIAMETER *_obj = _ent->tio.DIMENSION_DIAMETER;
         obj->fixedtype = DWG_TYPE_DIMENSION_DIAMETER;
+        obj->name = obj->dxfname = (char *)"DIMENSION_DIAMETER";
         LOG_TRACE ("=> Entity DIMENSION_DIAMETER\n");
         if (R11OPTS (32))
           {
@@ -6698,6 +6699,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_RADIUS *_obj = _ent->tio.DIMENSION_RADIUS;
         obj->fixedtype = DWG_TYPE_DIMENSION_RADIUS;
+        obj->name = obj->dxfname = (char *)"DIMENSION_RADIUS";
         LOG_TRACE ("=> Entity DIMENSION_RADIUS\n");
         if (R11OPTS (32))
           {
@@ -6720,6 +6722,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_ANG3PT *_obj = _ent->tio.DIMENSION_ANG3PT;
         obj->fixedtype = DWG_TYPE_DIMENSION_ANG3PT;
+        obj->name = obj->dxfname = (char *)"DIMENSION_ANG3PT";
         LOG_TRACE ("=> Entity DIMENSION_ANG3PT\n");
         if (R11OPTS (8))
           {
@@ -6754,6 +6757,7 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
       {
         Dwg_Entity_DIMENSION_ORDINATE *_obj = _ent->tio.DIMENSION_ORDINATE;
         obj->fixedtype = DWG_TYPE_DIMENSION_ORDINATE;
+        obj->name = obj->dxfname = (char *)"DIMENSION_ORDINATE";
         LOG_TRACE ("=> Entity DIMENSION_ORDINATE\n");
         if (R11OPTS (8))
           { // if dxf 13 (extension_defining_pt)
@@ -6778,45 +6782,6 @@ decode_preR13_DIMENSION (Bit_Chain *restrict dat, Dwg_Object *restrict obj)
     default:
       LOG_ERROR ("Unknown preR13 DIMENSION type %u", dimtype);
       error |= DWG_ERR_VALUEOUTOFBOUNDS;
-    }
-
-  /* --- uncad local patch, 2026-10-07 (NOTICE.md at the root of this crate,
-     "The changes"; the full reasoning is in the project's docs/CAVEATS.md,
-     "Local patches to the vendored LibreDWG", which is not in the published
-     tarball) ---------------------------------------------------------------
-
-     The object was set up as the largest subtype, DIMENSION_ANG2LN, which
-     named it "DIMENSION_ANG2LN"; the switch above then gave it its real
-     fixedtype but left the name. Every R13+ dimension carries its subtype's
-     name, and the dynapi accessors refuse an object whose name is not the
-     one they are asked for -- so every field of a pre-R13 dimension read as
-     missing through them: definition points, block, text position. Name the
-     object after the type it was decoded as. (Spelled out here rather than
-     through dwg_type_name(), which this file does not declare: an implicit
-     declaration returns int and cuts the pointer on a 64-bit build.)
-     --- end uncad local patch --- */
-  switch (obj->fixedtype)
-    {
-    case DWG_TYPE_DIMENSION_LINEAR:
-      obj->name = obj->dxfname = (char *)"DIMENSION_LINEAR";
-      break;
-    case DWG_TYPE_DIMENSION_ALIGNED:
-      obj->name = obj->dxfname = (char *)"DIMENSION_ALIGNED";
-      break;
-    case DWG_TYPE_DIMENSION_ANG3PT:
-      obj->name = obj->dxfname = (char *)"DIMENSION_ANG3PT";
-      break;
-    case DWG_TYPE_DIMENSION_DIAMETER:
-      obj->name = obj->dxfname = (char *)"DIMENSION_DIAMETER";
-      break;
-    case DWG_TYPE_DIMENSION_RADIUS:
-      obj->name = obj->dxfname = (char *)"DIMENSION_RADIUS";
-      break;
-    case DWG_TYPE_DIMENSION_ORDINATE:
-      obj->name = obj->dxfname = (char *)"DIMENSION_ORDINATE";
-      break;
-    default: /* DIMENSION_ANG2LN, as set up */
-      break;
     }
 
   return error;

@@ -2490,14 +2490,19 @@ add_LTYPE_dashes (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
             o->strings_area = (BITCODE_TF)xcalloc (strings_size, 1);
           if (is_tu)
             {
-              needed = (bit_wcs2len ((BITCODE_TU)o->dashes[j].text) * 2) + 2;
+              // dashes[j].text is TV from DXF, the r2007+ area is TU
+              BITCODE_TU wstr = bit_utf8_to_TU (pair->value.s.ptr, 0);
+              if (!wstr)
+                goto skip_overflow;
+              needed = (bit_wcs2len (wstr) * 2) + 2;
               if (dash_i + needed > strings_size)
                 {
                   LOG_WARN ("LTYPE strings_area overflow, truncating");
+                  free (wstr);
                   goto skip_overflow;
                 }
-              bit_wcs2cpy ((BITCODE_TU)&o->strings_area[dash_i],
-                           (BITCODE_TU)o->dashes[j].text);
+              bit_wcs2cpy ((BITCODE_TU)&o->strings_area[dash_i], wstr);
+              free (wstr);
               dash_i += (unsigned)needed;
             }
           else
@@ -5887,8 +5892,8 @@ add_TABLEGEOMETRY_Cell (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
         case 95:
           CHK_cells;
           CHK_geometry;
-          o->cells[i].geometry[j].unknown = pair->value.i;
-          LOG_TRACE ("%s.cells[%d].geometry[%d].unknown = %d [BL %d]\n",
+          o->cells[i].geometry[j].flags = pair->value.i;
+          LOG_TRACE ("%s.cells[%d].geometry[%d].flags = %d [BL %d]\n",
                      obj->name, i, j, pair->value.i, pair->code);
           break;
         default:
@@ -6322,9 +6327,9 @@ add_EVAL_Edge (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           LOG_ERROR ("Unknown DXF code %d for %s", pair->code, obj->name);
           return pair;
         }
-      o->edges[i].e1 = pair->value.i; // 94
-      LOG_TRACE ("%s.edges[%d].e1 = %d [BL %d]\n", obj->name, i, pair->value.i,
-                 pair->code);
+      o->edges[i].incoming_edge = pair->value.i; // 94
+      LOG_TRACE ("%s.edges[%d].incoming_edge = %d [BL %d]\n", obj->name, i,
+                 pair->value.i, pair->code);
       dxf_free_pair (pair);
 
       pair = dxf_read_pair (dat);
@@ -6333,9 +6338,9 @@ add_EVAL_Edge (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           LOG_ERROR ("Unknown DXF code %d for %s", pair->code, obj->name);
           return pair;
         }
-      o->edges[i].e2 = pair->value.i; // 91
-      LOG_TRACE ("%s.edges[%d].e2 = %d [BL %d]\n", obj->name, i, pair->value.i,
-                 pair->code);
+      o->edges[i].source_node = pair->value.i; // 91
+      LOG_TRACE ("%s.edges[%d].source_node = %d [BL %d]\n", obj->name, i,
+                 pair->value.i, pair->code);
       dxf_free_pair (pair);
 
       pair = dxf_read_pair (dat);
@@ -6344,9 +6349,9 @@ add_EVAL_Edge (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
           LOG_ERROR ("Unknown DXF code %d for %s", pair->code, obj->name);
           return pair;
         }
-      o->edges[i].e3 = pair->value.i; // 91
-      LOG_TRACE ("%s.edges[%d].e3 = %d [BL %d]\n", obj->name, i, pair->value.i,
-                 pair->code);
+      o->edges[i].destination_node = pair->value.i; // 91
+      LOG_TRACE ("%s.edges[%d].destination_node = %d [BL %d]\n", obj->name, i,
+                 pair->value.i, pair->code);
       dxf_free_pair (pair);
 
       for (int j = 0; j < 5; j++)
@@ -6664,7 +6669,7 @@ add_RENDERSETTINGS (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
   FIELD_T (environ_image_filename, 1);
   FIELD_T (description, 1);
   FIELD_BL (display_index, 90);
-  VERSION (R_2013)
+  SINCE (R_2013)
   {
     FIELD_B (has_predefined, 290);
   }
@@ -6706,9 +6711,17 @@ add_RENDERENTRY (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
   FIELD_BS (start_year, 70);
   FIELD_BS (start_month, 70);
   FIELD_BS (start_day, 70);
+  FIELD_BS (start_hour, 70);
   FIELD_BS (start_minute, 70);
   FIELD_BS (start_second, 70);
   FIELD_BS (start_msec, 70);
+  FIELD_BS (end_year, 70);
+  FIELD_BS (end_month, 70);
+  FIELD_BS (end_day, 70);
+  FIELD_BS (end_hour, 70);
+  FIELD_BS (end_minute, 70);
+  FIELD_BS (end_second, 70);
+  FIELD_BS (end_msec, 70);
   FIELD_BD (render_time, 40);
   FIELD_BL (memory_amount, 90);
   FIELD_BL (material_count, 90);
@@ -8731,12 +8744,9 @@ add_AcDbBlockMoveAction (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
   dxf_free_pair (pair);
 
   // AcDbBlockAction_doubles
-  FIELD_BD (action_offset_x, 140);
-  FIELD_BD (action_offset_y, 141);
-  FIELD_BD (angle_offset, 0);
-  /* VALUE_RC (1, 280); Action XY type. 1? */
-  pair = dxf_read_pair (dat);
-  dxf_free_pair (pair);
+  FIELD_BD (distance_multiplier, 140);
+  FIELD_BD (angle_offset, 141);
+  FIELD_RC (action_xy_type, 280);
   return NULL;
 }
 
@@ -8884,12 +8894,9 @@ add_AcDbBlockStretchAction (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
     }
 
   // AcDbBlockAction_doubles
-  FIELD_BD (action_offset_x, 140);
-  FIELD_BD (action_offset_y, 141);
-  FIELD_BD (angle_offset, 0);
-  /* VALUE_RC (1, 280); Action XY type. 1? */
-  pair = dxf_read_pair (dat);
-  dxf_free_pair (pair);
+  FIELD_BD (distance_multiplier, 140);
+  FIELD_BD (angle_offset, 141);
+  FIELD_RC (action_xy_type, 280);
   return NULL;
 }
 
@@ -12405,11 +12412,11 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
               else
                 goto search_field;
             }
-          else if (pair->code == 8 && obj->fixedtype == DWG_TYPE_LAYERFILTER
+          else if (pair->code == 8 && obj->fixedtype == DWG_TYPE_LAYER_FILTER
                    && strEQc (subclass, "AcDbLayerFilter"))
             {
               // num_names
-              Dwg_Object_LAYERFILTER *o = obj->tio.object->tio.LAYERFILTER;
+              Dwg_Object_LAYER_FILTER *o = obj->tio.object->tio.LAYER_FILTER;
               if (!o->names)
                 {
                   o->names = (BITCODE_T *)xcalloc (1, sizeof (BITCODE_T));
@@ -13728,8 +13735,7 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                   LOG_TRACE ("%s.%s = %f (from DEG %f°) [%s %d]\n", name,
                              "dim_rotation", ang, pair->value.d, "BD", 50);
                 }
-              else if (obj->fixedtype == DWG_TYPE_MTEXT
-                       && pair->code == 50)
+              else if (obj->fixedtype == DWG_TYPE_MTEXT && pair->code == 50)
                 {
                   // valid alternative to the group 11 direction vector:
                   // rotation in degrees (AutoCAD and ezdxf both write it)
@@ -13847,12 +13853,11 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
       Dwg_Entity_VIEWPORT *o = obj->tio.entity->tio.VIEWPORT;
       if (o->vport_entity_header)
         {
-          Dwg_Object *vxobj = dwg_resolve_handle (
-              dwg, o->vport_entity_header->absolute_ref);
+          Dwg_Object *vxobj
+              = dwg_resolve_handle (dwg, o->vport_entity_header->absolute_ref);
           if (vxobj && vxobj->fixedtype == DWG_TYPE_VX_TABLE_RECORD)
             {
-              vxobj->tio.object->tio.VX_TABLE_RECORD->is_on
-                  = o->on_off != 0;
+              vxobj->tio.object->tio.VX_TABLE_RECORD->is_on = o->on_off != 0;
               LOG_TRACE ("VX_TABLE_RECORD.is_on = %d (VIEWPORT.on_off %d)\n",
                          o->on_off != 0, (int)o->on_off);
             }
@@ -14990,6 +14995,7 @@ resolve_postponed_object_refs (Dwg_Data *restrict dwg)
     }
 }
 
+// clang-format off
 #  define CHECK_DICTIONARY_HDR(name)                                          \
     if (!vars->DICTIONARY_##name)                                             \
       {                                                                       \
@@ -15020,6 +15026,7 @@ resolve_postponed_object_refs (Dwg_Data *restrict dwg)
                 = dwg_add_handleref (dwg, 4, nod_hdl, is_abs ? NULL : obj);   \
           }                                                                   \
       }
+// clang-format on
 
 static void
 resolve_header_dicts (Dwg_Data *restrict dwg)

@@ -60,7 +60,6 @@ const LOCAL_PATCHES: &[(&str, usize)] = &[
     ("src/acds.spec", 2),
     ("src/common.c", 3),
     ("src/common_entity_data.spec", 3),
-    ("src/decode.c", 2),
     ("src/dwg.spec", 1),
 ];
 
