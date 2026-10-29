@@ -2,5 +2,5 @@
 # lib/libredwg submodule's commit at the last scripts/sync-libredwg-vendor.sh
 # run. The files that differ from it carry an "uncad local patch" comment
 # (docs/CAVEATS.md, "Local patches to the vendored LibreDWG").
-commit 6f3f82b9c9c3beaa3d4cddd1eb7b707ec41799f2
-date 2026-10-29T13:42:23+01:00
+commit f662cea7f4ce96ca949829e721162e5cb488ff67
+date 2026-10-29T13:44:45+01:00

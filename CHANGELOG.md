@@ -6,6 +6,14 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The vendored LibreDWG is updated to upstream commit `f662cea7` (2026-10-29; seven commits after
+  `6f3f82b9`). A colour read from a drawing now keeps the palette index the file supplied when it is
+  usable, instead of deriving it again from the RGB value. Upstream also fixes memory leaks in the
+  section-information, block-scale-action and association-data paths, and a use-after-free in its
+  DXF reader, which this crate links but does not call.
+
 ## [0.14.3] - 2026-10-30
 
 ### Changed
