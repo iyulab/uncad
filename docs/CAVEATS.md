@@ -124,10 +124,20 @@ through its cached block** (`*T...`): the vendored LibreDWG decodes TABLE in a n
 since the refresh to its commit `69f56a54` (before it, `src/classes.inc` listed TABLE as a
 debugging class and a DWG table arrived as `UNKNOWN`). A table in a DXF is read, its grid of
 rows, columns and cell texts included, with the way its rows run (`flow`: the table's own
-direction, or else its table style's); a DWG table's `grid` and `flow` are `None` -- its
-cells and flow are not read out of the decoded records yet. The block's number (`*T13` or
-`*T14`) is assigned when the application writes a file, so one drawing saved in two formats
-can name its table's block differently.
+direction, or else its table style's). A DWG table's `grid` is read for a record up to R2007:
+rows, columns, row heights, column widths, each cell's kind, text, span and whether another cell's
+span covers it. The corpus holds one table, and for R2000 and R2004 it reads cell for cell as its
+DXF twin states it; how a vertical or two-way merge is flagged in a record is not checked by any
+drawing there (the one merge is horizontal), and a span that does not stay inside the grid makes
+the table unread. In R2007 a cell's
+text sits in its value, and the backend returns the string of a string value empty; a cell that
+holds a value of any kind and yields no text reads as an empty one, so that table's `grid` is `None`
+too, with a `TABLE_CELL_TEXT` warning counting the cells. From R2010 the entity states no rows, columns or cells (a separate content
+object holds them, which is not read), so `grid` is `None` -- not read, which is not an empty
+table. A DWG table's `flow` is
+`None` in every release: neither the table's own direction nor its style's is read. The block's
+number (`*T13` or `*T14`) is assigned when the application writes a file, so one drawing saved in
+two formats can name its table's block differently.
 
 **WIPEOUT** is the one type here carrying risk *beyond* "not verified against a real
 file": its `pt0 + u*uvec + v*vvec` pixel-space-to-world transform comes from general

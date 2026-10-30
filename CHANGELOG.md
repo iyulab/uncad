@@ -6,13 +6,21 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A table in a DWG up to R2007 carries its rows, columns, row heights, column widths and cells (each
+  cell's kind, text, span, and whether another cell's span covers it), where it was read without
+  them. For R2000 and R2004 the corpus's one table reads cell for cell as its DXF twin states it. An
+  R2007 table with a cell that holds a value but yields no text is not read (`grid` stays `None`, with a
+  `TABLE_CELL_TEXT` warning counting the cells), as is any table from R2010, whose entity states no
+  rows or columns. A DWG table's `flow` stays `None`.
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `69f56a54` (2026-10-30; seven commits after
   `33bfac15`). It now decodes the TABLE entity in a normal build, so a table in a DWG is read as an
   `ACAD_TABLE` -- its insertion point, placement and cached block -- and drawn through that block,
-  where it used to arrive as an `UNKNOWN` entity that was not drawn. Its `grid` and `flow` are still
-  `None`: the cells are not read out of the decoded records yet. The same refresh fixes a heap
+  where it used to arrive as an `UNKNOWN` entity that was not drawn. The same refresh fixes a heap
   overflow in the backend's trace logging of field names, and corrects the fraction of a day it
   derives from a time's milliseconds (display values only; no DWG bytes and nothing in the model
   change). The one local patch to `common.c` is rebased onto it.

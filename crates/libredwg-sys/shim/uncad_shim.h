@@ -301,6 +301,31 @@ unsigned int uncad_entity_style_overrides(const Dwg_Data *dwg,
 
 void uncad_free_style_overrides(uncad_style_override_t *list);
 
+/* One cell of a TABLE entity (ACAD_TABLE), read out of the entity's cells[]
+ * array -- see uncad_table_get_cells. Strings point into the drawing and live
+ * as long as it; nothing to free but the array itself. */
+typedef struct uncad_table_cell
+{
+  uint16_t type;               /* Dwg_TABLE_Cell.type: 1 text, 2 block */
+  uint8_t is_merged_value;     /* Dwg_TABLE_Cell.is_merged_value */
+  uint32_t merged_width_flag;  /* Dwg_TABLE_Cell.merged_width_flag */
+  uint32_t merged_height_flag; /* Dwg_TABLE_Cell.merged_height_flag */
+  const char *text_value;      /* Dwg_TABLE_Cell.text_value, or NULL */
+  uint32_t value_flags;        /* value.flags (DXF 90) */
+  uint32_t value_data_type;    /* value.data_type */
+  const char *value_string;    /* value.value_string, or NULL */
+  const char *data_string;     /* value.data_string, or NULL */
+} uncad_table_cell_t;
+
+/* A TABLE's cells in the order the entity stores them (row by row), as
+ * many as it states rows times columns. Returns that count and mallocs
+ * *out to it; 0 with *out NULL for a NULL entity, a table with no cells
+ * array, or a count the entity states inconsistently. Free with
+ * uncad_table_free_cells. */
+unsigned long uncad_table_get_cells(void *entity, uncad_table_cell_t **out);
+
+void uncad_table_free_cells(uncad_table_cell_t *cells);
+
 #ifdef __cplusplus
 }
 #endif

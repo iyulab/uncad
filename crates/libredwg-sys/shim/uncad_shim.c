@@ -551,3 +551,43 @@ uncad_free_style_overrides (uncad_style_override_t *list)
 {
   free (list);
 }
+
+unsigned long
+uncad_table_get_cells (void *entity, uncad_table_cell_t **out)
+{
+  *out = NULL;
+  if (!entity)
+    return 0;
+  Dwg_Entity_TABLE *table = (Dwg_Entity_TABLE *)entity;
+  if (!table->cells || table->num_rows == 0 || table->num_cols == 0)
+    return 0;
+  /* A count past what a drawing's table can hold is not a table. */
+  unsigned long long count
+      = (unsigned long long)table->num_rows * table->num_cols;
+  if (count > 4000000ULL)
+    return 0;
+  uncad_table_cell_t *cells = calloc ((size_t)count, sizeof (uncad_table_cell_t));
+  if (!cells)
+    return 0;
+  for (unsigned long long i = 0; i < count; i++)
+    {
+      const Dwg_TABLE_Cell *src = &table->cells[i];
+      cells[i].type = src->type;
+      cells[i].is_merged_value = src->is_merged_value;
+      cells[i].merged_width_flag = src->merged_width_flag;
+      cells[i].merged_height_flag = src->merged_height_flag;
+      cells[i].text_value = (const char *)src->text_value;
+      cells[i].value_flags = src->value.flags;
+      cells[i].value_data_type = src->value.data_type;
+      cells[i].value_string = (const char *)src->value.value_string;
+      cells[i].data_string = (const char *)src->value.data_string;
+    }
+  *out = cells;
+  return (unsigned long)count;
+}
+
+void
+uncad_table_free_cells (uncad_table_cell_t *cells)
+{
+  free (cells);
+}

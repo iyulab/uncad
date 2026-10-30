@@ -26,8 +26,9 @@ use uncad_model::model::{
     LeaderPath, LeaderRoot, LightEntity, LightType, LineEntity, LwPolylineEntity, MLineEntity,
     MLineVertex, MTextAttachment, MTextEntity, MultiLeaderBlock, MultiLeaderContent,
     MultiLeaderEntity, MultiLeaderText, OrdinateAxis, Origin, PointEntity, PolylineEntity,
-    RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TextEntity, TextOverride,
-    ToleranceEntity, ViewportEntity, ViewportView, WipeoutEntity,
+    RayEntity, Ref, Solid3DEntity, SolidEntity, SplineEntity, TableCell, TableCellKind, TableGrid,
+    TableRow, TextEntity, TextOverride, ToleranceEntity, ViewportEntity, ViewportView,
+    WipeoutEntity,
 };
 use uncad_model::model::{
     AttributeFlags, EntityLinetype, HorizontalJustification, OverrideValue, Point2D, Point3D,
@@ -1724,18 +1725,19 @@ unsafe fn convert_entity(
                 z: 1.0,
             });
             let rotation = get_field::<f64>(entity_ptr, "TABLE", "rotation").unwrap_or(0.0);
+            let grid = convert_table_grid(text, entity_ptr, common.id);
             Entity::AcadTable(AcadTableEntity {
                 common,
                 block_name,
                 insertion_point,
                 scale,
                 rotation,
-                // The cells are not carried over: the backend decodes them
-                // now, but this conversion does not read them out yet. Nor
-                // is the flow direction -- the table's and its style's live
-                // in the same records, and without the cells it places
-                // nothing.
-                grid: None,
+                // The rows, columns and cells of a record up to R2007; `None`
+                // from R2010, whose entity holds none (see
+                // [`convert_table_grid`]). The flow direction is not read:
+                // the table's own lives in the same records as its style's,
+                // and neither is carried over yet.
+                grid,
                 flow: None,
             })
         }
@@ -2934,6 +2936,146 @@ fn dimension_text_override(user_text: Option<&str>) -> TextOverride {
         Some(" ") => TextOverride::Suppressed,
         Some(other) => TextOverride::Literal(other.to_string()),
     }
+}
+
+/// The `uncad_table_get_cells` array, freed when it goes out of scope.
+struct TableCellArray {
+    ptr: *mut libredwg_sys::uncad_table_cell_t,
+    len: usize,
+}
+
+impl TableCellArray {
+    fn slice(&self) -> &[libredwg_sys::uncad_table_cell_t] {
+        if self.ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: the shim mallocs `len` cells at `ptr`, ours until Drop.
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+impl Drop for TableCellArray {
+    fn drop(&mut self) {
+        // SAFETY: `ptr` is NULL or the array the shim allocated; freed once.
+        unsafe { libredwg_sys::uncad_table_free_cells(self.ptr) }
+    }
+}
+
+/// The `string` kind of a table value (`Dwg_TABLE_value.data_type`).
+const TABLE_VALUE_STRING: u32 = 4;
+
+/// A table's rows, columns and cells, as its record states them.
+///
+/// Only the record up to R2007 states them: from R2010 the entity holds no
+/// rows or columns and a separate TABLECONTENT object does, which is not
+/// read -- the answer is then `None` ("not read"), not an empty grid. (A
+/// table of no rows or no columns is `None` too, whatever its release: the
+/// record of a release up to R2007 that states none cannot be told from one
+/// that does not state them.) `None` also when what the record states is not
+/// a whole grid (a count the arrays do not match, a span that is not a count
+/// inside the grid); the cells are not guessed at.
+///
+/// A cell's text is the one the record states in the cell, or -- where a
+/// version keeps it in the cell's value instead -- the value's string. A cell
+/// that holds a value and yields no text cannot be told from an empty one, and
+/// a consumer takes a cell with no text for an empty one, so such a table is
+/// `None` too (counted in a warning) rather than a grid that says less than the
+/// record does.
+fn convert_table_grid(
+    text: &TextDecoder,
+    entity_ptr: *mut std::ffi::c_void,
+    id: EntityId,
+) -> Option<TableGrid> {
+    let rows = get_field::<u32>(entity_ptr, "TABLE", "num_rows")? as usize;
+    let columns = get_field::<u32>(entity_ptr, "TABLE", "num_cols")? as usize;
+    if rows == 0 || columns == 0 {
+        return None;
+    }
+    let column_widths: Vec<f64> =
+        get_array_field::<u32, f64>(entity_ptr, "TABLE", "num_cols", "col_widths");
+    let heights: Vec<f64> =
+        get_array_field::<u32, f64>(entity_ptr, "TABLE", "num_rows", "row_heights");
+    let mut raw: *mut libredwg_sys::uncad_table_cell_t = std::ptr::null_mut();
+    // SAFETY: entity_ptr is the TABLE struct of a live entity (the caller
+    // matched its type); the shim only reads it.
+    let len = unsafe { libredwg_sys::uncad_table_get_cells(entity_ptr, &mut raw) } as usize;
+    let array = TableCellArray { ptr: raw, len };
+    if column_widths.len() != columns || heights.len() != rows || len != rows * columns {
+        text.warn(format!(
+            "TABLE_GRID: the ACAD_TABLE {id:?} states {rows} rows and {columns} columns but {} row heights, {} column widths and {len} cells; its cells are not read",
+            heights.len(),
+            column_widths.len()
+        ));
+        return None;
+    }
+    let mut unread_values = 0usize;
+    let mut grid_rows = Vec::with_capacity(rows);
+    for (row, height) in heights.into_iter().enumerate() {
+        let mut cells = Vec::with_capacity(columns);
+        for column in 0..columns {
+            let cell = &array.slice()[row * columns + column];
+            // A span is a count that stays inside the grid.
+            if cell.merged_width_flag == 0
+                || cell.merged_height_flag == 0
+                || column + cell.merged_width_flag as usize > columns
+                || row + cell.merged_height_flag as usize > rows
+            {
+                text.warn(format!(
+                    "TABLE_GRID: a cell of the ACAD_TABLE {id:?} (row {row}, column {column}) states a span that is not a count inside the grid; its cells are not read"
+                ));
+                return None;
+            }
+            let kind = match cell.type_ {
+                1 => Some(TableCellKind::Text),
+                2 => Some(TableCellKind::Block),
+                _ => None,
+            };
+            let stated = |field: &str, ptr: *const std::os::raw::c_char| {
+                // SAFETY: a string field of the cell of a live table, in the
+                // drawing `text` was made for.
+                unsafe { text.stored_field(ptr, "TABLE_Cell", field) }.filter(|s| !s.is_empty())
+            };
+            let cell_text = if kind == Some(TableCellKind::Block) {
+                None
+            } else {
+                let own = stated("text_value", cell.text_value);
+                let valued = || {
+                    stated("value_string", cell.value_string)
+                        .or_else(|| stated("data_string", cell.data_string))
+                };
+                let found = own.or_else(|| {
+                    (cell.value_data_type == TABLE_VALUE_STRING)
+                        .then(valued)
+                        .flatten()
+                });
+                // A cell that holds a value of any kind and yields no text may be an empty
+                // string or a value the backend did not give a text for; a consumer takes
+                // "no text" for an empty cell, so it is not left as one.
+                if found.is_none() && cell.value_data_type != 0 {
+                    unread_values += 1;
+                }
+                found
+            };
+            cells.push(TableCell {
+                kind,
+                text: cell_text,
+                covered: cell.is_merged_value != 0,
+                span_columns: cell.merged_width_flag,
+                span_rows: cell.merged_height_flag,
+            });
+        }
+        grid_rows.push(TableRow { height, cells });
+    }
+    if unread_values > 0 {
+        text.warn(format!(
+            "TABLE_CELL_TEXT: the ACAD_TABLE {id:?} has {unread_values} cells whose value the backend returned without a text; its cells are not read"
+        ));
+        return None;
+    }
+    Some(TableGrid {
+        column_widths,
+        rows: grid_rows,
+    })
 }
 
 #[cfg(test)]
