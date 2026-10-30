@@ -122,7 +122,23 @@ uncad redline plan.dwg step2.json -o review.png --fit 1200 --stroke 3 --paper da
 uncad redline plan.dwg step2.json -o review.svg --stroke 1 --paper dark  # 1 px on screen at any zoom
 ```
 
-`uncad mcp` serves `summarize`, `hit-test`, `relate`, `diff`, `set` and `redline` as [Model Context
+`balloon` draws numbered balloons on top of a drawing: the drawing exactly as it
+renders alone, and over it, in one color, a circle holding each label you give,
+joined by a leader to the entity or point it numbers. The labels are yours,
+written as given; the verb decides only where each circle sits. It writes an SVG
+file -- never over an existing one -- and answers with every balloon drawn (a
+`crowded` one overlaps a text or another balloon, since no free spot was found)
+and every one that could not be, and why. The balloons are JSON, as text or
+`@file.json`: an array of `{ "label", "target": {"entity": <ID>} or {"point": [x, y]},
+"state": "active" or "dropped" }`:
+
+```bash
+uncad balloon part.dwg --balloons '[{"label":"1","target":{"entity":42}}]' -o numbered.svg
+uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --color '#0057b8'  # a color of your own
+uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --size 12 --space paper  # 12 units across, in paper space
+```
+
+`uncad mcp` serves `summarize`, `hit-test`, `relate`, `diff`, `set`, `redline` and `balloon` as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files

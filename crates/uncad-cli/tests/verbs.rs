@@ -1,4 +1,4 @@
-//! The verbs (`summarize`, `hit-test`, `diff`, `set`, `redline`) and
+//! The verbs (`summarize`, `hit-test`, `diff`, `set`, `redline`, `balloon`) and
 //! `uncad mcp`, which serves the same verbs as MCP tools.
 //!
 //! The property that matters most is that the two front ends give the same
@@ -473,7 +473,15 @@ fn every_advertised_protocol_version_lists_and_answers_alike() {
             .collect();
         assert_eq!(
             names,
-            ["summarize", "hit_test", "relate", "diff", "set", "redline"],
+            [
+                "summarize",
+                "hit_test",
+                "relate",
+                "diff",
+                "set",
+                "redline",
+                "balloon"
+            ],
             "{version}"
         );
         if version.as_str() >= STATELESS {
@@ -511,17 +519,25 @@ fn every_advertised_protocol_version_lists_and_answers_alike() {
 }
 
 #[test]
-fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
+fn mcp_lists_the_verbs_and_only_the_file_writers_write() {
     let mut mcp = Mcp::start();
     let list = mcp.request("tools/list", json!({}));
     let tools = list["result"]["tools"].as_array().expect("tools");
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(
         names,
-        ["summarize", "hit_test", "relate", "diff", "set", "redline"]
+        [
+            "summarize",
+            "hit_test",
+            "relate",
+            "diff",
+            "set",
+            "redline",
+            "balloon"
+        ]
     );
     for tool in tools {
-        let writes = tool["name"] == "set" || tool["name"] == "redline";
+        let writes = ["set", "redline", "balloon"].contains(&tool["name"].as_str().unwrap());
         let description = tool["description"].as_str().unwrap();
         assert!(
             !description.contains('\\'),
@@ -551,6 +567,7 @@ fn mcp_lists_the_verbs_and_only_set_and_redline_write() {
         "diff",
         "set",
         "redline",
+        "balloon",
         "export",
     ]
     .into_iter()
@@ -2424,4 +2441,224 @@ fn a_picture_names_a_solid_with_no_edge_and_does_not_call_its_type_unsupported()
         .find(|l| l.contains("having no edge to draw"))
         .unwrap_or_else(|| panic!("{stderr}"));
     assert!(line.ends_with(": 1106"), "{line}");
+}
+
+/// The balloons the tests draw: one on the circle, one on a point, one gone
+/// (an entity that does not exist, which the picture cannot show and says so).
+fn balloons_for(id: &str) -> Value {
+    let (cx, cy, _) = circle();
+    json!([
+        {"label": "1", "target": {"entity": id.parse::<u64>().unwrap()}},
+        {"label": "5.1", "target": {"point": [cx, cy]}, "state": "dropped"},
+        {"label": "7", "target": {"entity": 4_000_000_000_u64}},
+    ])
+}
+
+/// What the verb answers and writes is what the renderer gives for the same
+/// drawing and balloons, called directly -- the verb adds no rule of its own.
+#[test]
+fn balloon_answers_what_the_renderer_draws() {
+    let dir = scratch("balloon");
+    let id = circle_id(&dir);
+    let balloons = balloons_for(&id);
+    let picture = dir.join("balloons.svg");
+    let (line, report) = answer(&[
+        "balloon",
+        CORPUS_DWG,
+        "--balloons",
+        &balloons.to_string(),
+        "-o",
+        arg(&picture),
+    ]);
+
+    let db = uncad::parse_bytes(
+        &std::fs::read(CORPUS_DWG).unwrap(),
+        uncad::Format::from_path(CORPUS_DWG),
+    )
+    .expect("the fixture reads");
+    let (cx, cy, _) = circle();
+    let direct = iron_render_cad::balloons_to_svg(
+        &db,
+        &[
+            iron_render_cad::Balloon::new(
+                "1",
+                iron_render_cad::BalloonTarget::Entity(uncad::model::EntityId::new(
+                    id.parse().unwrap(),
+                )),
+            ),
+            iron_render_cad::Balloon {
+                state: iron_render_cad::BalloonState::Dropped,
+                ..iron_render_cad::Balloon::new(
+                    "5.1",
+                    iron_render_cad::BalloonTarget::Point(uncad::model::Point2D { x: cx, y: cy }),
+                )
+            },
+            iron_render_cad::Balloon::new(
+                "7",
+                iron_render_cad::BalloonTarget::Entity(uncad::model::EntityId::new(4_000_000_000)),
+            ),
+        ],
+        iron_render_cad::BalloonOptions::default(),
+    );
+    assert_eq!(line, serde_json::to_string(&direct).unwrap());
+    assert_eq!(std::fs::read_to_string(&picture).unwrap(), direct.svg);
+
+    // Every balloon is told: two drawn, one named with its reason.
+    assert_eq!(report["placed"].as_array().unwrap().len(), 2, "{report}");
+    let not_placed = report["not_placed"].as_array().unwrap();
+    assert_eq!(not_placed.len(), 1, "{report}");
+    assert_eq!(not_placed[0]["index"], 2, "{report}");
+    assert_eq!(not_placed[0]["label"], "7", "{report}");
+    assert_eq!(report["placed"][1]["label"], "5.1", "{report}");
+
+    // `@file` is the command line's way to give the balloons from a file;
+    // the MCP tool answers the same bytes.
+    let again = dir.join("again.svg");
+    let from_file = dir.join("balloons.json");
+    std::fs::write(&from_file, balloons.to_string()).unwrap();
+    let at_file = format!("@{}", arg(&from_file));
+    let (same, _) = answer(&[
+        "balloon",
+        CORPUS_DWG,
+        "--balloons",
+        &at_file,
+        "-o",
+        arg(&again),
+    ]);
+    assert_eq!(same, line);
+    assert_eq!(
+        std::fs::read(&again).unwrap(),
+        std::fs::read(&picture).unwrap()
+    );
+    let mcp_picture = dir.join("mcp.svg");
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "balloon",
+        json!({"input": CORPUS_DWG, "balloons": balloons, "output": arg(&mcp_picture)}),
+    );
+    assert_ne!(result["isError"], true, "{result}");
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), line);
+    assert_eq!(
+        std::fs::read(&mcp_picture).unwrap(),
+        std::fs::read(&picture).unwrap()
+    );
+}
+
+#[test]
+fn balloon_options_change_the_picture() {
+    let dir = scratch("balloon-options");
+    let id = circle_id(&dir);
+    let balloons = json!([{"label": "1", "target": {"entity": id.parse::<u64>().unwrap()}}]);
+    let text = balloons.to_string();
+    let plain = dir.join("plain.svg");
+    let (_, base) = answer(&[
+        "balloon",
+        CORPUS_DWG,
+        "--balloons",
+        &text,
+        "-o",
+        arg(&plain),
+    ]);
+
+    let colored = dir.join("colored.svg");
+    let (_, report) = answer(&[
+        "balloon",
+        CORPUS_DWG,
+        "--balloons",
+        &text,
+        "--color",
+        "#123456",
+        "-o",
+        arg(&colored),
+    ]);
+    assert_eq!(report["color"], "#123456", "{report}");
+    assert_ne!(base["color"], report["color"]);
+
+    let sized = dir.join("sized.svg");
+    let (_, big) = answer(&[
+        "balloon",
+        CORPUS_DWG,
+        "--balloons",
+        &text,
+        "--size",
+        "50",
+        "-o",
+        arg(&sized),
+    ]);
+    assert_eq!(big["placed"][0]["radius"], 25.0, "{big}");
+    assert_ne!(base["placed"][0]["radius"], big["placed"][0]["radius"]);
+}
+
+#[test]
+fn balloon_refuses_input_it_cannot_draw_and_names_where() {
+    let dir = scratch("balloon-refuse");
+    let id: u64 = circle_id(&dir).parse().unwrap();
+    let long = "x".repeat(65);
+    let many: Vec<Value> = (0..1001)
+        .map(|n| json!({"label": n.to_string(), "target": {"entity": id}}))
+        .collect();
+    let cases: [(Value, &str); 10] = [
+        (json!({"label": "1"}), "must be an array"),
+        (json!(["1"]), "balloons[0] must be an object"),
+        (
+            json!([{"target": {"entity": id}}]),
+            "balloons[0] needs a 'label'",
+        ),
+        (
+            json!([{"label": "", "target": {"entity": id}}]),
+            "needs a 'label'",
+        ),
+        (
+            json!([{"label": long, "target": {"entity": id}}]),
+            "balloons[0].label is 65 characters",
+        ),
+        (
+            json!([{"label": "1", "target": {"entity": id}}, {"label": "2"}]),
+            "balloons[1] needs a 'target'",
+        ),
+        (
+            json!([{"label": "1", "target": {"entity": id, "point": [0, 0]}}]),
+            "exactly one of 'entity' and 'point'",
+        ),
+        (
+            json!([{"label": "1", "target": {"point": [0]}}]),
+            "two finite numbers",
+        ),
+        (
+            json!([{"label": "1", "target": {"entity": id}, "state": "gone"}]),
+            "must be \"active\" or \"dropped\"",
+        ),
+        (Value::Array(many), "at most 1000"),
+    ];
+    for (n, (balloons, expected)) in cases.iter().enumerate() {
+        let picture = dir.join(format!("refused-{n}.svg"));
+        // From a file: a thousand balloons do not fit a command line.
+        let listed = dir.join(format!("refused-{n}.json"));
+        std::fs::write(&listed, balloons.to_string()).unwrap();
+        let out = run(&[
+            "balloon",
+            CORPUS_DWG,
+            "--balloons",
+            &format!("@{}", arg(&listed)),
+            "-o",
+            arg(&picture),
+        ]);
+        assert!(!out.status.success(), "{balloons}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(expected), "{expected}: {stderr}");
+        assert!(!picture.exists(), "a refused call writes nothing: {n}");
+    }
+    let one = json!([{"label": "1", "target": {"entity": id}}]).to_string();
+    let taken = dir.join("taken.svg");
+    std::fs::write(&taken, "keep").unwrap();
+    let out = run(&["balloon", CORPUS_DWG, "--balloons", &one, "-o", arg(&taken)]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("already exists"));
+    assert_eq!(std::fs::read_to_string(&taken).unwrap(), "keep");
+
+    let wrong = dir.join("picture.png");
+    let out = run(&["balloon", CORPUS_DWG, "--balloons", &one, "-o", arg(&wrong)]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("does not end in .svg"));
+    assert!(!wrong.exists());
 }

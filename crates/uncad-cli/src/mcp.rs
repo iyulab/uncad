@@ -29,7 +29,9 @@ const INSTRUCTIONS: &str =
     reason), never guessed. `set` changes one field and writes the result as a new model JSON \
     file -- never over an existing one, never into its input -- which every tool reads as a \
     drawing, so edits chain; its answer is the difference it made. `redline` draws that \
-    difference on top of the original as an SVG or PNG file (a new one), for a person to see.";
+    difference on top of the original as an SVG or PNG file (a new one), for a person to see. \
+    `balloon` draws labels you give, each pointing at an entity or a point, on top of a drawing \
+    as an SVG file (a new one).";
 
 struct Server;
 

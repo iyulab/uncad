@@ -6,6 +6,21 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `uncad balloon <input> --balloons <json|@file.json> -o <out.svg>` (and the MCP verb `balloon`)
+  draws numbered balloons on top of a drawing: the drawing as it renders alone, and over it a circle
+  holding each label the caller gives, joined by a leader to the entity or point it numbers. The
+  answer is the renderer's own result: every balloon drawn (`placed`, with `crowded` when no free
+  spot was found) and every one that could not be (`not_placed`, with the reason), the view box,
+  origin and stroke width, and the balloons' color with the original's colors too close to it.
+  `--color`, `--size` (the circle's diameter in drawing units) and `--space` choose the color, size
+  and space. A balloon list is refused, naming the entry, when it holds more than 1000 balloons, a
+  label of 0 or more than 64 characters, or a target that is not exactly one of `entity` and
+  `point`. The file is never written over an existing one.
+- On the command line, a JSON option (`--balloons`, `--value`) reads its JSON from a file when
+  given as `@file.json`.
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `33bfac15` (2026-10-29; thirteen commits after

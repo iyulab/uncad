@@ -13,9 +13,10 @@
 //!
 //! A drawing argument is a DWG or DXF file, or the model JSON this tool
 //! writes (`uncad <drawing> -o <state.json>`, or `set`'s output) -- which is
-//! how an edit's result is the next call's input. Two verbs write a file:
-//! `set` the edited model JSON, `redline` a picture of the edit. Neither
-//! writes over an existing file, and neither changes its input.
+//! how an edit's result is the next call's input. Three verbs write a file:
+//! `set` the edited model JSON, `redline` a picture of the edit, `balloon` a
+//! picture of the drawing with numbered balloons on it. None writes over an
+//! existing file, and none changes its input.
 //!
 //! Argument names are snake_case, as the libraries spell them; the command
 //! line writes them as `--kebab-case` flags.
@@ -470,6 +471,83 @@ pub const VERBS: &[Verb] = &[
         writes: true,
         run: redline,
     },
+    Verb {
+        name: "balloon",
+        description: "Draws numbered balloons on top of a drawing: the drawing exactly as it \
+            renders alone, and over it, in one color, a circle holding each label you give, \
+            joined by a leader to the entity or point it numbers. The labels are yours, written \
+            as given -- the verb places the circles and numbers nothing. Writes an SVG file -- \
+            never over an existing one -- and answers with every balloon drawn (`placed` -- its \
+            `index` in your list, circle `center` and `radius`, `leader_end`, `via` the block \
+            references for an entity inside a block definition, and `crowded` when no free \
+            spot was found and the circle overlaps a text or another balloon) and every one \
+            that could not be (`not_placed`, with the `reason`); the world rectangle shown and \
+            the point its coordinates are relative to (`view_box`, `origin`) and the stroke \
+            width in drawing units (`stroke_width`), for marks of your own; and the color of \
+            the balloons (`color`) and original colors too close to it (`color_conflicts`). \
+            The same drawing and balloons give the same bytes.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "balloons",
+                kind: Kind::Json,
+                required: true,
+                positional: false,
+                description: "The balloons to draw: an array of at most 1000 objects \
+                    `{\"label\": \"5.1\", \"target\": {\"entity\": 289}, \"state\": \"active\"}`. \
+                    `label` is 1 to 64 characters. `target` is `{\"entity\": <reference ID>}` \
+                    (as summarize and hit_test give it) or `{\"point\": [x, y]}` in drawing \
+                    units, for where no entity is left to point at. `state` is `active` \
+                    (default; solid) or `dropped` (dashed: the number is kept, the thing it \
+                    numbered is gone). On the command line, JSON text, or `@file.json` to \
+                    read it from a file.",
+            },
+            Param {
+                name: "output",
+                kind: Kind::Path,
+                required: true,
+                positional: false,
+                description: "Where to write the picture: a .svg path that does not exist yet.",
+            },
+            Param {
+                name: "color",
+                kind: Kind::Color,
+                required: false,
+                positional: false,
+                description: "The color of the balloons. Without it, the first of red #e4002b, \
+                    purple #c000ff, blue #0060ff, green #00a040 and orange #ff8000 that no \
+                    color of the drawing comes close to (or, when every one does, the one the \
+                    drawing uses least). Given, the balloons are drawn in it whatever the \
+                    drawing uses, and the answer lists the colors close to it as \
+                    color_conflicts.",
+            },
+            Param {
+                name: "size",
+                kind: Kind::Positive,
+                required: false,
+                positional: false,
+                description: "The circles' diameter in drawing units. Without it, one sixtieth \
+                    of the picture's diagonal, so a circle keeps its size in the picture \
+                    whatever the drawing's units.",
+            },
+            Param {
+                name: "space",
+                kind: Kind::Choice(&["model", "paper", "all"]),
+                required: false,
+                positional: false,
+                description: "Which space to draw (default: model). The balloons' targets are \
+                    entities and points of that space.",
+            },
+        ],
+        writes: true,
+        run: balloon,
+    },
 ];
 
 const DRAWING: &str = "The drawing (.dwg, .dxf, or model JSON .json).";
@@ -716,9 +794,18 @@ impl Verb {
                     Kind::Integer => raw.parse::<u64>().map(Value::from).map_err(|_| {
                         format!("{word} must be an integer, 0 or more (got '{raw}')")
                     })?,
-                    Kind::Json => serde_json::from_str(raw).map_err(|e| {
-                        format!("{word} must be JSON -- a string in quotes (got '{raw}': {e})")
-                    })?,
+                    Kind::Json => {
+                        // `@file.json` reads the JSON from a file, for a value
+                        // too long for a command line.
+                        let text = match raw.strip_prefix('@') {
+                            Some(file) => std::fs::read_to_string(file)
+                                .map_err(|e| format!("cannot read {word} from '{file}': {e}"))?,
+                            None => raw.clone(),
+                        };
+                        serde_json::from_str(&text).map_err(|e| {
+                            format!("{word} must be JSON -- a string in quotes (got '{raw}': {e})")
+                        })?
+                    }
                     Kind::Window => Value::Array(
                         raw.split(',')
                             .map(|n| {
@@ -1310,6 +1397,163 @@ fn redline(args: &Map<String, Value>) -> Result<Answer, String> {
         create_new(&output, overlay.svg.as_bytes())?;
     }
     answer(&overlay, warnings)
+}
+
+/// The most balloons one call draws.
+const MAX_BALLOONS: usize = 1000;
+
+/// The longest balloon label, in characters.
+const MAX_LABEL_CHARS: usize = 64;
+
+/// The balloons `value` lists, or what is wrong with it and where. The
+/// renderer is handed nothing this refuses.
+fn balloon_list(value: &Value) -> Result<Vec<iron_render_cad::Balloon>, String> {
+    let items = value
+        .as_array()
+        .ok_or("'balloons' must be an array of {label, target, state} objects")?;
+    if items.len() > MAX_BALLOONS {
+        return Err(format!(
+            "'balloons' lists {} balloons: at most {MAX_BALLOONS} are drawn in one call",
+            items.len()
+        ));
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(at, item)| {
+            let fields = item.as_object().ok_or_else(|| {
+                format!("balloons[{at}] must be an object {{label, target, state}}")
+            })?;
+            if let Some(key) = fields
+                .keys()
+                .find(|k| !["label", "target", "state"].contains(&k.as_str()))
+            {
+                return Err(format!("balloons[{at}] takes no field '{key}'"));
+            }
+            let label = fields
+                .get("label")
+                .and_then(Value::as_str)
+                .filter(|l| !l.is_empty())
+                .ok_or_else(|| format!("balloons[{at}] needs a 'label': a non-empty string"))?;
+            let length = label.chars().count();
+            if length > MAX_LABEL_CHARS {
+                return Err(format!(
+                    "balloons[{at}].label is {length} characters: at most {MAX_LABEL_CHARS} fit \
+                     a balloon"
+                ));
+            }
+            let target = fields
+                .get("target")
+                .and_then(Value::as_object)
+                .ok_or_else(|| {
+                    format!(
+                        "balloons[{at}] needs a 'target': {{\"entity\": <ID>}} or \
+                         {{\"point\": [x, y]}}"
+                    )
+                })?;
+            let target = match (target.len(), target.get("entity"), target.get("point")) {
+                (1, Some(id), None) => {
+                    let id = id.as_u64().ok_or_else(|| {
+                        format!("balloons[{at}].target.entity must be an entity ID: an integer, 0 or more")
+                    })?;
+                    iron_render_cad::BalloonTarget::Entity(uncad::model::EntityId::new(id))
+                }
+                (1, None, Some(point)) => {
+                    let xy: Option<Vec<f64>> = point.as_array().filter(|p| p.len() == 2).and_then(
+                        |p| {
+                            p.iter()
+                                .map(|n| n.as_f64().filter(|n| n.is_finite()))
+                                .collect()
+                        },
+                    );
+                    let Some(&[x, y]) = xy.as_deref() else {
+                        return Err(format!(
+                            "balloons[{at}].target.point must be two finite numbers [x, y]"
+                        ));
+                    };
+                    iron_render_cad::BalloonTarget::Point(uncad::model::Point2D { x, y })
+                }
+                _ => {
+                    return Err(format!(
+                        "balloons[{at}].target must hold exactly one of 'entity' and 'point'"
+                    ))
+                }
+            };
+            let state = match fields.get("state").map(Value::as_str) {
+                None | Some(Some("active")) => iron_render_cad::BalloonState::Active,
+                Some(Some("dropped")) => iron_render_cad::BalloonState::Dropped,
+                Some(_) => {
+                    return Err(format!(
+                        "balloons[{at}].state must be \"active\" or \"dropped\""
+                    ))
+                }
+            };
+            let mut balloon = iron_render_cad::Balloon::new(label, target);
+            balloon.state = state;
+            Ok(balloon)
+        })
+        .collect()
+}
+
+fn balloon(args: &Map<String, Value>) -> Result<Answer, String> {
+    let output = path(args, "output");
+    let is_svg = std::path::Path::new(&output)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+    if !is_svg {
+        return Err(format!(
+            "balloon writes SVG only: '{output}' does not end in .svg"
+        ));
+    }
+    // Checked before anything is read, so a refused call costs nothing; the
+    // write below refuses an existing file again, atomically.
+    if std::path::Path::new(&output).exists() {
+        return Err(format!(
+            "'{output}' already exists -- balloon never writes over a file; give a new path"
+        ));
+    }
+    let balloons = balloon_list(&args["balloons"])?;
+    let mut options = iron_render_cad::BalloonOptions::default();
+    if let Some(given) = args.get("color").and_then(Value::as_str) {
+        options.color =
+            iron_render_cad::ProposalColor::Given(color(given).expect("checked by Verb::call"));
+    }
+    if let Some(diameter) = number(args, "size") {
+        options.size = iron_render_cad::BalloonSize::Units(diameter);
+    }
+    options.svg.space = match args.get("space").and_then(Value::as_str) {
+        Some("paper") => iron_render_cad::Space::Paper,
+        Some("all") => iron_render_cad::Space::All,
+        _ => iron_render_cad::Space::Model,
+    };
+    let mut warnings = Vec::new();
+    let db = read(&path(args, "input"), &mut warnings)?;
+    let drawn = iron_render_cad::balloons_to_svg(&db, &balloons, options);
+    if !drawn.color_conflicts.is_empty() {
+        let colors: Vec<String> = drawn
+            .color_conflicts
+            .iter()
+            .map(|c| format!("{} ({} uses)", c.color, c.uses))
+            .collect();
+        let advice = match options.color {
+            iron_render_cad::ProposalColor::Given(_) => {
+                "draw the balloons in another color with --color <#rrggbb> (MCP: color)"
+            }
+            _ => {
+                "every color balloon chooses from clashes with the drawing and this one \
+                 clashes least -- give one with --color <#rrggbb> (MCP: color)"
+            }
+        };
+        warnings.push(format!(
+            "the original is drawn in colors close to {}, the color the balloons are drawn in \
+             ({}): a balloon may not stand out from the lines around it -- {advice}",
+            drawn.color,
+            colors.join(", ")
+        ));
+    }
+    create_new(&output, drawn.svg.as_bytes())?;
+    answer(&drawn, warnings)
 }
 
 /// The size, in pixels, under which a mark's cloud is reported as hard to

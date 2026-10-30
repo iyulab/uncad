@@ -65,8 +65,17 @@ Usage:
                                       revision cloud (never over an
                                       existing file); answer with what
                                       was marked and what could not be
+  uncad balloon <input> --balloons <json|@file.json> -o <out.svg>
+                [--color <#rrggbb>] [--size <n>] [--space <model|paper|all>]
+                                    draw numbered balloons on top of <input>:
+                                      the original unchanged, a circle with
+                                      your label joined by a leader to the
+                                      entity or point it numbers (never over
+                                      an existing file); answer with what
+                                      was drawn and what could not be
   uncad mcp                         serve summarize, hit-test, relate, diff,
-                                      set and redline as MCP tools over stdio
+                                      set, redline and balloon as MCP tools
+                                      over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --
   what `-o <output.json>` and `set` write -- so edits chain, and the last
