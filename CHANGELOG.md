@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-30
+
 ### Added
 
 - `uncad balloon <input> --balloons <json|@file.json> -o <out.svg>` (and the MCP verb `balloon`)
@@ -30,6 +32,8 @@ Notable changes to this project are recorded here. The format follows
   so it is taken from the object's own type code. Upstream also fixes memory leaks in the
   section-information, block-scale-action, association-data and second-schema-data paths, and two
   use-after-free defects in its DXF reader, which this crate links but does not call.
+- The `libredwg-sys` crate description names the four local patches that remain on the vendored sources.
+- Built on `iron-diff-cad` 0.12.0, `iron-hand-cad` 0.10.0, `iron-pack-cad` 0.13.0, `iron-render-cad` 0.14.0, `iron-scout-cad` 0.14.0, `uncad-model` 0.10.0 and `undxf` 0.9.0.
 
 ## [0.14.3] - 2026-10-30
 
