@@ -572,9 +572,9 @@ dependencies = [
 
 [[package]]
 name = "iron-diff-cad"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f132403d1deaaa41e24d36c21b8353072bcf1d8d48be81fe729b77a1adc7bfe"
+checksum = "86d1128dd764458d2b56f6526432e5252936c6f9d1cfebeb1fcdf9fcb6008392"
 dependencies = [
  "serde",
  "serde_json",
@@ -583,9 +583,9 @@ dependencies = [
 
 [[package]]
 name = "iron-hand-cad"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b430702acca3d237fedce6a8a6fe5157a236ccf03d8bf634bcf6243def859128"
+checksum = "0d76c3c7cfb6b0897baf760d5bc487ef0ee62025cad94a2c53c94d1532fe469f"
 dependencies = [
  "serde",
  "serde_json",
@@ -594,9 +594,9 @@ dependencies = [
 
 [[package]]
 name = "iron-pack-cad"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1f51950276d46aaff88b8ecbd977b0a7ca915987e01823b7f689363ad985da8"
+checksum = "9d4f49474a812f7561d5768834df4734457b51765884ca50ecf3317251a2e442"
 dependencies = [
  "iron-render-cad",
  "png",
@@ -608,9 +608,9 @@ dependencies = [
 
 [[package]]
 name = "iron-render-cad"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2392681cf7acb7caf1add6522241521bbf4542b499673ee8fdbbd8d6e8028705"
+checksum = "2a4183e5093eafca569e63f4056bacfca2e9f686d47b38cd674125fd5d22c77d"
 dependencies = [
  "iron-diff-cad",
  "resvg",
@@ -620,9 +620,9 @@ dependencies = [
 
 [[package]]
 name = "iron-scout-cad"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "297bb4f0ecacee089e726eae0c204b3fa6020fad755b57d728952f5d4d7a3cd7"
+checksum = "8ad141ab105e8256fa1f35c62a4d181ff88f130357f7833aebeab43d70cdea5d"
 dependencies = [
  "serde",
  "uncad-model",
@@ -1424,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "uncad-model"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "acbb2bf30357b409f579f83754237d3252bb528c1b914bf9cf5af05e003516e3"
+checksum = "e5aeaafabb356de35f0540e3c0d34f950386cd61dab31d1445862de299c991ca"
 dependencies = [
  "serde",
  "serde_json",
@@ -1434,9 +1434,9 @@ dependencies = [
 
 [[package]]
 name = "undxf"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "716efd1ecc4669fcc0506a9b588c3ad38ca52e6903c098ff3399c02a74d427ac"
+checksum = "a1a755b50ace23dab21270991dade895518a6f5065affd34cba5fe01bf3ac13a"
 dependencies = [
  "encoding_rs",
  "serde",
