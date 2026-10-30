@@ -1730,11 +1730,11 @@ unsafe fn convert_entity(
                 insertion_point,
                 scale,
                 rotation,
-                // The cells are not read: the backend decodes them only in a
-                // build that enables its unfinished classes, which this one
-                // does not, and from R2010 not at all. Nor is the flow
-                // direction -- the table's and its style's live in the same
-                // undecoded data, and without the cells it places nothing.
+                // The cells are not carried over: the backend decodes them
+                // now, but this conversion does not read them out yet. Nor
+                // is the flow direction -- the table's and its style's live
+                // in the same records, and without the cells it places
+                // nothing.
                 grid: None,
                 flow: None,
             })

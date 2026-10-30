@@ -272,10 +272,13 @@ fn auto_matching_pairs_by_reference_only_drawings_the_files_show_to_be_one() {
 fn one_drawing_saved_in_a_newer_format_differs_only_in_what_the_files_state_differently() {
     // The corpus holds one drawing saved in six formats. Leaving out what the
     // older format had no place for (`unstated`) and what moved within
-    // tolerance, the change set is empty -- but for one name the files
-    // themselves state differently: from R2007 on, the system lights layer
+    // tolerance, the change set is empty -- but for two names the files
+    // themselves state differently. From R2007 on, the system lights layer
     // is written `*ADSK_SYSTEM_LIGHTS` (each version's DXF twin states the
-    // same).
+    // same). And the table's anonymous block is numbered by the saving
+    // application: the 2000 file's block table holds `*T13`, the 2004 to
+    // 2013 files' hold `*T14` (their DXF twins agree), and the 2018 file's
+    // holds `*T13` again.
     let base = corpus("example_2000.dwg");
     for version in ["2004", "2007", "2010", "2013", "2018"] {
         let other = corpus(&format!("example_{version}.dwg"));
@@ -287,21 +290,34 @@ fn one_drawing_saved_in_a_newer_format_differs_only_in_what_the_files_state_diff
             "{version}: the newer format states what the older could not"
         );
         let changes = set["changes"].as_array().unwrap();
-        if version == "2004" {
-            assert!(changes.is_empty(), "{version}: {changes:?}");
-            continue;
-        }
-        assert_eq!(changes.len(), 1, "{version}: {changes:?}");
-        let modified = &changes[0]["data"];
-        assert_eq!(changes[0]["type"], "MODIFIED");
-        assert_eq!(modified["entity_type"], "LIGHT");
-        let fields = modified["fields"].as_array().unwrap();
-        assert_eq!(fields.len(), 1, "{version}: {fields:?}");
-        assert_eq!(fields[0]["path"], "common.layer.data");
+        let table_renumbered = matches!(version, "2004" | "2007" | "2010" | "2013");
+        let lights_renamed = version != "2004";
         assert_eq!(
-            (&fields[0]["before"], &fields[0]["after"]),
-            (&json!("ADSK_SYSTEM_LIGHTS"), &json!("*ADSK_SYSTEM_LIGHTS"))
+            changes.len(),
+            usize::from(table_renumbered) + usize::from(lights_renamed),
+            "{version}: {changes:?}"
         );
+        for change in changes {
+            assert_eq!(change["type"], "MODIFIED", "{version}");
+            let modified = &change["data"];
+            let fields = modified["fields"].as_array().unwrap();
+            assert_eq!(fields.len(), 1, "{version}: {fields:?}");
+            let (path, before, after) = match modified["entity_type"].as_str().unwrap() {
+                "LIGHT" => (
+                    "common.layer.data",
+                    json!("ADSK_SYSTEM_LIGHTS"),
+                    json!("*ADSK_SYSTEM_LIGHTS"),
+                ),
+                "ACAD_TABLE" => ("block_name.data", json!("*T13"), json!("*T14")),
+                other => panic!("{version}: unexpected change to a {other}: {changes:?}"),
+            };
+            assert_eq!(fields[0]["path"], path, "{version}");
+            assert_eq!(
+                (&fields[0]["before"], &fields[0]["after"]),
+                (&before, &after),
+                "{version}"
+            );
+        }
     }
 }
 

@@ -44,7 +44,7 @@
  #define TRUNC(n) (long)floor (n)
  
 +  memset (tm, 0, sizeof (struct tm)); /* uncad local patch */
-   t = 0.864 * date.ms / 1000.0; /*t=1000000 = 1 day, means 86400 in seconds */
+   t = date.ms / 1000.0; // ms within the day, in seconds
    if (date.days > 2299161)
      {
 @@ -583,6 +616,16 @@

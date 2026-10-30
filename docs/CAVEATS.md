@@ -119,13 +119,15 @@ points at is drawn through the same path as INSERT/DIMENSION -- reusing geometry
 already computed instead of reconstructing cell content. Structurally that makes it about
 as trustworthy as REGION. Note that dynapi's field-table key is `"TABLE"`, not the real
 DXF name `"ACAD_TABLE"` (the same class of name mismatch as REGION/3DSOLID -- see the
-`DWG_TYPE_TABLE` case in `convert.rs`). **In a DWG, a table arrives as `UNKNOWN` and is
-not drawn**: the vendored LibreDWG decodes TABLE only in a debugging build (`src/classes.inc`
-lists it as a debugging class, noting that R2010+ tables need subclassing). Its cached
-block (`*T...`) is still in the block table. A table in a DXF is read, its grid of rows,
-columns and cell texts included, with the way its rows run (`flow`: the table's own direction,
-or else its table style's); a DWG table's `grid` and `flow` are `None` -- its cells and flow are
-not read.
+`DWG_TYPE_TABLE` case in `convert.rs`). **In a DWG, a table is read as a table, and drawn
+through its cached block** (`*T...`): the vendored LibreDWG decodes TABLE in a normal build
+since the refresh to its commit `69f56a54` (before it, `src/classes.inc` listed TABLE as a
+debugging class and a DWG table arrived as `UNKNOWN`). A table in a DXF is read, its grid of
+rows, columns and cell texts included, with the way its rows run (`flow`: the table's own
+direction, or else its table style's); a DWG table's `grid` and `flow` are `None` -- its
+cells and flow are not read out of the decoded records yet. The block's number (`*T13` or
+`*T14`) is assigned when the application writes a file, so one drawing saved in two formats
+can name its table's block differently.
 
 **WIPEOUT** is the one type here carrying risk *beyond* "not verified against a real
 file": its `pt0 + u*uvec + v*vvec` pixel-space-to-world transform comes from general

@@ -453,14 +453,12 @@ fn what_each_reader_finds_per_entity_type_is_what_it_was_when_last_measured() {
     //   crate's model has no such entity, so it reports one as unknown,
     //   carrying the type name. Nothing is claimed falsely -- the entity is
     //   simply not covered, and the file records where coverage stops.
-    // - `table` in one drawing: this crate reports that entity as unknown
-    //   under the name its engine gives an unrecognized class, while the
-    //   second reader reads it as a table. Which reading is right has not
-    //   been measured; the disagreement is recorded, not resolved.
     //
-    // Both are of one shape: a place where one reader says "unknown" and the
+    // It is of one shape: a place where one reader says "unknown" and the
     // other gives a name. That is the shape worth watching, because the
     // opposite -- both naming it, differently -- is a defect in one of them.
+    // (A line for a table in the 2000 drawing stood here while the engine
+    // left tables undecoded; it decodes them now and both readers count one.)
     let pinned = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/second-reader-types.txt"

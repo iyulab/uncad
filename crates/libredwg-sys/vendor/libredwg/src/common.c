@@ -377,12 +377,12 @@ strrplc (const char *s, const char *from, const char *to)
     {
       const size_t l1 = strlen (from);
       const size_t l2 = strlen (to);
-      char *dest = (char *)calloc (1, 160);
+      const size_t len = strlen (s);
+      char *dest = (char *)calloc (1, len - l1 + l2 + 1);
       long i = p - s;
-      assert (strlen (s) - ((long)l1 - l2) < 120);
       memcpy (dest, s, i);
-      strncat (dest, to, 159 - l2);
-      strncat (dest, s + i + l1, 159 - l1);
+      memcpy (dest + i, to, l2);
+      memcpy (dest + i + l2, s + i + l1, len - i - l1);
       return dest;
     }
   else
@@ -572,7 +572,7 @@ cvt_TIMEBLL (struct tm *tm, BITCODE_TIMEBLL date)
 #define TRUNC(n) (long)floor (n)
 
   memset (tm, 0, sizeof (struct tm)); /* uncad local patch */
-  t = 0.864 * date.ms / 1000.0; /*t=1000000 = 1 day, means 86400 in seconds */
+  t = date.ms / 1000.0; // ms within the day, in seconds
   if (date.days > 2299161)
     {
       jalpha = TRUNC (((date.days - 1867216) - 0.25) / 36524.25);
