@@ -7163,6 +7163,7 @@ add_FIELD (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
     return pair;
   o->num_childval = pair->value.u;
   dxf_free_pair (pair);
+  pair = NULL;
   if (o->num_childval)
     {
       o->childval = (Dwg_FIELD_ChildValue *)xcalloc (
@@ -7302,7 +7303,7 @@ add_FIELD (Dwg_Object *restrict obj, Bit_Chain *restrict dat)
           FIELD_T (value_string, 301);
         }
     }
-  if (pair->code != 301)
+  if (!pair || pair->code != 301)
     {
       FIELD_T (value_string, 301); // TODO: and 9 for subsequent >255 chunks
     }
@@ -11939,8 +11940,12 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                            || obj->fixedtype == DWG_TYPE_ATTDEF)
                        && !dwg_is_valid_tag (pair->value.s.ptr))
                 {
-                  LOG_ERROR ("Invalid %s.tag %s\n", obj->name,
-                             pair->value.s.ptr);
+                  /* Keep it. dwg_is_valid_tag() is stricter than AutoCAD,
+                     which writes and reads tags such as "#", and the tag is
+                     the attribute's name. */
+                  LOG_WARN ("Unusual %s.tag %s (kept)\n", obj->name,
+                            pair->value.s.ptr);
+                  goto search_field;
                 }
               else if (pair->code == 30 && pair->value.d == 0.0)
                 {
@@ -13747,6 +13752,20 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
                   LOG_TRACE ("MTEXT.x_axis_dir = (%f, %f, 0) (from DEG %f)"
                              " [3BD 11 from 50]\n",
                              o->x_axis_dir.x, o->x_axis_dir.y, pair->value.d);
+                }
+              /* A multiline ATTDEF/ATTRIB (r2018) embeds an MTEXT whose
+                 fields ride along on the attribute record. They are not
+                 modelled, and treating an unknown code as fatal destroys
+                 the entity and aborts the file for one modern attribute.
+                 TODO: honour the 101 "Embedded Object" marker instead and
+                 skip to the next 0 record. */
+              else if ((strEQc (name, "ATTDEF") || strEQc (name, "ATTRIB"))
+                       && ((pair->code >= 42 && pair->code <= 49)
+                           || pair->code == 101 || pair->code == 421
+                           || pair->code == 431 || pair->code == 441))
+                {
+                  LOG_WARN ("Skipped embedded-MTEXT DXF code %d for %s",
+                            pair->code, name);
                 }
               // accept wrong colors
               else if (is_dxf_class_importable (obj->name)

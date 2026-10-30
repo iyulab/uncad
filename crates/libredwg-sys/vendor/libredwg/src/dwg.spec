@@ -5664,11 +5664,16 @@ DWG_ENTITY (PROXY_ENTITY)
 
   //HANDLE_UNKNOWN_BITS;
   SUBCLASS (AcDbProxyEntity)
-  FIELD_BL (proxy_id, 90); // always 499
+  // ODA 20.4.90: the DWG stream has no proxy_id field. dxf 90 is the
+  // object's own DWG type code.
+  DECODER {
+    FIELD_VALUE (proxy_id) = obj->type;
+  }
   DXF {
-    PRE (R_2018) {
-      FIELD_BL (class_id, 91);
-    }
+    FIELD_BL (proxy_id, 90);
+  }
+  SINCE (R_2000b) {
+    FIELD_BL (class_id, 91); // R2000+, ODA 20.4.90
   }
   PRE (R_2018) {
     FIELD_BLx (version, 95);
@@ -5796,11 +5801,16 @@ DWG_OBJECT (PROXY_OBJECT)
     SUBCLASS (AcDbProxyObject)
   }
 #endif
-  FIELD_BL (proxy_id, 90); // always 499
+  // ODA 20.4.90: the DWG stream has no proxy_id field. dxf 90 is the
+  // object's own DWG type code.
+  DECODER {
+    FIELD_VALUE (proxy_id) = obj->type;
+  }
   DXF {
-    PRE (R_2018) {
-      FIELD_BL (class_id, 91);
-    }
+    FIELD_BL (proxy_id, 90);
+  }
+  SINCE (R_2000b) {
+    FIELD_BL (class_id, 91); // R2000+, ODA 20.4.90
   }
   PRE (R_2018) {
     FIELD_BLx (version, 95);
