@@ -1,0 +1,1415 @@
+{
+  "entities": [
+    {
+      "type": "LWPOLYLINE",
+      "common": {
+        "id": 260,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "104"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "vertices": [
+        {
+          "point": {
+            "x": 100.0,
+            "y": -40.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 200.0,
+            "y": -40.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 200.0,
+            "y": -85.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        },
+        {
+          "point": {
+            "x": 100.0,
+            "y": -85.0
+          },
+          "bulge": 0.0,
+          "start_width": 0.0,
+          "end_width": 0.0
+        }
+      ],
+      "closed": true,
+      "const_width": 0.0,
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 261,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "105"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -44.0
+      },
+      "text_height": 2.0,
+      "text": "Responsible dept.",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 262,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "106"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -49.0
+      },
+      "text_height": 3.5,
+      "text": "ABC 2",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 263,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "107"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 130.0,
+        "y": -44.0
+      },
+      "text_height": 2.0,
+      "text": "Technical reference",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 264,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "108"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 130.0,
+        "y": -49.0
+      },
+      "text_height": 3.5,
+      "text": "Patricia Johnson",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 265,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "109"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -58.0
+      },
+      "text_height": 2.0,
+      "text": "Title",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 266,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10A"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -63.0
+      },
+      "text_height": 3.5,
+      "text": "Mounting bracket",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 267,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10B"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -68.0
+      },
+      "text_height": 3.5,
+      "text": "for motor M2",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 268,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10C"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 150.0,
+        "y": -58.0
+      },
+      "text_height": 2.0,
+      "text": "Rev.",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 269,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10D"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 150.0,
+        "y": -63.0
+      },
+      "text_height": 3.5,
+      "text": "A",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 270,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10E"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -76.0
+      },
+      "text_height": 3.5,
+      "text": "SHEET",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 271,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "10F"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 102.0,
+        "y": -81.0
+      },
+      "text_height": 3.5,
+      "text": "1 OF 2",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 272,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "110"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 170.0,
+        "y": -44.0
+      },
+      "text_height": 2.0,
+      "text": "Scale",
+      "rotation": 0.0,
+      "horizontal_justification": "LEFT",
+      "vertical_justification": "BASELINE",
+      "alignment_point": null,
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    },
+    {
+      "type": "TEXT",
+      "common": {
+        "id": 273,
+        "origin": "VECTOR",
+        "confidence": "HIGH",
+        "source_handle": {
+          "type": "RESOLVED",
+          "data": "111"
+        },
+        "layer": {
+          "type": "RESOLVED",
+          "data": "TITLE"
+        },
+        "color_index": 256,
+        "true_color": null,
+        "invisible": false,
+        "linetype": {
+          "type": "BY_LAYER"
+        },
+        "linetype_scale": 1.0,
+        "lineweight": -1,
+        "transparency": null
+      },
+      "start_point": {
+        "x": 168.5,
+        "y": -49.0
+      },
+      "text_height": 3.5,
+      "text": "1:2",
+      "rotation": 0.0,
+      "horizontal_justification": "CENTER",
+      "vertical_justification": "BASELINE",
+      "alignment_point": {
+        "x": 170.0,
+        "y": -49.0
+      },
+      "width_factor": 1.0,
+      "oblique_angle": 0.0,
+      "style_name": {
+        "type": "ABSENT"
+      },
+      "elevation": 0.0,
+      "extrusion": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.0
+      }
+    }
+  ],
+  "tables": {
+    "layers": {
+      "0": {
+        "name": "0",
+        "color_index": 7,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      },
+      "TITLE": {
+        "name": "TITLE",
+        "color_index": 2,
+        "off": false,
+        "frozen": false,
+        "locked": false,
+        "plot": null,
+        "lineweight": null,
+        "linetype": {
+          "type": "RESOLVED",
+          "data": "CONTINUOUS"
+        }
+      }
+    },
+    "block_records": {
+      "*Model_Space": {
+        "name": "*Model_Space",
+        "entities": [
+          {
+            "type": "LWPOLYLINE",
+            "common": {
+              "id": 260,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "104"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "vertices": [
+              {
+                "point": {
+                  "x": 100.0,
+                  "y": -40.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 200.0,
+                  "y": -40.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 200.0,
+                  "y": -85.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              },
+              {
+                "point": {
+                  "x": 100.0,
+                  "y": -85.0
+                },
+                "bulge": 0.0,
+                "start_width": 0.0,
+                "end_width": 0.0
+              }
+            ],
+            "closed": true,
+            "const_width": 0.0,
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 261,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "105"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -44.0
+            },
+            "text_height": 2.0,
+            "text": "Responsible dept.",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 262,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "106"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -49.0
+            },
+            "text_height": 3.5,
+            "text": "ABC 2",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 263,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "107"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 130.0,
+              "y": -44.0
+            },
+            "text_height": 2.0,
+            "text": "Technical reference",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 264,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "108"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 130.0,
+              "y": -49.0
+            },
+            "text_height": 3.5,
+            "text": "Patricia Johnson",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 265,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "109"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -58.0
+            },
+            "text_height": 2.0,
+            "text": "Title",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 266,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10A"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -63.0
+            },
+            "text_height": 3.5,
+            "text": "Mounting bracket",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 267,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10B"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -68.0
+            },
+            "text_height": 3.5,
+            "text": "for motor M2",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 268,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10C"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 150.0,
+              "y": -58.0
+            },
+            "text_height": 2.0,
+            "text": "Rev.",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 269,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10D"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 150.0,
+              "y": -63.0
+            },
+            "text_height": 3.5,
+            "text": "A",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 270,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10E"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -76.0
+            },
+            "text_height": 3.5,
+            "text": "SHEET",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 271,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "10F"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 102.0,
+              "y": -81.0
+            },
+            "text_height": 3.5,
+            "text": "1 OF 2",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 272,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "110"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 170.0,
+              "y": -44.0
+            },
+            "text_height": 2.0,
+            "text": "Scale",
+            "rotation": 0.0,
+            "horizontal_justification": "LEFT",
+            "vertical_justification": "BASELINE",
+            "alignment_point": null,
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          },
+          {
+            "type": "TEXT",
+            "common": {
+              "id": 273,
+              "origin": "VECTOR",
+              "confidence": "HIGH",
+              "source_handle": {
+                "type": "RESOLVED",
+                "data": "111"
+              },
+              "layer": {
+                "type": "RESOLVED",
+                "data": "TITLE"
+              },
+              "color_index": 256,
+              "true_color": null,
+              "invisible": false,
+              "linetype": {
+                "type": "BY_LAYER"
+              },
+              "linetype_scale": 1.0,
+              "lineweight": -1,
+              "transparency": null
+            },
+            "start_point": {
+              "x": 168.5,
+              "y": -49.0
+            },
+            "text_height": 3.5,
+            "text": "1:2",
+            "rotation": 0.0,
+            "horizontal_justification": "CENTER",
+            "vertical_justification": "BASELINE",
+            "alignment_point": {
+              "x": 170.0,
+              "y": -49.0
+            },
+            "width_factor": 1.0,
+            "oblique_angle": 0.0,
+            "style_name": {
+              "type": "ABSENT"
+            },
+            "elevation": 0.0,
+            "extrusion": {
+              "x": 0.0,
+              "y": 0.0,
+              "z": 1.0
+            }
+          }
+        ],
+        "base_point": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "external_reference": null
+      },
+      "*Paper_Space": {
+        "name": "*Paper_Space",
+        "entities": [],
+        "base_point": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "external_reference": null
+      }
+    },
+    "dim_styles": {},
+    "mlinestyles": {},
+    "layouts": {},
+    "image_definitions": {}
+  },
+  "header": {
+    "insunits": null,
+    "fingerprintguid": null,
+    "versionguid": null,
+    "pdmode": null,
+    "pdsize": null
+  },
+  "read_diagnostics": {
+    "warnings": []
+  }
+}
