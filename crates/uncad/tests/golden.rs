@@ -20,7 +20,7 @@ use uncad::model::Ref;
 use uncad::{CadDatabase, Entity};
 
 /// Every case, as (name, DXF bytes, expected model JSON).
-const CASES: [(&str, &[u8], &str); 21] = [
+const CASES: [(&str, &[u8], &str); 22] = [
     (
         "g1",
         include_bytes!("golden/g1.dxf"),
@@ -125,6 +125,11 @@ const CASES: [(&str, &[u8], &str); 21] = [
         "g23",
         include_bytes!("golden/g23.dxf"),
         include_str!("golden/g23.expected.json"),
+    ),
+    (
+        "g24",
+        include_bytes!("golden/g24.dxf"),
+        include_str!("golden/g24.expected.json"),
     ),
 ];
 
