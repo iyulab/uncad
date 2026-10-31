@@ -105,7 +105,8 @@ pub const VERBS: &[Verb] = &[
             several places give differently is listed with every value, never one of them. \
             Given a type, a layer, a box, a space or an ID, it also selects entities \
             (`selection`) -- to find them by what they are rather than where -- and with \
-            `detail` gives each one's model record, the fields `set` addresses.",
+            `detail` gives each one's model record, the fields `set` addresses. With `omit` \
+            it leaves out the parts named (the `signature`), naming them in `omitted`.",
         params: &[
             Param {
                 name: "input",
@@ -173,6 +174,17 @@ pub const VERBS: &[Verb] = &[
                 positional: false,
                 description: "Give each selected entity's model record too: its fields as \
                     the model JSON names them, which are the `path`s `set` takes.",
+            },
+            Param {
+                name: "omit",
+                kind: Kind::Choices(&["signature"]),
+                required: false,
+                positional: false,
+                description: "Parts of the summary to leave out of the answer: `signature` \
+                    (the shape signature, the largest part of the answer for a drawing with \
+                    many views). The answer names what was left out in `omitted`, so a part \
+                    that is absent is never read as one that is empty. Default: nothing is \
+                    left out.",
             },
         ],
         writes: false,
@@ -1147,11 +1159,17 @@ const SELECTION_LIMIT: u64 = 100;
 fn summarize(args: &Map<String, Value>) -> Result<Answer, String> {
     let mut warnings = Vec::new();
     let db = read(&path(args, "input"), &mut warnings)?;
+    let mut omit = Vec::new();
+    if let Some(words) = args.get("omit").and_then(Value::as_array) {
+        if words.iter().any(|w| w == "signature") {
+            omit.push(iron_scout_cad::Part::Signature);
+        }
+    }
     let selecting = ["type", "layer", "within", "space", "id", "limit", "detail"]
         .iter()
         .any(|name| args.contains_key(*name));
     if !selecting {
-        return answer(&iron_scout_cad::summarize(&db), warnings);
+        return answer(&iron_scout_cad::summarize(&db).without(&omit), warnings);
     }
     let text = |name: &str| args.get(name).and_then(Value::as_str);
     let limit = args
@@ -1181,7 +1199,10 @@ fn summarize(args: &Map<String, Value>) -> Result<Answer, String> {
     if args.get("detail").and_then(Value::as_bool) == Some(true) {
         selection = selection.with_detail();
     }
-    answer(&iron_scout_cad::summarize_with(&db, &selection), warnings)
+    answer(
+        &iron_scout_cad::summarize_with(&db, &selection).without(&omit),
+        warnings,
+    )
 }
 
 fn hit_test(args: &Map<String, Value>) -> Result<Answer, String> {

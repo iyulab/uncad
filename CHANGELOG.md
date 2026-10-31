@@ -8,6 +8,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- `summarize` takes `omit` (`--omit signature`, or `"omit": ["signature"]` over MCP), leaving the shape signature
+  out of the answer -- the largest part of it for a drawing with many views. The answer names what was
+  left out in `omitted`; by default nothing is left out.
 - A dimension style in a DWG carries `DIMGAP`, the gap between a dimension's text and its dimension line;
   a negative value draws the text in a box, as a basic dimension is drawn. It reads the same as its DXF
   twin states it across the corpus's style pairs.

@@ -978,6 +978,56 @@ fn a_diff_can_leave_out_what_the_caller_does_not_need_and_says_how_much() {
 }
 
 #[test]
+fn a_summary_can_leave_out_its_signature_and_says_so() {
+    let (_, full) = answer(&["summarize", CORPUS_DXF]);
+    assert!(
+        full["signature"].is_object(),
+        "the signature is there by default"
+    );
+    assert!(
+        full.get("omitted").is_none(),
+        "nothing is left out by default"
+    );
+
+    let (cli, cut) = answer(&["summarize", CORPUS_DXF, "--omit", "signature"]);
+    assert!(cut.get("signature").is_none(), "{cut}");
+    assert_eq!(cut["omitted"], json!(["signature"]));
+    // The rest of the answer is the same.
+    let mut rest = full.clone();
+    rest.as_object_mut().unwrap().remove("signature");
+    let mut cut_rest = cut.clone();
+    cut_rest.as_object_mut().unwrap().remove("omitted");
+    assert_eq!(cut_rest, rest);
+
+    // A selection is projected the same way.
+    let (_, selected) = answer(&[
+        "summarize",
+        CORPUS_DXF,
+        "--limit",
+        "3",
+        "--omit",
+        "signature",
+    ]);
+    assert!(selected.get("signature").is_none(), "{selected}");
+    assert!(selected["selection"].is_object(), "{selected}");
+
+    let mut mcp = Mcp::start();
+    let result = mcp.call(
+        "summarize",
+        json!({"input": CORPUS_DXF, "omit": ["signature"]}),
+    );
+    assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
+    for bad in [
+        json!(["shape"]),
+        json!("signature"),
+        json!(["signature", "signature"]),
+    ] {
+        let result = mcp.call("summarize", json!({"input": CORPUS_DXF, "omit": bad}));
+        assert_eq!(result["isError"], true, "{result}");
+    }
+}
+
+#[test]
 fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
     // Read, point at the circle, change its radius, draw the change.
     let dir = scratch("skeleton");
