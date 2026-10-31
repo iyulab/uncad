@@ -9,13 +9,13 @@
 //! corrupt header date below was checked against a build without the
 //! patches: it ends that build's process with 0xC0000409.
 //!
-//! The `common_entity_data.spec` one, which puts an entity's true colour and
-//! its transparency back in their own fields, is pinned below on the entity
-//! it was measured on (HATCH 29F in `test-data/2004/HatchG.dwg`); the R13/R14
-//! linetype one in the corpus twin comparison; the `dwg.spec` one, an
-//! R2010+ ATTRIB's text style, below. A pre-R13 dimension's points, which an
-//! earlier local patch to `decode.c` restored and upstream now does, stay
-//! pinned below against the DXF twins.
+//! Three further local patches -- an entity's true colour read before its
+//! transparency (`common_entity_data.spec`), an R13/R14 entity's linetype
+//! flags, and an R2010+ ATTRIB's text style (`dwg.spec`) -- are upstream's
+//! own code now, as is a pre-R13 dimension's points, which an earlier patch
+//! to `decode.c` restored. Their tests stay, pinned against the entities and
+//! the DXF twins they were measured on, so a re-vendor that regresses any of
+//! them still fails here.
 
 use std::fs;
 use std::path::{Path, PathBuf};

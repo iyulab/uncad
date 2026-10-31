@@ -290,9 +290,9 @@ with clean diagnostics.
 LibreDWG's DWG reader returns a bit set. Bits at or above `DWG_ERR_CLASSESNOTFOUND` make
 `parse()` fail with `ParseError::Critical`; the bits below it are carried in
 `CadDatabase::read_diagnostics` (by their dwg.h names), and the CLI prints them as a
-warning. Every example DWG in the LibreDWG corpus comes back with `UNHANDLEDCLASS` set, and
-`example_2018.dwg` with `UNHANDLEDCLASS | VALUEOUTOFBOUNDS`. Across the corpus's 141 DWGs,
-98 read clean, 17 with `UNHANDLEDCLASS` and 29 with `VALUEOUTOFBOUNDS` (some with both);
+warning. Every example DWG in the LibreDWG corpus comes back with `UNHANDLEDCLASS` set.
+Across the corpus's 141 DWGs, 103 read clean, 17 with `UNHANDLEDCLASS` and 21 with
+`VALUEOUTOFBOUNDS` (some with both);
 none fails critically. A DXF is not read by LibreDWG and carries none of these bits (see
 "DXF" for how its 67 read). What the bits mean for the result is
 LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
@@ -793,7 +793,7 @@ walks get the same wireframe for every solid and that none has an edge skipped.
 ## Local patches to the vendored LibreDWG
 
 `crates/libredwg-sys/vendor/libredwg/` is a copy of the submodule sources (see
-`docs/ARCHITECTURE.md`, "Build"), and it carries five local patches, in four files. Each is marked in the
+`docs/ARCHITECTURE.md`, "Build"), and it carries two local patches, in two files. Each is marked in the
 source with a dated `uncad local patch` comment saying why, and each is listed again in
 `crates/libredwg-sys/NOTICE.md` -- inside the crate, because that is what a crates.io
 consumer receives and this file is not in the tarball (GPLv3 §5(a)).
@@ -805,9 +805,13 @@ nearby). A patch changed in the vendored copy itself is written back with
 `scripts/libredwg-patches.sh export`, and `scripts/libredwg-patches.sh check` fails while
 the files and the copy disagree. `build.rs` counts the markers per file
 against the list it carries (`LOCAL_PATCHES`) and refuses to build when they differ, so
-a re-vendor that drops a patch fails by name instead of compiling upstream's code. The
+a re-vendor that drops a patch fails by name instead of compiling upstream's code. A patch the
+upstream later adopts is retired, not carried: the three that once covered an entity's RGB and
+transparency order, an R13/R14 entity's linetype flags and an R2010+ ATTRIB's text style went
+when upstream fixed the same reads, and their regressions in `tests/vendored_patches.rs` now
+guard upstream's code. The
 `lib/libredwg` submodule the copy is taken from has none of them: compared file by file
-(line endings aside), the two trees differ in exactly these four files.
+(line endings aside), the two trees differ in exactly these two files.
 
 - **`src/common.c`** -- `cvt_TIMEBLL()` left `tm_wday`/`tm_yday`/`tm_isdst` uninitialized
   and let a corrupt date drive `tm_year`, `tm_mon` and `tm_hour` far out of range. Every
@@ -829,38 +833,6 @@ a re-vendor that drops a patch fails by name instead of compiling upstream's cod
   is one abort fixed, not a guarantee: the decoder is ~100 000 lines of C over
   attacker-controlled offsets and lengths, so a service that parses untrusted drawings
   should still do it in a process it can afford to lose.
-- **`src/common_entity_data.spec`** -- for an R2004+ entity whose ENC flag has both `0x80`
-  (an inline RGB follows) and `0x20` (a transparency follows), the spec read the two BLs
-  in the wrong order, so the colour landed in `alpha_raw` and the transparency in `rgb`.
-  LibreDWG's own standalone `bit_read_ENC` (`src/bits.c`) already reads rgb first; only
-  this spec, and the encoder that shares it, had them the other way round. Measured on
-  `test-data/2004/HatchG.dwg`, whose HATCH `29F` (flag `0xa0`) sits inside LWPOLYLINE
-  `28D` (flag `0x80`, one BL, unambiguous): with alpha first the HATCH read
-  `alpha_raw = 0xc21ae464` -- byte for byte the LWPOLYLINE's `rgb` -- and
-  `rgb = 0x020000e5`, which has exactly the `alpha_type << 24 | alpha` shape every
-  flag-`0x20` entity in the corpus shows. Only the `0xa0` combination changes: with one of
-  the two bits set there is a single BL and the order cannot matter.
-  `crates/uncad/tests/vendored_patches.rs` is the regression: both entities carry the true
-  colour `0x1ae464`, where the HATCH's was `0x0000e5` without the patch (see "An entity's
-  true colour is what the file states" for how the colour is read).
-- **`src/common_entity_data.spec`**, an R13/R14 entity's linetype -- those releases store
-  one bit, "BYLAYER", and otherwise a handle to the LTYPE record (which may be the BYBLOCK
-  record). The decoder derived the later releases' linetype flags from the bit only when
-  the bit was set, so an entity that was not BYLAYER kept flags 0 and read as BYLAYER too.
-  The patch sets the flags to "by handle" (3) when the bit is clear. Measured against the
-  corpus's DXF twins: 67 LINEs of `example_r13` that the DXF says are BYBLOCK, and its ARCs
-  and `r14/Leader`'s LEADER with a named linetype, all read BYLAYER without the patch.
-
-- **`src/dwg.spec`**, an R2010+ ATTRIB's text style -- an ATTDEF stores a second version
-  byte before its prompt, which the spec reads as `keep_duplicate_records`; the spec read
-  that byte for an ATTRIB too, which has no such field (the Open Design Specification lists
-  none), so it took a byte past the record's data. That byte failed the field's bounds check
-  often enough to end the decode with `VALUEOUTOFBOUNDS` before the style handle: every
-  R2010+ ATTRIB of the corpus -- 9, in `example_2010`, `example_2013`, `example_2018` and
-  `2010/gh209_1` -- came back with no text style, where the DXF twins name `Standard` and
-  `Hebtxt`. The patch drops that read for an ATTRIB; two corpus drawings no longer report
-  `VALUEOUTOFBOUNDS` at all. `tests/vendored_patches.rs` is the regression (`Absent`
-  without the patch).
 - **`src/acds.spec`** -- an R2013+ drawing keeps each 3DSOLID's or REGION's ACIS body in its
   data storage, one record per body in a `_data_` segment, under the handle of the entity
   it belongs to: a 0x30-byte segment header, an array of 20-byte record headers (size 20, 1,

@@ -212,10 +212,10 @@ fn the_corpus_distribution_is_what_it_was_when_last_measured() {
     assert_eq!(s.clean_dwg, 103);
     assert_eq!(s.diagnostics.get("UNHANDLEDCLASS"), Some(&17));
     // 31 until an R2010+ ATTRIB stopped reading a byte its record does not
-    // have (a local patch to the vendored spec): in two drawings that byte
-    // was the only value out of bounds; 29 until the vendored decoder's later
-    // fixes removed six of those errors.
-    assert_eq!(s.diagnostics.get("VALUEOUTOFBOUNDS"), Some(&23));
+    // have: in two drawings that byte was the only value out of bounds; 29
+    // until the vendored decoder's later fixes removed six of those errors;
+    // 23 until the decoder's R2018 attribute and text fixes removed two more.
+    assert_eq!(s.diagnostics.get("VALUEOUTOFBOUNDS"), Some(&21));
     // The two pre-R11 drawings (r9, r10) whose object stream ends at a JUMP
     // right after a closed polyline, before that polyline's vertices.
     let short_polylines: usize = s

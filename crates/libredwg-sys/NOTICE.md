@@ -15,7 +15,7 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
   real include graph. Autotools' generated `config.h` is stood in for by this
   crate's own `vendor-config/config.h`, a separate file rather than a patch to
   LibreDWG's sources.
-- **Modified**: **yes**, in four files. Each change carries an
+- **Modified**: **yes**, in two files. Each change carries an
   `uncad local patch` comment in the source saying what changed and why
   (GPLv3 §5(a)); `grep -rn "uncad local patch" vendor/libredwg/` finds every
   marker, and `build.rs` refuses to build when the markers per file differ
@@ -25,24 +25,16 @@ file; it is the same text as LibreDWG's own `vendor/libredwg/COPYING`.
 ### The changes
 
 The marker in `common.c` was written when it was one of the first two
-changes, and cites this list as "The two changes"; it is this one.
+changes, and cites this list as "The two changes"; it is this one. Other
+changes this crate once carried (the order of an entity's RGB and transparency,
+an R13/R14 entity's linetype flags, an R2010+ ATTRIB's text style) are now
+upstream's own code and are no longer patched.
 
 1. **`vendor/libredwg/src/common.c`**, 2026-09-23 — `cvt_TIMEBLL()` zeroes its
    `struct tm` and clamps every field into the range `strftime()` accepts, so
    a corrupt date in a hostile file cannot abort the process from inside a
    library call.
-2. **`vendor/libredwg/src/common_entity_data.spec`**, 2026-09-23 — the R2004+
-   entity colour reads its RGB before its transparency, the order LibreDWG's
-   own `bit_read_ENC()` uses. With the two the other way round, an entity
-   carrying both had its colour and its transparency swapped.
-3. **`vendor/libredwg/src/common_entity_data.spec`**, 2026-09-24 — an R13/R14
-   entity whose "BYLAYER" bit is clear gets linetype flags 3 (by handle);
-   upstream set the flags only when the bit was set, so it read as BYLAYER.
-4. **`vendor/libredwg/src/dwg.spec`**, 2026-09-24 — an R2010+ ATTRIB no longer
-   reads the version byte only an ATTDEF stores; read past the record, it
-   ended the decode before the text style handle, so every such attribute
-   came back with no style.
-5. **`vendor/libredwg/src/acds.spec`**, 2026-09-30 — an ACIS body in an
+2. **`vendor/libredwg/src/acds.spec`**, 2026-09-30 — an ACIS body in an
    R2013+ drawing's data storage goes to the entity whose handle its `_data_`
    record names, instead of to the drawing's solids in the order a signature
    search found the bodies (which put bodies on the wrong solids and found no

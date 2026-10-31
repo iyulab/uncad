@@ -194,6 +194,17 @@ DWG_ENT_SUBCLASS_DECL (ATTDEF, AcDbMTextObjectEmbedded);
 DWG_ENTITY (ATTRIB)
 
   SUBCLASS (AcDbText);
+#ifdef IS_ENCODER
+  // R2018+ multi-line ATTRIB stores its text in mtext.text. When
+  // downconverting to an older version, substitute it into text_value.
+  if (dat->version < R_2018
+      && (!FIELD_VALUE (text_value) || !*FIELD_VALUE (text_value))
+      && FIELD_VALUE (mtext).text && *FIELD_VALUE (mtext).text)
+    {
+      free (FIELD_VALUE (text_value));
+      FIELD_VALUE (text_value) = dwg_strip_mtext (FIELD_VALUE (mtext).text);
+    }
+#endif
   PRE (R_13b1)
     {
       FIELD_2RD (ins_pt, 10);
@@ -361,6 +372,9 @@ DWG_ENTITY (ATTRIB)
       FIELD_RC (is_locked_in_block, 0);
       VALUEOUTOFBOUNDS (is_locked_in_block, 2)
     }
+  SINCE (R_13b1) {
+    FIELD_HANDLE (style, 5, 0); // unexpected here in DXF
+  }
   SINCE (R_2018b)
     {
       FIELD_RC (mtext_type, 70); // 1=single line, 2=multi line attrib, 4=multi line attdef
@@ -376,18 +390,8 @@ DWG_ENTITY (ATTRIB)
     SINCE (R_2007a) {
       FIELD_B (lock_position_flag, 0); // 70
     }
-    /* uncad local patch (see docs/CAVEATS.md, "Local patches to the
-       vendored LibreDWG"): an ATTRIB has no field here. ATTDEF stores a
-       second version byte before its prompt, which this spec reads as
-       keep_duplicate_records; read for an ATTRIB too, it took a byte past
-       the record's data, which failed the bounds check below often enough
-       to end the decode before the text style handle: every R2010+ ATTRIB
-       of the corpus came back with no style. */
   }
   COMMON_ENTITY_HANDLE_DATA;
-  SINCE (R_13b1) {
-    FIELD_HANDLE (style, 5, 0); // unexpected here in DXF
-  }
 
 DWG_ENTITY_END
 
@@ -395,6 +399,18 @@ DWG_ENTITY_END
 DWG_ENTITY (ATTDEF)
 
   SUBCLASS (AcDbText);
+#ifdef IS_ENCODER
+  // R2018+ multi-line ATTDEF stores its text in mtext.text. When
+  // downconverting to an older version, substitute it into default_value.
+  if (dat->version < R_2018
+      && (!FIELD_VALUE (default_value) || !*FIELD_VALUE (default_value))
+      && FIELD_VALUE (mtext).text && *FIELD_VALUE (mtext).text)
+    {
+      free (FIELD_VALUE (default_value));
+      FIELD_VALUE (default_value)
+          = dwg_strip_mtext (FIELD_VALUE (mtext).text);
+    }
+#endif
   PRE (R_13b1)
     {
       FIELD_2RD (ins_pt, 10);
@@ -577,6 +593,8 @@ DWG_ENTITY (ATTDEF)
       FIELD_RC (is_locked_in_block, 0);
       VALUEOUTOFBOUNDS (is_locked_in_block, 1)
     }
+  SINCE (R_13b1)
+    FIELD_HANDLE (style, 5, 0);
   IF_FREE_OR_SINCE (R_2018)
     {
       // 1=single line, 2=multi line attrib, 4=multi line attdef
@@ -600,8 +618,6 @@ DWG_ENTITY (ATTDEF)
   }
 
   COMMON_ENTITY_HANDLE_DATA;
-  SINCE (R_13b1)
-    FIELD_HANDLE (style, 5, 0);
 
 DWG_ENTITY_END
 
@@ -2958,7 +2974,8 @@ DWG_ENTITY (MTEXT)
   SINCE (R_2004a)
     {
       FIELD_BL0 (bg_fill_flag, 90);
-      if (FIELD_VALUE (bg_fill_flag) & (dat->version <= R_2018 ? 1 : 16))
+      // 0x10 (text frame) also has the background fields since R2018
+      if (FIELD_VALUE (bg_fill_flag) & (dat->version >= R_2018 ? 17 : 1))
         {
           FIELD_BD (bg_fill_scale, 45); // def: 1.5
           FIELD_CMC (bg_fill_color, 63);
@@ -3439,7 +3456,9 @@ DWG_TABLE (LAYER)
   }
   VERSIONS (R_13b1, R_14) {
     DECODER {
-      FIELD_VALUE (off) = FIELD_VALUE (color.index) < 0;
+      // The off state is given by the bit or a negative color.
+      // OR them, do not overwrite the decoded bit.
+      FIELD_VALUE (off) |= FIELD_VALUE (color.index) < 0;
       LOG_LAYER_FLAG(off);
     }
     // for DWG

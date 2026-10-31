@@ -30,6 +30,14 @@ Notable changes to this project are recorded here. The format follows
   whole block, so an object carrying many small items no longer needs memory that grows with the
   square of their number, and reads the dimension-association object as a stable class. The local
   patches are rebased onto it.
+- The vendored LibreDWG is updated again, to upstream commit `7fdd73f3` (2026-10-29; two commits after
+  `3e5f216b`). Upstream now carries three reads this crate had patched locally -- an R2004+ entity's
+  true colour before its transparency, an R13/R14 entity's linetype flags, and an R2010+ ATTRIB's
+  text style -- so those patches are retired and two remain (the time-conversion clamp and the ACIS
+  body routing). The same refresh reads an R2018 multi-line attribute's text, an R2010+ attribute's
+  style handle in its own place, an MTEXT background fill that is only a text frame, and a layer's
+  off state from both its bit and a negative colour in R13/R14. The regressions for the retired
+  patches stay and now guard upstream's code.
 
 ## [0.15.0] - 2026-10-30
 

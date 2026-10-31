@@ -16,13 +16,14 @@ const CORPUS: &str = concat!(
 
 #[test]
 fn libredwg_non_fatal_bits_are_reported_and_named() {
-    // Measured: LibreDWG returns UNHANDLEDCLASS | VALUEOUTOFBOUNDS (0x44) for
-    // this file and still reads it. Before, both bits were thrown away.
+    // Measured: LibreDWG returns UNHANDLEDCLASS (0x04) for this file and still
+    // reads it (it also returned VALUEOUTOFBOUNDS until the decoder's R2018
+    // attribute fixes). Before, the bits were thrown away.
     let db =
         uncad::parse(format!("{CORPUS}/example_2018.dwg")).expect("the corpus DWG should parse");
     assert_eq!(
         db.read_diagnostics.warnings,
-        vec!["UNHANDLEDCLASS".to_string(), "VALUEOUTOFBOUNDS".to_string()]
+        vec!["UNHANDLEDCLASS".to_string()]
     );
     assert!(!db.read_diagnostics.is_clean());
     assert!(
