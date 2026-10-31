@@ -318,6 +318,7 @@ fn convert_dim_style(
         arc_symbol: small("DIMARCSYM")
             .filter(|_| has_arc_symbol)
             .and_then(ArcSymbol::from_code),
+        text_gap: number("DIMGAP"),
     })
 }
 

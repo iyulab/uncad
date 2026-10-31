@@ -8,6 +8,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Added
 
+- A dimension style in a DWG carries `DIMGAP`, the gap between a dimension's text and its dimension line;
+  a negative value draws the text in a box, as a basic dimension is drawn. It reads the same as its DXF
+  twin states it across the corpus's style pairs.
 - A table in a DWG up to R2007 carries its rows, columns, row heights, column widths and cells (each
   cell's kind, text, span, and whether another cell's span covers it), where it was read without
   them. For R2000 and R2004 the corpus's one table reads cell for cell as its DXF twin states it. An
