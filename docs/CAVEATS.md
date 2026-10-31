@@ -292,7 +292,7 @@ LibreDWG's DWG reader returns a bit set. Bits at or above `DWG_ERR_CLASSESNOTFOU
 `CadDatabase::read_diagnostics` (by their dwg.h names), and the CLI prints them as a
 warning. Every example DWG in the LibreDWG corpus comes back with `UNHANDLEDCLASS` set.
 Across the corpus's 141 DWGs, 103 read clean, 17 with `UNHANDLEDCLASS` and 21 with
-`VALUEOUTOFBOUNDS` (some with both);
+`VALUEOUTOFBOUNDS` (none with both);
 none fails critically. A DXF is not read by LibreDWG and carries none of these bits (see
 "DXF" for how its 67 read). What the bits mean for the result is
 LibreDWG's to say -- `UNHANDLEDCLASS` in particular means objects of a class it did not know
