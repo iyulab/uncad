@@ -17,13 +17,16 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
-- The vendored LibreDWG is updated to upstream commit `69f56a54` (2026-10-30; seven commits after
+- The vendored LibreDWG is updated to upstream commit `3e5f216b` (2026-10-30; fourteen commits after
   `33bfac15`). It now decodes the TABLE entity in a normal build, so a table in a DWG is read as an
   `ACAD_TABLE` -- its insertion point, placement and cached block -- and drawn through that block,
   where it used to arrive as an `UNKNOWN` entity that was not drawn. The same refresh fixes a heap
   overflow in the backend's trace logging of field names, and corrects the fraction of a day it
   derives from a time's milliseconds (display values only; no DWG bytes and nothing in the model
-  change). The one local patch to `common.c` is rebased onto it.
+  change). It also sizes each extended-entity-data item to the item rather than to what is left of the
+  whole block, so an object carrying many small items no longer needs memory that grows with the
+  square of their number, and reads the dimension-association object as a stable class. The local
+  patches are rebased onto it.
 
 ## [0.15.0] - 2026-10-30
 
