@@ -42,6 +42,11 @@ Usage:
   uncad relate <input> [--tolerance <n>] [--id <n>]
                                     what each dimension's definition
                                       points sit on, as JSON
+  uncad coincident-ends <input> --id <n> --anchor <start|end|vertex:N>
+             --join-gap-um <n>
+                                    the other ends within the gap of one
+                                      end, and which a straight move of it
+                                      can carry along, as JSON
   uncad diff <before> <after> [--matching <auto|reference|geometry>]
              [--length-tolerance <n>] [--angle-tolerance <n>]
              [--min-similarity <n>] [--min-margin <n>] [--max-pairs <n>]
@@ -73,8 +78,9 @@ Usage:
                                       entity or point it numbers (never over
                                       an existing file); answer with what
                                       was drawn and what could not be
-  uncad mcp                         serve summarize, hit-test, relate, diff,
-                                      set, redline and balloon as MCP tools
+  uncad mcp                         serve summarize, hit-test, relate,
+                                      coincident-ends, diff, set, redline
+                                      and balloon as MCP tools
                                       over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --

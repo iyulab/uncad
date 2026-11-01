@@ -196,6 +196,68 @@ fn relate_refuses_a_tolerance_that_is_not_positive() {
 }
 
 #[test]
+fn coincident_ends_names_the_asked_end_and_the_fields_set_writes() {
+    let (_, lines) = answer(&["summarize", CORPUS_DXF, "--type", "line", "--detail"]);
+    let first = &lines["selection"]["entities"][0];
+    let id = first["id"]
+        .as_u64()
+        .expect("a line has a reference ID")
+        .to_string();
+    let (_, got) = answer(&[
+        "coincident-ends",
+        CORPUS_DXF,
+        "--id",
+        &id,
+        "--anchor",
+        "end",
+        "--join-gap-um",
+        "100",
+    ]);
+    assert_eq!(got["end"]["entity"], first["id"], "{got}");
+    assert_eq!(got["end"]["anchor"], "end", "{got}");
+    assert_eq!(got["end"]["path"], "end_point", "{got}");
+    assert_eq!(got["end"]["can_follow"], true, "{got}");
+    assert!(got["ends"].is_array(), "{got}");
+    // Not the asked end itself; and each one says whether it can follow.
+    for e in got["ends"].as_array().unwrap() {
+        assert!(!(e["entity"] == first["id"] && e["anchor"] == "end"), "{e}");
+        assert!(e["can_follow"].is_boolean(), "{e}");
+        assert!(
+            e["at"]["x"].is_number() && e["local"]["x"].is_number(),
+            "{e}"
+        );
+    }
+}
+
+#[test]
+fn coincident_ends_refuses_an_end_the_drawing_does_not_have_and_a_bad_anchor() {
+    let out = run(&[
+        "coincident-ends",
+        CORPUS_DXF,
+        "--id",
+        "999999999",
+        "--anchor",
+        "end",
+        "--join-gap-um",
+        "100",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no end"));
+    let out = run(&[
+        "coincident-ends",
+        CORPUS_DXF,
+        "--id",
+        "1",
+        "--anchor",
+        "middle",
+        "--join-gap-um",
+        "100",
+    ]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("vertex:N"));
+}
+
+#[test]
 fn diff_of_a_drawing_with_itself_is_empty_and_carries_its_tolerance() {
     let (_, same) = answer(&["diff", CORPUS_DXF, CORPUS_DXF]);
     assert!(same["changes"].as_array().unwrap().is_empty(), "{same}");
@@ -434,7 +496,7 @@ impl Drop for Mcp {
 const STATELESS: &str = "2026-07-28";
 
 /// Every protocol version the server advertises, spoken the way that
-/// version is spoken: each negotiates as itself, lists the same five
+/// version is spoken: each negotiates as itself, lists the same
 /// tools, and answers a call with the same bytes -- what a tool says does
 /// not depend on the protocol it is asked over. From 2026-07-28 a list
 /// result must also say how long it stays fresh (`ttlMs`) and who may
@@ -493,6 +555,7 @@ fn every_advertised_protocol_version_lists_and_answers_alike() {
                 "summarize",
                 "hit_test",
                 "relate",
+                "coincident_ends",
                 "diff",
                 "set",
                 "redline",
@@ -546,6 +609,7 @@ fn mcp_lists_the_verbs_and_only_the_file_writers_write() {
             "summarize",
             "hit_test",
             "relate",
+            "coincident_ends",
             "diff",
             "set",
             "redline",
@@ -580,6 +644,7 @@ fn mcp_lists_the_verbs_and_only_the_file_writers_write() {
         "summarize",
         "hit-test",
         "relate",
+        "coincident-ends",
         "diff",
         "set",
         "redline",
