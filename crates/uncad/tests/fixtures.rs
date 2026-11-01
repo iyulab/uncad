@@ -193,9 +193,10 @@ fn dimlfac12_fixture_has_a_line_and_a_dimension_bound_to_its_cached_block() {
         .expect("DIMENSION");
     // The DIMENSION record carries no group 5: the file gives it no handle.
     assert_eq!(dim.common.source_handle, Ref::Absent);
-    // `2 *D1`, bound through the BLOCK_RECORD table, and `42 = 10.0`.
+    // `2 *D1`, bound through the BLOCK_RECORD table, and `42 = 120.0` -- the
+    // number the label shows (the points are 10 apart).
     assert_eq!(dim.block_name, resolved("*D1"));
-    assert_eq!(dim.measurement, Some(10.0));
+    assert_eq!(dim.measurement, Some(120.0));
     assert_eq!(dim.style_name, resolved("STANDARD"));
     assert_eq!(db.tables.block_records["*Model_Space"].entities.len(), 2);
     // The cached label is the block's one TEXT: 12 x 10 under DIMLFAC 12.

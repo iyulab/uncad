@@ -24,7 +24,7 @@ Ground truth below is what each file states, worked out from its group codes.
 | `cp949_r2000.dxf` | 855 | CP949 (`ANSI_949`) strings in TEXT, MTEXT and a LAYER name |
 | `mirrored_ocs_r2000.dxf` | 925 | Closed LWPOLYLINE with extrusion (0,0,-1), an open one with a bulge, mirrored CIRCLE/ARC/TEXT |
 | `mirrored_bulge_r2000.dxf` | 470 | The bulged outline of the mirrored fixture in an OCS with extrusion (0,0,-1), next to an ARC tracing the same arc |
-| `dimlfac12_r2000.dxf` | 1304 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose measurement (group 42) is 10.0, its `*D1` block bound |
+| `dimlfac12_r2000.dxf` | 1305 | `$DIMLFAC 12.0` (header and STANDARD style) with a rotated DIMENSION whose points are 10.0 apart and whose measurement (group 42) is 120.0, the number its label shows, its `*D1` block bound |
 | `twisted_viewport_r2000.dxf` | 2253 | A paper-space VIEWPORT with `VIEWTWIST` 30 degrees and every AcDbViewport view field, plus a LAYOUT `Layout1` (A4 landscape, embedded plot settings) bound to `*Paper_Space` and to the VIEWPORT |
 | `hidden_layers_r2000.dxf` | 1925 | 9 entities, 7 layers, 2 linetypes: one LINE per layer state (on, off, frozen, non-plotting, `Defpoints`, locked), an invisible LINE and a 0.50 mm DASHED one |
 | `plot_origin_r2000.dxf` | 2430 | A LAYOUT `Layout1` in inches (ANSI B landscape, rotation 0) with asymmetric margins and a non-zero plot origin (DXF 46/47); a paper-space border LWPOLYLINE and a 1:5 plan VIEWPORT over a model LINE |
@@ -132,10 +132,14 @@ TABLES: a BLOCK_RECORD table with `*Model_Space` (handle `1F`) and `*D1` (handle
 plus DIMSTYLE `STANDARD` with `144 = 12.0` (DIMLFAC). BLOCKS: a BLOCK `*D1` (flag 1,
 anonymous, `330 = 40`) containing a TEXT "120" at (5,6), height 0.18 -- the label 12 x 10
 under DIMLFAC 12. ENTITIES: a LINE (0,0)-(10,0) and a DIMENSION with `100 AcDbDimension`, `2 *D1`, `10 = (10,5)` dimension-line point, `11 = (5,6)` text
-midpoint, `70 = 32`, `1` empty, `42 = 10.0`, `3 STANDARD`, `100 AcDbAlignedDimension`,
+midpoint, `70 = 32`, `1` empty, `42 = 120.0`, `3 STANDARD`, `100 AcDbAlignedDimension`,
 `13 = (0,0)`, `14 = (10,0)`, `50 = 0.0`, `100 AcDbRotatedDimension`.
 
-So the DIMENSION is a linear (rotated) one measuring **10.0**, with no text override, its
+So the DIMENSION is a linear (rotated) one whose points are **10.0** apart and whose group 42
+stores **120.0** -- the label's number, the points' length times the style's DIMLFAC. That is how a
+file written by AutoCAD states it (a real drawing in the corpus, `Dynblocks`, has extension points
+120 apart and a DIMLFAC 25.4 style that stores 3048.0 and draws "3048"); an earlier version of
+this fixture stored 10.0, the unscaled length. It has no text override, its
 block `*D1` and its style `STANDARD`. The file binds the `*D1` BLOCK to its BLOCK_RECORD
 through the BLOCK's `330` owner, as an R13-or-later DXF does; `make_fixtures.py .
 dimlfac-minimal` writes an ENTITIES-only draft without the BLOCK_RECORD table.

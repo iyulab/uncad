@@ -68,7 +68,7 @@ fn the_fixture_dimension_carries_its_value_points_and_style() {
     assert_eq!(dims.len(), 1);
     let dim = dims[0];
     assert_eq!(dim.kind, Some(DimensionKind::Rotated));
-    assert_eq!(dim.measurement, Some(10.0), "DXF 42 as written");
+    assert_eq!(dim.measurement, Some(120.0), "DXF 42 as written");
     assert_eq!(dim.definition_point, p3(10.0, 5.0), "group 10");
     assert_eq!((dim.text_midpoint.x, dim.text_midpoint.y), (5.0, 6.0));
     assert_eq!(dim.points.extension1, p3(0.0, 0.0), "group 13");
@@ -82,8 +82,8 @@ fn the_fixture_dimension_carries_its_value_points_and_style() {
     );
     assert_eq!(dim.style_name, Ref::Resolved("STANDARD".to_string()));
     assert_eq!(dim.ordinate_axis, None);
-    // The style's own DIMLFAC (144), which is what the displayed 120 is 12
-    // times the measurement by.
+    // The style's own DIMLFAC (144): the stored 120 is the points' 10 times it,
+    // the number the label shows.
     assert_eq!(db.tables.dim_styles["STANDARD"].length_factor, Some(12.0));
 }
 
