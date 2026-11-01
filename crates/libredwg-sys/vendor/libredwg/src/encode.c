@@ -3869,6 +3869,10 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
                   dwg->header.section_info = (Dwg_Section_Info *)realloc (
                       dwg->header.section_info,
                       (info_id + 1) * sizeof (Dwg_Section_Info));
+                  // the new entry must be zeroed: realloc does not
+                  // initialize it, and info->sections is freed below
+                  memset (&dwg->header.section_info[info_id], 0,
+                          sizeof (Dwg_Section_Info));
                 }
               info = &dwg->header.section_info[info_id];
               info->fixedtype = (Dwg_Section_Type)type;
@@ -3894,6 +3898,9 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
                   if ((unsigned)ssize % max_decomp_size)
                     info->num_sections++;
                 }
+              // free the read-time sections array, replaced by the
+              // pre-calculated one (leak otherwise, see alive.test)
+              free (info->sections);
               info->sections = (Dwg_Section **)calloc (info->num_sections,
                                                        sizeof (Dwg_Section *));
               // enough sections?
@@ -7953,8 +7960,8 @@ in_postprocess_SEQEND (Dwg_Object *restrict obj, BITCODE_BL num_owned,
         }
       if (owned[num_owned - 1])
         {
-          hdl = dwg_add_handleref (
-              dwg, 4, owned[num_owned - 1]->absolute_ref, NULL);
+          hdl = dwg_add_handleref (dwg, 4, owned[num_owned - 1]->absolute_ref,
+                                   NULL);
           dwg_dynapi_entity_set_value (ow, owner->name, lastfield, &hdl, 0);
           LOG_TRACE ("%s[%u].%s = " FORMAT_REF "[H 0]\n", owner->name,
                      num_owned - 1, lastfield, ARGS_REF (hdl));
@@ -8162,14 +8169,15 @@ dwg_set_dataflags (Dwg_Object *obj)
     {
       Dwg_Entity_TEXT *_obj = obj->tio.entity->tio.TEXT;
 
+      // clang-format off
 #define _SET_DATAFLAGS                                                        \
   _obj->dataflags = 0xff;                                                     \
   if (_obj->elevation != 0.0)                                                 \
     _obj->dataflags &= ~1;                                                    \
-  /* a non-left alignment places the text by its alignment point, even  \
-     when it equals the insertion point (as DXF writers that do not       \
-     compute the left baseline point write it): left out, it reads back   \
-     as 0,0 and the text jumps to the origin */                           \
+  /* a non-left alignment places the text by its alignment point, even        \
+     when it equals the insertion point (as DXF writers that do not           \
+     compute the left baseline point write it): left out, it reads back       \
+     as 0,0 and the text jumps to the origin */                               \
   if (_obj->alignment_pt.x != _obj->ins_pt.x                                  \
       || _obj->alignment_pt.y != _obj->ins_pt.y                               \
       || _obj->horiz_alignment != 0 || _obj->vert_alignment != 0)             \
@@ -8186,6 +8194,7 @@ dwg_set_dataflags (Dwg_Object *obj)
     _obj->dataflags &= ~0x40;                                                 \
   if (_obj->vert_alignment != 0)                                              \
     _obj->dataflags &= ~0x80
+      // clang-format on
 
       _SET_DATAFLAGS;
     }
@@ -8254,8 +8263,7 @@ downconvert_relative_handle (BITCODE_H ref, Dwg_Object *restrict obj)
 void
 downconvert_TABLE (Dwg_Object *restrict obj)
 {
-  Dwg_Entity_TABLE *_obj
-      = obj->tio.entity ? obj->tio.entity->tio.TABLE : NULL;
+  Dwg_Entity_TABLE *_obj = obj->tio.entity ? obj->tio.entity->tio.TABLE : NULL;
   Dwg_LinkedTableData *tdata;
   unsigned long idx;
   if (!obj || obj->fixedtype != DWG_TYPE_TABLE)
@@ -8291,8 +8299,7 @@ downconvert_TABLE (Dwg_Object *restrict obj)
   for (BITCODE_BL r = 0; r < tdata->num_rows; r++)
     {
       Dwg_TableRow *row = &tdata->rows[r];
-      BITCODE_BL ncols
-          = row->num_cells ? row->num_cells : tdata->num_cols;
+      BITCODE_BL ncols = row->num_cells ? row->num_cells : tdata->num_cols;
       for (BITCODE_BL c = 0; c < ncols && idx < _obj->num_cells; c++)
         {
           Dwg_TableCell *tc = &row->cells[c];
@@ -8309,8 +8316,7 @@ downconvert_TABLE (Dwg_Object *restrict obj)
                 s = cc->value.value_string;
               if (s)
                 {
-                  cell->text_value
-                      = (BITCODE_T)calloc (strlen (s) + 1, 1);
+                  cell->text_value = (BITCODE_T)calloc (strlen (s) + 1, 1);
                   strcpy ((char *)cell->text_value, s);
                 }
             }

@@ -48,6 +48,12 @@ Notable changes to this project are recorded here. The format follows
   restores the data type of a table cell value. What this crate reads from a DWG does not change --
   the corpus sweep, the twin comparison and the table reads give the same answers -- and the two
   local patches apply to it unchanged.
+- The vendored LibreDWG is updated to upstream commit `86cc68d2` (2026-11-01; four commits after
+  `a8357582`). The decoder now rejects an OLE frame object (`OLEFRAME`, `OLE2FRAME`) whose declared
+  data size exceeds the size of the file's data, treating the payload as empty instead of letting
+  the length drive a multi-gigabyte allocation (GHSA-37mv-q3xr-pjjc). The refresh also carries
+  encoder-only fixes and changes to files this crate does not build. What this crate reads from a
+  DWG does not change, and the two local patches apply to it unchanged.
 
 ## [0.15.0] - 2026-10-30
 
