@@ -2306,6 +2306,7 @@ const ANSWER_FIELDS: [(&str, &[&str]); 5] = [
             "unplaced_texts",
             "dimensions",
             "tolerance_frames",
+            "contour_totals",
             "extents",
             "signature",
             "selection",

@@ -98,7 +98,9 @@ pub const VERBS: &[Verb] = &[
             those on a tilted plane left out of that (`unplaced_texts`), every dimension \
             (`dimensions`), feature control frame (`tolerance_frames`) and table with what \
             its cells say by row and column (`tables` -- `cells` null when they were not \
-            read), where each space \
+            read), which outlines of the model space close (`contour_totals` -- how many are \
+            closed and how many open, the ends left free and the lengths by layer, absent \
+            when the header states no unit), where each space \
             lies (`extents`), its shape signature (`signature` -- model space counted into \
             integers whose every place has a meaning), the lowest confidence of anything \
             summarized (`confidence`) and the reader's diagnostics (`warnings`). A value that \
