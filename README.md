@@ -73,7 +73,6 @@ uncad summarize drawing.dwg --type circle --layer pipes       # ... and the circ
 uncad summarize drawing.dwg --id 812 --detail                 # ... and one entity's model record (the fields `set` takes)
 uncad summarize drawing.dwg --omit signature                  # ... without the shape signature, which `omitted` then names
 uncad hit-test drawing.dwg --x 120 --y 45 --tolerance 0.5     # the entities at a point
-uncad coincident-ends drawing.dwg --id 6 --anchor end --join-gap-um 100   # the ends that sit where this one does
 uncad relate drawing.dwg                                      # what each dimension's definition points sit on
 uncad diff rev-a.dwg rev-b.dwg                                # exact numeric difference (by reference ID when the files show one drawing)
 uncad diff a.dxf b.dxf --matching geometry --length-tolerance 0.01
@@ -140,7 +139,7 @@ uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --color '#0057b
 uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --size 12 --space paper  # 12 units across, in paper space
 ```
 
-`uncad mcp` serves `summarize`, `hit-test`, `relate`, `coincident-ends`, `diff`, `set`, `redline` and `balloon` as [Model Context
+`uncad mcp` serves `summarize`, `hit-test`, `relate`, `diff`, `set`, `redline` and `balloon` as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files
