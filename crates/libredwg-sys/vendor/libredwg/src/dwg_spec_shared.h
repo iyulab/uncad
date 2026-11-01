@@ -191,12 +191,12 @@ decode_3dsolid (Bit_Chain *dat, Bit_Chain *hdl_dat, Dwg_Object *restrict obj,
       return DWG_ERR_VALUEOUTOFBOUNDS;
   }
   else
-    // no leading ACIS empty bit since R2013; the SAB data is in the
-    // has_ds_data AcDs blob (see common_entity_data.spec), not inline
-    {
-      FIELD_VALUE (acis_empty) = 1;
-      FIELD_VALUE (version) = 2;
-    }
+  // no leading ACIS empty bit since R2013; the SAB data is in the
+  // has_ds_data AcDs blob (see common_entity_data.spec), not inline
+  {
+    FIELD_VALUE (acis_empty) = 1;
+    FIELD_VALUE (version) = 2;
+  }
   if (!FIELD_VALUE (acis_empty))
     {
       FIELD_B (unknown, 0);
@@ -599,10 +599,35 @@ free_3dsolid (Dwg_Object *restrict obj, Dwg_Entity_3DSOLID *restrict _obj)
   FREE_3DSOLID \
   COMMON_3DSOLID
 
+// clang-format off
 #define TABLE_value_fields(value)                                             \
-  PRE (R_2007a) { FIELD_VALUE (value.data_type) &= ~0x200; }                  \
-  LATER_VERSIONS { FIELD_BL (value.format_flags, 93); }                       \
-  FIELD_BL (value.data_type, 90);                                             \
+  {                                                                           \
+    BITCODE_BL _tv_saved_data_type = 0;                                       \
+    int _tv_restore = 0;                                                      \
+    PRE (R_2007a) {                                                           \
+      /* The 0x200 (kGeneral) pre-clear only makes sense when the field is   \
+         read from or written to the file, where it is a no-op in decode     \
+         (the field is still zero). It must not re-run on the stored value   \
+         in free/JSON/DXF/print modes: kGeneral (512) would be rewritten to  \
+         kUnknown (0) and value.data_date would be neither emitted nor       \
+         freed. See example_2000.dwg TABLECONTENT object 467 (2-byte leak).  \
+         In encode it is intentional (kGeneral is not representable before   \
+         R2007), but must not persist: the stored data_type is the source    \
+         of truth for free/JSON/DXF afterwards, so save and restore it.      \
+         See example_2004.dwg TABLECONTENT (2-byte leak via dwgrewrite to    \
+         r2000: data_date no longer freed once data_type is 0). */           \
+      if (IF_IS_DECODER || IF_IS_ENCODER)                                    \
+        {                                                                     \
+          if (IF_IS_ENCODER)                                                  \
+            {                                                                 \
+              _tv_saved_data_type = FIELD_VALUE (value.data_type);            \
+              _tv_restore = 1;                                                \
+            }                                                                 \
+            FIELD_VALUE (value.data_type) &= ~0x200;                         \
+        }                                                                     \
+    }                                                                         \
+    LATER_VERSIONS { FIELD_BL (value.format_flags, 93); }                     \
+    FIELD_BL (value.data_type, 90);                                           \
   if (!(dat->version >= R_2007 && (FIELD_VALUE (value.format_flags) & 1)))    \
     {                                                                         \
       switch (FIELD_VALUE (value.data_type))                                  \
@@ -668,7 +693,11 @@ free_3dsolid (Dwg_Object *restrict obj, Dwg_Entity_3DSOLID *restrict _obj)
     FIELD_T (value.format_string, 300);                                       \
     if (FIELD_VALUE (value.unit_type) != 12)                                  \
       FIELD_T (value.value_string, 302);                                      \
+  }                                                                           \
+    if (_tv_restore)                                                          \
+      FIELD_VALUE (value.data_type) = _tv_saved_data_type;                    \
   }
+// clang-format on
 
 #ifdef IS_JSON
 #  define JSON_END_REPEAT(f)  ENDHASH; ENDARRAY;

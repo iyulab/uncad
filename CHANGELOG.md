@@ -41,6 +41,13 @@ Notable changes to this project are recorded here. The format follows
   style handle in its own place, an MTEXT background fill that is only a text frame, and a layer's
   off state from both its bit and a negative colour in R13/R14. The regressions for the retired
   patches stay and now guard upstream's code.
+- The vendored LibreDWG is updated once more, to upstream commit `a8357582` (2026-10-31; five commits
+  after `7fdd73f3`). Freeing a TABLE or TABLECONTENT object now releases the memory two of their
+  fields held, and a table's cell array is freed only when it holds a plausible allocation, where it
+  was never freed before; a table's cell count is sized like its dynamic-API field; and the encoder
+  restores the data type of a table cell value. What this crate reads from a DWG does not change --
+  the corpus sweep, the twin comparison and the table reads give the same answers -- and the two
+  local patches apply to it unchanged.
 
 ## [0.15.0] - 2026-10-30
 

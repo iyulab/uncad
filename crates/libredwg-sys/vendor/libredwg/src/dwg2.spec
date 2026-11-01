@@ -724,7 +724,16 @@ DWG_ENTITY (TABLE)
           }
         SET_PARENT_OBJ (cell);
     END_REPEAT_BLOCK
-#ifndef IS_FREE // FIXME: bogus cells value 0x21, not a pointer
+#if defined (IS_FREE)
+    // 6cb65e748: cells may hold a bogus non-pointer value (observed 0x21,
+    // the subclass marker byte) when the TABLE object memory is overwritten
+    // by the aliased TABLECONTENT decode. Only free plausible heap pointers;
+    // glibc aligns every allocation to 16 bytes, so reject unaligned values.
+    if (FIELD_VALUE (cells)
+        && ((size_t)FIELD_VALUE (cells) % 16) == 0)
+      free (FIELD_VALUE (cells));
+    FIELD_VALUE (cells) = NULL;
+#else
     END_REPEAT (cells);
 #endif
     #undef cell
