@@ -6,11 +6,17 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-02
+
 ### Added
 
 - `summarize` takes `omit` (`--omit signature`, or `"omit": ["signature"]` over MCP), leaving the shape signature
   out of the answer -- the largest part of it for a drawing with many views. The answer names what was
   left out in `omitted`; by default nothing is left out.
+- `summarize` carries what `iron-scout-cad` 0.15.0 adds to a summary: each linear dimension's `value` (its
+  nominal value, the length it measures in millimetres, a count and a tolerance written in its text, and what
+  was not read) and `contour_totals` (which outlines of the model space close, at the signature's join gap).
+  The verb's description names them.
 - A dimension style in a DWG carries `DIMGAP`, the gap between a dimension's text and its dimension line;
   a negative value draws the text in a box, as a basic dimension is drawn. It reads the same as its DXF
   twin states it across the corpus's style pairs.
@@ -54,6 +60,10 @@ Notable changes to this project are recorded here. The format follows
   the length drive a multi-gigabyte allocation (GHSA-37mv-q3xr-pjjc). The refresh also carries
   encoder-only fixes and changes to files this crate does not build. What this crate reads from a
   DWG does not change, and the two local patches apply to it unchanged.
+- The dependency lock moves `tokio` to 1.54.1 (RUSTSEC-2026-0386 affects the earlier version), `rmcp` to 3.8.0
+  and `acadrust` to 0.6.8; the renderer's `resvg` is 0.49.
+
+- Built on `iron-diff-cad` 0.13.0, `iron-hand-cad` 0.11.0, `iron-pack-cad` 0.14.0, `iron-render-cad` 0.15.0, `iron-scout-cad` 0.15.0, `uncad-model` 0.11.0 and `undxf` 0.10.0.
 
 ## [0.15.0] - 2026-10-30
 
