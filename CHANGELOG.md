@@ -6,6 +6,21 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The vendored LibreDWG is updated to upstream commit `86e04c74` (2026-11-01; two commits after
+  `86cc68d2`). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
+  ATTRIB/SEQEND of a block, and numbers a pre-R13 drawing's anonymous blocks from the drawing's own
+  BLOCK entities; the DXF writer no longer splits a UTF-8 sequence across chunks of a long string.
+  The two local patches apply to it unchanged, and the twin comparison and the corpus sweep give the
+  same answers.
+
+### Fixed
+
+- A pre-R13 drawing's anonymous block (`*D`, `*X`, ...) is named by its block-table index, as before
+  the vendored decoder began numbering such blocks itself. The index was appended to the decoder's
+  number, so a dimension's block read as `*D12` where the drawing's DXF export writes `*D2`.
+
 ## [0.16.0] - 2026-11-02
 
 ### Added

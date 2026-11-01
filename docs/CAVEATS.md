@@ -365,7 +365,9 @@ each dimension's block is `*D`, each hatch's `*X` -- so the stored name does not
 apart; only the table index does. An anonymous block takes its table index as its number
 (`*D0`, `*D1`, ...), the name the drawing's DXF export writes for it, both as its key in the
 block records and wherever a reference names it. Read by the stored name alone, the blocks
-collapsed into one record and every dimension pointed at the last.
+collapsed into one record and every dimension pointed at the last. The vendored decoder numbers
+such a block itself, from the drawing's BLOCK entity (`*D12`); that number is dropped and the
+table index used, so the name does not depend on whether the decoder numbered it.
 
 Measured across the corpus (the 207 files that read, 116,528 entity layer references
 including those inside block definitions): every layer resolves except 22 in the single R1.4

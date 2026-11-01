@@ -415,11 +415,46 @@ fn block_base_point(block_header_object_ptr: *mut c_void) -> Point3D {
 /// apart. An anonymous name (one starting with `*`) takes that index as its
 /// number, which is the name the drawing's DXF export writes for it
 /// (`*D0`, `*D1`, ...); a named block keeps its name.
+///
+/// The vendored decoder may already have numbered such a name from the
+/// drawing's own BLOCK entity (`*D12`); that number is not the table index,
+/// so it is dropped first -- appending the index to it would name the block
+/// `*D12` + index, which no other reader of the drawing writes.
 pub(crate) fn pre_r13_block_name(name: String, table_index: i32) -> String {
-    if name.starts_with('*') {
-        format!("{name}{table_index}")
-    } else {
-        name
+    if !name.starts_with('*') {
+        return name;
+    }
+    let bare = match name.as_bytes() {
+        [b'*', letter, digits @ ..]
+            if letter.is_ascii_alphabetic() && digits.iter().all(u8::is_ascii_digit) =>
+        {
+            &name[..2]
+        }
+        _ => name.as_str(),
+    };
+    format!("{bare}{table_index}")
+}
+
+#[cfg(test)]
+mod pre_r13_block_name_tests {
+    use super::pre_r13_block_name;
+
+    #[test]
+    fn a_bare_anonymous_name_takes_the_table_index() {
+        assert_eq!(pre_r13_block_name("*D".into(), 2), "*D2");
+        assert_eq!(pre_r13_block_name("*X".into(), 0), "*X0");
+    }
+
+    #[test]
+    fn a_name_the_decoder_already_numbered_is_renumbered_by_index() {
+        assert_eq!(pre_r13_block_name("*D1".into(), 2), "*D2");
+        assert_eq!(pre_r13_block_name("*D12".into(), 2), "*D2");
+        assert_eq!(pre_r13_block_name("*X7".into(), 11), "*X11");
+    }
+
+    #[test]
+    fn a_named_block_keeps_its_name() {
+        assert_eq!(pre_r13_block_name("PART1".into(), 3), "PART1");
     }
 }
 
