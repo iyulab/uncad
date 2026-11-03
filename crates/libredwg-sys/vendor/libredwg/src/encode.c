@@ -3907,10 +3907,16 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
               if (si + info->num_sections > dwg->header.num_sections)
                 {
                   Dwg_Section *oldsecs = dwg->header.section;
+                  const BITCODE_RL old_num = dwg->header.num_sections;
                   dwg->header.num_sections = si + info->num_sections;
                   dwg->header.section = (Dwg_Section *)realloc (
                       dwg->header.section,
                       dwg->header.num_sections * sizeof (Dwg_Section));
+                  // realloc leaves the new entries indeterminate, and
+                  // section_info_rebuild reads sec->type of every entry.
+                  memset (&dwg->header.section[old_num], 0,
+                          (dwg->header.num_sections - old_num)
+                              * sizeof (Dwg_Section));
                   if (dwg->header.section != oldsecs)
                     // need to rebuild all info->sections
                     section_info_rebuild (dwg, (Dwg_Section_Type)type);
@@ -3973,9 +3979,12 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
       if ((unsigned)si > dwg->header.num_sections) // needed?
         {
           Dwg_Section *oldsecs = dwg->header.section;
+          const BITCODE_RL old_num = dwg->header.num_sections;
           dwg->header.num_sections = si;
           dwg->header.section = (Dwg_Section *)realloc (
               dwg->header.section, si * sizeof (Dwg_Section));
+          memset (&dwg->header.section[old_num], 0,
+                  (si - old_num) * sizeof (Dwg_Section));
           if (dwg->header.section != oldsecs)
             section_info_rebuild (dwg, SECTION_SYSTEM_MAP);
         }
@@ -6552,13 +6561,8 @@ dwg_encode_add_object (Dwg_Object *restrict obj, Bit_Chain *restrict dat,
                && (error = dwg_encode_variable_type (dwg, dat, obj))
                       & DWG_ERR_UNHANDLEDCLASS)
         {
-          int is_entity;
-          Dwg_Class *klass = dwg_encode_get_class (dwg, obj);
-          if (klass)
-            is_entity = klass->item_class_id == 0x1f2
-                        && obj->supertype == DWG_SUPERTYPE_ENTITY;
-          else
-            is_entity = obj->supertype == DWG_SUPERTYPE_ENTITY;
+          // by the object's struct, not by its class
+          const int is_entity = obj->supertype == DWG_SUPERTYPE_ENTITY;
 
           assert (address);
           dat->byte = address; // restart and write into the UNKNOWN_OBJ object
@@ -8823,11 +8827,16 @@ void
 dwg_convert_LTYPE_strings_area (const Dwg_Data *restrict dwg,
                                 Dwg_Object_LTYPE *restrict _obj)
 {
-  // DXF input reconstructs strings_area directly in the target in-memory
-  // layout (add_LTYPE_dashes), sized by header.version, not the from_version
-  // on-disk blob this 256<->512 converter expects. Running it on a DXF-built
-  // 256-byte buffer reads old[i*2] up to index 510, past the allocation.
-  if (dwg->opts & DWG_OPTS_INDXF)
+  // add_LTYPE_dashes builds strings_area for DXF input sized by the source
+  // (header.version during the read): exactly 256 for a <=r2004 source, 512
+  // for a >=r2007 source. The <=r2004 -> r2007 upconvert reads old[0..255] and
+  // writes new[i*2], safe on a 256-byte buffer, and is required so a <=r2004
+  // source is not written past its 256-byte allocation for a r2007+ target
+  // (GH #1486). The r2007 -> <=r2004 downconvert instead reads old[i*2] up to
+  // index 510, which would overread a 256-byte DXF buffer, so it stays skipped
+  // for DXF input.
+  if ((dwg->opts & DWG_OPTS_INDXF)
+      && !(dwg->header.from_version <= R_2004 && dwg->header.version > R_2004))
     return;
   if (dwg->header.from_version <= R_2004 && dwg->header.version > R_2004)
     {

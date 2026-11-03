@@ -222,6 +222,8 @@ static BITCODE_BL rcount1, rcount2;
 #define FIELD_2RD_VECTOR(name, size, dxf) FIELD_TV (name, dxf)
 #define FIELD_2DD_VECTOR(name, size, dxf) FIELD_TV (name, dxf)
 #define FIELD_3DPOINT_VECTOR(name, size, dxf) FIELD_TV (name, dxf)
+#define SUB_FIELD_2RD_VECTOR(o, name, size, dxf) FREE_IF (_obj->o.name)
+#define SUB_FIELD_3BD_VECTOR(o, name, size, dxf) FREE_IF (_obj->o.name)
 #define HANDLE_VECTOR_N(name, size, code, dxf)                                \
   if (_obj->name)                                                             \
     {                                                                         \
@@ -566,10 +568,13 @@ dwg_free_variable_type (Dwg_Data *restrict dwg, Dwg_Object *restrict obj)
     // global class dispatcher:
     // with indxf even DEBUGGING objects, such as TABLE are created.
     // usually not written/encoded though.
+    // A class of another type frees by fixedtype.
 
     // clang-format off
+  #define CLASS_NOT_OF_OBJECT return dwg_free_variable_no_class (dwg, obj)
   #include "classes.inc"
 
+  #undef CLASS_NOT_OF_OBJECT
   #undef WARN_UNHANDLED_CLASS
   #undef WARN_UNSTABLE_CLASS
   // clang-format on
