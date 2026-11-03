@@ -13,7 +13,7 @@ $INSUNITS
   9
 $HANDSEED
   5
-164
+17E
   0
 ENDSEC
   0
@@ -111,7 +111,7 @@ BLOCK_RECORD
 100
 AcDbSymbolTable
  70
-18
+22
   0
 BLOCK_RECORD
   5
@@ -328,6 +328,54 @@ AcDbSymbolTableRecord
 AcDbBlockTableRecord
   2
 *D16
+  0
+BLOCK_RECORD
+  5
+19
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*D17
+  0
+BLOCK_RECORD
+  5
+1A
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*D18
+  0
+BLOCK_RECORD
+  5
+1B
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*D19
+  0
+BLOCK_RECORD
+  5
+1C
+330
+6
+100
+AcDbSymbolTableRecord
+100
+AcDbBlockTableRecord
+  2
+*D20
   0
 ENDTAB
   0
@@ -2205,6 +2253,502 @@ AcDbEntity
 100
 AcDbBlockEnd
   0
+BLOCK
+  5
+154
+330
+19
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D17
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D17
+  1
+
+  0
+LINE
+  5
+155
+330
+19
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+100.0
+ 20
+200.0
+ 30
+0.0
+ 11
+147.7
+ 21
+200.0
+ 31
+0.0
+  0
+TEXT
+  5
+156
+330
+19
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+123.85
+ 20
+201.0
+ 30
+0.0
+ 40
+2.5
+  1
+%%C47.7%%P0.03
+ 50
+0.0
+100
+AcDbText
+  0
+ENDBLK
+  5
+157
+330
+19
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+158
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D18
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D18
+  1
+
+  0
+LINE
+  5
+159
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+210.0
+ 30
+0.0
+ 11
+1.35
+ 21
+210.0
+ 31
+0.0
+  0
+LINE
+  5
+15A
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+200.0
+ 30
+0.0
+ 11
+0.0
+ 21
+210.0
+ 31
+0.0
+  0
+LINE
+  5
+15B
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+1.35
+ 20
+200.0
+ 30
+0.0
+ 11
+1.35
+ 21
+210.0
+ 31
+0.0
+  0
+TEXT
+  5
+15C
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+0.675
+ 20
+211.0
+ 30
+0.0
+ 40
+2.5
+  1
+R1.4
+ 50
+0.0
+100
+AcDbText
+  0
+ENDBLK
+  5
+15D
+330
+1A
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+15E
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D19
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D19
+  1
+
+  0
+LINE
+  5
+15F
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+235.0
+ 30
+0.0
+ 11
+20.0
+ 21
+235.0
+ 31
+0.0
+  0
+LINE
+  5
+160
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+225.0
+ 30
+0.0
+ 11
+0.0
+ 21
+235.0
+ 31
+0.0
+  0
+LINE
+  5
+161
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+20.0
+ 20
+225.0
+ 30
+0.0
+ 11
+20.0
+ 21
+235.0
+ 31
+0.0
+  0
+TEXT
+  5
+162
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+10.0
+ 20
+236.0
+ 30
+0.0
+ 40
+2.5
+  1
+concavity 5um~45um
+ 50
+0.0
+100
+AcDbText
+  0
+ENDBLK
+  5
+163
+330
+1B
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+164
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+*D20
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+*D20
+  1
+
+  0
+LINE
+  5
+165
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+260.0
+ 30
+0.0
+ 11
+45.0
+ 21
+260.0
+ 31
+0.0
+  0
+LINE
+  5
+166
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+0.0
+ 20
+250.0
+ 30
+0.0
+ 11
+0.0
+ 21
+260.0
+ 31
+0.0
+  0
+LINE
+  5
+167
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbLine
+ 10
+45.0
+ 20
+250.0
+ 30
+0.0
+ 11
+45.0
+ 21
+260.0
+ 31
+0.0
+  0
+TEXT
+  5
+168
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbText
+ 10
+22.5
+ 20
+261.0
+ 30
+0.0
+ 40
+2.5
+  1
+45{\H0.7x;\S+0.05^-0.02;}
+ 50
+0.0
+100
+AcDbText
+  0
+ENDBLK
+  5
+169
+330
+1C
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
 ENDSEC
   0
 SECTION
@@ -2213,7 +2757,7 @@ ENTITIES
   0
 DIMENSION
   5
-154
+16A
 330
 7
 100
@@ -2255,7 +2799,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-155
+16B
 330
 7
 100
@@ -2297,7 +2841,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-156
+16C
 330
 7
 100
@@ -2339,7 +2883,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-157
+16D
 330
 7
 100
@@ -2381,7 +2925,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-158
+16E
 330
 7
 100
@@ -2423,7 +2967,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-159
+16F
 330
 7
 100
@@ -2465,7 +3009,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-15A
+170
 330
 7
 100
@@ -2507,7 +3051,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-15B
+171
 330
 7
 100
@@ -2549,7 +3093,7 @@ AcDbDiametricDimension
   0
 DIMENSION
   5
-15C
+172
 330
 7
 100
@@ -2597,7 +3141,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-15D
+173
 330
 7
 100
@@ -2645,7 +3189,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-15E
+174
 330
 7
 100
@@ -2693,7 +3237,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-15F
+175
 330
 7
 100
@@ -2741,7 +3285,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-160
+176
 330
 7
 100
@@ -2789,7 +3333,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-161
+177
 330
 7
 100
@@ -2837,7 +3381,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-162
+178
 330
 7
 100
@@ -2885,7 +3429,7 @@ AcDbRotatedDimension
   0
 DIMENSION
   5
-163
+179
 330
 7
 100
@@ -2926,6 +3470,192 @@ AcDbAlignedDimension
 50.0
  24
 175.0
+ 34
+0.0
+100
+AcDbRotatedDimension
+  0
+DIMENSION
+  5
+17A
+330
+7
+100
+AcDbEntity
+  8
+DIMS
+100
+AcDbDimension
+  2
+*D17
+ 10
+100.0
+ 20
+200.0
+ 30
+0.0
+ 11
+123.85
+ 21
+200.0
+ 31
+0.0
+ 70
+35
+  1
+%%C47.7%%P0.03
+ 42
+47.7
+100
+AcDbDiametricDimension
+ 15
+147.7
+ 25
+200.0
+ 35
+0.0
+ 40
+0.0
+  0
+DIMENSION
+  5
+17B
+330
+7
+100
+AcDbEntity
+  8
+DIMS
+100
+AcDbDimension
+  2
+*D18
+ 10
+0.0
+ 20
+210.0
+ 30
+0.0
+ 11
+0.675
+ 21
+200.0
+ 31
+0.0
+ 70
+32
+  1
+R1.4
+ 42
+1.35
+100
+AcDbAlignedDimension
+ 13
+0.0
+ 23
+200.0
+ 33
+0.0
+ 14
+1.35
+ 24
+200.0
+ 34
+0.0
+100
+AcDbRotatedDimension
+  0
+DIMENSION
+  5
+17C
+330
+7
+100
+AcDbEntity
+  8
+DIMS
+100
+AcDbDimension
+  2
+*D19
+ 10
+0.0
+ 20
+235.0
+ 30
+0.0
+ 11
+10.0
+ 21
+225.0
+ 31
+0.0
+ 70
+32
+  1
+concavity 5um~45um
+ 42
+20.0
+100
+AcDbAlignedDimension
+ 13
+0.0
+ 23
+225.0
+ 33
+0.0
+ 14
+20.0
+ 24
+225.0
+ 34
+0.0
+100
+AcDbRotatedDimension
+  0
+DIMENSION
+  5
+17D
+330
+7
+100
+AcDbEntity
+  8
+DIMS
+100
+AcDbDimension
+  2
+*D20
+ 10
+0.0
+ 20
+260.0
+ 30
+0.0
+ 11
+22.5
+ 21
+250.0
+ 31
+0.0
+ 70
+32
+  1
+45{\H0.7x;\S+0.05^-0.02;}
+ 42
+45.0
+100
+AcDbAlignedDimension
+ 13
+0.0
+ 23
+250.0
+ 33
+0.0
+ 14
+45.0
+ 24
+250.0
  34
 0.0
 100
