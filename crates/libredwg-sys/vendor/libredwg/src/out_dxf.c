@@ -70,6 +70,7 @@ static int dxf_3dsolid (Bit_Chain *restrict dat,
                         Dwg_Entity_3DSOLID *restrict _obj);
 static void dxf_fixup_string (Bit_Chain *restrict dat, char *restrict str,
                               const int opts, const int dxf);
+static bool dxf_needs_cquote (const char *restrict str);
 static void dxf_CMC (Bit_Chain *restrict dat, Dwg_Color *restrict color,
                      const int dxf, const int opt);
 
@@ -89,7 +90,7 @@ static void dxf_CMC (Bit_Chain *restrict dat, Dwg_Color *restrict color,
 
 #define VALUE_TV(value, dxf)                                                  \
   {                                                                           \
-    if (dxf && dat->version >= R_2007)                                        \
+    if (dxf && (dat->version >= R_2007 || dxf_needs_cquote ((char *)value)))  \
       {                                                                       \
         char *u8 = bit_TV_to_utf8 ((char *)value, dat->codepage);             \
         dxf_fixup_string (dat, u8 ? u8 : (char *)value, 1, dxf);              \
@@ -108,7 +109,7 @@ static void dxf_CMC (Bit_Chain *restrict dat, Dwg_Color *restrict color,
 #define VALUE_TV0(value, dxf)                                                 \
   if (dxf && value && *value)                                                 \
     {                                                                         \
-      if (dat->version >= R_2007)                                             \
+      if (dat->version >= R_2007 || dxf_needs_cquote ((char *)value))         \
       {                                                                       \
         char *u8 = bit_TV_to_utf8 ((char *)value, dat->codepage);             \
         dxf_fixup_string (dat, u8 ? u8 : (char *)value, 1, dxf);              \
@@ -1359,32 +1360,29 @@ cquote (char *restrict dest, const size_t len, const char *restrict src)
       // 5: 936 Simplified Chinese
       // See
       // https://docs.intellicad.org/files/oda/2021_11/oda_drawings_docs/frames.html?frmname=topic&frmfile=FontHandling.html
+      // s is past the backslash: s[2] is n, s[3..6] the hex code.
       else if (c == '\\' && dest + 7 < dend && s + 6 < send
-               && memBEGINc (s, "M+") && s[3] >= '1' && s[3] <= '5')
+               && memBEGINc (s, "M+") && s[2] >= '1' && s[2] <= '5'
+               && isxdigit ((unsigned char)s[3])
+               && isxdigit ((unsigned char)s[4])
+               && isxdigit ((unsigned char)s[5])
+               && isxdigit ((unsigned char)s[6]))
         {
           const Dwg_Codepage mif_tbl[]
               = { CP_UNDEFINED, CP_ANSI_932,  CP_ANSI_950,
                   CP_ANSI_949,  CP_ANSI_1361, CP_ANSI_936 };
-          int i;
-          uint16_t x;
+          unsigned int x = 0;
           uint32_t uc;
-          Dwg_Codepage cp;
-          sscanf (s, "M+%d", &i);
-          if (i >= 1 && i <= 5)
+          sscanf (&s[3], "%4X", &x);
+          uc = (uint32_t)dwg_codepage_uwc (mif_tbl[s[2] - '0'], (uint16_t)x);
+          if (uc)
             {
-              cp = mif_tbl[i];
-              sscanf (&s[3], "%4X", &uc);
-              x = uc & 0xFFFF;
-              uc = dwg_codepage_uwc (cp, x);
               snprintf (dest, dend - dest, "\\U+%04X", uc);
               dest += 7;
               s += 7;
             }
-          else
-            {
-              LOG_ERROR ("Invalid MIF index in %s", s - 1);
-              s += 3;
-            }
+          else // not in that codepage: keep the MIF code as it is
+            *dest++ = c;
         }
       else
         *dest++ = c;
@@ -1406,6 +1404,8 @@ cquote (char *restrict dest, const size_t len, const char *restrict src)
 static bool
 dxf_needs_cquote (const char *restrict str)
 {
+  if (!str)
+    return false;
   for (const unsigned char *s = (const unsigned char *)str; *s; s++)
     {
       if (*s < 0x20 && *s != '\t')
@@ -1436,7 +1436,23 @@ dxf_fixup_zero_handle (const Dwg_Object *restrict obj)
 {
   static BITCODE_RLL last = 0;
   Dwg_Object *o = (Dwg_Object *)obj;
-  BITCODE_RLL next = dwg_next_handle (obj->parent);
+  Dwg_Data *dwg = obj->parent;
+  BITCODE_RLL next = dwg_next_handle (dwg);
+  // dwg_next_handle returns the last non-zero object handle + 1, which is
+  // not the highest handle. A handle-0 object landing on an existing handle
+  // corrupts the DXF (GH #1356), so start from the real highest handle.
+  BITCODE_RLL max_hdl = 0;
+  for (BITCODE_BL i = 0; i < dwg->num_objects; i++)
+    if (dwg->object[i].handle.value > max_hdl)
+      max_hdl = dwg->object[i].handle.value;
+  for (BITCODE_BL i = 0; i < dwg->num_object_refs; i++)
+    {
+      const Dwg_Object_Ref *ref = dwg->object_ref[i];
+      if (ref && ref->absolute_ref > max_hdl)
+        max_hdl = ref->absolute_ref;
+    }
+  if (next <= max_hdl)
+    next = max_hdl + 1;
   if (next <= last)
     next = last + 1;
   last = next;
@@ -1521,6 +1537,33 @@ dxf_write_chunked (Bit_Chain *restrict dat, const char *restrict str,
     }
 }
 
+/* Like bit_embed_TU, but writes U+0080-U+00FF as \U+XXXX too, not as one
+   raw byte: that byte is invalid UTF-8 in a r2007+ DXF, and another
+   character (or half of one) in a r2000-r2004 DXF in an Asian codepage.
+   (GH #1497) */
+static char *
+dxf_embed_TU (const BITCODE_TU restrict wstr)
+{
+  size_t len = 0, i;
+  char *str, *d;
+  if (!wstr)
+    return NULL;
+  while (wstr[len])
+    len++;
+  d = str = (char *)malloc ((7 * len) + 1);
+  if (!str)
+    return NULL;
+  for (i = 0; i < len; i++)
+    {
+      if (wstr[i] < 0x80)
+        *d++ = (char)wstr[i];
+      else
+        d += sprintf (d, "\\U+%04X", (unsigned)wstr[i]);
+    }
+  *d = '\0';
+  return str;
+}
+
 static void
 dxf_fixup_string (Bit_Chain *restrict dat, char *restrict str, const int opts,
                   const int dxf)
@@ -1544,7 +1587,7 @@ dxf_fixup_string (Bit_Chain *restrict dat, char *restrict str, const int opts,
           // -- as a single raw byte, silently undoing any quoting done
           // beforehand.
           wstr = bit_utf8_to_TU (str, 0);
-          ubuf = bit_embed_TU (wstr);
+          ubuf = dxf_embed_TU (wstr);
           free (wstr);
           if (!ubuf)
             {
@@ -4261,6 +4304,11 @@ dwg_write_dxf (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
   loglevel = dwg->opts & DWG_OPTS_LOGLEVEL;
   if (dat->from_version == R_INVALID)
     dat->from_version = dwg->header.from_version;
+  // Pre-R2007 TV strings are stored in the source codepage; set dat->codepage
+  // so the cquote path (VALUE_TV/TV0) can convert them to UTF-8 before
+  // caret-quoting.  (GH #1496)
+  if (dat->from_version < R_2007)
+    dat->codepage = dwg->header.codepage;
   // Propagate the input-format flags, so IS_FROM_TU (dat) reflects the actual
   // source encoding.  DXF/JSON input stores T strings as single-byte TV even
   // for an r2007+ target, so without this the writer would scan them as wide

@@ -8,8 +8,9 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
-- The vendored LibreDWG is updated to upstream commit `a13dbe0b` (2026-11-03; 28 commits after
-  `86cc68d2`, the first 27 as landed on upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
+- The vendored LibreDWG is updated to upstream commit `93e2d87b` (2026-11-04; 16 commits after
+  `a13dbe0b`, which was 2026-11-03 and 28 commits after `86cc68d2`, the first 27 as landed on
+  upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
   ATTRIB/SEQEND of a block, and numbers a pre-R13 drawing's anonymous blocks from the drawing's own
   BLOCK entities; the DXF writer no longer splits a UTF-8 sequence across chunks of a long string.
   Since `86e04c74`: the V4 geometry transform switches on the fixed type, maps shared elevations
@@ -19,7 +20,13 @@ Notable changes to this project are recorded here. The format follows
   JSON/DXF input paths keep every count equal to the array it counts. The two local patches apply
   to it unchanged, and the twin comparison and the corpus sweep give the same answers. The last
   commit makes the DXF writer emit an empty chunk, not a run of zero bytes, for a binary field with
-  no payload (GHSA-fxmw-mp89-7g88); no reader path of this crate calls the writer.
+  no payload (GHSA-fxmw-mp89-7g88); no reader path of this crate calls the writer. Since
+  `a13dbe0b`: the decoder accepts extended entity data of exactly 256 bytes and reads Inventor
+  block references as insertions, the object-handle seed scans every object for the highest handle,
+  and the API no longer drops the last vertex of an R13-R2000 2D/3D polyline; the rest is the DXF
+  writer and the geometry helpers (bulge arcs), which no reader path of this crate calls. The two
+  local patches apply to it unchanged, and the twin comparison and the corpus sweep give the same
+  answers.
 
 ### Fixed
 

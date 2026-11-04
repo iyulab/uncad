@@ -4074,7 +4074,8 @@ dwg_decode_eed (Bit_Chain *restrict dat, Dwg_Object_Object *restrict obj)
         }
 
       LOG_RPOS
-      if (size > _obj->size || dat->byte == sav_byte)
+      if (size > _obj->size
+          || (dat->from_version < R_13b1 && dat->byte == sav_byte))
         {
           LOG_ERROR ("Invalid EED size " FORMAT_BS " > %u", size, _obj->size);
           obj->num_eed = idx;
@@ -5901,7 +5902,15 @@ dwg_decode_add_object (Dwg_Data *restrict dwg, Bit_Chain *dat,
             }
 
           // properly dwg_decode_object/_entity for eed, reactors, xdic
-          if (is_entity)
+          // Inventor's AcIdBlockReference is an AcDbBlockReference: read it as
+          // an INSERT (even when its class flags are unusable)
+          if (klass->dxfname
+              && !strcmp (klass->dxfname, "ACIDBLOCKREFERENCE"))
+            {
+              obj->type = DWG_TYPE_INSERT;
+              error |= dwg_decode_INSERT (dat, obj);
+            }
+          else if (is_entity)
             {
               // obj->type = DWG_TYPE_UNKNOWN_ENT;
               error |= dwg_decode_UNKNOWN_ENT (dat, obj);
