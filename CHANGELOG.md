@@ -8,8 +8,8 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
-- The vendored LibreDWG is updated to upstream commit `46c44598` (2026-11-02; 27 commits after
-  `86cc68d2`). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
+- The vendored LibreDWG is updated to upstream commit `a13dbe0b` (2026-11-03; 28 commits after
+  `86cc68d2`, the first 27 as landed on upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
   ATTRIB/SEQEND of a block, and numbers a pre-R13 drawing's anonymous blocks from the drawing's own
   BLOCK entities; the DXF writer no longer splits a UTF-8 sequence across chunks of a long string.
   Since `86e04c74`: the V4 geometry transform switches on the fixed type, maps shared elevations
@@ -17,7 +17,9 @@ Notable changes to this project are recorded here. The format follows
   variable-type object is dispatched only by a class of its own type; the field offsets of
   `ASSOCASMBODYACTIONPARAM` line up with the 3DSOLID helpers called on it (an invalid free); and the
   JSON/DXF input paths keep every count equal to the array it counts. The two local patches apply
-  to it unchanged, and the twin comparison and the corpus sweep give the same answers.
+  to it unchanged, and the twin comparison and the corpus sweep give the same answers. The last
+  commit makes the DXF writer emit an empty chunk, not a run of zero bytes, for a binary field with
+  no payload (GHSA-fxmw-mp89-7g88); no reader path of this crate calls the writer.
 
 ### Fixed
 
