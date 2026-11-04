@@ -3,7 +3,7 @@
     {
       "type": "POLYLINE_MESH",
       "common": {
-        "id": 260,
+        "id": "260",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -305,7 +305,7 @@
           {
             "type": "POLYLINE_MESH",
             "common": {
-              "id": 260,
+              "id": "260",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {

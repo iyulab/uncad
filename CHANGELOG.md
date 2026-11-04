@@ -8,6 +8,12 @@ Notable changes to this project are recorded here. The format follows
 
 ### Changed
 
+- **Breaking:** entity IDs are decimal strings everywhere they appear -- in the model JSON and the answers
+  of every verb (`"id": "812"`, not a number), and in the arguments that take one: `--id` on the command
+  line is unchanged (it is text), but the MCP tools' `id` argument and a balloon's `target.entity` are now
+  strings (schema `type: string`) and a number is refused. An ID is an opaque token; as a JSON number a
+  64-bit value does not survive a client whose numbers are doubles (the IDs of entities a file gives no
+  handle start at 2^63). Built on `uncad-model`'s change of the same date.
 - The vendored LibreDWG is updated to upstream commit `93e2d87b` (2026-11-04; 16 commits after
   `a13dbe0b`, which was 2026-11-03 and 28 commits after `86cc68d2`, the first 27 as landed on
   upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the

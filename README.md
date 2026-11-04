@@ -134,7 +134,7 @@ and every one that could not be, and why. The balloons are JSON, as text or
 "state": "active" or "dropped" }`:
 
 ```bash
-uncad balloon part.dwg --balloons '[{"label":"1","target":{"entity":42}}]' -o numbered.svg
+uncad balloon part.dwg --balloons '[{"label":"1","target":{"entity":"42"}}]' -o numbered.svg
 uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --color '#0057b8'  # a color of your own
 uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --size 12 --space paper  # 12 units across, in paper space
 ```

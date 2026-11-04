@@ -591,6 +591,10 @@ a range above every possible handle value (the top bit set), and its `source_han
 `Absent`. The corpus sweep checks that no file yields two different entities with one ID
 and counts how often the fallback is needed.
 
+An ID is written as a decimal string (`"id": "812"`), never as a number, and a verb that takes one
+(`--id`, a balloon's `target.entity`) takes the same string. The fallback range lies above 2^53, where
+two different IDs are one number to a client whose numbers are doubles; as strings they stay two.
+
 ## MTEXT rotation is the direction of its X axis
 
 The file states an MTEXT's rotation as the text's X-axis direction (`x_axis_dir`, DXF 11),

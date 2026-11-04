@@ -3,7 +3,7 @@
     {
       "type": "LWPOLYLINE",
       "common": {
-        "id": 266,
+        "id": "266",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -74,7 +74,7 @@
     {
       "type": "INSERT",
       "common": {
-        "id": 267,
+        "id": "267",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -113,7 +113,7 @@
       "attribs": [
         {
           "common": {
-            "id": 268,
+            "id": "268",
             "origin": "VECTOR",
             "confidence": "HIGH",
             "source_handle": {
@@ -165,7 +165,7 @@
         },
         {
           "common": {
-            "id": 269,
+            "id": "269",
             "origin": "VECTOR",
             "confidence": "HIGH",
             "source_handle": {
@@ -217,7 +217,7 @@
         },
         {
           "common": {
-            "id": 270,
+            "id": "270",
             "origin": "VECTOR",
             "confidence": "HIGH",
             "source_handle": {
@@ -277,7 +277,7 @@
     {
       "type": "ATTRIB",
       "common": {
-        "id": 268,
+        "id": "268",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -330,7 +330,7 @@
     {
       "type": "ATTRIB",
       "common": {
-        "id": 269,
+        "id": "269",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -383,7 +383,7 @@
     {
       "type": "ATTRIB",
       "common": {
-        "id": 270,
+        "id": "270",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -436,7 +436,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 272,
+        "id": "272",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -529,7 +529,7 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "id": 266,
+              "id": "266",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -600,7 +600,7 @@
           {
             "type": "INSERT",
             "common": {
-              "id": 267,
+              "id": "267",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -639,7 +639,7 @@
             "attribs": [
               {
                 "common": {
-                  "id": 268,
+                  "id": "268",
                   "origin": "VECTOR",
                   "confidence": "HIGH",
                   "source_handle": {
@@ -691,7 +691,7 @@
               },
               {
                 "common": {
-                  "id": 269,
+                  "id": "269",
                   "origin": "VECTOR",
                   "confidence": "HIGH",
                   "source_handle": {
@@ -743,7 +743,7 @@
               },
               {
                 "common": {
-                  "id": 270,
+                  "id": "270",
                   "origin": "VECTOR",
                   "confidence": "HIGH",
                   "source_handle": {
@@ -803,7 +803,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 272,
+              "id": "272",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -870,7 +870,7 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "id": 261,
+              "id": "261",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -941,7 +941,7 @@
           {
             "type": "ATTDEF",
             "common": {
-              "id": 262,
+              "id": "262",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -994,7 +994,7 @@
           {
             "type": "ATTDEF",
             "common": {
-              "id": 263,
+              "id": "263",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1047,7 +1047,7 @@
           {
             "type": "ATTDEF",
             "common": {
-              "id": 264,
+              "id": "264",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {

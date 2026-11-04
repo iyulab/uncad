@@ -3,7 +3,7 @@
     {
       "type": "LWPOLYLINE",
       "common": {
-        "id": 263,
+        "id": "263",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -74,7 +74,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 264,
+        "id": "264",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -120,7 +120,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 265,
+        "id": "265",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -166,7 +166,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 266,
+        "id": "266",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -212,7 +212,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 267,
+        "id": "267",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -258,7 +258,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 268,
+        "id": "268",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -304,7 +304,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 269,
+        "id": "269",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -350,7 +350,7 @@
     {
       "type": "CIRCLE",
       "common": {
-        "id": 270,
+        "id": "270",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -386,7 +386,7 @@
     {
       "type": "ARC",
       "common": {
-        "id": 271,
+        "id": "271",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -424,7 +424,7 @@
     {
       "type": "LWPOLYLINE",
       "common": {
-        "id": 272,
+        "id": "272",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -486,7 +486,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 273,
+        "id": "273",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -535,7 +535,7 @@
     {
       "type": "INSERT",
       "common": {
-        "id": 274,
+        "id": "274",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -581,7 +581,7 @@
     {
       "type": "TEXT",
       "common": {
-        "id": 275,
+        "id": "275",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -661,7 +661,7 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "id": 263,
+              "id": "263",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -732,7 +732,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 264,
+              "id": "264",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -778,7 +778,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 265,
+              "id": "265",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -824,7 +824,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 266,
+              "id": "266",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -870,7 +870,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 267,
+              "id": "267",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -916,7 +916,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 268,
+              "id": "268",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -962,7 +962,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 269,
+              "id": "269",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1008,7 +1008,7 @@
           {
             "type": "CIRCLE",
             "common": {
-              "id": 270,
+              "id": "270",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1044,7 +1044,7 @@
           {
             "type": "ARC",
             "common": {
-              "id": 271,
+              "id": "271",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1082,7 +1082,7 @@
           {
             "type": "LWPOLYLINE",
             "common": {
-              "id": 272,
+              "id": "272",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1144,7 +1144,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 273,
+              "id": "273",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1193,7 +1193,7 @@
           {
             "type": "INSERT",
             "common": {
-              "id": 274,
+              "id": "274",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1239,7 +1239,7 @@
           {
             "type": "TEXT",
             "common": {
-              "id": 275,
+              "id": "275",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -1306,7 +1306,7 @@
           {
             "type": "LINE",
             "common": {
-              "id": 261,
+              "id": "261",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {

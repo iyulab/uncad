@@ -33,6 +33,13 @@ fn run(args: &[&str]) -> Output {
 }
 
 /// The command's stdout as one JSON document, after checking it succeeded.
+/// An entity ID out of an answer: the decimal string every answer carries, as a number to compare and sort.
+fn id_of(v: &Value) -> u64 {
+    v.as_str()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("an entity ID is a decimal string, got {v}"))
+}
+
 fn answer(args: &[&str]) -> (String, Value) {
     let out = run(args);
     assert!(
@@ -175,7 +182,7 @@ fn relate_names_what_each_dimension_stands_on_and_what_it_could_not_look_at() {
     assert!(at_point > 0, "some point is a point of the geometry");
 
     // One dimension, by its ID; the rest of the answer as it was.
-    let id = dimensions[0]["id"].as_u64().unwrap().to_string();
+    let id = id_of(&dimensions[0]["id"]).to_string();
     let (_, one) = answer(&["relate", XREF_DWG, "--id", &id]);
     assert_eq!(one["dimensions"].as_array().unwrap(), &dimensions[..1]);
     assert_eq!(one["external_references"], r["external_references"]);
@@ -724,7 +731,7 @@ fn a_render_names_the_leaders_it_could_not_draw() {
         .unwrap()
         .iter()
         .filter(|e| e["type"] == "LEADER" && e["path_type"] == "SPLINE")
-        .map(|e| e["common"]["id"].to_string())
+        .map(|e| e["common"]["id"].as_str().unwrap().to_string())
         .collect();
     assert!(
         !splines.is_empty(),
@@ -767,6 +774,8 @@ fn circle_id(dir: &std::path::Path) -> String {
         .iter()
         .find(|e| e["type"] == "CIRCLE")
         .expect("the fixture has a circle")["common"]["id"]
+        .as_str()
+        .unwrap()
         .to_string()
 }
 
@@ -888,7 +897,7 @@ fn set_as_a_tool_answers_as_the_command_line_does() {
     let mut mcp = Mcp::start();
     let result = mcp.call(
         "set",
-        json!({"input": CORPUS_DWG, "id": id.parse::<u64>().unwrap(), "path": "radius",
+        json!({"input": CORPUS_DWG, "id": id, "path": "radius",
                "value": 3, "output": arg(&by_tool)}),
     );
     assert_eq!(result["isError"], false, "{result}");
@@ -1052,7 +1061,7 @@ fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
     ]);
     let hit = &hits["hits"][0];
     assert_eq!(hit["entity_type"], "CIRCLE", "{hits}");
-    let id = hit["id"].to_string();
+    let id = hit["id"].as_str().unwrap().to_string();
 
     let edited = dir.join("edited.json");
     let smaller = (r / 2.0).to_string();
@@ -1074,8 +1083,8 @@ fn the_skeleton_runs_from_a_drawing_to_a_redline_without_a_hand_on_it() {
     let marked = report["marked"].as_array().unwrap();
     assert_eq!(marked.len(), 1, "{report}");
     assert_eq!(marked[0]["kind"], "MODIFIED");
-    assert_eq!(marked[0]["before"].to_string(), id);
-    assert_eq!(marked[0]["after"].to_string(), id);
+    assert_eq!(marked[0]["before"].as_str().unwrap(), id);
+    assert_eq!(marked[0]["after"].as_str().unwrap(), id);
     assert!(
         report["not_marked"].as_array().unwrap().is_empty(),
         "{report}"
@@ -1110,7 +1119,7 @@ fn related(answer: &Value, dimension: u64) -> Vec<(String, Vec<u64>)> {
         .as_array()
         .unwrap()
         .iter()
-        .find(|d| d["id"] == dimension)
+        .find(|d| id_of(&d["id"]) == dimension)
         .unwrap_or_else(|| panic!("dimension {dimension} in {answer}"));
     d["points"]
         .as_array()
@@ -1121,7 +1130,7 @@ fn related(answer: &Value, dimension: u64) -> Vec<(String, Vec<u64>)> {
                 .as_array()
                 .unwrap()
                 .iter()
-                .map(|r| r["entity"].as_u64().unwrap())
+                .map(|r| id_of(&r["entity"]))
                 .collect();
             (p["role"].as_str().unwrap().to_string(), ids)
         })
@@ -1145,7 +1154,7 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
     let circle = dimensions
         .iter()
         .find(|d| d["kind"] == "DIAMETER")
-        .and_then(|d| d["points"][0]["relations"][0]["entity"].as_u64())
+        .map(|d| id_of(&d["points"][0]["relations"][0]["entity"]))
         .expect("a diameter dimension on a circle");
     let measuring: Vec<u64> = dimensions
         .iter()
@@ -1155,10 +1164,10 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .any(|r| r["entity"] == circle)
+                    .any(|r| id_of(&r["entity"]) == circle)
             })
         })
-        .map(|d| d["id"].as_u64().unwrap())
+        .map(|d| id_of(&d["id"]))
         .collect();
     assert_eq!(measuring.len(), 2, "a diameter and a radius: {before}");
 
@@ -1190,7 +1199,7 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
             .as_array()
             .unwrap()
             .iter()
-            .find(|x| x["id"] == d)
+            .find(|x| id_of(&x["id"]) == d)
             .unwrap();
         dim["points"]
             .as_array()
@@ -1284,7 +1293,7 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
                 .map(|f| f["path"].as_str().unwrap().to_string())
                 .collect();
             paths.sort();
-            (ch["data"]["id"].as_u64().unwrap(), paths)
+            (id_of(&ch["data"]["id"]), paths)
         })
         .collect();
     changed.sort();
@@ -1316,14 +1325,14 @@ fn a_circle_and_the_dimensions_that_measure_it_are_edited_as_one_chain() {
         .iter()
         .map(|m| {
             let not_drawn = m.get("not_drawn").cloned().unwrap_or(Value::Null);
-            (m["before"].as_u64().unwrap(), m["after"].clone(), not_drawn)
+            (id_of(&m["before"]), m["after"].clone(), not_drawn)
         })
         .collect();
     marked.sort_by_key(|m| m.0);
     let mut expected: Vec<(u64, Value, Value)> = measuring
         .iter()
         .map(|&d| (d, Value::Null, json!("BLOCK_OUT_OF_DATE")))
-        .chain([(circle, json!(circle), Value::Null)])
+        .chain([(circle, json!(circle.to_string()), Value::Null)])
         .collect();
     expected.sort_by_key(|m| m.0);
     assert_eq!(marked, expected, "{report}");
@@ -1352,14 +1361,15 @@ fn an_edit_inside_a_block_is_marked_at_every_place_the_block_is_put() {
         .iter()
         .find(|e| e["type"] == "CIRCLE")
         .expect("a circle in the block")["common"]["id"]
-        .as_u64()
+        .as_str()
+        .and_then(|s| s.parse::<u64>().ok())
         .unwrap();
     let mut references: Vec<u64> = model["entities"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|e| e["type"] == "INSERT" && e["block_name"]["data"] == block)
-        .map(|e| e["common"]["id"].as_u64().unwrap())
+        .map(|e| id_of(&e["common"]["id"]))
         .collect();
     references.sort();
     assert_eq!(references.len(), 8, "{references:?}");
@@ -1380,8 +1390,8 @@ fn an_edit_inside_a_block_is_marked_at_every_place_the_block_is_put() {
         .iter()
         .map(|m| {
             assert_eq!(m["entry"], 0, "{report}");
-            assert_eq!(m["after"], circle, "{report}");
-            m["via"][0].as_u64().unwrap()
+            assert_eq!(id_of(&m["after"]), circle, "{report}");
+            id_of(&m["via"][0])
         })
         .collect();
     via.sort();
@@ -1418,7 +1428,7 @@ fn what_a_dimension_states_is_edited_and_marked_without_its_old_drawing() {
         .as_array()
         .unwrap()
         .iter()
-        .filter_map(|d| Some((d["id"].as_u64()?, d["kind"].as_str()?)))
+        .filter_map(|d| Some((id_of(&d["id"]), d["kind"].as_str()?)))
         .collect();
     let diameter = kinds.iter().find(|k| k.1 == "DIAMETER").unwrap().0;
     let radius = kinds.iter().find(|k| k.1 == "RADIUS").unwrap().0;
@@ -1456,7 +1466,7 @@ fn what_a_dimension_states_is_edited_and_marked_without_its_old_drawing() {
                 .iter()
                 .map(|f| (f["path"].as_str().unwrap().to_string(), f["after"].clone()))
                 .collect();
-            (ch["data"]["id"].as_u64().unwrap(), fields)
+            (id_of(&ch["data"]["id"]), fields)
         })
         .collect();
     changed.sort_by_key(|c| c.0);
@@ -2154,7 +2164,7 @@ fn a_summary_selects_entities_and_reads_them() {
     assert_eq!(result["content"][0]["text"].as_str().unwrap(), cli);
 
     // One entity by its ID; a limit keeps the first, the total counts all.
-    let id = first["id"].to_string();
+    let id = first["id"].as_str().unwrap().to_string();
     let (_, one) = answer(&["summarize", CORPUS_DWG, "--id", &id]);
     assert_eq!(one["selection"]["total"], 1);
     assert!(one["selection"]["entities"][0].get("record").is_none());
@@ -2263,7 +2273,10 @@ fn every_json_answer_takes_pretty() {
     let out_file = dir.join("set.json");
     let _ = std::fs::remove_file(&out_file);
     let (_, summary) = answer(&["summarize", CORPUS_DWG, "--type", "circle", "--limit", "1"]);
-    let id = summary["selection"]["entities"][0]["id"].to_string();
+    let id = summary["selection"]["entities"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let out = run(&[
         "set",
         CORPUS_DWG,
@@ -2515,9 +2528,9 @@ fn a_picture_names_a_solid_with_no_edge_and_does_not_call_its_type_unsupported()
 fn balloons_for(id: &str) -> Value {
     let (cx, cy, _) = circle();
     json!([
-        {"label": "1", "target": {"entity": id.parse::<u64>().unwrap()}},
+        {"label": "1", "target": {"entity": id}},
         {"label": "5.1", "target": {"point": [cx, cy]}, "state": "dropped"},
-        {"label": "7", "target": {"entity": 4_000_000_000_u64}},
+        {"label": "7", "target": {"entity": "4000000000"}},
     ])
 }
 
@@ -2615,7 +2628,7 @@ fn balloon_answers_what_the_renderer_draws() {
 fn balloon_options_change_the_picture() {
     let dir = scratch("balloon-options");
     let id = circle_id(&dir);
-    let balloons = json!([{"label": "1", "target": {"entity": id.parse::<u64>().unwrap()}}]);
+    let balloons = json!([{"label": "1", "target": {"entity": id}}]);
     let text = balloons.to_string();
     let plain = dir.join("plain.svg");
     let (_, base) = answer(&[
@@ -2659,7 +2672,7 @@ fn balloon_options_change_the_picture() {
 #[test]
 fn balloon_refuses_input_it_cannot_draw_and_names_where() {
     let dir = scratch("balloon-refuse");
-    let id: u64 = circle_id(&dir).parse().unwrap();
+    let id = circle_id(&dir);
     let long = "x".repeat(65);
     let many: Vec<Value> = (0..1001)
         .map(|n| json!({"label": n.to_string(), "target": {"entity": id}}))

@@ -3,7 +3,7 @@
     {
       "type": "INSERT",
       "common": {
-        "id": 269,
+        "id": "269",
         "origin": "VECTOR",
         "confidence": "HIGH",
         "source_handle": {
@@ -70,7 +70,7 @@
           {
             "type": "INSERT",
             "common": {
-              "id": 269,
+              "id": "269",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -137,7 +137,7 @@
           {
             "type": "INSERT",
             "common": {
-              "id": 267,
+              "id": "267",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -194,7 +194,7 @@
           {
             "type": "INSERT",
             "common": {
-              "id": 264,
+              "id": "264",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {
@@ -251,7 +251,7 @@
           {
             "type": "LINE",
             "common": {
-              "id": 261,
+              "id": "261",
               "origin": "VECTOR",
               "confidence": "HIGH",
               "source_handle": {

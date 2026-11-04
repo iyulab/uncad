@@ -41,6 +41,8 @@ pub enum Kind {
     Path,
     /// An integer, 0 or more.
     Integer,
+    /// An entity's reference ID: a string of decimal digits, as the answers give it.
+    EntityId,
     /// A non-empty string.
     Text,
     /// Any JSON value. The command line takes it as JSON text.
@@ -155,7 +157,7 @@ pub const VERBS: &[Verb] = &[
             },
             Param {
                 name: "id",
-                kind: Kind::Integer,
+                kind: Kind::EntityId,
                 required: false,
                 positional: false,
                 description: "Select the entity with this reference ID -- with `detail`, to \
@@ -284,7 +286,7 @@ pub const VERBS: &[Verb] = &[
             },
             Param {
                 name: "id",
-                kind: Kind::Integer,
+                kind: Kind::EntityId,
                 required: false,
                 positional: false,
                 description: "Answer for the dimension with this reference ID only, as \
@@ -356,7 +358,7 @@ pub const VERBS: &[Verb] = &[
             },
             Param {
                 name: "id",
-                kind: Kind::Integer,
+                kind: Kind::EntityId,
                 required: true,
                 positional: false,
                 description: "The entity's reference ID, as summarize and hit_test give it.",
@@ -670,6 +672,7 @@ impl Verb {
             let fits = match &param.kind {
                 Kind::Path | Kind::Text => value.as_str().is_some_and(|s| !s.is_empty()),
                 Kind::Integer => value.as_u64().is_some(),
+                Kind::EntityId => entity_id(value).is_some(),
                 Kind::Json => true,
                 Kind::Number => value.as_f64().is_some_and(f64::is_finite),
                 Kind::NonNegative => value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0),
@@ -713,6 +716,12 @@ impl Verb {
                 Kind::Integer => {
                     schema.insert("type".into(), "integer".into());
                     schema.insert("minimum".into(), 0.into());
+                }
+                // A string, not a number: an ID is an opaque token and a 64-bit value does not
+                // survive a client whose numbers are doubles.
+                Kind::EntityId => {
+                    schema.insert("type".into(), "string".into());
+                    schema.insert("pattern".into(), "^(0|[1-9][0-9]*)$".into());
                 }
                 // Any JSON value: the schema leaves the type open.
                 Kind::Json => {}
@@ -808,6 +817,12 @@ impl Verb {
                     Kind::Integer => raw.parse::<u64>().map(Value::from).map_err(|_| {
                         format!("{word} must be an integer, 0 or more (got '{raw}')")
                     })?,
+                    Kind::EntityId => {
+                        let value = Value::String(raw.clone());
+                        entity_id(&value).map(|_| value).ok_or_else(|| {
+                            format!("{word} must be a reference ID: decimal digits (got '{raw}')")
+                        })?
+                    }
                     Kind::Json => {
                         // `@file.json` reads the JSON from a file, for a value
                         // too long for a command line.
@@ -945,6 +960,7 @@ impl Kind {
         match self {
             Kind::Path => "a file path".into(),
             Kind::Integer => "an integer, 0 or more".into(),
+            Kind::EntityId => "a reference ID: a string of decimal digits".into(),
             Kind::Text => "a non-empty string".into(),
             Kind::Json => "a JSON value".into(),
             Kind::Number => "a finite number".into(),
@@ -962,6 +978,7 @@ impl Kind {
         match self {
             Kind::Path => "path".into(),
             Kind::Integer | Kind::Number | Kind::NonNegative | Kind::Positive => "n".into(),
+            Kind::EntityId => "id".into(),
             Kind::Text => "text".into(),
             Kind::Json => "json".into(),
             Kind::Choice(words) => words.join("|"),
@@ -996,6 +1013,11 @@ fn color(text: &str) -> Option<[u8; 3]> {
         .filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()))?;
     let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
     Some([channel(0)?, channel(2)?, channel(4)?])
+}
+
+/// An entity's reference ID as an argument: the canonical decimal string, nothing else.
+fn entity_id(value: &Value) -> Option<uncad::model::EntityId> {
+    serde_json::from_value(value.clone()).ok()
 }
 
 fn path(args: &Map<String, Value>, name: &str) -> String {
@@ -1193,9 +1215,7 @@ fn summarize(args: &Map<String, Value>) -> Result<Answer, String> {
         Some("paper") => selection = selection.in_space(iron_scout_cad::SpaceFilter::Paper),
         _ => {}
     }
-    if let Some(id) = args.get("id").and_then(Value::as_u64) {
-        let id: uncad::model::EntityId =
-            serde_json::from_value(Value::from(id)).expect("a reference ID is an integer");
+    if let Some(id) = args.get("id").and_then(entity_id) {
         selection = selection.with_ids([id]);
     }
     if args.get("detail").and_then(Value::as_bool) == Some(true) {
@@ -1227,9 +1247,7 @@ fn relate(args: &Map<String, Value>) -> Result<Answer, String> {
     let db = read(&path(args, "input"), &mut warnings)?;
     let mut related =
         iron_scout_cad::relate(&db, number(args, "tolerance")).map_err(|e| e.to_string())?;
-    if let Some(id) = args.get("id").and_then(Value::as_u64) {
-        let id: uncad::model::EntityId =
-            serde_json::from_value(Value::from(id)).expect("a reference ID is an integer");
+    if let Some(id) = args.get("id").and_then(entity_id) {
         related = related.of_dimension(id);
     }
     answer(&related, warnings)
@@ -1476,10 +1494,10 @@ fn balloon_list(value: &Value) -> Result<Vec<iron_render_cad::Balloon>, String> 
                 })?;
             let target = match (target.len(), target.get("entity"), target.get("point")) {
                 (1, Some(id), None) => {
-                    let id = id.as_u64().ok_or_else(|| {
-                        format!("balloons[{at}].target.entity must be an entity ID: an integer, 0 or more")
+                    let id = entity_id(id).ok_or_else(|| {
+                        format!("balloons[{at}].target.entity must be an entity ID: a string of decimal digits")
                     })?;
-                    iron_render_cad::BalloonTarget::Entity(uncad::model::EntityId::new(id))
+                    iron_render_cad::BalloonTarget::Entity(id)
                 }
                 (1, None, Some(point)) => {
                     let xy: Option<Vec<f64>> = point.as_array().filter(|p| p.len() == 2).and_then(
@@ -1625,7 +1643,7 @@ fn set(args: &Map<String, Value>) -> Result<Answer, String> {
     }
     let mut warnings = Vec::new();
     let before = read(&input, &mut warnings)?;
-    let id = uncad::model::EntityId::new(args["id"].as_u64().expect("checked by Verb::call"));
+    let id = entity_id(&args["id"]).expect("checked by Verb::call");
     let field = args["path"].as_str().expect("checked by Verb::call");
     let after =
         iron_hand_cad::set(&before, id, field, args["value"].clone()).map_err(|refusal| {
