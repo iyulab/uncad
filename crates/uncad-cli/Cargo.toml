@@ -1,6 +1,6 @@
 [package]
 name = "uncad-cli"
-version = "0.17.0"
+version = "0.18.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -24,7 +24,7 @@ name = "uncad"
 path = "src/main.rs"
 
 [dependencies]
-uncad = { path = "../uncad", version = "0.17.0" }
+uncad = { path = "../uncad", version = "0.18.0" }
 # SVG/PNG output. A version dependency, never a path.
 iron-render-cad = "0.16.0"
 # The LLM/VLM package behind `uncad export`. A version dependency, never

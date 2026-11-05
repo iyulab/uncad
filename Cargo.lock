@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "libredwg-sys"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -1376,7 +1376,7 @@ dependencies = [
 
 [[package]]
 name = "uncad"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "acadrust",
  "iron-render-cad",
@@ -1385,12 +1385,13 @@ dependencies = [
  "serde",
  "serde_json",
  "uncad-model",
+ "undwg",
  "undxf",
 ]
 
 [[package]]
 name = "uncad-cli"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "iron-diff-cad",
  "iron-hand-cad",
@@ -1412,6 +1413,16 @@ checksum = "a200d1dd3c19b70e4576add486f318b301997696603550118ab80b6e13fe123a"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "undwg"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4658d820330b8124d27d4fb2aa23084da5f01e94f776c43678addc41971cec98"
+dependencies = [
+ "encoding_rs",
+ "uncad-model",
 ]
 
 [[package]]

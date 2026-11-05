@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-06
+
 ### Added
 
 - The `undwg-reader` feature (off by default; `uncad-cli` forwards it): a DWG can be read by `undwg`, a reader
@@ -25,6 +27,8 @@ Notable changes to this project are recorded here. The format follows
   null checks in the encoder, the JSON reader and the DXF reader, none of which a reader path of this
   crate calls. The two local patches apply to it unchanged, and the twin comparison and the corpus
   sweep give the same answers.
+
+- Built on `undwg` 0.2.0.
 
 ## [0.17.0] - 2026-11-05
 
