@@ -6,6 +6,8 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-05
+
 ### Added
 
 - `coincident-ends` (and the `coincident_ends` MCP tool, read-only): given the end of a line, an arc or a
@@ -48,6 +50,8 @@ Notable changes to this project are recorded here. The format follows
   spline read from a DWG still carries no control points (they are not stored in the record). The
   two local patches apply to it unchanged, and the twin comparison and the corpus sweep give the same
   answers.
+
+- Built on `iron-diff-cad` 0.14.0, `iron-hand-cad` 0.12.0, `iron-pack-cad` 0.15.0, `iron-render-cad` 0.16.0, `iron-scout-cad` 0.16.0, `uncad-model` 0.12.0 and `undxf` 0.11.0.
 
 ### Fixed
 
