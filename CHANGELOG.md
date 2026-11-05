@@ -12,9 +12,10 @@ Notable changes to this project are recorded here. The format follows
   written from the public file specification in safe Rust, instead of LibreDWG. `UNCAD_DWG_READER=undwg` selects it
   for a process (`libredwg`, or the variable unset or empty, keeps the default; any other value is
   `ParseError::UnknownReader`, never a quiet fall back), and `DwgReader` with `parse_dwg_with_reader` selects it for
-  one call. The model and the header come out of the same types. The header field `undwg` cannot state yet is
-  `measurement`, and `codepage_name` is given only for the code pages `undwg` knows; the versions older than R2000 are
-  an error that names the version. A build without the feature reads exactly as before.
+  one call. The model and the header come out of the same types, and the header agrees field by field on every drawing both
+  readers read except `codepage_name` (given only for the code pages `undwg` knows) and `measurement` (`undwg` states it
+  for the R2004 and R2018 files whose template LibreDWG does not read); the versions older than R2000 are an error
+  that names the version. A build without the feature reads exactly as before.
 
 ### Changed
 

@@ -70,8 +70,7 @@ fn header_of(bytes: &[u8], database: &CadDatabase, facts: &undwg::DrawingFacts) 
         codepage: facts.code_page,
         codepage_name: undwg::CodePage::name_of(facts.code_page).map(str::to_owned),
         insunits: database.header.insunits,
-        // `MEASUREMENT` is in a section `undwg` does not read yet.
-        measurement: None,
+        measurement: facts.measurement,
         lunits: unsigned(v.linear_units),
         luprec: unsigned(v.linear_precision),
         aunits: unsigned(v.angular_units),

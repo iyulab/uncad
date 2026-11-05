@@ -13,16 +13,16 @@ use std::path::{Path, PathBuf};
 use uncad::{parse_dwg_with_reader, DwgReader};
 
 /// A header field the two readers state differently, and why.
-const KNOWN_DIFFERENCES: &[(&str, &str)] = &[
-    (
-        "measurement",
-        "`MEASUREMENT` is in a section undwg does not read yet",
-    ),
-    (
-        "codepage_name",
-        "undwg names only the code pages its table covers (28 to 30); LibreDWG names more",
-    ),
-];
+const KNOWN_DIFFERENCES: &[(&str, &str)] = &[(
+    "codepage_name",
+    "undwg names only the code pages its table covers (28 to 30); LibreDWG names more",
+)];
+
+/// A header field LibreDWG leaves out and undwg reads from the file.
+const MORE_STATED: &[(&str, &str)] = &[(
+    "measurement",
+    "the template of the versions that keep it in a section states it; LibreDWG does not read it there",
+)];
 
 fn dwg_files(dir: &Path, into: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -52,6 +52,7 @@ fn the_two_readers_give_the_same_header_field_by_field() {
     let mut compared = 0usize;
     let mut only_libredwg = 0usize;
     let mut differences: BTreeMap<String, usize> = BTreeMap::new();
+    let mut more_stated: BTreeMap<String, usize> = BTreeMap::new();
     let mut examples: BTreeMap<String, String> = BTreeMap::new();
     for path in &files {
         let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -85,6 +86,18 @@ fn the_two_readers_give_the_same_header_field_by_field() {
         for (key, left) in a {
             let right = b.get(key);
             if right != Some(left) {
+                let stated_more = left.is_null()
+                    && right.is_some_and(|r| !r.is_null())
+                    && MORE_STATED.iter().any(|(name, _)| name == &key.as_str());
+                if stated_more {
+                    *more_stated
+                        .entry(format!(
+                            "{key} ({})",
+                            libredwg.acadver.as_deref().unwrap_or("?")
+                        ))
+                        .or_default() += 1;
+                    continue;
+                }
                 *differences.entry(key.clone()).or_default() += 1;
                 examples.entry(key.clone()).or_insert_with(|| {
                     format!("{}: libredwg {left} / undwg {:?}", path.display(), right)
@@ -93,7 +106,7 @@ fn the_two_readers_give_the_same_header_field_by_field() {
         }
     }
     eprintln!(
-        "{compared} drawings compared · {only_libredwg} only LibreDWG reads · differing fields: {differences:?}"
+        "{compared} drawings compared · {only_libredwg} only LibreDWG reads · differing fields: {differences:?} · stated by undwg only: {more_stated:?}"
     );
     for (field, example) in &examples {
         eprintln!("  {field}: {example}");
