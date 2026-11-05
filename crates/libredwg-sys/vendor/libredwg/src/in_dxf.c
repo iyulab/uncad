@@ -10069,6 +10069,7 @@ dxf_postprocess_SEQEND (Dwg_Object *restrict obj)
       return;
     }
   obj->tio.entity->ownerhandle->obj = NULL;
+  obj->tio.entity->entmode = 0;
   owhdls = memBEGINc (owner->name, "POLYLINE_") ? "vertex" : "attribs";
   ow = owner->tio.entity->tio.POLYLINE_2D;
 
@@ -10082,6 +10083,21 @@ dxf_postprocess_SEQEND (Dwg_Object *restrict obj)
     {
       Dwg_Object *_o = &dwg->object[i];
       num_owned = j + 1;
+      // set each child's ownerhandle to the parent entity and entmode 0,
+      // whatever their 330 pointed to (which may be the block record).
+      if (_o->supertype == DWG_SUPERTYPE_ENTITY && _o->tio.entity)
+        {
+          _o->tio.entity->entmode = 0;
+          if (_o->tio.entity->ownerhandle)
+            {
+              _o->tio.entity->ownerhandle->obj = NULL;
+              _o->tio.entity->ownerhandle->absolute_ref = owner->handle.value;
+              _o->tio.entity->ownerhandle->handleref.value = owner->handle.value;
+            }
+          else
+            _o->tio.entity->ownerhandle
+                = dwg_add_handleref (dwg, 3, owner->handle.value, _o);
+        }
       if (dwg->header.from_version >= R_13b1)
         {
           // Match the encoder's expected handle relation-code for the owned
@@ -14711,6 +14727,25 @@ static __nonnull ((1, 2, 3, 4)) Dxf_Pair *new_object (
       o->has_no_flags = 1;
       LOG_TRACE ("_3DFACE.has_no_flags = 1 [B]\n");
     }
+  else if (obj->fixedtype == DWG_TYPE_MINSERT)
+    {
+      // DXF omits INSERT groups 70/71 (column/row count) when the count is
+      // 1 (ezdxf and AutoCAD both do), and importing the missing group as 0
+      // gave such an MINSERT a grid of 0, which dwg2dxf writes back as an
+      // explicit 0. 0 is not a valid grid count, so this can never override
+      // a real value.
+      Dwg_Entity_MINSERT *o = obj->tio.entity->tio.MINSERT;
+      if (!o->num_cols)
+        {
+          o->num_cols = 1;
+          LOG_TRACE ("MINSERT.num_cols = 1 (default) [BS 70]\n");
+        }
+      if (!o->num_rows)
+        {
+          o->num_rows = 1;
+          LOG_TRACE ("MINSERT.num_rows = 1 (default) [BS 71]\n");
+        }
+    }
   else if (obj->fixedtype == DWG_TYPE_MTEXT)
     {
       // DXF omits the optional groups 72/73/44 when they hold their default
@@ -14851,14 +14886,20 @@ dxf_tables_read (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
                   free (dxfname);
                   if (idx != dwg->num_objects)
                     obj->dxfname = NULL;
-                  return DWG_ERR_INVALIDDWG;
+                  LOG_WARN ("Skipping failed table entry \"%s\", "
+                           "continuing\n",
+                           table);
+                  while ((pair = dxf_read_pair (dat)) && pair->code != 0)
+                    dxf_free_pair (pair);
+                  if (!pair)
+                    return DWG_ERR_INVALIDDWG;
                 }
               // new_object may have reused an existing object (e.g.,
               // *Paper_Space via "Reuse existing BLOCK_HEADER"), decrementing
               // num_objects. In that case idx >= num_objects and obj points to
               // a stale/partial object — skip the fixup to avoid a phantom
               // handle/entry.
-              if (idx >= dwg->num_objects)
+              if (!pair || idx >= dwg->num_objects)
                 goto next_table_entry;
               // A minimal DXF will have no handle values
               if (!obj->handle.value)
@@ -15172,7 +15213,13 @@ dxf_blocks_read (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
                   free (dxfname);
                   if (idx != dwg->num_objects)
                     obj->dxfname = NULL;
-                  return DWG_ERR_INVALIDDWG;
+                  LOG_WARN ("Skipping failed object \"%s\", continuing\n",
+                           name);
+                  while ((pair = dxf_read_pair (dat)) && pair->code != 0)
+                    dxf_free_pair (pair);
+                  if (!pair)
+                    return DWG_ERR_INVALIDDWG;
+                  continue;
                 }
               if (obj->type == DWG_TYPE_BLOCK)
                 {
@@ -15527,7 +15574,13 @@ dxf_entities_read (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
               free (dxfname);
               if (idx != dwg->num_objects)
                 obj->dxfname = NULL;
-              return DWG_ERR_INVALIDDWG;
+              LOG_WARN ("Skipping failed entity \"%s\", continuing\n", name);
+              // skip the rest of the object: read pairs until the next 0 code
+              while ((pair = dxf_read_pair (dat)) && pair->code != 0)
+                dxf_free_pair (pair);
+              if (!pair)
+                return DWG_ERR_INVALIDDWG; // EOF
+              continue; // re-check the while condition with the new 0 code
             }
           if (pair->code == 0 && pair->value.s.ptr)
             {
@@ -15546,27 +15599,38 @@ dxf_entities_read (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
                   obj = &dwg->object[last_ent];
                   ent = obj->tio.entity;
                 }
-              if (ent->ownerhandle)
+              // never file ATTRIB/VERTEX*/SEQEND under a block header:
+              // they belong to their parent INSERT/POLYLINE, not the block.
+              if (obj->fixedtype != DWG_TYPE_ATTRIB
+                  && obj->fixedtype != DWG_TYPE_VERTEX_2D
+                  && obj->fixedtype != DWG_TYPE_VERTEX_3D
+                  && obj->fixedtype != DWG_TYPE_VERTEX_MESH
+                  && obj->fixedtype != DWG_TYPE_VERTEX_PFACE
+                  && obj->fixedtype != DWG_TYPE_VERTEX_PFACE_FACE
+                  && obj->fixedtype != DWG_TYPE_SEQEND)
                 {
-                  if (ent->ownerhandle->absolute_ref == mspace)
-                    ent->entmode = 2;
-                  else if (pspace && ent->ownerhandle->absolute_ref == pspace)
-                    ent->entmode = 1;
-                  else if (dwg->header.from_version < R_13b1)
+                  if (ent->ownerhandle)
                     {
-                      // SEQEND/VERTEX: owner is INSERT/POLYLINE, not mspace.
-                      // Inherit entmode from the parent entity.
-                      Dwg_Object *owner_obj = dwg_resolve_handle (
-                          dwg, ent->ownerhandle->absolute_ref);
-                      if (owner_obj && owner_obj->tio.entity)
-                        ent->entmode = owner_obj->tio.entity->entmode;
+                      if (ent->ownerhandle->absolute_ref == mspace)
+                        ent->entmode = 2;
+                      else if (pspace && ent->ownerhandle->absolute_ref == pspace)
+                        ent->entmode = 1;
+                      else if (dwg->header.from_version < R_13b1)
+                        {
+                          // SEQEND/VERTEX: owner is INSERT/POLYLINE, not mspace.
+                          // Inherit entmode from the parent entity.
+                          Dwg_Object *owner_obj = dwg_resolve_handle (
+                              dwg, ent->ownerhandle->absolute_ref);
+                          if (owner_obj && owner_obj->tio.entity)
+                            ent->entmode = owner_obj->tio.entity->entmode;
+                        }
+                      add_to_BLOCK_HEADER (obj, ent->ownerhandle);
                     }
-                  add_to_BLOCK_HEADER (obj, ent->ownerhandle);
-                }
-              else
-                {
-                  ent->entmode = 2;
-                  add_to_BLOCK_HEADER (obj, mspace_ref);
+                  else
+                    {
+                      ent->entmode = 2;
+                      add_to_BLOCK_HEADER (obj, mspace_ref);
+                    }
                 }
 
               in_postprocess_handles (obj);
@@ -15623,7 +15687,13 @@ dxf_objects_read (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
                   free (dxfname);
                   if (idx != dwg->num_objects)
                     obj->dxfname = NULL;
-                  return DWG_ERR_INVALIDDWG;
+                  LOG_WARN ("Skipping failed object \"%s\", continuing\n",
+                           name);
+                  while ((pair = dxf_read_pair (dat)) && pair->code != 0)
+                    dxf_free_pair (pair);
+                  if (!pair)
+                    return DWG_ERR_INVALIDDWG;
+                  continue;
                 }
             }
           else

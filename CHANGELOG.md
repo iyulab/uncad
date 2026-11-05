@@ -14,9 +14,9 @@ Notable changes to this project are recorded here. The format follows
   strings (schema `type: string`) and a number is refused. An ID is an opaque token; as a JSON number a
   64-bit value does not survive a client whose numbers are doubles (the IDs of entities a file gives no
   handle start at 2^63). Built on `uncad-model`'s change of the same date.
-- The vendored LibreDWG is updated to upstream commit `93e2d87b` (2026-11-04; 16 commits after
-  `a13dbe0b`, which was 2026-11-03 and 28 commits after `86cc68d2`, the first 27 as landed on
-  upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
+- The vendored LibreDWG is updated to upstream commit `5bdce514` (2026-11-04; 28 commits after
+  `93e2d87b`, which was 16 after `a13dbe0b`, which was 2026-11-03 and 28 after `86cc68d2`, the first
+  27 as landed on upstream's master). The decoder now keeps the trailing entity bytes of an R11/R12 drawing, reads the
   ATTRIB/SEQEND of a block, and numbers a pre-R13 drawing's anonymous blocks from the drawing's own
   BLOCK entities; the DXF writer no longer splits a UTF-8 sequence across chunks of a long string.
   Since `86e04c74`: the V4 geometry transform switches on the fixed type, maps shared elevations
@@ -32,6 +32,14 @@ Notable changes to this project are recorded here. The format follows
   and the API no longer drops the last vertex of an R13-R2000 2D/3D polyline; the rest is the DXF
   writer and the geometry helpers (bulge arcs), which no reader path of this crate calls. The two
   local patches apply to it unchanged, and the twin comparison and the corpus sweep give the same
+  answers. Since `93e2d87b`: the decoder resynchronizes the object map after a failed modular-char
+  read, skips an owned entity it cannot resolve instead of ending the layout there, treats a missing
+  pre-R13 table sentinel as a warning, and stores TU strings only for a drawing that holds them as
+  such; the reference-adding path loses three quadratic costs. The rest is the DXF reader and writer,
+  a fuzz target, the SVG program, and spline helpers in the geometry module (evaluation, fit-point
+  interpolation, Bezier conversion) -- none of which a reader path of this crate calls. A fit-point
+  spline read from a DWG still carries no control points (they are not stored in the record). The
+  two local patches apply to it unchanged, and the twin comparison and the corpus sweep give the same
   answers.
 
 ### Fixed

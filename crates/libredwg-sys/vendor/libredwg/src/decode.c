@@ -2620,6 +2620,16 @@ read_2004_section_handles (Bit_Chain *restrict dat, Dwg_Data *restrict dwg)
           oldpos = hdl_dat.byte;
           // the offset from the previous handle. default: 1, unsigned
           handleoff = bit_read_UMC (&hdl_dat);
+          // A failed modular char read (nine or more high-bit bytes in a row)
+          // derails the stream; resync one byte later instead of trusting the
+          // garbage. Only on !handleoff: the other conditions below also fire
+          // on entries that parsed fine, and resyncing on them costs good
+          // entries (Leader.dwg would lose all its modelspace entities).
+          if (!handleoff)
+            {
+              hdl_dat.byte = oldpos + 1;
+              handleoff = bit_read_UMC (&hdl_dat);
+            }
           // the offset from the previous address. default: obj->size
           offset = bit_read_MC (&hdl_dat);
           if (!handleoff || handleoff > max_handles - last_handle
@@ -4693,7 +4703,8 @@ dwg_decode_add_object_ref (Dwg_Data *restrict dwg, Dwg_Object_Ref *ref)
                                * sizeof (Dwg_Object_Ref *));
       memset (&dwg->object_ref[dwg->num_object_refs], 0,
               REFS_PER_REALLOC * sizeof (Dwg_Object_Ref *));
-      dwg->dirty_refs = 1;
+      // The realloc moves only the array of pointers; the refs and their
+      // cached ref->obj are untouched, so dirty_refs is not set here.
       LOG_TRACE ("REALLOC dwg->object_ref vector to %u\n",
                  dwg->num_object_refs + REFS_PER_REALLOC);
     }
@@ -6853,9 +6864,13 @@ decode_preR13_sentinel (const Dwg_Sentinel sentinel,
       char *found = (char *)memmem (&dat->chain[pos], len, wanted, 16);
       if (!found)
         {
-          LOG_ERROR ("%s not found at %" PRIuSIZE, sentinel_name,
-                     dat->byte - 16);
-          error = DWG_ERR_SECTIONNOTFOUND;
+          // The sentinel is a delimiter, not the locator: records are read
+          // from tbl->address (which the header states independently) and
+          // each carries its own CRC. A missing sentinel (e.g. on an empty
+          // table) is the writer being irregular, not a reason to reject the
+          // file.
+          LOG_WARN ("%s not found at %" PRIuSIZE ", reading on", sentinel_name,
+                    dat->byte - 16);
         }
       else
         {

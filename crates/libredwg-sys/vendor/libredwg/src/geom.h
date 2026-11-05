@@ -65,6 +65,35 @@ EXPORT int bulge_split (BITCODE_2BD *pts, const int num_pts,
                         const BITCODE_2BD p1, const BITCODE_2BD p2,
                         const double bulge) __nonnull ((1));
 
+// The highest SPLINE degree the spline functions handle.
+#define SPLINE_MAX_DEGREE 15
+// True if the SPLINE has usable control points and knots.
+EXPORT int spline_is_valid (const Dwg_Entity_SPLINE *spline);
+// De Boor: the point of the SPLINE at parameter t, clamped to its range.
+// Returns 0 if the SPLINE is not valid.
+EXPORT int spline_eval (BITCODE_3DPOINT *out, const Dwg_Entity_SPLINE *spline,
+                        double t) __nonnull ((1, 2));
+// The SPLINE as a chain of Bezier curves of its degree, by knot insertion.
+// Returns the number k of curves and a malloc'ed array of k*degree+1 points,
+// or 0 if the SPLINE is not valid, clamped and non-rational.
+EXPORT int spline_to_bezier (const Dwg_Entity_SPLINE *spline,
+                             BITCODE_3DPOINT **pts) __nonnull ((1, 2));
+// AutoCAD's cubic interpolation of the fit points of a SPLINE.  Sets *out
+// to a copy with the computed control points and knots, to be freed by the
+// caller.  Returns 0 if the fit points cannot be interpolated.
+EXPORT int spline_from_fit_points (const Dwg_Entity_SPLINE *spline,
+                                   Dwg_Entity_SPLINE *out) __nonnull ((1, 2));
+// The limits of spline_flatten: halvings per Bezier curve, points, and
+// evaluated points per knot span when there are no Bezier curves.
+#define BEZIER_MAX_DEPTH 16
+#define SPLINE_MAX_POINTS 1000000
+#define SPLINE_EVAL_STEPS 16
+// Points on the curve of a SPLINE, within rel_tol times its size, as a
+// malloc'ed array.  Returns their number, or 0.
+EXPORT int spline_flatten (const Dwg_Entity_SPLINE *spline,
+                           const double rel_tol, BITCODE_3DPOINT **pts)
+    __nonnull ((1, 3));
+
 /* Fast V4 Spatial Geometry Transformations (Klein Four-Group V4 ≅ Z2 x Z2)
  * Note: V4 refers to the Klein 4-group integer matrix over the S12 lattice,
  * not some Version 4 or 4D vectors.

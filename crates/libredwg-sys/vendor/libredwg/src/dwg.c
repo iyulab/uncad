@@ -1250,18 +1250,29 @@ get_first_owned_entity (const Dwg_Object *hdr)
     }
   else if (version >= R_2004 || version < R_13b1)
     {
+      Dwg_Data *dwg = hdr->parent;
+      Dwg_Object_Ref *ref;
+      Dwg_Object *obj;
       _hdr->__iterator = 0;
-      if (_hdr->entities && _hdr->num_owned && _hdr->entities[0])
+      // skip entries that do not resolve: one dangling reference must not
+      // make the layout look empty from the start.
+      while (_hdr->entities && _hdr->__iterator < _hdr->num_owned)
         {
-          Dwg_Data *dwg = hdr->parent;
-          Dwg_Object *obj = dwg_ref_object (dwg, _hdr->entities[0]);
-          if (version < R_13b1 && obj && obj->fixedtype == DWG_TYPE_JUMP)
-            return dwg_resolve_jump (obj);
-          else
-            return obj;
+          ref = _hdr->entities[_hdr->__iterator];
+          obj = ref ? dwg_ref_object (dwg, ref) : NULL;
+          if (obj)
+            {
+              if (version < R_13b1 && obj->fixedtype == DWG_TYPE_JUMP)
+                return dwg_resolve_jump (obj);
+              else
+                return obj;
+            }
+          LOG_WARN ("BLOCK_HEADER " FORMAT_HV " entities[%lu] does not"
+                    " resolve, skipping\n",
+                    hdr->handle.value, (unsigned long)_hdr->__iterator);
+          _hdr->__iterator++;
         }
-      else
-        return NULL;
+      return NULL;
     }
 
   // TODO: preR13 block table
@@ -1351,8 +1362,8 @@ dwg_strip_mtext (const char *restrict mtext)
           if (mtext[i] == '\\') // \\ literal, \\U+xxxx, \\c/\\u NNNN
             {
               i++;
-              if (i < len && (mtext[i] == 'U' || mtext[i] == 'u'
-                              || mtext[i] == 'c'))
+              if (i < len
+                  && (mtext[i] == 'U' || mtext[i] == 'u' || mtext[i] == 'c'))
                 {
                   if (mtext[i] == 'U' && i + 1 < len && mtext[i + 1] == '+')
                     i += 2;
@@ -1461,14 +1472,26 @@ get_next_owned_entity (const Dwg_Object *restrict hdr,
       Dwg_Object *obj;
       Dwg_Object_Ref *ref;
       _hdr->__iterator++;
-      if (_hdr->__iterator == _hdr->num_owned)
-        return NULL;
-      ref = _hdr->entities ? _hdr->entities[_hdr->__iterator] : NULL;
-      obj = ref ? dwg_ref_object (dwg, ref) : NULL;
-      if (version < R_13b1 && obj && obj->fixedtype == DWG_TYPE_JUMP)
-        return dwg_resolve_jump (obj);
-      else
-        return obj;
+      // skip entries that do not resolve: one dangling reference must not
+      // end the whole layout. < (not ==) so an iterator bumped past the
+      // count cannot walk off the end of entities[].
+      while (_hdr->entities && _hdr->__iterator < _hdr->num_owned)
+        {
+          ref = _hdr->entities[_hdr->__iterator];
+          obj = ref ? dwg_ref_object (dwg, ref) : NULL;
+          if (obj)
+            {
+              if (version < R_13b1 && obj->fixedtype == DWG_TYPE_JUMP)
+                return dwg_resolve_jump (obj);
+              else
+                return obj;
+            }
+          LOG_WARN ("BLOCK_HEADER " FORMAT_HV " entities[%lu] does not"
+                    " resolve, skipping\n",
+                    hdr->handle.value, (unsigned long)_hdr->__iterator);
+          _hdr->__iterator++;
+        }
+      return NULL;
     }
 
   LOG_ERROR ("Unsupported version %s\n", dwg_version_type (version));
@@ -1721,14 +1744,26 @@ get_next_owned_block_entity (const Dwg_Object *restrict hdr,
       Dwg_Object *obj;
       Dwg_Object_Ref *ref;
       _hdr->__iterator++;
-      if (_hdr->__iterator == _hdr->num_owned)
-        return NULL;
-      ref = _hdr->entities ? _hdr->entities[_hdr->__iterator] : NULL;
-      obj = ref ? dwg_ref_object (dwg, ref) : NULL;
-      if (version < R_13b1 && obj && obj->fixedtype == DWG_TYPE_JUMP)
-        return dwg_resolve_jump (obj);
-      else
-        return obj;
+      // skip entries that do not resolve: one dangling reference must not
+      // end the whole layout. < (not ==) so an iterator bumped past the
+      // count cannot walk off the end of entities[].
+      while (_hdr->entities && _hdr->__iterator < _hdr->num_owned)
+        {
+          ref = _hdr->entities[_hdr->__iterator];
+          obj = ref ? dwg_ref_object (dwg, ref) : NULL;
+          if (obj)
+            {
+              if (version < R_13b1 && obj->fixedtype == DWG_TYPE_JUMP)
+                return dwg_resolve_jump (obj);
+              else
+                return obj;
+            }
+          LOG_WARN ("BLOCK_HEADER " FORMAT_HV " entities[%lu] does not"
+                    " resolve, skipping\n",
+                    hdr->handle.value, (unsigned long)_hdr->__iterator);
+          _hdr->__iterator++;
+        }
+      return NULL;
     }
 
   LOG_ERROR ("Unsupported version %s\n", dwg_version_type (version));
@@ -2220,19 +2255,19 @@ dxf_revcvt_lweight (const int lw)
    68/69 is derived the same way as its group 330. Ordinary blocks
    (e.g. the A$C... paste blocks) carry no sheet view and their
    viewports are written off (0, 0). */
-EXPORT bool
+EXPORT int
 dxf_block_is_layout (Dwg_Data *dwg, Dwg_Object *blk)
 {
   Dwg_Object_BLOCK_HEADER *blkhdr;
   if (blk->fixedtype != DWG_TYPE_BLOCK_HEADER)
-    return false;
+    return 0;
   blkhdr = blk->tio.object->tio.BLOCK_HEADER;
   if (dwg->header_vars.BLOCK_RECORD_PSPACE
       && dwg->header_vars.BLOCK_RECORD_PSPACE->obj == blk)
-    return true;
+    return 1;
   if (dwg->header_vars.BLOCK_RECORD_MSPACE
       && dwg->header_vars.BLOCK_RECORD_MSPACE->obj == blk)
-    return true;
+    return 1;
   {
     const BITCODE_T name = blkhdr->name;
     // Model- and paperspace blocks are named *Model_Space /
@@ -2240,7 +2275,7 @@ dxf_block_is_layout (Dwg_Data *dwg, Dwg_Object *blk)
     // leading '*' holds in TV and in UTF-16LE (first code unit in the
     // low byte) and in every supported codepage.
     if (name && name[0] == '*')
-      return true;
+      return 1;
     // A named layout references its block record
     for (BITCODE_BL i = 0; i < dwg->num_objects; i++)
       {
@@ -2248,10 +2283,10 @@ dxf_block_is_layout (Dwg_Data *dwg, Dwg_Object *blk)
         if (o && o->fixedtype == DWG_TYPE_LAYOUT
             && o->tio.object->tio.LAYOUT->block_header
             && o->tio.object->tio.LAYOUT->block_header->obj == blk)
-          return true;
+          return 1;
       }
   }
-  return false;
+  return 0;
 }
 
 void
@@ -4135,12 +4170,14 @@ Ref_cmp (const void *key, const void *elem)
 {
   const Dwg_Object_Ref *pKey = (const Dwg_Object_Ref *)key;
   const Dwg_Object_Ref *pR = *(const Dwg_Object_Ref **)elem;
-  int retVal = (int)pKey->handleref.code - (int)pR->handleref.code;
+  // absolute_ref as the primary key: a new ref (highest handle so far)
+  // lands at the end, so ordered_ref_add's memmove copies nothing.
+  int retVal = pKey->absolute_ref > pR->absolute_ref    ? 1
+               : pKey->absolute_ref == pR->absolute_ref ? 0
+                                                        : -1;
   if (0 != retVal)
     return retVal;
-  return pKey->absolute_ref > pR->absolute_ref    ? 1
-         : pKey->absolute_ref == pR->absolute_ref ? 0
-                                                  : -1;
+  return (int)pKey->handleref.code - (int)pR->handleref.code;
 }
 
 void
