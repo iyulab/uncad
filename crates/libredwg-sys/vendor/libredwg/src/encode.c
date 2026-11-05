@@ -220,14 +220,16 @@ EXPORT long dwg_add_##token (Dwg_Data * dwg)     \
         return error;                                                         \
       }                                                                       \
     error = dwg_encode_##token##_private (dat, hdl_dat, str_dat, obj);        \
-    if (error & DWG_ERR_VALUEOUTOFBOUNDS && hdl_dat != dat                    \
+    if (hdl_dat != dat && hdl_dat->chain                                      \
         && hdl_dat->chain != dat->chain)                                      \
       {                                                                       \
-        LOG_HANDLE ("VALUEOUTOFBOUNDS bypassed DWG_ENTITY_END\n");            \
+        /* _private returned early (VALUEOUTOFBOUNDS, aborted repeat)        \
+           before DWG_ENTITY_END could free the per-object streams */        \
+        LOG_HANDLE ("Early exit bypassed DWG_ENTITY_END\n");                  \
         bit_chain_free (hdl_dat);                                             \
-        if (str_dat != dat && str_dat->chain)                                 \
-          bit_chain_free (str_dat);                                           \
       }                                                                       \
+    if (str_dat != dat && str_dat->chain)                                     \
+      bit_chain_free (str_dat);                                               \
     dwg_encode_unknown_rest (dat, obj);                                       \
     return error;                                                             \
   }                                                                           \
@@ -289,9 +291,12 @@ EXPORT long dwg_add_##token (Dwg_Data * dwg)     \
         return error;                                                         \
       }                                                                       \
     error = dwg_encode_##token##_private (dat, hdl_dat, str_dat, obj);        \
-    if (error & DWG_ERR_VALUEOUTOFBOUNDS && hdl_dat != dat                    \
+    if (hdl_dat != dat && hdl_dat->chain                                      \
         && hdl_dat->chain != dat->chain)                                      \
       {                                                                       \
+        /* _private returned early (VALUEOUTOFBOUNDS, aborted repeat)        \
+           before DWG_OBJECT_END could free the per-object streams */        \
+        LOG_HANDLE ("Early exit bypassed DWG_OBJECT_END\n");                  \
         bit_chain_free (hdl_dat);                                             \
       }                                                                       \
     if (str_dat != dat && str_dat->chain)                                     \
@@ -610,6 +615,7 @@ add_DUMMY_eed (Dwg_Object *obj)
       data->u.eed_0_r2007.is_tu = 1;
       data->u.eed_0_r2007.length = len & 0xFFFF; // RS
       memcpy (data->u.eed_0_r2007.string, wstr, len * 2);
+      free (wstr);
     }
   else
     {
@@ -4089,6 +4095,8 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
         if (!info || !info->sections)
           {
             LOG_ERROR ("SECTION_SYSTEM_MAP not found");
+            for (type = SECTION_HEADER; type <= SECTION_SYSTEM_MAP; type++)
+              bit_chain_free (&sec_dat[type]);
             return DWG_ERR_SECTIONNOTFOUND;
           }
 
@@ -4136,6 +4144,8 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
           if (dat->size < 4 || dat->chain[0] != 'A' || dat->chain[1] != 'C')
             {
               LOG_ERROR ("Encode overwrite pos 0");
+              for (type = SECTION_HEADER; type <= SECTION_SYSTEM_MAP; type++)
+                bit_chain_free (&sec_dat[type]);
               return DWG_ERR_INVALIDDWG;
             }
           assert (dat->chain[0] == 'A');
@@ -4161,7 +4171,12 @@ dwg_encode (Dwg_Data *restrict dwg, Bit_Chain *restrict dat)
           type = stream_order[i];
           info = find_section_info_type (dwg, (Dwg_Section_Type)type);
           if (!info)
-            continue;
+            {
+              // section without an info entry is not written; still drop
+              // its (possibly pre-allocated) chain
+              bit_chain_free (&sec_dat[type]);
+              continue;
+            }
           max_decomp_size
               = section_max_decomp_size (dwg, (Dwg_Section_Type)type);
 
@@ -4610,9 +4625,9 @@ fixup_invalid_tag (const Bit_Chain *restrict dat, char *restrict tag)
   if (!tag)
     return NULL;
   if (IS_FROM_TU (dat))
-    wstr = (BITCODE_TU)tag;
+    wstr = (BITCODE_TU)tag; // caller's storage, no allocation
   else
-    wstr = bit_utf8_to_TU ((char*)tag, 0);
+    wstr = bit_utf8_to_TU ((char*)tag, 0); // temporary copy
   len = bit_wcs2len (wstr);
   for (size_t i = 0; i < len; i++)
     {
@@ -4637,12 +4652,24 @@ fixup_invalid_tag (const Bit_Chain *restrict dat, char *restrict tag)
     }
   if (changed && dat->version < R_2007)
     {
+      // a replacement string is returned; the caller stores it in place of
+      // the old tag, so we have to free the original here
       newtag = bit_convert_TU (wstr);
-      free (wstr);
+      if (IS_FROM_TU (dat))
+        free (wstr); // original TU tag is replaced
+      else
+        {
+          free (wstr); // temporary copy
+          free (tag); // original utf8 tag is replaced
+        }
       return newtag;
     }
   else
-    return (BITCODE_T)tag;
+    {
+      if (!IS_FROM_TU (dat))
+        free (wstr); // temporary copy, original returned unchanged
+      return (BITCODE_T)tag;
+    }
 }
 
 #define HANDLE_STREAM_ERROR_CLEANUP
@@ -7476,7 +7503,11 @@ dwg_encode_xdata (Bit_Chain *restrict dat, Dwg_Object_XRECORD *restrict _obj,
               {
                 BITCODE_TV news = bit_embed_TU_size (rbuf->value.str.u.wdata,
                                                      rbuf->value.str.size);
-                unsigned len = (unsigned)strlen (news);
+                // corrupted input may claim a size without a payload
+                unsigned len = news ? (unsigned)strlen (news) : 0;
+                if (!news && rbuf->value.str.size)
+                  LOG_ERROR ("Empty xdata string of size %u",
+                             (unsigned)rbuf->value.str.size);
                 bit_write_RS (dat, len & 0xFFFF);
                 bit_write_RC (dat, rbuf->value.str.codepage);
                 if (rbuf->value.str.u.data)
@@ -7490,7 +7521,8 @@ dwg_encode_xdata (Bit_Chain *restrict dat, Dwg_Object_XRECORD *restrict _obj,
             else
               {
                 // do we need to convert UTF-8 to codepage?
-                if (rbuf->value.str.size > 0 && dat->opts & DWG_OPTS_INJSON)
+                if (rbuf->value.str.size > 0 && rbuf->value.str.u.data
+                    && dat->opts & DWG_OPTS_INJSON)
                   {
                     BITCODE_RS destlen = rbuf->value.str.size * 2;
                     char *dest = (char *)malloc (destlen);
@@ -7533,14 +7565,24 @@ dwg_encode_xdata (Bit_Chain *restrict dat, Dwg_Object_XRECORD *restrict _obj,
             if (rbuf->value.str.size && !rbuf->value.str.is_tu)
               {
                 // TODO: same len when converted to TU? normally yes
-                BITCODE_TU news = bit_utf8_to_TU (rbuf->value.str.u.data, 0);
                 BITCODE_RS size = rbuf->value.str.size;
+                BITCODE_TU news;
+                // corrupted/fuzzed input may claim a size without a payload
+                if (!rbuf->value.str.u.data)
+                  {
+                    LOG_ERROR ("Empty xdata string of size %u",
+                               (unsigned)size);
+                    size = 0;
+                  }
+                news = size ? bit_utf8_to_TU (rbuf->value.str.u.data, 0)
+                            : NULL;
                 // Guard against fuzzer input with embedded NULs
-                {
-                  size_t tu_len = strlen (rbuf->value.str.u.data);
-                  if (size > tu_len)
-                    size = (BITCODE_RS)tu_len;
-                }
+                if (rbuf->value.str.u.data)
+                  {
+                    size_t tu_len = strlen (rbuf->value.str.u.data);
+                    if (size > tu_len)
+                      size = (BITCODE_RS)tu_len;
+                  }
                 bit_write_RS (dat, size);
                 for (i = 0; i < size; i++)
                   bit_write_RS (dat, news[i]);
@@ -7549,9 +7591,19 @@ dwg_encode_xdata (Bit_Chain *restrict dat, Dwg_Object_XRECORD *restrict _obj,
               }
             else
               {
-                bit_write_RS (dat, rbuf->value.str.size);
-                for (i = 0; i < rbuf->value.str.size; i++)
-                  bit_write_RS (dat, rbuf->value.str.u.wdata[i]);
+                // corrupted/fuzzed input may claim a size without a payload
+                if (!rbuf->value.str.u.wdata && rbuf->value.str.size)
+                  {
+                    LOG_ERROR ("Empty xdata string of size %u",
+                               (unsigned)rbuf->value.str.size);
+                    bit_write_RS (dat, 0);
+                  }
+                else
+                  {
+                    bit_write_RS (dat, rbuf->value.str.size);
+                    for (i = 0; i < rbuf->value.str.size; i++)
+                      bit_write_RS (dat, rbuf->value.str.u.wdata[i]);
+                  }
                 LOG_TRACE_TU ("xdata", rbuf->value.str.u.wdata, rbuf->type);
               }
             LOG_POS;
@@ -7909,6 +7961,15 @@ downconvert_TABLESTYLE (Dwg_Object *restrict obj)
               = _obj->sty.cellstyle.borders[i].visible;
           _obj->rowstyles[0].borders[i].color
               = _obj->sty.cellstyle.borders[i].color;
+        }
+      // The pre-R2007 rowstyle borders have no ltype, so the cellstyle
+      // border ltype handle refs are dropped here; free the object-owned
+      // (non-global) ones before freeing the borders array.
+      for (unsigned i = 0; i < _obj->sty.cellstyle.num_borders && i < 6; i++)
+        {
+          if (_obj->sty.cellstyle.borders[i].ltype
+              && !_obj->sty.cellstyle.borders[i].ltype->handleref.is_global)
+            free (_obj->sty.cellstyle.borders[i].ltype);
         }
       free (_obj->sty.cellstyle.borders);
       _obj->sty.cellstyle.borders = NULL;
