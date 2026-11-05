@@ -11,6 +11,11 @@ description = "CLI for uncad (CAD file summary, JSON export of the parsed model,
 keywords = ["cad", "dwg", "dxf", "cli", "svg"]
 categories = ["command-line-utilities", "graphics"]
 
+[features]
+default = []
+# `uncad/undwg-reader`: DWG files can be read with `undwg` (`UNCAD_DWG_READER=undwg`).
+undwg-reader = ["uncad/undwg-reader"]
+
 [lints]
 workspace = true
 

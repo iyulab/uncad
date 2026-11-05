@@ -13,6 +13,8 @@ mod dynapi;
 pub mod header;
 mod table_convert;
 mod text;
+#[cfg(feature = "undwg-reader")]
+mod undwg_reader;
 
 use std::mem::MaybeUninit;
 use std::path::Path;
@@ -85,6 +87,13 @@ pub enum ParseError {
     Io(std::io::Error),
     /// The DXF reader could not read the file: where, and why.
     Dxf(undxf::ReadError),
+    /// `undwg` could not read the file (the `undwg-reader` feature).
+    #[cfg(feature = "undwg-reader")]
+    Undwg(undwg::DatabaseError),
+    /// `UNCAD_DWG_READER` names a reader this build does not know (the
+    /// `undwg-reader` feature).
+    #[cfg(feature = "undwg-reader")]
+    UnknownReader(String),
 }
 
 impl std::fmt::Display for ParseError {
@@ -93,6 +102,13 @@ impl std::fmt::Display for ParseError {
             ParseError::Critical(code) => write!(f, "LibreDWG critical read error (code {code})"),
             ParseError::Io(e) => write!(f, "cannot read the file: {e}"),
             ParseError::Dxf(e) => write!(f, "DXF could not be read: {e}"),
+            #[cfg(feature = "undwg-reader")]
+            ParseError::Undwg(e) => write!(f, "undwg could not read the DWG: {e}"),
+            #[cfg(feature = "undwg-reader")]
+            ParseError::UnknownReader(name) => write!(
+                f,
+                "UNCAD_DWG_READER={name:?} names no DWG reader (use \"libredwg\" or \"undwg\")"
+            ),
         }
     }
 }
@@ -101,7 +117,11 @@ impl std::error::Error for ParseError {
         match self {
             ParseError::Io(e) => Some(e),
             ParseError::Dxf(e) => Some(e),
+            #[cfg(feature = "undwg-reader")]
+            ParseError::Undwg(e) => Some(e),
             ParseError::Critical(_) => None,
+            #[cfg(feature = "undwg-reader")]
+            ParseError::UnknownReader(_) => None,
         }
     }
 }
@@ -234,7 +254,61 @@ fn parse_dxf(bytes: &[u8]) -> Result<(CadDatabase, Header), ParseError> {
     Ok((db, header))
 }
 
+/// Which reader reads a DWG (the `undwg-reader` feature). A build without the
+/// feature has one reader, LibreDWG.
+#[cfg(feature = "undwg-reader")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DwgReader {
+    /// LibreDWG: what every build does by default.
+    LibreDwg,
+    /// `undwg`, a reader written from the public file specification.
+    Undwg,
+}
+
+#[cfg(feature = "undwg-reader")]
+impl DwgReader {
+    /// The reader `UNCAD_DWG_READER` names: `libredwg` (also when it is unset
+    /// or empty) or `undwg`; any other value is [`ParseError::UnknownReader`],
+    /// never a quiet fall back.
+    pub fn from_env() -> Result<DwgReader, ParseError> {
+        match std::env::var("UNCAD_DWG_READER") {
+            Ok(name) => match name.as_str() {
+                "" | "libredwg" => Ok(DwgReader::LibreDwg),
+                "undwg" => Ok(DwgReader::Undwg),
+                _ => Err(ParseError::UnknownReader(name)),
+            },
+            Err(std::env::VarError::NotPresent) => Ok(DwgReader::LibreDwg),
+            Err(std::env::VarError::NotUnicode(name)) => Err(ParseError::UnknownReader(
+                name.to_string_lossy().into_owned(),
+            )),
+        }
+    }
+}
+
+/// Reads the DWG in `bytes` with the reader asked for, ignoring
+/// `UNCAD_DWG_READER` (the `undwg-reader` feature).
+#[cfg(feature = "undwg-reader")]
+pub fn parse_dwg_with_reader(
+    bytes: &[u8],
+    reader: DwgReader,
+) -> Result<(CadDatabase, Header), ParseError> {
+    match reader {
+        DwgReader::Undwg => undwg_reader::parse(bytes),
+        _ => parse_dwg_libredwg(bytes),
+    }
+}
+
 fn parse_dwg(bytes: &[u8]) -> Result<(CadDatabase, Header), ParseError> {
+    #[cfg(feature = "undwg-reader")]
+    if DwgReader::from_env()? == DwgReader::Undwg {
+        return undwg_reader::parse(bytes);
+    }
+    parse_dwg_libredwg(bytes)
+}
+
+/// A DWG, through LibreDWG.
+fn parse_dwg_libredwg(bytes: &[u8]) -> Result<(CadDatabase, Header), ParseError> {
     // See LIBREDWG_LOCK: the whole read/convert/free cycle must run without
     // another thread's LibreDWG call interleaved. Recovering from a poisoned
     // lock rather than propagating the poison is deliberate -- a panic here

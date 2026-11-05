@@ -6,6 +6,16 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The `undwg-reader` feature (off by default; `uncad-cli` forwards it): a DWG can be read by `undwg`, a reader
+  written from the public file specification in safe Rust, instead of LibreDWG. `UNCAD_DWG_READER=undwg` selects it
+  for a process (`libredwg`, or the variable unset or empty, keeps the default; any other value is
+  `ParseError::UnknownReader`, never a quiet fall back), and `DwgReader` with `parse_dwg_with_reader` selects it for
+  one call. The model and the header come out of the same types. The header field `undwg` cannot state yet is
+  `measurement`, and `codepage_name` is given only for the code pages `undwg` knows; the versions older than R2000 are
+  an error that names the version. A build without the feature reads exactly as before.
+
 ### Changed
 
 - The vendored LibreDWG is updated to upstream commit `b2a8b7ff` (2026-11-05; 10 commits after

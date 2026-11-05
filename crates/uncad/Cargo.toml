@@ -11,6 +11,13 @@ description = "CAD file (DWG/DXF) parsing with JSON, SVG and PNG export of the p
 keywords = ["cad", "dwg", "dxf", "svg", "json"]
 categories = ["graphics", "parser-implementations"]
 
+[features]
+default = []
+# Read a DWG with `undwg` instead of LibreDWG when `UNCAD_DWG_READER=undwg` is
+# set (or a caller asks for it). Off by default: a build without it reads
+# exactly as before.
+undwg-reader = ["dep:undwg"]
+
 [lints]
 workspace = true
 
@@ -21,6 +28,9 @@ libredwg-sys = { path = "../libredwg-sys", version = "0.17.0" }
 uncad-model = "0.12.0"
 # The DXF reader (MIT): every DXF, ASCII or binary, is read through it.
 undxf = "0.11.0"
+# The DWG reader written from the public file specification (MIT), behind the
+# `undwg-reader` feature. A version dependency, never a path.
+undwg = { version = "0.1.0", optional = true }
 libc = "0.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
