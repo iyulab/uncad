@@ -297,6 +297,56 @@ pub const VERBS: &[Verb] = &[
         run: relate,
     },
     Verb {
+        name: "coincident_ends",
+        description: "The ends of the model space that sit where one end does: given the end \
+            of a line, an arc or a polyline (`id` and `anchor`), the other ends within the \
+            join gap of it (`ends`, by entity and anchor), each with the field path `set` \
+            writes it through (`path` -- none for an arc's end), its position in the plan \
+            (`at`) and in the entity's own coordinates (`local`, the value `set` takes), and \
+            whether a straight move of the asked end can carry it along (`can_follow`; the end \
+            of an arc, and a polyline vertex that a curved segment leaves or reaches, cannot \
+            -- `why_not` is `ARC_END`). The asked end is `end`. What the model space holds \
+            that was not read (blocks, ellipses, splines, 3D polylines, tilted planes) is \
+            counted in `not_read`: ends of those may sit at the asked end and are not listed. \
+            It moves nothing and solves no constraint. Coordinates are in the drawing's own \
+            units; the gap is in micrometres.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "id",
+                kind: Kind::EntityId,
+                required: true,
+                positional: false,
+                description: "The reference ID of the entity whose end is asked, as summarize \
+            gives it.",
+            },
+            Param {
+                name: "anchor",
+                kind: Kind::Text,
+                required: true,
+                positional: false,
+                description: "Which end: `start` or `end` of a line or an arc, `vertex:N` for \
+            the polyline vertex at index N (from 0, in file order).",
+            },
+            Param {
+                name: "join_gap_um",
+                kind: Kind::Integer,
+                required: true,
+                positional: false,
+                description: "How close two ends must be to sit together, in micrometres. \
+            There is no default: the right value depends on the drawing's scale.",
+            },
+        ],
+        writes: false,
+        run: coincident_ends,
+    },
+    Verb {
         name: "diff",
         description: "The exact numeric difference between two drawing states (`changes`): \
             which entities were added, removed or modified, and for a modified one every field \
@@ -1251,6 +1301,39 @@ fn relate(args: &Map<String, Value>) -> Result<Answer, String> {
         related = related.of_dimension(id);
     }
     answer(&related, warnings)
+}
+
+fn coincident_ends(args: &Map<String, Value>) -> Result<Answer, String> {
+    let mut warnings = Vec::new();
+    let db = read(&path(args, "input"), &mut warnings)?;
+    let id = entity_id(&args["id"]).expect("checked by Verb::call");
+    let anchor = match path(args, "anchor").as_str() {
+        "start" => iron_scout_cad::Anchor::Start,
+        "end" => iron_scout_cad::Anchor::End,
+        other => other
+            .strip_prefix("vertex:")
+            .and_then(|n| n.parse().ok())
+            .map(iron_scout_cad::Anchor::Vertex)
+            .ok_or_else(|| {
+                format!("anchor '{other}' is not `start`, `end` or `vertex:N` (N from 0)")
+            })?,
+    };
+    let gap = args["join_gap_um"].as_u64().expect("checked by Verb::call");
+    iron_scout_cad::coincident_ends(&db, id, anchor, gap)
+        .map_err(|e| match e {
+            iron_scout_cad::CoincidentRefusal::NoUnit => {
+                "the drawing states no unit, so a gap in micrometres means nothing".to_string()
+            }
+            iron_scout_cad::CoincidentRefusal::NoSuchEnd => {
+                format!(
+                    "no end '{}' of entity {} in the model space",
+                    path(args, "anchor"),
+                    path(args, "id")
+                )
+            }
+            _ => "the ends could not be told".to_string(),
+        })
+        .and_then(|ends| answer(&ends, warnings))
 }
 
 fn diff(args: &Map<String, Value>) -> Result<Answer, String> {

@@ -6,6 +6,13 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `coincident-ends` (and the `coincident_ends` MCP tool, read-only): given the end of a line, an arc or a
+  polyline (`--id`, `--anchor start|end|vertex:N`), the other ends of the model space within a join gap
+  (`--join-gap-um`) of it, each with the field path `set` writes it through, its position, and whether a
+  straight move of the asked end can carry it along. It moves nothing; the move is `set` once per end.
+
 ### Changed
 
 - **Breaking:** entity IDs are decimal strings everywhere they appear -- in the model JSON and the answers
