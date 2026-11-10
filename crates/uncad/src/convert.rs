@@ -1561,6 +1561,7 @@ unsafe fn entity_insert(
         rotation,
         attribs,
         extrusion: extrusion(entity_ptr, "INSERT"),
+        array: None,
     }))
 }
 
