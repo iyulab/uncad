@@ -140,7 +140,25 @@ uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --color '#0057b
 uncad balloon part.dwg --balloons @balloons.json -o numbered.svg --size 12 --space paper  # 12 units across, in paper space
 ```
 
-`uncad mcp` serves `summarize`, `hit-test`, `relate`, `coincident-ends`, `diff`, `set`, `redline` and `balloon` as [Model Context
+`crop` shows one rectangle of a drawing: the drawing exactly as it renders alone,
+framed on exactly the `--window` you give (drawing units, y up), as a PNG or an
+SVG -- never over an existing file -- and the entities that cross that window,
+listed the way `summarize` lists a selection (at most `--limit`, with their
+`total`). The answer says the picture's pixels (`picture`: its size,
+`px_per_unit`, and the world point of its top-left corner, so pixel `(px, py)` is
+the world point `(left + px / px_per_unit, top - py / px_per_unit)`), the
+`view_box` and `origin` the picture is written in, and what it left out. A window
+that crosses no entity, or a `--fit` outside 1 to 8192 pixels, is refused with the
+reason, never changed quietly. The same drawing, window and `--fit` give the same
+bytes.
+
+```bash
+uncad crop plan.dwg --window 120,40,220,100 -o detail.png  # 1200 px on its longer side
+uncad crop plan.dwg --window 120,40,220,100 -o detail.png --fit 2000 --paper dark
+uncad crop plan.dwg --window 120,40,220,100 -o detail.svg  # an SVG has no pixels
+```
+
+`uncad mcp` serves `summarize`, `hit-test`, `relate`, `coincident-ends`, `diff`, `set`, `redline`, `balloon` and `crop` as [Model Context
 Protocol](https://modelcontextprotocol.io) tools over stdio, for an agent to
 call. A tool's answer is byte for byte what the command prints; a warning the
 command writes to stderr is a further content block. Each call reads its files

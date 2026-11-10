@@ -78,9 +78,18 @@ Usage:
                                       entity or point it numbers (never over
                                       an existing file); answer with what
                                       was drawn and what could not be
+  uncad crop <input> --window <x0,y0,x1,y1> -o <out.png|out.svg>
+             [--fit <px>] [--space <model|paper|all>] [--paper <light|dark>]
+             [--limit <n>]
+                                    one rectangle of <input> as a picture
+                                      framed on exactly that window (never
+                                      over an existing file), and the
+                                      entities that cross it: answer with
+                                      the picture's pixels, the view and
+                                      those entities
   uncad mcp                         serve summarize, hit-test, relate,
-                                      coincident-ends, diff, set, redline
-                                      and balloon as MCP tools
+                                      coincident-ends, diff, set, redline,
+                                      balloon and crop as MCP tools
                                       over stdio
 
   Every command but export reads model JSON (.json) as a drawing too --

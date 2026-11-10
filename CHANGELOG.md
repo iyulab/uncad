@@ -6,6 +6,23 @@ Notable changes to this project are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The `crop` verb (`uncad crop`, and the `crop` MCP tool): one rectangle of a drawing as a picture and as the
+  entities in it, in one answer. The picture (a PNG, or an SVG; never over an existing file) is the drawing as it
+  renders alone, framed on exactly the `window` given, with no margin. The answer says the picture's pixels
+  (`picture`: size, `px_per_unit` and the world point of its top-left corner, so pixel `(px, py)` is the world point
+  `(left + px / px_per_unit, top - py / px_per_unit)`), the `view_box` and `origin`, the entities that cross the
+  window listed as `summarize` lists a selection (`entities`, at most `limit`, with their `total`), and what the
+  picture left out (`unsupported_types`, `hidden`). A window that crosses no entity, or a `fit` outside 1 to
+  8192 pixels, is refused with the reason rather than changed quietly. The same drawing, window and `fit` give the
+  same bytes.
+
+### Changed
+
+- Needs the `uncad-model`, `undxf`, `iron-scout-cad`, `iron-render-cad` and `iron-pack-cad` releases that read and draw
+  the grid of a multiple insert.
+
 ## [0.18.0] - 2026-11-06
 
 ### Added

@@ -14,7 +14,8 @@
 //! A drawing argument is a DWG or DXF file, or the model JSON this tool
 //! writes (`uncad <drawing> -o <state.json>`, or `set`'s output) -- which is
 //! how an edit's result is the next call's input. Three verbs write a file:
-//! `set` the edited model JSON, `redline` a picture of the edit, `balloon` a
+//! `set` the edited model JSON, `redline` a picture of the edit, `crop` a picture
+//! of one window and the entities in it, `balloon` a
 //! picture of the drawing with numbered balloons on it. None writes over an
 //! existing file, and none changes its input.
 //!
@@ -613,6 +614,78 @@ pub const VERBS: &[Verb] = &[
         ],
         writes: true,
         run: balloon,
+    },
+    Verb {
+        name: "crop",
+        description: "One rectangle of a drawing, as a picture and as the entities in it, in one \
+            answer: the drawing exactly as it renders alone, framed on exactly the `window` you \
+            give (drawing units, y up), written as a PNG or an SVG -- never over an existing \
+            file -- and the answer's `view_box` and `origin` (the world point an SVG's \
+            coordinates are written relative to), for a PNG its pixels (`picture`: `width`, \
+            `height`, `px_per_unit`, and the world point of its top-left corner, `left` and \
+            `top`: pixel `(px, py)` is the world point `(left + px / px_per_unit, top - py / \
+            px_per_unit)`), the entities that cross the window (`entities`, as summarize \
+            lists them: `id`, `type`, `layer`, box -- at most `limit`; their `total`), and what \
+            the picture left out (`crop`, `unsupported_types`, `hidden`). A window that crosses \
+            no entity, or a `fit` over 8192 pixels, is refused with the reason, never changed \
+            quietly. The same drawing, window and `fit` give the same bytes.",
+        params: &[
+            Param {
+                name: "input",
+                kind: Kind::Path,
+                required: true,
+                positional: true,
+                description: DRAWING,
+            },
+            Param {
+                name: "window",
+                kind: Kind::Window,
+                required: true,
+                positional: false,
+                description: "The rectangle to show, `[x0, y0, x1, y1]` in drawing units with \
+                    x0 < x1 and y0 < y1. On the command line, comma-separated.",
+            },
+            Param {
+                name: "output",
+                kind: Kind::Path,
+                required: true,
+                positional: false,
+                description: "Where to write the picture: a .png or .svg path that does not \
+                    exist yet.",
+            },
+            Param {
+                name: "fit",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "For a PNG, how many pixels its longer side is (default: 1200; at \
+                    most 8192). An SVG has no pixels of its own.",
+            },
+            Param {
+                name: "space",
+                kind: Kind::Choice(&["model", "paper", "all"]),
+                required: false,
+                positional: false,
+                description: "Which space to draw and take entities from (default: model).",
+            },
+            Param {
+                name: "paper",
+                kind: Kind::Choice(&["light", "dark"]),
+                required: false,
+                positional: false,
+                description: "The page the drawing is drawn on (default: light).",
+            },
+            Param {
+                name: "limit",
+                kind: Kind::Integer,
+                required: false,
+                positional: false,
+                description: "The most entities listed in `entities` (default: 100); \
+                    `entities.total` counts all that cross the window.",
+            },
+        ],
+        writes: true,
+        run: crop,
     },
 ];
 
@@ -1678,6 +1751,164 @@ fn balloon(args: &Map<String, Value>) -> Result<Answer, String> {
     }
     create_new(&output, drawn.svg.as_bytes())?;
     answer(&drawn, warnings)
+}
+
+/// The longest side, in pixels, a `crop` picture may ask for.
+const CROP_MAX_FIT: u64 = 8192;
+
+/// The default longer side, in pixels, of a `crop` PNG.
+const CROP_DEFAULT_FIT: u64 = 1200;
+
+fn crop(args: &Map<String, Value>) -> Result<Answer, String> {
+    let output = path(args, "output");
+    let extension = std::path::Path::new(&output)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let is_png = match extension.as_deref() {
+        Some("png") => true,
+        Some("svg") => false,
+        _ => {
+            return Err(format!(
+                "crop writes a .png or a .svg: '{output}' ends in neither"
+            ))
+        }
+    };
+    if !is_png && args.contains_key("fit") {
+        return Err(
+            "fit is a size in pixels and an SVG has none -- leave it out, or write a .png".into(),
+        );
+    }
+    let fit = args
+        .get("fit")
+        .and_then(Value::as_u64)
+        .unwrap_or(CROP_DEFAULT_FIT);
+    if is_png && !(1..=CROP_MAX_FIT).contains(&fit) {
+        return Err(format!(
+            "fit {fit} is not between 1 and {CROP_MAX_FIT} pixels -- crop does not shrink or grow a request quietly"
+        ));
+    }
+    // Checked before anything is read, so a refused call costs nothing; the
+    // write below refuses an existing file again, atomically.
+    if std::path::Path::new(&output).exists() {
+        return Err(format!(
+            "'{output}' already exists -- crop never writes over a file; give a new path"
+        ));
+    }
+    let bounds = window(&args["window"]).expect("checked by Verb::call");
+    if !(bounds.min.x < bounds.max.x && bounds.min.y < bounds.max.y) {
+        return Err("window must have x0 < x1 and y0 < y1".into());
+    }
+    let rect = iron_render_cad::Rect::new(bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y);
+    let space = match args.get("space").and_then(Value::as_str) {
+        Some("paper") => iron_render_cad::Space::Paper,
+        Some("all") => iron_render_cad::Space::All,
+        _ => iron_render_cad::Space::Model,
+    };
+    let paper = match args.get("paper").and_then(Value::as_str) {
+        Some("dark") => iron_render_cad::Paper::Dark,
+        _ => iron_render_cad::Paper::Light,
+    };
+    let mut warnings = Vec::new();
+    let db = read(&path(args, "input"), &mut warnings)?;
+
+    // The entities that cross the window, listed the way summarize lists them.
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(SELECTION_LIMIT);
+    let mut selection = iron_scout_cad::Selection::new()
+        .limit(limit as usize)
+        .crossing(bounds);
+    match space {
+        iron_render_cad::Space::Model => {
+            selection = selection.in_space(iron_scout_cad::SpaceFilter::Model);
+        }
+        iron_render_cad::Space::Paper => {
+            selection = selection.in_space(iron_scout_cad::SpaceFilter::Paper);
+        }
+        _ => {}
+    }
+    let listed = iron_scout_cad::summarize_with(&db, &selection);
+    // Only the selection: the drawing-wide parts of the summary are not about
+    // this window.
+    let entities = serde_json::to_value(&listed)
+        .map_err(|e| e.to_string())?
+        .get("selection")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let total = entities.get("total").and_then(Value::as_u64);
+    if total == Some(0) {
+        return Err(
+            "the window crosses no entity of the drawing -- crop shows nothing there; give a \
+             window over the drawing"
+                .into(),
+        );
+    }
+
+    let svg_options = iron_render_cad::ToSvgOptions {
+        space,
+        crop: iron_render_cad::Crop::Window(rect),
+        paper,
+        // The rectangle asked for and no margin around it.
+        padding: 0.0,
+        ..Default::default()
+    };
+    let (bytes, view_box, origin, picture, unsupported, hidden) = if is_png {
+        let options = iron_render_cad::ToPngOptions {
+            svg: svg_options,
+            size: iron_render_cad::PngSize::FitLongEdge(fit as u32),
+            ..Default::default()
+        };
+        let drawn = iron_render_cad::to_png(&db, options).map_err(|e| e.to_string())?;
+        let picture = serde_json::json!({
+            "width": drawn.view.width,
+            "height": drawn.view.height,
+            "px_per_unit": drawn.view.px_per_unit,
+            "left": drawn.view.left,
+            "top": drawn.view.top,
+        });
+        // The pixels' own rectangle: the window to within half a pixel at
+        // its far edges, as `picture` says.
+        let view = drawn.view;
+        let view_box = iron_render_cad::Rect::new(
+            view.left,
+            view.top - f64::from(view.height) / view.px_per_unit,
+            view.left + f64::from(view.width) / view.px_per_unit,
+            view.top,
+        );
+        (
+            drawn.png,
+            serde_json::to_value(view_box).map_err(|e| e.to_string())?,
+            Value::Null,
+            picture,
+            drawn.unsupported_types,
+            drawn.hidden,
+        )
+    } else {
+        let drawn = iron_render_cad::to_svg(&db, svg_options);
+        (
+            drawn.svg.into_bytes(),
+            serde_json::to_value(drawn.view_box).map_err(|e| e.to_string())?,
+            serde_json::to_value(drawn.origin).map_err(|e| e.to_string())?,
+            Value::Null,
+            drawn.unsupported_types,
+            drawn.hidden,
+        )
+    };
+    create_new(&output, &bytes)?;
+    answer(
+        &serde_json::json!({
+            "window": [rect.min_x, rect.min_y, rect.max_x, rect.max_y],
+            "view_box": view_box,
+            "origin": origin,
+            "picture": picture,
+            "entities": entities,
+            "unsupported_types": unsupported,
+            "hidden": hidden,
+        }),
+        warnings,
+    )
 }
 
 /// The size, in pixels, under which a mark's cloud is reported as hard to

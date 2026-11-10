@@ -1,4 +1,4 @@
-//! The verbs (`summarize`, `hit-test`, `diff`, `set`, `redline`, `balloon`) and
+//! The verbs (`summarize`, `hit-test`, `diff`, `set`, `redline`, `balloon`, `crop`) and
 //! `uncad mcp`, which serves the same verbs as MCP tools.
 //!
 //! The property that matters most is that the two front ends give the same
@@ -566,7 +566,8 @@ fn every_advertised_protocol_version_lists_and_answers_alike() {
                 "diff",
                 "set",
                 "redline",
-                "balloon"
+                "balloon",
+                "crop"
             ],
             "{version}"
         );
@@ -620,11 +621,13 @@ fn mcp_lists_the_verbs_and_only_the_file_writers_write() {
             "diff",
             "set",
             "redline",
-            "balloon"
+            "balloon",
+            "crop"
         ]
     );
     for tool in tools {
-        let writes = ["set", "redline", "balloon"].contains(&tool["name"].as_str().unwrap());
+        let writes =
+            ["set", "redline", "balloon", "crop"].contains(&tool["name"].as_str().unwrap());
         let description = tool["description"].as_str().unwrap();
         assert!(
             !description.contains('\\'),
@@ -656,6 +659,7 @@ fn mcp_lists_the_verbs_and_only_the_file_writers_write() {
         "set",
         "redline",
         "balloon",
+        "crop",
         "export",
     ]
     .into_iter()
@@ -2806,4 +2810,164 @@ fn balloon_refuses_input_it_cannot_draw_and_names_where() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("does not end in .svg"));
     assert!(!wrong.exists());
+}
+
+// ---- crop
+
+/// A new path in the system's temp directory; nothing exists there yet.
+fn fresh(ext: &str) -> String {
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let n = N.fetch_add(1, Ordering::SeqCst);
+    std::env::temp_dir()
+        .join(format!("uncad-crop-test-{}-{n}.{ext}", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The box around everything the drawing's model space holds, from its summary.
+fn drawing_box(input: &str) -> [f64; 4] {
+    let (_, summary) = answer(&["summarize", input]);
+    let b = &summary["extents"][0]["bounds"];
+    [
+        b["min"]["x"].as_f64().expect("a box"),
+        b["min"]["y"].as_f64().expect("a box"),
+        b["max"]["x"].as_f64().expect("a box"),
+        b["max"]["y"].as_f64().expect("a box"),
+    ]
+}
+
+fn window_arg(w: [f64; 4]) -> String {
+    format!("{},{},{},{}", w[0], w[1], w[2], w[3])
+}
+
+#[test]
+fn crop_writes_a_picture_framed_on_the_window_and_lists_the_entities_in_it() {
+    let w = drawing_box(CORPUS_DXF);
+    let out = fresh("png");
+    let (_, a) = answer(&[
+        "crop",
+        CORPUS_DXF,
+        "--window",
+        &window_arg(w),
+        "-o",
+        &out,
+        "--fit",
+        "400",
+    ]);
+    let bytes = std::fs::read(&out).expect("the picture is written");
+    assert_eq!(&bytes[..4], b"\x89PNG");
+    let picture = &a["picture"];
+    let (width, height) = (
+        picture["width"].as_u64().unwrap(),
+        picture["height"].as_u64().unwrap(),
+    );
+    assert_eq!(width.max(height), 400, "the longer side is `fit`");
+    // The pixels' scale follows from the window: left and top are the window's
+    // top-left corner, and a pixel is 1/px_per_unit of a drawing unit.
+    let ppu = picture["px_per_unit"].as_f64().unwrap();
+    assert!((picture["left"].as_f64().unwrap() - w[0]).abs() < 1e-9);
+    assert!((picture["top"].as_f64().unwrap() - w[3]).abs() < 1e-9);
+    assert!(
+        (width as f64 / ppu - (w[2] - w[0])).abs() <= 1.0 / ppu,
+        "{a}"
+    );
+    assert!(a["entities"]["total"].as_u64().unwrap() > 0, "{a}");
+    assert!(
+        a["entities"]["entities"].as_array().unwrap().len() as u64
+            <= a["entities"]["total"].as_u64().unwrap()
+    );
+    assert_eq!(a["window"], serde_json::json!(w));
+    let _ = std::fs::remove_file(&out);
+}
+
+#[test]
+fn crop_gives_the_same_bytes_for_the_same_call_and_a_smaller_window_no_more_entities() {
+    let w = drawing_box(CORPUS_DXF);
+    let args = |out: &str, win: [f64; 4]| {
+        vec![
+            "crop".to_string(),
+            CORPUS_DXF.to_string(),
+            "--window".to_string(),
+            window_arg(win),
+            "-o".to_string(),
+            out.to_string(),
+        ]
+    };
+    let (one, two) = (fresh("svg"), fresh("svg"));
+    let run_args = |v: Vec<String>| {
+        let refs: Vec<&str> = v.iter().map(String::as_str).collect();
+        answer(&refs).1
+    };
+    let a = run_args(args(&one, w));
+    let b = run_args(args(&two, w));
+    assert_eq!(std::fs::read(&one).unwrap(), std::fs::read(&two).unwrap());
+    assert_eq!(a["entities"], b["entities"]);
+    // An SVG says where its coordinates are written from and has no pixels.
+    assert!(a["origin"].is_object() || a["origin"].is_null());
+    assert!(a["picture"].is_null());
+    let corner = [w[0], w[1], w[0] + (w[2] - w[0]) * 0.5, w[3]];
+    let three = fresh("svg");
+    let small = run_args(args(&three, corner));
+    assert!(
+        small["entities"]["total"].as_u64().unwrap() <= a["entities"]["total"].as_u64().unwrap(),
+        "{small}"
+    );
+    for f in [one, two, three] {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
+#[test]
+fn crop_refuses_what_it_would_have_to_change_quietly() {
+    let w = drawing_box(CORPUS_DXF);
+    let win = window_arg(w);
+    let refused = |extra: &[&str], what: &str| {
+        let out = fresh("png");
+        let mut args = vec![
+            "crop",
+            CORPUS_DXF,
+            "--window",
+            win.as_str(),
+            "-o",
+            out.as_str(),
+        ];
+        args.extend_from_slice(extra);
+        let r = run(&args);
+        assert!(!r.status.success(), "{what}");
+        assert!(
+            !std::path::Path::new(&out).exists(),
+            "{what}: nothing is written"
+        );
+        String::from_utf8_lossy(&r.stderr).into_owned()
+    };
+    assert!(refused(&["--fit", "9000"], "fit over the bound").contains("8192"));
+    assert!(refused(&["--fit", "0"], "fit of zero").contains("fit"));
+    // A window over nothing.
+    let far = format!(
+        "{},{},{},{}",
+        w[2] + 1000.0,
+        w[3] + 1000.0,
+        w[2] + 1100.0,
+        w[3] + 1100.0
+    );
+    let out = fresh("png");
+    let r = run(&["crop", CORPUS_DXF, "--window", &far, "-o", &out]);
+    assert!(!r.status.success());
+    assert!(String::from_utf8_lossy(&r.stderr).contains("crosses no entity"));
+    assert!(!std::path::Path::new(&out).exists());
+    // An SVG has no pixels, and a file already there is never written over.
+    let svg = fresh("svg");
+    let r = run(&[
+        "crop", CORPUS_DXF, "--window", &win, "-o", &svg, "--fit", "100",
+    ]);
+    assert!(!r.status.success());
+    let existing = fresh("png");
+    std::fs::write(&existing, b"x").unwrap();
+    let r = run(&["crop", CORPUS_DXF, "--window", &win, "-o", &existing]);
+    assert!(!r.status.success());
+    assert_eq!(std::fs::read(&existing).unwrap(), b"x");
+    let _ = std::fs::remove_file(existing);
+    // An output that is neither a PNG nor an SVG.
+    let r = run(&["crop", CORPUS_DXF, "--window", &win, "-o", &fresh("jpg")]);
+    assert!(!r.status.success());
 }
